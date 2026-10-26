@@ -1,0 +1,155 @@
+{
+ "when": "2026-10-26T07:53:50.558Z",
+ "month": "2026-09",
+ "summary": {
+  "PASS": 23,
+  "FAIL": 0,
+  "INFO": 1
+ },
+ "results": [
+  {
+   "id": "REC-00",
+   "status": "PASS",
+   "name": "The app runs 2026-09 payroll for all 10",
+   "detail": "200/200 []"
+  },
+  {
+   "id": "REC-01a",
+   "status": "PASS",
+   "name": "Rec Perfect (present every working day): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-01b",
+   "status": "PASS",
+   "name": "Rec Perfect: net salary 47,500 matches",
+   "detail": "app gross 47500, cut 0, tax 0, pf 0, advance 0, net 47500 — expected gross 47500, cut 0, net 47500"
+  },
+  {
+   "id": "REC-02a",
+   "status": "PASS",
+   "name": "Rec Absent (3 days absent (7–9 Sep)): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":22,\"absent\":3,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":22,\"absent\":3,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-02b",
+   "status": "PASS",
+   "name": "Rec Absent: net salary 35,200 matches",
+   "detail": "app gross 40000, cut 4800, tax 0, pf 0, advance 0, net 35200 — expected gross 40000, cut 4800, net 35200"
+  },
+  {
+   "id": "REC-03a",
+   "status": "PASS",
+   "name": "Rec Casual (casual leave 14–15 Sep): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":23,\"absent\":0,\"leave\":2,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":23,\"absent\":0,\"leave\":2,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-03b",
+   "status": "PASS",
+   "name": "Rec Casual: net salary 44,500 matches",
+   "detail": "app gross 44500, cut 0, tax 0, pf 0, advance 0, net 44500 — expected gross 44500, cut 0, net 44500"
+  },
+  {
+   "id": "REC-04a",
+   "status": "PASS",
+   "name": "Rec Unpaid (leave without pay 21–22 Sep): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":23,\"absent\":0,\"leave\":0,\"lwp\":2,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":23,\"absent\":0,\"leave\":0,\"lwp\":2,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-04b",
+   "status": "PASS",
+   "name": "Rec Unpaid: net salary 32,660 matches",
+   "detail": "app gross 35500, cut 2840, tax 0, pf 0, advance 0, net 32660 — expected gross 35500, cut 2840, net 32660"
+  },
+  {
+   "id": "REC-05a",
+   "status": "PASS",
+   "name": "Rec Late (4 lates (3 lates = 1 day cut)): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":4,\"extremes\":0,\"lateDays\":1} vs expected {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":4,\"extremes\":0,\"lateDays\":1}"
+  },
+  {
+   "id": "REC-05b",
+   "status": "PASS",
+   "name": "Rec Late: net salary 39,840 matches",
+   "detail": "app gross 41500, cut 1660, tax 0, pf 0, advance 0, net 39840 — expected gross 41500, cut 1660, net 39840"
+  },
+  {
+   "id": "REC-06a",
+   "status": "PASS",
+   "name": "Rec Extreme (1 extreme late (10:30) + 2 lates): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":2,\"extremes\":1,\"lateDays\":1} vs expected {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":2,\"extremes\":1,\"lateDays\":1}"
+  },
+  {
+   "id": "REC-06b",
+   "status": "PASS",
+   "name": "Rec Extreme: net salary 41,280 matches",
+   "detail": "app gross 43000, cut 1720, tax 0, pf 0, advance 0, net 41280 — expected gross 43000, cut 1720, net 41280"
+  },
+  {
+   "id": "REC-07a",
+   "status": "PASS",
+   "name": "Rec Over Weekend (casual leave Thu 17 – Sat 19 Sep (Friday in between)): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":23,\"absent\":0,\"leave\":2,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":23,\"absent\":0,\"leave\":2,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-07b",
+   "status": "PASS",
+   "name": "Rec Over Weekend: net salary 38,500 matches",
+   "detail": "app gross 38500, cut 0, tax 0, pf 0, advance 0, net 38500 — expected gross 38500, cut 0, net 38500"
+  },
+  {
+   "id": "REC-08a",
+   "status": "PASS",
+   "name": "Rec Friday Work (also worked Friday 11 Sep and the holiday): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-08b",
+   "status": "PASS",
+   "name": "Rec Friday Work: net salary 37,000 matches",
+   "detail": "app gross 37000, cut 0, tax 0, pf 0, advance 0, net 37000 — expected gross 37000, cut 0, net 37000"
+  },
+  {
+   "id": "REC-09a",
+   "status": "PASS",
+   "name": "Rec Advance (advance 2,000/month, tax 500, PF 1,000): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0} vs expected {\"working\":25,\"present\":25,\"absent\":0,\"leave\":0,\"lwp\":0,\"lates\":0,\"extremes\":0,\"lateDays\":0}"
+  },
+  {
+   "id": "REC-09b",
+   "status": "PASS",
+   "name": "Rec Advance: net salary 59,000 matches",
+   "detail": "app gross 62500, cut 0, tax 500, pf 1000, advance 2000, net 59000 — expected gross 62500, cut 0, net 59000"
+  },
+  {
+   "id": "REC-10a",
+   "status": "PASS",
+   "name": "Rec Mixed (1 absent day + 3 lates): attendance counts match",
+   "detail": "app {\"working\":25,\"present\":24,\"absent\":1,\"leave\":0,\"lwp\":0,\"lates\":3,\"extremes\":0,\"lateDays\":1} vs expected {\"working\":25,\"present\":24,\"absent\":1,\"leave\":0,\"lwp\":0,\"lates\":3,\"extremes\":0,\"lateDays\":1}"
+  },
+  {
+   "id": "REC-10b",
+   "status": "PASS",
+   "name": "Rec Mixed: net salary 46,460 matches",
+   "detail": "app gross 50500, cut 4040, tax 0, pf 0, advance 0, net 46460 — expected gross 50500, cut 4040, net 46460"
+  },
+  {
+   "id": "REC-L1",
+   "status": "PASS",
+   "name": "Casual leave 14–15 Sep takes 2 days off the balance (10 → 8)",
+   "detail": "now 8"
+  },
+  {
+   "id": "REC-L2",
+   "status": "PASS",
+   "name": "Leave without pay 21–22 Sep: 2 days used (10 → 8), and cut from the salary",
+   "detail": "now 8"
+  },
+  {
+   "id": "REC-L3",
+   "status": "INFO",
+   "name": "Leave Thu 17 – Sat 19 Sep (Friday in between)",
+   "detail": "balance 10 → 7 (3 days, the application says 3); payroll counts 2 leave days (the Friday is a weekend, not leave). Decide whether a weekend inside a leave should come off the balance (calendar days, as now) or not."
+  }
+ ]
+}

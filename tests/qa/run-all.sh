@@ -59,6 +59,7 @@ SUITES=(
   "companies|1|node $S/qa-companies.mjs $QA_OUT/companies.json"
   "group-hr|1|node $S/qa-group-hr.mjs $QA_OUT/group-hr.json"
   "dates|1|node $S/qa-dates.mjs $QA_OUT/dates.json"
+  "month-reconcile|1|node $S/qa-month-reconcile.mjs $QA_OUT/month-reconcile"
   "supervisor-chain|1|node $S/supervisor-chain.mjs $QA_OUT/supervisor-chain.json"
   "e2e-forms|1|node $S/qa-e2e-forms.mjs $QA_OUT/e2e"
   "bangla-pdf|1|node $S/qa-bangla-pdf.mjs $QA_OUT/bangla-pdf"
