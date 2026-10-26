@@ -373,3 +373,22 @@ Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `
 ## ১৬. যা এই workflow-তে ধরা নেই
 
 আসল ফোন অ্যাপের ভেতরের প্রবাহ (GPS, ক্যামেরা), প্রতিটি ছোট রিপোর্ট ও পেজ, মডিউলভিত্তিক সব এজ-কেস। বিস্তারিত দেখতে `docs/CredenceHR-Code-Guide-for-Laravel-Developers-BN.md` ও সংশ্লিষ্ট `*Routes.ts` ফাইলের শুরুর মন্তব্য পড়ুন (প্রতিটি ফাইলে প্রবাহ লেখা আছে)।
+
+---
+
+## Android app update
+
+```mermaid
+flowchart TD
+  A([HR: নতুন APK রাখে server-এর downloads/ ফোল্ডারে]) --> V["server APK-এর ভেতর থেকে versionCode পড়ে<br/>GET /api/app/android-latest"]
+  O([কর্মী app খোলে]) --> C{"server-এর APK কি ফোনের app-এর<br/>চেয়ে নতুন? (App.getInfo().build)"}
+  V --> C
+  C -- না / আজ Later চেপেছে --> N["কিছু দেখায় না"]
+  C -- হ্যাঁ --> P{"ফোনের app কতটা পুরনো?"}
+  P -- versionCode 1 (এই ব্যবস্থার আগের APK) --> L["Update popup: link Copy / Share<br/>→ Chrome-এ খুলে install"]
+  P -- নতুন APK --> U["Update popup: Update now<br/>→ ফোনের browser নামায় → Install"]
+```
+
+- প্রতিটা build-এর versionCode আগেরটার চেয়ে বড় (২০২৬-এর ১ জানুয়ারি থেকে কত মিনিট, `android/app/build.gradle`)। GitHub আর Android Studio দুই জায়গাতেই এক নিয়ম।
+- পর্দাগুলো server থেকে আসে, তাই এই popup-এর আগে বানানো পুরনো APK-তেও popup দেখায় (`src/components/AppUpdatePrompt.tsx`)। শুধু এক চাপে নামানোটা নতুন APK-তে হয় (`MainActivity.java`-র DownloadListener)।
+- "Later" চাপলে ওই version-এর জন্য এক দিন আর দেখায় না। Popup সব app ব্যবহারকারীর জন্য, কোনো অনুমতির দরকার নেই, কারণ APK নিজেই লগইন পাতায় সবার জন্য খোলা।

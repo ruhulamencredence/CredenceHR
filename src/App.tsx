@@ -85,6 +85,7 @@ import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
 import { WebPushPrompt } from './components/WebPushPrompt';
+import { AppUpdatePrompt } from './components/AppUpdatePrompt';
 import { setActiveCompanyId } from './lib/company';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
@@ -1026,6 +1027,8 @@ export default function App() {
     return (
       <>
         <AuthScreen onLoginSuccess={handleLoginSuccess} />
+        {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
+        <AppUpdatePrompt />
         {pullToRefreshIndicator}
         {pullToRefreshFullscreenLoader}
         {backToServerBadge}
@@ -1671,6 +1674,9 @@ export default function App() {
       {/* Chat audio/video calls — rings on any page; only for accounts with
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
+
+      {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
+      <AppUpdatePrompt />
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}

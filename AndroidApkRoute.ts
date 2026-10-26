@@ -86,6 +86,84 @@ export function apkInside(buf: Buffer): Buffer | "self" | null {
 
 const apkDirs = () => [process.env.APK_DIR, path.join(process.cwd(), "downloads"), path.join(process.cwd(), "dist", "downloads"), path.join(process.cwd(), "public", "downloads")];
 
+// ---- The APK's own version (for the app's "Update available" popup) ----
+// AndroidManifest.xml inside an APK is Android's binary XML: a string pool,
+// a resource-id map, then elements. versionCode / versionName are
+// attributes of the first element, <manifest>.
+function readStringPool(buf: Buffer, p: number): string[] {
+  const headerSize = buf.readUInt16LE(p + 2);
+  const count = buf.readUInt32LE(p + 8);
+  const utf8 = (buf.readUInt32LE(p + 16) & 0x100) !== 0;
+  const start = p + buf.readUInt32LE(p + 20);
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    let o = start + buf.readUInt32LE(p + headerSize + i * 4);
+    if (utf8) {
+      o += buf[o] & 0x80 ? 2 : 1; // length in UTF-16 units, not needed
+      let len = buf[o];
+      if (len & 0x80) {
+        len = ((len & 0x7f) << 8) | buf[o + 1];
+        o += 2;
+      } else o += 1;
+      out.push(buf.toString("utf8", o, o + len));
+    } else {
+      let len = buf.readUInt16LE(o);
+      if (len & 0x8000) {
+        len = ((len & 0x7fff) << 16) | buf.readUInt16LE(o + 2);
+        o += 4;
+      } else o += 2;
+      out.push(buf.toString("utf16le", o, o + len * 2));
+    }
+  }
+  return out;
+}
+
+export function manifestVersion(axml: Buffer): { code: number; name: string | null } | null {
+  if (axml.length < 8 || axml.readUInt16LE(0) !== 0x0003) return null;
+  let strings: string[] = [];
+  const resIds: number[] = [];
+  let p = axml.readUInt16LE(2);
+  while (p + 8 <= axml.length) {
+    const type = axml.readUInt16LE(p);
+    const headerSize = axml.readUInt16LE(p + 2);
+    const size = axml.readUInt32LE(p + 4);
+    if (size < 8) return null;
+    if (type === 0x0001) strings = readStringPool(axml, p);
+    else if (type === 0x0180) for (let i = p + headerSize; i + 4 <= p + size; i += 4) resIds.push(axml.readUInt32LE(i));
+    else if (type === 0x0102) {
+      const ext = p + headerSize;
+      if (strings[axml.readUInt32LE(ext + 4)] !== "manifest") return null;
+      const attrStart = axml.readUInt16LE(ext + 8);
+      const attrSize = axml.readUInt16LE(ext + 10);
+      const attrCount = axml.readUInt16LE(ext + 12);
+      let code: number | null = null;
+      let name: string | null = null;
+      for (let i = 0; i < attrCount; i++) {
+        const a = ext + attrStart + i * attrSize;
+        const nameIdx = axml.readUInt32LE(a + 4);
+        const raw = axml.readUInt32LE(a + 8);
+        const dataType = axml[a + 15];
+        const data = axml.readUInt32LE(a + 16);
+        // By name, or by Android's resource id when names are stripped.
+        const attr = strings[nameIdx];
+        const rid = resIds[nameIdx];
+        if (attr === "versionCode" || rid === 0x0101021b) code = data;
+        if (attr === "versionName" || rid === 0x0101021c) name = dataType === 0x03 ? strings[data] ?? null : raw !== 0xffffffff ? strings[raw] ?? null : null;
+      }
+      return code === null ? null : { code, name };
+    }
+    p += size;
+  }
+  return null;
+}
+
+// The version of an APK file's bytes. null = not readable.
+export function apkVersion(apk: Buffer): { code: number; name: string | null } | null {
+  const entries = zipEntries(apk);
+  const m = entries?.find((e) => e.name === "AndroidManifest.xml");
+  return m ? manifestVersion(zipEntryData(apk, m)) : null;
+}
+
 function findApk(name: string): string | null {
   for (const d of apkDirs()) {
     if (!d) continue;
@@ -148,7 +226,37 @@ function servable(file: string): string | null {
   return out;
 }
 
+const versions = new Map<string, { code: number; name: string | null } | null>();
+// What the login page's button would send now, and its version.
+function currentApk(): { file: string; version: { code: number; name: string | null } | null } | null {
+  const file = findApk(LOGIN_PAGE_APK) || findApk("CredenceHR.zip") || findApk("CredenceHR-android-debug.zip") || newestApk();
+  const send = file && servable(file);
+  if (!send) return null;
+  const st = fs.statSync(send);
+  const key = `${send}|${st.size}|${st.mtimeMs}`;
+  if (!versions.has(key)) {
+    let v: { code: number; name: string | null } | null = null;
+    try {
+      v = apkVersion(fs.readFileSync(send));
+    } catch {
+      // unreadable manifest: no version to compare
+    }
+    versions.set(key, v);
+  }
+  return { file: send, version: versions.get(key)! };
+}
+
 export function registerApkDownload(app: Express) {
+  // The Android app on the server (downloads/) and its version, for the
+  // app's own "Update available" popup (src/components/AppUpdatePrompt.tsx).
+  // Public like the download itself: a version number, nothing else.
+  app.get("/api/app/android-latest", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    const apk = currentApk();
+    if (!apk || !apk.version) return res.json({ available: false });
+    res.json({ available: true, version_code: apk.version.code, version_name: apk.version.name, url: `/downloads/${LOGIN_PAGE_APK}` });
+  });
+
   app.get(/^\/downloads\/([^/]+\.apk)$/i, (req, res) => {
     let name = "";
     try {

@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+// Every build gets a higher versionCode than the one before (minutes since
+// 1 Jan 2026), on GitHub and in Android Studio alike: the app's "Update
+// available" popup compares it with the APK on the server, and Android only
+// installs a same-or-newer versionCode over the app already on the phone.
+def buildMinute = (int) ((System.currentTimeMillis() - 1767225600000L) / 60000L)
+def buildStamp = new Date().format("yyyy.MM.dd-HHmm", TimeZone.getTimeZone("Asia/Dhaka"))
+
 android {
     namespace = "com.mprtracker.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.mprtracker.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode buildMinute
+        versionName "1.0." + buildStamp
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

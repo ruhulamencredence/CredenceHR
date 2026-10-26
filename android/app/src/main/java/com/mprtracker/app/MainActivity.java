@@ -1,6 +1,8 @@
 package com.mprtracker.app;
 
 import android.Manifest;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -133,6 +135,19 @@ public class MainActivity extends BridgeActivity {
                 new Handler(Looper.getMainLooper()).postDelayed(
                     () -> ViewCompat.requestApplyInsets(webView), 500
                 );
+            }
+        });
+
+        // A link the page opens that turns out to be a download (the app's
+        // own APK from the "Update available" popup, AppUpdatePrompt.tsx)
+        // goes to the phone's browser, which downloads it and offers to
+        // install it. A WebView with no DownloadListener just drops it.
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) return;
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (ActivityNotFoundException e) {
+                // no browser on the phone: nothing to hand it to
             }
         });
 

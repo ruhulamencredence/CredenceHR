@@ -236,6 +236,10 @@ npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBa
   (সার্ভারের log-এ কারণ লেখা থাকে)। আগের মতো web পাতা "CredenceHR.apk"
   নামে নামে না।
 - পরীক্ষা: `npm run test:apk`
+- **App-এর ভেতরে "Update available" popup:** এখানে রাখা APK যদি কর্মীর ফোনের
+  app-এর চেয়ে নতুন হয়, app খুললেই popup দেখায়। প্রতিটা build-এর
+  versionCode নিজে থেকে বাড়ে, তাই নতুন APK রাখলেই হলো। পুরনো app-এ link
+  copy/share করে browser-এ খুলতে বলে, নতুন app-এ এক চাপে "Update now"।
 
 ---
 

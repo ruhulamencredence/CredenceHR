@@ -3250,12 +3250,13 @@ async function startServer() {
 
   // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
   // JSON too (ApiErrors.ts). After every route, before the web app.
-  apiNotFoundAndErrors(app);
-
-  // The Android app on the login page (AndroidApkRoute.ts) — ahead of the
-  // web app, whose catch-all would otherwise answer a missing APK with
+  // The Android app on the login page and its version for the app's update
+  // popup (AndroidApkRoute.ts) — ahead of the API's 404 and of the web
+  // app, whose catch-all would otherwise answer a missing APK with
   // index.html.
   registerApkDownload(app);
+
+  apiNotFoundAndErrors(app);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

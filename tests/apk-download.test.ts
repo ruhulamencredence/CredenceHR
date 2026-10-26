@@ -10,7 +10,7 @@ import os from "os";
 import path from "path";
 import express from "express";
 import type { AddressInfo } from "net";
-import { apkInside, registerApkDownload } from "../AndroidApkRoute";
+import { apkInside, apkVersion, manifestVersion, registerApkDownload } from "../AndroidApkRoute";
 
 // A zip with the files stored uncompressed (the reader skips CRCs).
 function makeZip(files: { name: string; data: Buffer }[]): Buffer {
@@ -123,6 +123,97 @@ test("the route: right type and file name, unwraps the artifact, 404 instead of 
       assert.equal(r.status, 404, p);
       assert.match(r.headers.get("content-type") || "", /text\/plain/, p);
     }
+  } finally {
+    server.close();
+    if (prev === undefined) delete process.env.APK_DIR;
+    else process.env.APK_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Android's binary AndroidManifest.xml with just <manifest versionCode versionName>.
+function makeManifest(code: number, name: string, withNames = true): Buffer {
+  const strs = [withNames ? "versionCode" : "", withNames ? "versionName" : "", "manifest", name];
+  const enc = strs.map((t) => {
+    const b = Buffer.alloc(2 + t.length * 2 + 2);
+    b.writeUInt16LE(t.length, 0);
+    b.write(t, 2, "utf16le");
+    return b;
+  });
+  const offsets: number[] = [];
+  let off = 0;
+  for (const e of enc) {
+    offsets.push(off);
+    off += e.length;
+  }
+  const poolHeader = Buffer.alloc(28);
+  const offs = Buffer.alloc(strs.length * 4);
+  offsets.forEach((o, i) => offs.writeUInt32LE(o, i * 4));
+  const data = Buffer.concat(enc);
+  const pool = Buffer.concat([poolHeader, offs, data]);
+  pool.writeUInt16LE(0x0001, 0);
+  pool.writeUInt16LE(28, 2);
+  pool.writeUInt32LE(pool.length, 4);
+  pool.writeUInt32LE(strs.length, 8);
+  pool.writeUInt32LE(0, 16); // UTF-16
+  pool.writeUInt32LE(28 + offs.length, 20);
+  const resMap = Buffer.alloc(16);
+  resMap.writeUInt16LE(0x0180, 0);
+  resMap.writeUInt16LE(8, 2);
+  resMap.writeUInt32LE(16, 4);
+  resMap.writeUInt32LE(0x0101021b, 8);
+  resMap.writeUInt32LE(0x0101021c, 12);
+  const el = Buffer.alloc(16 + 20 + 2 * 20);
+  el.writeUInt16LE(0x0102, 0);
+  el.writeUInt16LE(16, 2);
+  el.writeUInt32LE(el.length, 4);
+  el.writeUInt32LE(0xffffffff, 16); // ns
+  el.writeUInt32LE(2, 20); // "manifest"
+  el.writeUInt16LE(20, 24); // attribute start
+  el.writeUInt16LE(20, 26); // attribute size
+  el.writeUInt16LE(2, 28); // attribute count
+  const attr = (i: number, nameIdx: number, raw: number, type: number, value: number) => {
+    const a = 36 + i * 20;
+    el.writeUInt32LE(0xffffffff, a);
+    el.writeUInt32LE(nameIdx, a + 4);
+    el.writeUInt32LE(raw, a + 8);
+    el.writeUInt16LE(8, a + 12);
+    el[a + 15] = type;
+    el.writeUInt32LE(value, a + 16);
+  };
+  attr(0, 0, 0xffffffff, 0x10, code);
+  attr(1, 1, 3, 0x03, 3);
+  const body = Buffer.concat([pool, resMap, el]);
+  const head = Buffer.alloc(8);
+  head.writeUInt16LE(0x0003, 0);
+  head.writeUInt16LE(8, 2);
+  head.writeUInt32LE(8 + body.length, 4);
+  return Buffer.concat([head, body]);
+}
+
+test("the APK's version is read from its manifest (by name, or by resource id when names are stripped)", () => {
+  assert.deepEqual(manifestVersion(makeManifest(431234, "1.0.2026.10.26-1800")), { code: 431234, name: "1.0.2026.10.26-1800" });
+  assert.deepEqual(manifestVersion(makeManifest(7, "1.0.7", false)), { code: 7, name: "1.0.7" });
+  assert.equal(manifestVersion(Buffer.from("<manifest/>")), null);
+  const apk = makeZip([{ name: "AndroidManifest.xml", data: makeManifest(42, "1.0.42") }]);
+  assert.deepEqual(apkVersion(apk), { code: 42, name: "1.0.42" });
+  // A real APK built by Android tooling, when the repo has one.
+  const real = path.join(process.cwd(), "public", "downloads", "MBO.apk");
+  if (fs.existsSync(real)) assert.equal(typeof apkVersion(fs.readFileSync(real))?.code, "number");
+});
+
+test("GET /api/app/android-latest: the version of the APK the button would send", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apk-test-"));
+  const prev = process.env.APK_DIR;
+  process.env.APK_DIR = dir;
+  const app = express();
+  registerApkDownload(app);
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    assert.deepEqual(await (await fetch(`${base}/api/app/android-latest`)).json(), { available: false });
+    fs.writeFileSync(path.join(dir, "CredenceHR-android-debug.zip"), makeZip([{ name: "app-debug.apk", data: makeZip([{ name: "AndroidManifest.xml", data: makeManifest(431999, "1.0.x") }]) }]));
+    assert.deepEqual(await (await fetch(`${base}/api/app/android-latest`)).json(), { available: true, version_code: 431999, version_name: "1.0.x", url: "/downloads/CredenceHR.apk" });
   } finally {
     server.close();
     if (prev === undefined) delete process.env.APK_DIR;
