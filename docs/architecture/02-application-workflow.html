@@ -99,7 +99,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
   M -- না --&gt; D([ড্যাশবোর্ড])
   C --&gt; D
 </pre>
-<p><strong>বিকল্প প্রবেশ:</strong> (ক) <strong>Forgot password:</strong> ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা "HR-কে বলুন" (HR একটি অস্থায়ী পাসওয়ার্ড দেয়)। (খ) <strong>Fingerprint/Passkey:</strong> অ্যাপে ফোনের Keystore/Keychain-এর সিক্রেট, ওয়েবে WebAuthn passkey। দুটোই পাসওয়ার্ডের একই নিয়ম (ব্লক, ডিভাইস, কোম্পানি) মানে।
+<p><strong>বিকল্প প্রবেশ:</strong> (ক) <strong>Forgot password:</strong> ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা "HR-কে বলুন" (HR একটি অস্থায়ী পাসওয়ার্ড দেয়)। (খ) <strong>Fingerprint/Passkey:</strong> অ্যাপে ফোনের Keystore/Keychain-এর সিক্রেট, ওয়েবে WebAuthn passkey। দুটোই পাসওয়ার্ডের একই নিয়ম (ব্লক, ডিভাইস, কোম্পানি) মানে। অ্যাপে লগইন পাতায় fingerprint-এর জানালা নিজে একবার খোলে — অ্যাপ পুরো পর্দায় আসার পরে; আগে আঙুল, তারপর লোকেশন, তারপর সার্ভার। জানালা না খুললে বা সেন্সর ব্যস্ত থাকলে চালু করা fingerprint মুছে যায় না, "Sign in with fingerprint" চাপলেই আবার চেষ্টা হয়; শুধু ফোনের সংরক্ষিত চাবি সত্যিই না থাকলে (fingerprint বদলানো/মোছা) আবার চালু করতে বলে (<code>src/lib/fingerprint.ts</code>, টেস্ট <code>npm run test:fingerprint</code>)।
 ফাইল: <code>AuthRoutes.ts</code>, <code>LoginGuard.ts</code>, <code>PasswordResetRoutes.ts</code>, <code>FingerprintRoutes.ts</code>, <code>SessionSecurity.ts</code>।</p>
 <p><strong>সেশন শেষ হয় যখন:</strong> ওয়েবে ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয়; অ্যাপে ৭ দিন বা ৩ দিন না খুললে (Superadmin বদলাতে পারে); Logout; Superadmin কাউকে বের করে দিলে; পাসওয়ার্ড বদলালে (বাকি সব সেশন); অ্যাকাউন্ট ব্লক হলে।</p>
 <hr />

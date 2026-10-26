@@ -52,7 +52,7 @@ fresh() {
 
 # name | needs a fresh server | command
 SUITES=(
-  "unit|1|ONB_TEST_BASE=$BASE ONB_TEST_ADMIN_EMAIL=$ADMIN_EMAIL ONB_TEST_ADMIN_PASSWORD=$ADMIN_PASSWORD npm run -s test:onboarding && ONB_TEST_BASE=$BASE ONB_TEST_ADMIN_EMAIL=$ADMIN_EMAIL ONB_TEST_ADMIN_PASSWORD=$ADMIN_PASSWORD npm run -s test:hr-linkage"
+  "unit|1|ONB_TEST_BASE=$BASE ONB_TEST_ADMIN_EMAIL=$ADMIN_EMAIL ONB_TEST_ADMIN_PASSWORD=$ADMIN_PASSWORD npm run -s test:onboarding && ONB_TEST_BASE=$BASE ONB_TEST_ADMIN_EMAIL=$ADMIN_EMAIL ONB_TEST_ADMIN_PASSWORD=$ADMIN_PASSWORD npm run -s test:hr-linkage && npm run -s test:fingerprint"
   "bangla-excel|0|npx tsx $S/qa-bangla-excel.mts $QA_OUT/bangla-excel.json"
   "bangla-esign|0|npx tsx $S/qa-bangla-esign.mts $QA_OUT/esign-bangla.pdf"
   "concurrency|1|node $S/qa-concurrency.mjs $QA_OUT/concurrency.json"

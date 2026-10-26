@@ -180,26 +180,49 @@ export async function forgetHere() {
   if (isApp()) await (await plugin()).api.deleteCredentials({ server: SERVER }).catch(() => {});
 }
 
-// Sign in. `extra` is what the password sign-in also sends (workspace, and on
-// the app the location + device fields).
-export async function fingerprintLogin(extra: Record<string, any>): Promise<{ token: string; user: any; active_company_id?: number }> {
+// The saved secret is really gone (removed, or the phone's fingerprints
+// changed so the key was wiped): only then is "turn it on again" right. Any
+// other failure — the sensor busy as the app opens, the window closed by the
+// system — keeps the setup, so the next try can just work.
+const credentialsGone = (e: any) =>
+  Number(e?.code) === 21 || /no (protected )?credentials found|enrollment changed|key permanently invalidated/i.test(String(e?.message || ''));
+
+// What a failed fingerprint window means for the sign-in screen: a cancel
+// (say nothing), the message to show, and whether the saved setup is gone.
+export function fingerprintFailure(e: any): { cancelled: boolean; forget: boolean; message: string } {
+  const r = (message: string, forget = false) => ({ cancelled: false, forget, message });
+  if (cancelled(e)) return { cancelled: true, forget: false, message: '' };
+  const code = Number(e?.code);
+  if (code === 10) return r("The fingerprint didn't match. Try again or sign in with your password.");
+  if (code === 2 || code === 4) return r('Too many tries — the phone has locked fingerprint for now. Sign in with your password.');
+  if (credentialsGone(e)) return r('Fingerprint sign-in needs to be turned on again — sign in with your password, then Profile → Fingerprint login.', true);
+  if (code === 3) return r("No fingerprint is set up on this phone right now — add one in the phone's settings, or sign in with your password.");
+  if (code === 1) return r('The fingerprint sensor is busy or not ready — wait a moment and tap “Sign in with fingerprint” again.');
+  return r(`The fingerprint window didn't open (${why(e) || 'no reason given'}). Tap “Sign in with fingerprint” to try again, or sign in with your password.`);
+}
+
+// Sign in. `extra` gives what the password sign-in also sends (workspace, and
+// on the app the location + device fields); it is asked for only after the
+// fingerprint matched, so the phone's fingerprint window opens straight away
+// instead of after a GPS fix.
+export async function fingerprintLogin(extra: () => Promise<Record<string, any>>): Promise<{ token: string; user: any; active_company_id?: number }> {
   try {
     if (nativePluginMissing()) throw new Error(APP_TOO_OLD);
     if (isApp()) {
       const nb = await plugin();
       let creds;
       try {
-        creds = await nb.api.getSecureCredentials({ server: SERVER, title: 'Sign in to CredenceHR', reason: 'Sign in to CredenceHR', negativeButtonText: 'Use password' });
+        creds = await within(
+          nb.api.getSecureCredentials({ server: SERVER, title: 'Sign in to CredenceHR', reason: 'Sign in to CredenceHR', negativeButtonText: 'Use password' }),
+          120000,
+          "The phone's fingerprint window"
+        );
       } catch (e: any) {
-        if (cancelled(e)) throw Object.assign(new Error(''), { code: 'CANCELLED' });
-        const code = Number(e?.code);
-        if (code === 10) throw new Error("The fingerprint didn't match. Try again or sign in with your password.");
-        if (code === 2 || code === 4) throw new Error('Too many tries — the phone has locked fingerprint for now. Sign in with your password.');
-        // Fingerprints on the phone changed, or the saved one is gone.
-        await forgetHere();
-        throw new Error('Fingerprint sign-in needs to be turned on again — sign in with your password, then Profile → Fingerprint login.');
+        const r = fingerprintFailure(e);
+        if (r.forget) await forgetHere();
+        throw r.cancelled ? Object.assign(new Error(''), { code: 'CANCELLED' }) : new Error(r.message);
       }
-      return await call('/api/auth/fingerprint/app/login', null, { ...extra, secret: creds.password });
+      return await call('/api/auth/fingerprint/app/login', null, { ...(await extra()), secret: creds.password });
     }
     const { startAuthentication } = await import('@simplewebauthn/browser');
     const { key, ...optionsJSON } = await call('/api/auth/fingerprint/passkey/login-options', null, {});
@@ -210,7 +233,7 @@ export async function fingerprintLogin(extra: Record<string, any>): Promise<{ to
       if (cancelled(e)) throw Object.assign(new Error(''), { code: 'CANCELLED' });
       throw e;
     }
-    return await call('/api/auth/fingerprint/passkey/login', null, { ...extra, key, response });
+    return await call('/api/auth/fingerprint/passkey/login', null, { ...(await extra()), key, response });
   } catch (e: any) {
     if (e?.code === 'FINGERPRINT_NOT_SET') await forgetHere();
     throw e;

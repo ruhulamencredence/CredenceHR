@@ -219,18 +219,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     setError('');
     setLoading(true);
     try {
-      let extra: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
-      if (isNativeApp) {
+      // The fingerprint first, then (app) the location the password sign-in
+      // also needs — so the phone's fingerprint window opens at once.
+      const extra = async () => {
+        const base: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
+        if (!isNativeApp) return base;
         const device = await appDeviceInfo();
         setLocating(true);
-        let coords: { latitude: number; longitude: number };
         try {
-          coords = await requestLoginLocation();
+          const coords = await requestLoginLocation();
+          return { ...base, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) };
         } finally {
           setLocating(false);
         }
-        extra = { ...extra, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) };
-      }
+      };
       const data = await fingerprintLogin(extra);
       setActiveCompanyId(data.active_company_id || null);
       onLoginSuccess(data.token, data.user);
@@ -241,11 +243,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       setLoading(false);
     }
   };
+  // On the app the fingerprint window opens by itself once — when the app is
+  // really on screen (asked while it is still starting, Android closes the
+  // window at once or says the sensor isn't ready).
   const [fpAsked, setFpAsked] = useState(false);
   useEffect(() => {
     if (!isNativeApp || !fpHere || fpAsked) return;
     setFpAsked(true);
-    void handleFingerprint();
+    let stop = false;
+    let handle: { remove: () => void } | undefined;
+    const go = () => {
+      if (stop) return;
+      stop = true;
+      handle?.remove();
+      window.setTimeout(() => void handleFingerprint(), 400);
+    };
+    (async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        if ((await App.getState()).isActive) return go();
+        handle = await App.addListener('appStateChange', (st) => st.isActive && go());
+        if (stop) handle.remove();
+      } catch {
+        go();
+      }
+    })();
+    return () => {
+      stop = true;
+      handle?.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fpHere]);
 
