@@ -1,7 +1,8 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { ArrowUp, MapPin, Download, Building2, Fingerprint } from 'lucide-react';
+import { ArrowUp, MapPin, Building2, Fingerprint } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
+import googlePlayIcon from '../assets/google-play-icon.png';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
@@ -592,7 +593,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               className="mt-5 flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
               style={{ background: '#111318' }}
             >
-              <Download className="w-4 h-4 shrink-0" />
+              <img src={googlePlayIcon} alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
               <span className="flex flex-col items-start leading-tight">
                 <span className="text-[10px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
                   GET IT ON
