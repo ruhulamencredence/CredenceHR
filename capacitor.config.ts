@@ -92,6 +92,18 @@ const config = {
     ]
   },
   plugins: {
+    // Android: the app draws edge-to-edge itself (MainActivity.java) and
+    // hands the page the real status / navigation bar heights
+    // (--native-safe-area-inset-*), which the header, bottom nav and every
+    // full-screen page already leave room for. Capacitor 8's own SystemBars
+    // handling ("css", its default) would ALSO pad the whole WebView below
+    // the status bar and above the navigation bar whenever the phone's
+    // Android System WebView is older than Chromium 140 (many Vivo / Oppo /
+    // Xiaomi phones): dark bars at the top and bottom, and the room left
+    // twice — a big gap under the status bar. So it is turned off here.
+    SystemBars: {
+      insetsHandling: 'disable'
+    },
     // Tells Android to shrink the WebView's own viewport when the on-screen
     // keyboard opens (instead of just drawing the keyboard on top of the page
     // at its current size), which is what makes `scrollIntoView` on the

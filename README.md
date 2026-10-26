@@ -249,6 +249,7 @@ npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBa
 | APK তে লগইন/ডাটা লোড হচ্ছে না | Sign In স্ক্রিনে Server Address ঠিক দিয়েছেন কিনা দেখুন (PC এর LAN IP:PORT, একই WiFi তে থাকা লাগবে), Windows Firewall এ Node.js/পোর্ট 3000 allow করা আছে কিনা চেক করুন |
 | Employee Tracking কাজ করছে না (APK) | `capacitor.config.ts` এ `useLegacyBridge: true` আছে কিনা, ফোনে background location permission দেওয়া আছে কিনা দেখুন |
 | Web থেকে APK নামালে install হয় না / zip হয়ে নামে | ফাইলটা `<অ্যাপ ফোল্ডার>/downloads/CredenceHR.apk`-এ আছে কিনা দেখুন (৭ নং ধাপের শেষে)। `curl -I https://<domain>/downloads/CredenceHR.apk`-এ `Content-Type: application/vnd.android.package-archive` আসা উচিত; 404 এলে ফাইল নেই বা APK নয়, সার্ভারের log দেখুন |
+| APK-তে ওপরে status bar-এর নিচে বড় ফাঁকা / ওপরে-নিচে কালো দাগ (Vivo, Oppo… পুরনো Android System WebView) | `capacitor.config.ts`-এ `SystemBars.insetsHandling: 'disable'` আছে কিনা দেখুন, তারপর নতুন APK বানান। app নিজেই (MainActivity.java) status bar-এর মাপ দেয়; Capacitor-এর নিজের padding চালু থাকলে জায়গা দুবার ছাড়ে |
 | Port 3000 already in use | `.env` এ `PORT` বদলে অন্য একটা ফ্রি পোর্ট দিন |
 
 ---
