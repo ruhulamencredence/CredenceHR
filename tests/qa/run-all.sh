@@ -57,6 +57,7 @@ SUITES=(
   "bangla-esign|0|npx tsx $S/qa-bangla-esign.mts $QA_OUT/esign-bangla.pdf"
   "concurrency|1|node $S/qa-concurrency.mjs $QA_OUT/concurrency.json"
   "companies|1|node $S/qa-companies.mjs $QA_OUT/companies.json"
+  "group-hr|1|node $S/qa-group-hr.mjs $QA_OUT/group-hr.json"
   "dates|1|node $S/qa-dates.mjs $QA_OUT/dates.json"
   "supervisor-chain|1|node $S/supervisor-chain.mjs $QA_OUT/supervisor-chain.json"
   "e2e-forms|1|node $S/qa-e2e-forms.mjs $QA_OUT/e2e"

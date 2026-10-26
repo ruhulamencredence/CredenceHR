@@ -1,0 +1,63 @@
+{
+ "when": "2026-10-26T03:25:01.926Z",
+ "summary": {
+  "PASS": 9,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "GH-01",
+   "status": "PASS",
+   "name": "Group HR has the sister company in the company switcher",
+   "detail": "access 200; modules 200; {\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"group_id\":1,\"name\":\"Credence Housing Limited"
+  },
+  {
+   "id": "GH-02",
+   "status": "PASS",
+   "name": "In CBL: sees CBL's employees",
+   "detail": "200 [{\"id\":45,\"employee_id\":null,\"name\":\"Bina Builders\",\"designation\":\"Site Engineer\",\"department\":null,\"department_id\":null,\"branch\":null,\"branch_id\":null,\"email\":"
+  },
+  {
+   "id": "GH-03",
+   "status": "PASS",
+   "name": "In CBL: edits a CBL employee",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "GH-04",
+   "status": "PASS",
+   "name": "In CBL: adds and reads the bank account",
+   "detail": "201 {\"id\":1} / 200 [{\"id\":1,\"employee_id\":45,\"account_type\":\"bank\",\"account_label\":\"Salary\",\"bank_name\":\"DBBL\",\"branch_name\":null,\"provider\":null,\"account_number\":\"777000111\",\"per"
+  },
+  {
+   "id": "GH-05",
+   "status": "PASS",
+   "name": "In CBL: sets the salary",
+   "detail": "200 {\"success\":true,\"id\":1,\"gross_salary\":70000}"
+  },
+  {
+   "id": "GH-06",
+   "status": "PASS",
+   "name": "In CBL: runs and opens the payroll",
+   "detail": "200 {\"success\":true,\"id\":1,\"net_salary\":70000} / 200"
+  },
+  {
+   "id": "GH-07",
+   "status": "PASS",
+   "name": "In CBL: the payroll list has the CBL salary",
+   "detail": "200 [{\"id\":1,\"employee_id\":45,\"month_year\":\"2026-09\",\"total_working_days\":26,\"present_days\":26,\"absent_days\":0,\"leave_days\":0,\"lwp_days\":0,\"overtime_hours\":\"0.00\",\""
+  },
+  {
+   "id": "GH-08",
+   "status": "PASS",
+   "name": "In the mother company: the list shows the mother company's employees",
+   "detail": "200 [{\"id\":36,\"employee_id\":null,\"name\":\"Farhana Akter\",\"designation\":\"Accounts Officer\",\"department\":\"Finance\",\"department_id\":1,\"branch\":null,\"branch_id\":null,\"em"
+  },
+  {
+   "id": "GH-09",
+   "status": "PASS",
+   "name": "In the mother company: a CBL record opened by id is not shown (switch to CBL for it)",
+   "detail": "200 []"
+  }
+ ]
+}
