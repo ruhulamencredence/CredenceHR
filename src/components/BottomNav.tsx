@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 import { useScrolling } from '../lib/useScrolling';
@@ -47,6 +47,12 @@ const CORNER_BUFFER = 6;
 // floating circle and its cutout aligned.
 const EDGE_PAD = 34;
 const EDGE_PAD_PCT = `${(EDGE_PAD / BAR_W) * 100}%`;
+
+// The white circle that rides in the dip: its top edge, in px above the bar
+// (where each tab's own circle used to sit), and the slide's easing.
+const RIDER_TOP = -11;
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 function buildBarPath(dip: { center: number; halfWidth: number; depth: number } | null): string {
   const r = CORNER_R;
@@ -97,18 +103,83 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   // edge pads), so each of the 4 columns is the same width and the gaps
   // between icon centers come out equal — only the outer margins grow.
   const itemWidth = (BAR_W - 2 * EDGE_PAD) / items.length;
-  const dip =
-    activeIndex >= 0
-      ? {
-          center: EDGE_PAD + itemWidth * (activeIndex + 0.5),
-          // Slightly wider flare (0.82 -> 0.92) and shallower depth (50 -> 36,
-          // ~45% of bar height instead of ~62%) to match image 1's low, wide
-          // wave instead of a deep narrow notch.
-          halfWidth: Math.min(110, itemWidth * 0.92),
-          depth: 36
-        }
-      : null;
-  const pathD = buildBarPath(dip);
+  const centerOf = (index: number) => EDGE_PAD + itemWidth * (index + 0.5);
+  // Slightly wider flare (0.82 -> 0.92) and shallower depth (50 -> 36,
+  // ~45% of bar height instead of ~62%) to match image 1's low, wide
+  // wave instead of a deep narrow notch.
+  const dipAt = (center: number) => ({ center, halfWidth: Math.min(110, itemWidth * 0.92), depth: 36 });
+  const pathD = buildBarPath(activeIndex >= 0 ? dipAt(centerOf(activeIndex)) : null);
+
+  // Changing tab: ONE white circle rides the dip as it slides, both moved by
+  // the same animation frame so they never drift apart, and inside it the
+  // old icon is pushed out against the motion while the new one comes in.
+  // Moved through refs, not state, so a frame doesn't re-render the bar.
+  // pair = the icons in the circle: the one leaving and the one arriving.
+  const [pair, setPair] = useState({ out: activeIndex, in: activeIndex });
+  if (pair.in !== activeIndex) setPair({ out: pair.in, in: activeIndex });
+  const pathRef = useRef<SVGPathElement>(null);
+  const riderRef = useRef<HTMLSpanElement>(null);
+  const outRef = useRef<HTMLSpanElement>(null);
+  const inRef = useRef<HTMLSpanElement>(null);
+  const centerRef = useRef<number | null>(null);
+  const rafRef = useRef(0);
+  useLayoutEffect(() => {
+    const path = pathRef.current;
+    const rider = riderRef.current;
+    const outEl = outRef.current;
+    const inEl = inRef.current;
+    if (!path || !rider || !outEl || !inEl) return;
+    cancelAnimationFrame(rafRef.current);
+    const place = (center: number, stretch: number) => {
+      path.setAttribute('d', buildBarPath(dipAt(center)));
+      rider.style.left = `${(center / BAR_W) * 100}%`;
+      rider.style.transform = `translateX(-50%) scale(${1 + stretch * 0.16}, ${1 - stretch * 0.08})`;
+    };
+    const settle = (center: number) => {
+      place(center, 0);
+      outEl.style.opacity = '0';
+      inEl.style.opacity = '1';
+      inEl.style.transform = '';
+      rider.style.opacity = '1';
+      centerRef.current = center;
+    };
+    if (activeIndex < 0) {
+      path.setAttribute('d', buildBarPath(null));
+      rider.style.opacity = '0';
+      centerRef.current = null;
+      return;
+    }
+    const to = centerOf(activeIndex);
+    const from = centerRef.current;
+    if (from === null || from === to || reducedMotion()) {
+      settle(to);
+      return;
+    }
+    const dir = Math.sign(to - from);
+    const duration = 300 + Math.min(3, Math.round(Math.abs(to - from) / itemWidth)) * 60;
+    // Timed from the first frame: a frame's timestamp can be from just
+    // before this effect ran, which would start the slide slightly backwards.
+    let start = -1;
+    const step = (now: number) => {
+      if (start < 0) start = now;
+      const t = Math.min(1, (now - start) / duration);
+      const e = easeInOutCubic(t);
+      const center = from + (to - from) * e;
+      centerRef.current = center;
+      place(center, Math.sin(Math.PI * t));
+      outEl.style.transform = `translateX(${-dir * 34 * e}px)`;
+      outEl.style.opacity = String(1 - e);
+      inEl.style.transform = `translateX(${dir * 34 * (1 - e)}px)`;
+      inEl.style.opacity = String(e);
+      if (t < 1) rafRef.current = requestAnimationFrame(step);
+      else settle(to);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pair, activeIndex, items.length]);
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+  const OutIcon = items[pair.out]?.icon;
+  const InIcon = items[pair.in]?.icon;
   // "More" popup — a liquid glass sheet opened from the round button that
   // sits on the bar's top-right edge. Empty for now; items get added later.
   // Only on the Dashboard (Home); any other page closes it.
@@ -222,11 +293,8 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
           preserveAspectRatio="none"
           className="absolute inset-0 w-full h-full drop-shadow-[0_-8px_24px_rgba(var(--g-accent-rgb,127,0,255),0.25)]"
         >
-          <path
-            d={pathD}
-            fill="var(--g-accent)"
-            style={{ transition: 'd 280ms cubic-bezier(0.4, 0, 0.2, 1)' }}
-          />
+          {/* d is redrawn every frame while the dip slides (above). */}
+          <path ref={pathRef} d={pathD} fill="var(--g-accent)" />
         </svg>
 
         <div
@@ -245,6 +313,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                 key={label}
                 type="button"
                 onClick={() => onChange(key)}
+                aria-current={isActive ? 'page' : undefined}
                 className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1"
                 style={{
                   transform: `translateX(${pushPx}px)`,
@@ -257,24 +326,11 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                     bumped from w-5/h-5 to w-6/h-6 so it reads centered and
                     proportionate inside the 52px circle, matching image 1's
                     icon-to-circle ratio. */}
-                <span
-                  className={`absolute -top-4 left-1/2 -translate-x-1/2 flex items-center justify-center w-[52px] h-[52px] rounded-full bg-white bg-clip-padding border-[4px] border-transparent transition-all duration-200 ${
-                    isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
-                  }`}
-                  style={
-                    isActive
-                      ? {
-                          boxShadow: '0 6px 14px rgba(42,0,85,0.35)'
-                        }
-                      : undefined
-                  }
-                >
-                  <Icon className="w-6 h-6" style={{ color: 'var(--g-accent)' }} />
-                </span>
                 {/* Inactive icon container: unchanged size, but centered with
                     the same flex rules as the active circle so the icon's
                     optical center lines up across active/inactive states
                     instead of shifting when the circle toggles in/out. */}
+                {/* Hidden under the riding circle while this tab is active. */}
                 <span
                   className={`relative inline-flex items-center justify-center w-11 h-11 rounded-2xl transition-opacity duration-200 ${
                     isActive ? 'opacity-0' : ''
@@ -293,6 +349,24 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
             );
           })}
         </div>
+
+        {/* The one white circle riding the dip (moved by the effect above);
+            the two icon slots inside it are pushed past each other. The
+            transparent border with bg-clip-padding keeps the 52px footprint
+            the tabs' own circles had, and clips the icons to the white. */}
+        <span
+          ref={riderRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute w-[52px] h-[52px] rounded-full bg-white bg-clip-padding border-[4px] border-transparent overflow-hidden will-change-transform"
+          style={{ top: RIDER_TOP, opacity: 0, boxShadow: '0 6px 14px rgba(42,0,85,0.35)' }}
+        >
+          <span ref={outRef} className="absolute inset-0 flex items-center justify-center" style={{ opacity: 0 }}>
+            {OutIcon && <OutIcon className="w-6 h-6" style={{ color: 'var(--g-accent)' }} />}
+          </span>
+          <span ref={inRef} className="absolute inset-0 flex items-center justify-center">
+            {InIcon && <InIcon className="w-6 h-6" style={{ color: 'var(--g-accent)' }} />}
+          </span>
+        </span>
       </div>
 
       <div style={{ height: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))', background: 'var(--g-accent)' }} />
