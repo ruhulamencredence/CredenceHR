@@ -5,7 +5,9 @@ apply plugin: 'com.android.application'
 // available" popup compares it with the APK on the server, and Android only
 // installs a same-or-newer versionCode over the app already on the phone.
 def buildMinute = (int) ((System.currentTimeMillis() - 1767225600000L) / 60000L)
-def buildStamp = new Date().format("yyyy.MM.dd-HHmm", TimeZone.getTimeZone("Asia/Dhaka"))
+def stampFormat = new java.text.SimpleDateFormat("yyyy.MM.dd-HHmm")
+stampFormat.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Dhaka"))
+def buildStamp = stampFormat.format(new java.util.Date())
 
 android {
     namespace = "com.mprtracker.app"
