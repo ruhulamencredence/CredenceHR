@@ -10,7 +10,7 @@
 // send; the whole screen on a phone. Saves itself as a draft while you write
 // and when closed.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   X, Send, Paperclip, Bold, Italic, Underline, List, ListOrdered, Link2, Quote, RemoveFormatting, Clock, Trash2, Loader2, ChevronDown, FileText, PenLine,
   Minus, Maximize2, Minimize2, ArrowLeft, Type, Undo2, Redo2, AlignLeft
@@ -75,7 +75,9 @@ const SHOW_MAX = 150;
 
 // To / Cc / Bcc: type any address, or pick from the list — groups, employees
 // (all of them, from the dropdown button or as you type), your contacts and
-// people you've written with. Several addresses, comma between.
+// people you've written with. Each address shows as a chip with the person's
+// name (tap it for the full address), wrapping onto more lines; while not
+// being edited, two lines at most and "+N more".
 const AddressField: React.FC<{ token: string; label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; right?: React.ReactNode }> = ({
   token, label, value, onChange, autoFocus, right
 }) => {
@@ -156,52 +158,209 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
     listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
+  // The field's value stays "a@x.com, b@y.com, <what is being typed>"; each
+  // finished address shows as a chip with the person's name.
+  const parts = value.split(/[,;]/);
+  const committed = parts.slice(0, -1).map((x) => x.trim()).filter(Boolean);
+  const join = (list: string[], typed = '') => (list.length ? `${list.join(', ')}, ` : '') + typed;
+  const commitTyped = () => {
+    if (current) onChange(join([...committed, current]));
+  };
   const pick = (sug: Suggestion) => {
-    const parts = value.split(/[,;]/);
-    parts[parts.length - 1] = ` ${sug.members ? sug.members.join(', ') : sug.email}`;
-    onChange(`${parts.join(',').replace(/^\s*,?\s*/, '')}, `);
+    onChange(join([...committed, ...(sug.members ? sug.members : [sug.email])]));
     // Stays open for the next one.
     inputRef.current?.focus();
   };
+  const removeAt = (i: number) => onChange(join(committed.filter((_, k) => k !== i), current));
+
+  // Names for the chips: employees (directory), groups, "Name <address>".
+  useEffect(() => {
+    if (committed.length && !people) void loadDirectory(token).then(setPeople);
+    if (committed.length && !groups) void loadMailGroups(token).then(setGroups);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [committed.length > 0, people, groups, token]);
+  const byEmail = useMemo(() => new Map((people || []).map((p) => [p.email.toLowerCase(), p])), [people]);
+  const chipOf = (raw: string) => {
+    const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(raw);
+    const email = (m ? m[2] : raw).trim();
+    const person = byEmail.get(email.toLowerCase());
+    const group = (groups?.central || []).find((g) => g.email.toLowerCase() === email.toLowerCase());
+    const name = person?.name || group?.name || (m && m[1].trim()) || '';
+    const kind: 'person' | 'group' | 'other' = person ? 'person' : group ? 'group' : 'other';
+    const detail = person
+      ? [person.employeeId && `ID ${person.employeeId}`, person.designation, person.department].filter(Boolean).join(' · ')
+      : group
+      ? `Group · ${group.count} ${group.count === 1 ? 'person' : 'people'}`
+      : '';
+    return { email, name, label: name || email, kind, detail };
+  };
+
+  // Not being edited: at most two lines of chips, the rest as "+N more".
+  const [focused, setFocused] = useState(false);
+  const [limit, setLimit] = useState<number | null>(null);
+  const [width, setWidth] = useState(0);
+  const [openChip, setOpenChip] = useState<number | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const chipsKey = committed.join('|');
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => setLimit(null), [chipsKey, width, focused]);
+  useLayoutEffect(() => {
+    if (focused || limit !== null || !boxRef.current) return;
+    const chips = [...boxRef.current.querySelectorAll<HTMLElement>('[data-chip]')];
+    const tops = [...new Set(chips.map((c) => c.offsetTop))].sort((x, y) => x - y);
+    if (tops.length <= 2) return;
+    const firstHidden = chips.findIndex((c) => c.offsetTop > tops[1]);
+    // The "+N more" pill (about 80px) goes after the last chip of line two
+    // when it fits there, else that chip makes way for it.
+    const lastRight = chips[firstHidden - 1].getBoundingClientRect().right;
+    const fits = lastRight + 86 <= boxRef.current.getBoundingClientRect().right;
+    setLimit(Math.max(1, fits ? firstHidden : firstHidden - 1));
+  }, [focused, limit, chipsKey, width]);
+  const visible = !focused && limit !== null ? limit : committed.length;
+  useEffect(() => {
+    if (openChip === null) return;
+    const close = (e: PointerEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpenChip(null);
+    };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [openChip]);
+
+  const palette = ['#2563eb', '#059669', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#16a34a', '#9333ea', '#0d9488', '#be123c', '#4f46e5', '#ca8a04'];
+  const colourOf = (email: string) => palette[[...email].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % palette.length];
 
   return (
-    <div className="relative flex items-center gap-2 border-b border-slate-200 mx-4">
-      <span className="text-sm text-slate-500 shrink-0">{label}</span>
-      <input
-        ref={inputRef}
-        value={value}
-        autoFocus={autoFocus}
-        onChange={(e) => {
-          onChange(e.target.value);
-          setOpen(true);
-        }}
-        // The list opens from the button, or as soon as something is typed.
-        onFocus={() => current && setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') return setOpen(false);
-          if (e.key === 'ArrowDown' && !open) {
+    <div className="relative flex items-start gap-2 border-b border-slate-200 mx-4">
+      <span className="text-sm text-slate-500 shrink-0 pt-2 w-7">{label}</span>
+      <div
+        ref={boxRef}
+        className="flex-1 min-w-0 flex flex-wrap items-center gap-1.5 py-1.5 cursor-text"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) {
             e.preventDefault();
-            return setOpen(true);
-          }
-          if (!open || !shown.length) return;
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setActive((a) => (a + 1) % shown.length);
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setActive((a) => (a - 1 + shown.length) % shown.length);
-          } else if ((e.key === 'Enter' || e.key === 'Tab') && current && shown[active]) {
-            e.preventDefault();
-            pick(shown[active]);
+            inputRef.current?.focus();
           }
         }}
-        type="text"
-        inputMode="email"
-        autoComplete="off"
-        placeholder={label === 'To' ? 'Recipients — name, email or Employee ID' : ''}
-        className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none placeholder:text-slate-500"
-      />
+      >
+        {committed.slice(0, visible).map((raw, i) => {
+          const c = chipOf(raw);
+          const tone =
+            c.kind === 'group' ? 'bg-violet-50 ring-1 ring-violet-200' : c.kind === 'other' ? 'bg-orange-50 ring-1 ring-orange-200' : 'bg-slate-100 hover:bg-slate-200';
+          return (
+            <span key={`${raw}-${i}`} data-chip className={`relative inline-flex items-center gap-1.5 max-w-full h-7 pl-0.5 pr-1 rounded-full text-[13px] text-slate-800 ${tone}`}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setOpenChip(openChip === i ? null : i)}
+                title={[c.name, c.email, c.detail].filter(Boolean).join('\n')}
+                className="inline-flex items-center gap-1.5 min-w-0"
+              >
+                <span
+                  className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[11px] font-bold text-white"
+                  style={{ background: c.kind === 'other' ? '#fb923c' : c.kind === 'group' ? '#7c3aed' : colourOf(c.email) }}
+                >
+                  {(c.label.trim()[0] || '?').toUpperCase()}
+                </span>
+                <span className="truncate max-w-[220px]">{c.label}</span>
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setOpenChip(null);
+                  removeAt(i);
+                }}
+                aria-label={`Remove ${c.label}`}
+                className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center text-slate-500 hover:bg-slate-300 hover:text-slate-900"
+              >
+                <X className="w-3 h-3" />
+              </button>
+              {openChip === i && (
+                <span className="absolute left-0 top-full mt-1.5 z-30 w-max max-w-[min(80vw,360px)] rounded-lg bg-slate-800 text-white px-3 py-2 shadow-xl text-left">
+                  <span className="block text-xs font-semibold">{c.name || c.email}</span>
+                  <span className="block text-[11px] text-slate-200 break-all">{c.email}</span>
+                  {c.detail && <span className="block text-[11px] text-slate-300">{c.detail}</span>}
+                </span>
+              )}
+            </span>
+          );
+        })}
+        {visible < committed.length && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => inputRef.current?.focus()}
+            className="h-7 px-2 rounded-full text-xs font-semibold text-blue-700 hover:bg-blue-50"
+          >
+            +{committed.length - visible} more
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          value={parts[parts.length - 1].replace(/^\s+/, '')}
+          autoFocus={autoFocus}
+          onChange={(e) => {
+            const typed = e.target.value;
+            // A full address followed by a space becomes a chip (like a comma).
+            if (/\s$/.test(typed) && /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(typed.trim())) onChange(join([...committed, typed.trim()]));
+            else onChange(join(committed, typed));
+            setOpen(true);
+          }}
+          // The list opens from the button, or as soon as something is typed.
+          onFocus={() => {
+            setFocused(true);
+            if (current) setOpen(true);
+          }}
+          onBlur={() => {
+            setFocused(false);
+            // A typed address left in the box becomes a chip.
+            if (current.includes('@')) commitTyped();
+            setTimeout(() => setOpen(false), 150);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') return setOpen(false);
+            if (e.key === 'Backspace' && !current && committed.length) {
+              e.preventDefault();
+              return onChange(join(committed.slice(0, -1)));
+            }
+            if (e.key === 'ArrowDown' && !open) {
+              e.preventDefault();
+              return setOpen(true);
+            }
+            // Enter keeps what was typed only when it is a whole address (a
+            // name half typed before the list loaded stays in the box).
+            if (e.key === 'Enter' && current && (!open || !shown.length)) {
+              e.preventDefault();
+              if (current.includes('@')) commitTyped();
+              return;
+            }
+            if (!open || !shown.length) return;
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActive((a) => (a + 1) % shown.length);
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActive((a) => (a - 1 + shown.length) % shown.length);
+            } else if ((e.key === 'Enter' || e.key === 'Tab') && current && shown[active]) {
+              e.preventDefault();
+              pick(shown[active]);
+            }
+          }}
+          type="text"
+          inputMode="email"
+          autoComplete="off"
+          aria-label={label}
+          placeholder={label === 'To' && !committed.length ? 'Recipients — name, email or Employee ID' : ''}
+          // Takes no line of its own while the field isn't being edited.
+          className={`bg-transparent h-7 text-sm focus:outline-none placeholder:text-slate-500 ${focused || !committed.length || current ? 'flex-1 min-w-[80px]' : 'w-1 min-w-0 flex-none'}`}
+        />
+      </div>
       <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
@@ -209,20 +368,20 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
           setOpen((v) => !v);
           inputRef.current?.focus();
         }}
-        className="p-1 rounded-lg text-slate-500 hover:bg-black/5 hover:text-slate-800 shrink-0"
+        className="p-1 mt-1.5 rounded-lg text-slate-500 hover:bg-black/5 hover:text-slate-800 shrink-0"
         aria-label={`Choose ${label} from employees`}
         aria-expanded={open}
         title="Choose from employees"
       >
         <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      {right}
+      {right && <span className="pt-2 shrink-0">{right}</span>}
       {open && (
         <div ref={listRef} className="absolute left-6 right-0 top-full mt-1 z-20 rounded-lg bg-white shadow-xl ring-1 ring-black/10 overflow-y-auto max-h-72" onMouseDown={(e) => e.preventDefault()}>
           {!people && !book.length ? (
             <div className="px-3 py-3 text-xs text-slate-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading employees…</div>
           ) : !shown.length ? (
-            <div className="px-3 py-3 text-xs text-slate-500">{current ? `No one matches “${current}” — the address you type is used as it is.` : 'Everyone is added already.'}</div>
+            <div className="px-3 py-3 text-xs text-slate-500">{current ? `No one matches “${current}” — press Enter to use the address as typed.` : 'Everyone is added already.'}</div>
           ) : (
             <>
               {shown.map((sug, i) => (
