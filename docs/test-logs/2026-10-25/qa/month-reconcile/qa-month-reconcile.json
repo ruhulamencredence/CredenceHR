@@ -1,10 +1,10 @@
 {
- "when": "2026-10-26T07:53:50.558Z",
+ "when": "2026-10-26T08:26:35.329Z",
  "month": "2026-09",
  "summary": {
-  "PASS": 23,
+  "PASS": 30,
   "FAIL": 0,
-  "INFO": 1
+  "INFO": 0
  },
  "results": [
   {
@@ -147,9 +147,45 @@
   },
   {
    "id": "REC-L3",
-   "status": "INFO",
-   "name": "Leave Thu 17 – Sat 19 Sep (Friday in between)",
-   "detail": "balance 10 → 7 (3 days, the application says 3); payroll counts 2 leave days (the Friday is a weekend, not leave). Decide whether a weekend inside a leave should come off the balance (calendar days, as now) or not."
+   "status": "PASS",
+   "name": "Rule \"Count them\": leave Thu 17 – Sat 19 Sep takes 3 days off the balance; payroll counts 2 leave days",
+   "detail": "balance 10 → 7, application 3, payroll 2"
+  },
+  {
+   "id": "REC-L4",
+   "status": "PASS",
+   "name": "HR can set Casual Leave to \"Don't count weekends & holidays\"",
+   "detail": "200 {\"category_key\":\"casual\",\"min_advance_notice_days\":0,\"reliever_required\":false,\"max_consecutive_days\":null,\"require_paid_leave_exhausted\":false,\"count_off_days\":false,\"min_service_months\":0,\"gender\":\""
+  },
+  {
+   "id": "REC-L5",
+   "status": "PASS",
+   "name": "The form shows 2 days for Thu 1 – Sat 3 Oct (Friday 2 Oct not counted)",
+   "detail": "200 {\"day_count\":2,\"count_off_days\":false,\"off_days\":[\"2026-10-02\"]}"
+  },
+  {
+   "id": "REC-L6",
+   "status": "PASS",
+   "name": "Submitting it takes 2 days off the balance (7 → 5), same as payroll counts",
+   "detail": "200 {\"success\":true,\"id\":4,\"day_count\":2}; balance 5"
+  },
+  {
+   "id": "REC-L7",
+   "status": "PASS",
+   "name": "Leave on a Friday only is refused (nothing to take), balance unchanged",
+   "detail": "400 {\"error\":\"Every day you picked is a weekend or holiday, so no leave is needed for them.\"}"
+  },
+  {
+   "id": "REC-L8",
+   "status": "PASS",
+   "name": "Sick Leave still on \"Count them\": the same dates are 3 days (the rule is per Leave Type)",
+   "detail": "200 {\"day_count\":3,\"count_off_days\":true,\"off_days\":[]}"
+  },
+  {
+   "id": "REC-L9",
+   "status": "PASS",
+   "name": "An employee can't change the rule",
+   "detail": "403"
   }
  ]
 }

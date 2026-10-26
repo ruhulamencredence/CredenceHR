@@ -318,7 +318,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     ["accrual_per_month", "DECIMAL(4,1) NOT NULL DEFAULT 0"],
     ["balance_cap", "DECIMAL(5,1) NULL DEFAULT NULL"],
     ["carry_forward_max", "DECIMAL(5,1) NULL DEFAULT NULL"],
-    ["accrual_from", "CHAR(7) NULL DEFAULT NULL"]
+    ["accrual_from", "CHAR(7) NULL DEFAULT NULL"],
+    // 1 = weekends/holidays inside a leave come off the balance too (the
+    // old rule); 0 = only the applicant's working days do (leaveDayCount.ts).
+    ["count_off_days", "TINYINT(1) NOT NULL DEFAULT 1"]
   ] as [string, string][]) {
     try {
       await dbPool.query(`ALTER TABLE leave_category_policies ADD COLUMN ${col} ${def}`);

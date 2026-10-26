@@ -141,7 +141,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const dayCount = useMemo(() => calcDayCount(startDate, endDate, isHalfDay), [startDate, endDate, isHalfDay]);
+  const calendarDayCount = useMemo(() => calcDayCount(startDate, endDate, isHalfDay), [startDate, endDate, isHalfDay]);
 
   // Fixed 3 + every custom Leave Category (GET /api/leave-categories) —
   // what actually populates the Leave Type dropdown below. This is the fix:
@@ -182,6 +182,36 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     [policies, leaveType]
   );
 
+  // When this Leave Type's policy leaves weekends and holidays out, only the
+  // server knows this person's calendar (branch group + Duty Roster), so the
+  // Day Count comes from GET /api/leave-applications/day-count — the same
+  // number the submit will deduct.
+  const skipsOffDays = selectedPolicy.count_off_days === false;
+  const countKey = `${leaveType}|${startDate}|${endDate}|${isHalfDay ? 1 : 0}`;
+  const [workingCount, setWorkingCount] = useState<{ key: string; day_count: number; off_days: string[] } | null>(null);
+  useEffect(() => {
+    if (!skipsOffDays || !leaveType || !startDate || !endDate || endDate < startDate) return;
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      try {
+        const q = new URLSearchParams({ leave_type: leaveType, start_date: startDate, end_date: endDate, is_half_day: isHalfDay ? '1' : '0' });
+        const res = await fetch(apiUrl(`/api/leave-applications/day-count?${q}`), { headers: authHeaders });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) setWorkingCount({ key: countKey, day_count: Number(data.day_count) || 0, off_days: Array.isArray(data.off_days) ? data.off_days : [] });
+      } catch {
+        // Offline — the submit still counts it on the server.
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipsOffDays, countKey]);
+  const countReady = !skipsOffDays || workingCount?.key === countKey;
+  const dayCount = skipsOffDays ? (workingCount?.key === countKey ? workingCount.day_count : 0) : calendarDayCount;
+  const skippedOffDays = skipsOffDays && workingCount?.key === countKey ? workingCount.off_days.length : 0;
+
   // Sick Leave, and a backdated application (starting before today), never
   // need a Reliever — there's no hand-over to arrange for either. Same rule
   // as POST /api/leave-applications.
@@ -192,7 +222,8 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     if (!leaveType) return 'Select a Leave Type.';
     if (!startDate || !endDate) return 'Start Date and End Date are required.';
     if (endDate < startDate) return "End Date can't be before Start Date.";
-    if (dayCount <= 0) return 'Day Count must be greater than 0.';
+    if (!countReady) return 'Counting the days — try again in a moment.';
+    if (dayCount <= 0) return skipsOffDays ? 'Every day you picked is a weekend or holiday, so no leave is needed for them.' : 'Day Count must be greater than 0.';
     if (selectedPolicy.min_advance_notice_days > 0) {
       const noticeDays = Math.round((new Date(`${startDate}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / (1000 * 60 * 60 * 24));
       if (noticeDays < selectedPolicy.min_advance_notice_days) {
@@ -338,9 +369,14 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                 type="text"
                 readOnly
                 value={dayCount > 0 ? dayCount : ''}
-                placeholder="—"
+                placeholder={countReady ? '—' : '…'}
                 className="w-full text-sm px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-600"
               />
+              {skippedOffDays > 0 && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {skippedOffDays} weekend/holiday day{skippedOffDays === 1 ? '' : 's'} inside not counted.
+                </p>
+              )}
             </div>
             <div className="flex flex-col justify-center gap-2 sm:pt-5">
               <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">

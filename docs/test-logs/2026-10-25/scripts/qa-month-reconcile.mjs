@@ -148,7 +148,28 @@ const wkl = CASES.find((c) => c.key === 'weekendLeave');
 T('REC-L1', bal(cas.uid, 'casual_leave') === 8, 'Casual leave 14–15 Sep takes 2 days off the balance (10 → 8)', `now ${bal(cas.uid, 'casual_leave')}`);
 T('REC-L2', bal(unp.uid, 'leave_without_pay') === 8, 'Leave without pay 21–22 Sep: 2 days used (10 → 8), and cut from the salary', `now ${bal(unp.uid, 'leave_without_pay')}`);
 const wkBal = bal(wkl.uid, 'casual_leave');
-INFO('REC-L3', 'Leave Thu 17 – Sat 19 Sep (Friday in between)', `balance ${10} → ${wkBal} (${10 - wkBal} days, the application says ${wkl.leaveDayCount}); payroll counts ${wkl.expected.leave} leave days (the Friday is a weekend, not leave). Decide whether a weekend inside a leave should come off the balance (calendar days, as now) or not.`);
+// HR's rule per Leave Type (Leave Policies -> "Weekends & holidays inside the
+// leave"). Default "Count them": the Friday comes off the balance too, while
+// payroll still counts only the 2 working days as leave (the Friday is paid
+// either way).
+T('REC-L3', wkBal === 7 && wkl.leaveDayCount === 3 && wkl.expected.leave === 2, 'Rule "Count them": leave Thu 17 – Sat 19 Sep takes 3 days off the balance; payroll counts 2 leave days', `balance 10 → ${wkBal}, application ${wkl.leaveDayCount}, payroll ${wkl.expected.leave}`);
+// HR switches Casual Leave to "Don't count them".
+await api(SA, 'POST', '/api/holidays/bulk-weekly', { from: '2026-10-01', to: '2026-10-31', weekday: 5, title: 'Weekend', applies_to: 'head_office' });
+const pol = await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0, reliever_required: false, max_consecutive_days: null, require_paid_leave_exhausted: false, count_off_days: false });
+T('REC-L4', ok(pol) && pol.body.count_off_days === false, 'HR can set Casual Leave to "Don\'t count weekends & holidays"', `${pol.status} ${JSON.stringify(pol.body).slice(0, 200)}`);
+const wkTok = await login('weekendleave@rec.test', 'easy');
+const pre = await api(wkTok, 'GET', '/api/leave-applications/day-count?leave_type=casual&start_date=2026-10-01&end_date=2026-10-03');
+T('REC-L5', ok(pre) && pre.body.day_count === 2 && JSON.stringify(pre.body.off_days) === '["2026-10-02"]', 'The form shows 2 days for Thu 1 – Sat 3 Oct (Friday 2 Oct not counted)', `${pre.status} ${JSON.stringify(pre.body)}`);
+const la2 = await api(wkTok, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: '2026-10-01', end_date: '2026-10-03', purpose: 'reconciliation' });
+T('REC-L6', ok(la2) && Number(la2.body.day_count) === 2 && bal(wkl.uid, 'casual_leave') === 5, 'Submitting it takes 2 days off the balance (7 → 5), same as payroll counts', `${la2.status} ${JSON.stringify(la2.body).slice(0, 200)}; balance ${bal(wkl.uid, 'casual_leave')}`);
+const onlyFri = await api(wkTok, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: '2026-10-09', end_date: '2026-10-09', purpose: 'reconciliation' });
+T('REC-L7', onlyFri.status === 400 && /weekend or holiday/.test(onlyFri.body.error || '') && bal(wkl.uid, 'casual_leave') === 5, 'Leave on a Friday only is refused (nothing to take), balance unchanged', `${onlyFri.status} ${JSON.stringify(onlyFri.body)}`);
+const sickPre = await api(wkTok, 'GET', '/api/leave-applications/day-count?leave_type=sick&start_date=2026-10-01&end_date=2026-10-03');
+T('REC-L8', ok(sickPre) && sickPre.body.day_count === 3, 'Sick Leave still on "Count them": the same dates are 3 days (the rule is per Leave Type)', `${sickPre.status} ${JSON.stringify(sickPre.body)}`);
+const emp = await login('casual@rec.test', 'easy');
+const noPol = await api(emp, 'PUT', '/api/leave-policies/casual', { count_off_days: true });
+T('REC-L9', noPol.status === 401 || noPol.status === 403, 'An employee can\'t change the rule', `${noPol.status}`);
+await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0, reliever_required: false, max_consecutive_days: null, require_paid_leave_exhausted: false, count_off_days: true });
 
 // ---- The Excel workbook -------------------------------------------------------
 const wb = XLSX.utils.book_new();

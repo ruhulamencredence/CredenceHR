@@ -23,6 +23,7 @@
 import type { Express } from "express";
 import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
 import { runsBackgroundJobs } from "./jobRunner";
+import { leaveDayCount } from "./leaveDayCount";
 
 // Carry-forward at the year rollover: category (balance key) -> most days that
 // carry over, and each account's balance from just before the rollover.
@@ -801,7 +802,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // seeded with, so callers never have to special-case a missing row.
   // Leave rules (Leave Manage layer "leave_rules"): all off by default.
   const DEFAULT_LEAVE_RULES = { min_service_months: 0, gender: "any" as string, accrual_per_month: 0, balance_cap: null as number | null, carry_forward_max: null as number | null, accrual_from: null as string | null };
-  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, ...DEFAULT_LEAVE_RULES };
+  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, count_off_days: true, ...DEFAULT_LEAVE_RULES };
   const numOrNull = (v: any) => (v === null || v === undefined ? null : Number(v));
   async function getLeavePolicy(categoryKey: string) {
     const rows: any = await queryDB("SELECT * FROM leave_category_policies WHERE category_key = ?", [categoryKey]);
@@ -813,6 +814,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       reliever_required: !!Number(r.reliever_required),
       max_consecutive_days: r.max_consecutive_days === null ? null : Number(r.max_consecutive_days),
       require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted),
+      // Weekends/holidays inside a leave come off the balance (default) or not.
+      count_off_days: r.count_off_days === undefined || r.count_off_days === null ? true : !!Number(r.count_off_days),
       min_service_months: Number(r.min_service_months) || 0,
       gender: ["female", "male"].includes(String(r.gender)) ? String(r.gender) : "any",
       accrual_per_month: Number(r.accrual_per_month) || 0,
@@ -884,13 +887,16 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           ? null
           : Math.max(1, Math.trunc(Number(maxConsecutiveDaysRaw)) || 1);
       const requirePaidLeaveExhausted = !!req.body?.require_paid_leave_exhausted;
+      // Left out of the request (an older screen) = keep what is saved.
+      const countOffDays = req.body?.count_off_days === undefined ? (await getLeavePolicy(categoryKey)).count_off_days : !!req.body.count_off_days;
 
       await queryDB(
-        `INSERT INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted, count_off_days, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE min_advance_notice_days = VALUES(min_advance_notice_days), reliever_required = VALUES(reliever_required),
-           max_consecutive_days = VALUES(max_consecutive_days), require_paid_leave_exhausted = VALUES(require_paid_leave_exhausted), updated_by = VALUES(updated_by)`,
-        [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, req.user.id]
+           max_consecutive_days = VALUES(max_consecutive_days), require_paid_leave_exhausted = VALUES(require_paid_leave_exhausted),
+           count_off_days = VALUES(count_off_days), updated_by = VALUES(updated_by)`,
+        [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, countOffDays ? 1 : 0, req.user.id]
       );
       res.json(await getLeavePolicy(categoryKey));
     } catch (err: any) {
@@ -1250,6 +1256,28 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   const overlapMessage = (c: { start: string; end: string }) =>
     `You already have a leave application for ${c.start === c.end ? c.start : `${c.start} to ${c.end}`} that is waiting or approved. Choose other dates, or cancel that one first.`;
 
+  const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  // GET: what a Leave Application for these dates would take off the
+  // CALLER'S OWN balance, under the Leave Type's policy — so the form shows
+  // the same Day Count the submit below will deduct (weekends and holidays
+  // left out when the policy says so). Same gate as submitting.
+  app.get("/api/leave-applications/day-count", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
+    try {
+      const leaveType = String(req.query.leave_type || "");
+      const start = String(req.query.start_date || "");
+      const end = String(req.query.end_date || "");
+      if (!(await isValidLeaveType(leaveType))) return res.status(400).json({ error: "Select a valid Leave Type." });
+      if (!DATE_ONLY_RE.test(start) || !DATE_ONLY_RE.test(end) || end < start) return res.status(400).json({ error: "Pick a Start and End Date." });
+      const policy = await getLeavePolicy(leaveType);
+      const halfDay = String(req.query.is_half_day || "") === "1";
+      const { dayCount, offDays } = await leaveDayCount(queryDB, Number(req.user.id), start, end, halfDay, policy.count_off_days);
+      res.json({ day_count: dayCount, count_off_days: policy.count_off_days, off_days: offDays });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/leave-applications", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const {
@@ -1306,15 +1334,20 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         }
       }
 
-      // Calendar days between start/end, inclusive of both ends — Half Day trims
-      // 0.5 off the total (floored at 0.5). Mirrors calcDayCount in
-      // NewLeaveApplicationModal.tsx exactly, computed here too so a tampered
-      // client-side value can never change what gets deducted.
-      const s = new Date(`${start_date}T00:00:00`);
-      const e = new Date(`${end_date}T00:00:00`);
-      const diffDays = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      const dayCount = diffDays <= 0 ? 0 : (is_half_day ? Math.max(0.5, diffDays - 0.5) : diffDays);
-      if (dayCount <= 0) return res.status(400).json({ error: "Day Count must be greater than 0." });
+      // Days between start/end, inclusive of both ends — every calendar day,
+      // or only working days when this Leave Type's policy leaves weekends
+      // and holidays out (leaveDayCount.ts). Half Day trims 0.5 off (floored
+      // at 0.5). Computed here, never taken from the client, so a tampered
+      // request can't change what gets deducted.
+      if (!DATE_ONLY_RE.test(String(start_date)) || !DATE_ONLY_RE.test(String(end_date))) {
+        return res.status(400).json({ error: "Start Date and End Date must be dates (YYYY-MM-DD)." });
+      }
+      const { dayCount } = await leaveDayCount(queryDB, Number(req.user.id), String(start_date), String(end_date), !!is_half_day, policy.count_off_days);
+      if (dayCount <= 0) {
+        return res.status(400).json({
+          error: policy.count_off_days ? "Day Count must be greater than 0." : "Every day you picked is a weekend or holiday, so no leave is needed for them."
+        });
+      }
 
       // Leave rules: who may use this Leave Type (gender, months of service).
       if (policy.gender !== "any" || policy.min_service_months > 0) {

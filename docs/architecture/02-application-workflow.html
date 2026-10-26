@@ -167,6 +167,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </pre>
 <ul>
 <li>ব্যালেন্স: ছুটির বছর শুরুতে নীতি (workflow) অনুযায়ী বসে; বছর শেষে rollover job চলে (<code>LeaveRoutes.ts</code>, ৬ ঘণ্টা পরপর পরীক্ষা)।</li>
+<li>কত দিন কাটবে: প্রতিটি Leave Type-এর নীতিতে HR ঠিক করেন (Leave Manage → Leave Policies → "Weekends &amp; holidays inside the leave", <code>leave_category_policies.count_off_days</code>)। <strong>Count them</strong> (আগের মতো, default) হলে শুরু থেকে শেষ পর্যন্ত সব দিন কাটে। <strong>Don't count them</strong> হলে শুধু কর্মীর কাজের দিন কাটে: তাঁর শাখা-দলের Holiday Calendar, তার ওপর Duty Roster, অর্থাৎ payroll যে ক্যালেন্ডারে কাজের দিন গোনে (<code>leaveDayCount.ts</code>)। সংখ্যাটা সবসময় server গোনে। ফর্ম <code>GET /api/leave-applications/day-count</code> থেকে সেটা দেখায়, আর শুধু ছুটির দিনে পড়া আবেদন ফিরিয়ে দেওয়া হয়। Data Import-এ Days ঘর ফাঁকা থাকলেও একই নিয়মে গোনা হয়। বেতন দুই নিয়মেই এক: ছুটির ভেতরের সাপ্তাহিক বা সরকারি ছুটি কখনো বিনা বেতনে গোনা হয় না।</li>
 <li>অনুমোদনকারী ঠিক করে <strong>Approval Template</strong> (<code>approval_templates</code>/<code>_steps</code>/<code>_step_approvers</code>)। কর্মীর সুপারভাইজার বা নির্দিষ্ট ব্যক্তি/ভূমিকা হতে পারে।</li>
 </ul>
 <hr />

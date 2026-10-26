@@ -79,7 +79,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   // ever shown/usable when canManageAll is true, same as the Bulk panel.
   const [showPoliciesPanel, setShowPoliciesPanel] = useState(false);
   const [policies, setPolicies] = useState<LeaveCategoryPolicy[]>([]);
-  const [policyDraft, setPolicyDraft] = useState<Record<string, { min_advance_notice_days: string; reliever_required: boolean; max_consecutive_days: string; require_paid_leave_exhausted: boolean }>>({});
+  const [policyDraft, setPolicyDraft] = useState<Record<string, { min_advance_notice_days: string; reliever_required: boolean; max_consecutive_days: string; require_paid_leave_exhausted: boolean; count_off_days: boolean }>>({});
   const [savingPolicyFor, setSavingPolicyFor] = useState<string | null>(null);
   const [policyError, setPolicyError] = useState('');
   const [policySuccess, setPolicySuccess] = useState('');
@@ -94,7 +94,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const setRules = (key: string, patch: Partial<RulesDraft>) => setRulesDraft((prev) => ({ ...prev, [key]: { ...(prev[key] || emptyRules), ...patch } }));
 
   const draftFor = (categoryKey: string) =>
-    policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false };
+    policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false, count_off_days: true };
 
   const fetchPolicies = async () => {
     try {
@@ -124,7 +124,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
             min_advance_notice_days: String(p.min_advance_notice_days),
             reliever_required: p.reliever_required,
             max_consecutive_days: p.max_consecutive_days === null ? '' : String(p.max_consecutive_days),
-            require_paid_leave_exhausted: p.require_paid_leave_exhausted
+            require_paid_leave_exhausted: p.require_paid_leave_exhausted,
+            count_off_days: p.count_off_days !== false
           };
         }
         return next;
@@ -163,7 +164,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
           min_advance_notice_days: minAdvanceNoticeDays,
           reliever_required: draft.reliever_required,
           max_consecutive_days: maxConsecutiveDays,
-          require_paid_leave_exhausted: draft.require_paid_leave_exhausted
+          require_paid_leave_exhausted: draft.require_paid_leave_exhausted,
+          count_off_days: draft.count_off_days
         })
       });
       const data = await res.json();
@@ -1164,7 +1166,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   <p className="text-[11px] text-slate-500 mb-3 max-w-2xl">
                     Set the rules for each Leave Type — how many days ahead it must be applied, whether a Reliever is
                     required, the longest single application allowed, and (for a type like Leave Without Pay) whether
-                    Casual/Sick must be exhausted first. Enforced automatically when anyone submits a Leave Application.
+                    Casual/Sick must be exhausted first, and whether weekends and holidays inside a leave come off the
+                    balance. Enforced automatically when anyone submits a Leave Application.
                   </p>
 
                   {canRules && (
@@ -1258,6 +1261,26 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                               />
                               Only after Casual + Sick exhausted
                             </label>
+
+                            <div className="sm:col-span-2 lg:col-span-4">
+                              <label htmlFor={`count-off-${cat.key}`} className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Weekends &amp; holidays inside the leave
+                              </label>
+                              <select
+                                id={`count-off-${cat.key}`}
+                                value={draft.count_off_days ? 'count' : 'skip'}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), count_off_days: e.target.value === 'count' } }))
+                                }
+                                className="w-full sm:max-w-md px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="count">Count them (every calendar day comes off the balance)</option>
+                                <option value="skip">Don't count them (only working days come off the balance)</option>
+                              </select>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                E.g. Thursday to Saturday with Friday off: {draft.count_off_days ? '3 days' : '2 days'} off the balance. Salary is the same either way — off days are never unpaid.
+                              </p>
+                            </div>
                           </div>
 
                           {canRules && (

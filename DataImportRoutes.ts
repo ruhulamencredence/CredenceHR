@@ -39,6 +39,7 @@ import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { activeCompanyId, activeGroupId } from "./companyContext";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
+import { leaveDayCount } from "./leaveDayCount";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -681,7 +682,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const to = dateOf(v, "to_date", "To Date") as string;
         if (to < from) fail("To Date is before From Date.");
         const half = parseYesNo(v.half_day) === true;
-        let days = str(v.days) ? parseNumber(v.days) : half ? 0.5 : daysBetween(from, to);
+        // Days left blank: counted the way a Leave Application would be — every
+        // calendar day, or only working days when this Leave Type's policy
+        // leaves weekends and holidays out.
+        let days: number | null;
+        if (str(v.days)) days = parseNumber(v.days);
+        else if (half) days = 0.5;
+        else {
+          const pol: any[] = (await queryDB("SELECT count_off_days FROM leave_category_policies WHERE category_key = ?", [leaveType]).catch(() => [])) || [];
+          const countOff = !pol.length || pol[0].count_off_days == null || !!Number(pol[0].count_off_days);
+          days = countOff ? daysBetween(from, to) : (await leaveDayCount(queryDB, Number(userId), from, to, false, false)).dayCount;
+          if (!days) fail(`Every day from ${from} to ${to} is a weekend or holiday, so there's no leave to import.`);
+        }
         if (days === null || !Number.isFinite(days) || days <= 0 || days > 366) fail(`Days "${str(v.days)}" isn't a valid number of days.`);
         days = Math.round(Number(days) * 2) / 2;
         const status = parseStatus(v.status) || fail(`Status "${str(v.status)}" — write Approved, Pending or Rejected.`);

@@ -859,6 +859,9 @@ export interface LeaveCategoryPolicy {
   // Leave Without Pay style rule: this Leave Type may only be applied for
   // once Casual Leave AND Sick Leave balances are both exhausted (0).
   require_paid_leave_exhausted: boolean;
+  // true = weekends and holidays inside a leave come off the balance too
+  // (every calendar day); false = only the applicant's working days do.
+  count_off_days?: boolean;
   // Leave Rules (Leave Manage layer "leave_rules"); all off by default.
   // Who may apply: 'any' | 'female' | 'male', and months of service needed.
   gender?: 'any' | 'female' | 'male';
