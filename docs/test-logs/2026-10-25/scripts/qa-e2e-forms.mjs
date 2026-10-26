@@ -169,20 +169,25 @@ await dlg.waitFor({ timeout: 10000 });
 await page.waitForTimeout(700); // the popup's entrance animation
 const bb = await dlg.boundingBox();
 const vp = page.viewportSize();
-const units = await page.getByLabel('Unit').first().evaluate((el) => [...el.options].map((o) => o.value));
-await T('E2E-11', !!bb && bb.width <= vp.width && bb.height <= vp.height && units.length > 5 && units.includes('box') && units.includes('kg'), 'New Requisition fits the screen and offers more units than "pcs"', `box ${JSON.stringify(bb)}; units ${units.join(',')}`);
+// Opening the Unit field (it starts as "pcs") lists every unit, not just pcs.
+await page.getByLabel('Unit', { exact: true }).first().click();
+const units = await page.getByRole('listbox', { name: 'Unit options' }).getByRole('option').allInnerTexts();
+await T('E2E-11', !!bb && bb.width <= vp.width && bb.height <= vp.height && units.length > 5 && units.includes('box') && units.includes('kg'), 'New Requisition: opening the Unit field lists every unit, not just "pcs"', `box ${JSON.stringify(bb)}; units ${units.join(',')}`);
 await page.getByPlaceholder('e.g. Laptop, A4 Paper').first().fill('A4 Paper');
 await page.getByPlaceholder('Why this item is needed').first().fill('Printing');
-await page.getByLabel('Unit').first().selectOption('ream');
+await page.getByRole('option', { name: 'ream', exact: true }).click();
 await page.getByRole('button', { name: '+ Add Item' }).click();
 await page.getByPlaceholder('e.g. Laptop, A4 Paper').nth(1).fill('Engine oil');
 await page.getByPlaceholder('Why this item is needed').nth(1).fill('Generator');
-await page.getByLabel('Unit').nth(1).selectOption('__other__');
-await page.getByLabel('Unit').nth(1).fill('drum');
+// Typing filters the list; a unit not in it is kept as typed.
+await page.getByLabel('Unit', { exact: true }).nth(1).fill('k');
+const filtered = await page.getByRole('listbox', { name: 'Unit options' }).getByRole('option').allInnerTexts();
+await page.getByLabel('Unit', { exact: true }).nth(1).fill('drum');
+await page.keyboard.press('Escape');
 await page.getByRole('button', { name: 'Submit Request' }).click();
 await page.waitForTimeout(2500);
 const reqItems = sql(`SELECT GROUP_CONCAT(CONCAT(item_name, ':', unit) ORDER BY id) FROM asset_requisition_items WHERE requisition_id = (SELECT MAX(id) FROM asset_requisitions WHERE employee_user_id = ${uid})`);
-await T('E2E-12', reqItems === 'A4 Paper:ream,Engine oil:drum', 'Requisition saved with the picked unit (ream) and a typed one (drum)', reqItems);
+await T('E2E-12', reqItems === 'A4 Paper:ream,Engine oil:drum' && filtered[0] === 'kg' && !filtered.includes('pcs'), 'Unit: picked from the list (ream), typing filters it ("k" → kg), and a typed unit is kept (drum)', `${reqItems}; "k" → ${filtered.join(',')}`);
 
 const sum = { PASS: R.filter((r) => r.status === 'PASS').length, FAIL: R.filter((r) => r.status === 'FAIL').length };
 console.log('\nSUMMARY', JSON.stringify(sum));
