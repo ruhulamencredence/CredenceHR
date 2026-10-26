@@ -1,0 +1,57 @@
+{
+ "when": "2026-10-26T08:09:32.742Z",
+ "summary": {
+  "PASS": 8,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "PK-01",
+   "status": "PASS",
+   "name": "Loan / advance: \"nusrat j\" finds Nusrat Jahan, the loan is saved for her",
+   "detail": "offered Nusrat Jahan — Finance; shown \"Nusrat Jahan — Finance\"; saved 45\t12000\t3000"
+  },
+  {
+   "id": "PK-02",
+   "status": "PASS",
+   "name": "Salary adjustment: \"kamrul is\" finds Kamrul Islam (not Kamrul Hasan); saved for him",
+   "detail": "offered Kamrul Islam — Finance; shown \"Kamrul Islam — Finance\"; saved 48"
+  },
+  {
+   "id": "PK-03",
+   "status": "PASS",
+   "name": "Document Vault: \"shir\" finds Shirin Akter; the document is filed under her",
+   "detail": "offered Shirin Akter; shown \"Shirin Akter\"; her documents 1"
+  },
+  {
+   "id": "PK-04",
+   "status": "PASS",
+   "name": "Emergency vehicle requisition: \"tareq\" finds Tareq Aziz; saved for him; the \"own Supervisor\" default reads as text",
+   "detail": "offered Tareq Aziz; shown \"Tareq Aziz\"; supervisor field \"Use their own Supervisor (default)\"; saved user 140"
+  },
+  {
+   "id": "PK-05",
+   "status": "PASS",
+   "name": "Disciplinary action: \"hasan\" (a surname) finds Kamrul Hasan; issued to him",
+   "detail": "offered Kamrul Hasan; shown \"Kamrul Hasan\"; saved user 137"
+  },
+  {
+   "id": "PK-06",
+   "status": "PASS",
+   "name": "Department: Supervisor \"nusrat a\" → Nusrat Ara, saved with the department",
+   "detail": "offered Nusrat Ara (user); shown \"Nusrat Ara (user)\"; saved supervisor 136"
+  },
+  {
+   "id": "PK-08",
+   "status": "PASS",
+   "name": "Give a SIM: \"shirin\" finds Shirin Akter in the field itself (no second search box); SIM saved to her",
+   "detail": "offered Shirin Akter — Finance; shown \"Shirin Akter — Finance\"; extra search boxes 0; saved 49"
+  },
+  {
+   "id": "PK-07",
+   "status": "PASS",
+   "name": "No script errors on any of these pages",
+   "detail": ""
+  }
+ ]
+}

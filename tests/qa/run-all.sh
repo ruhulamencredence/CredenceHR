@@ -62,6 +62,7 @@ SUITES=(
   "month-reconcile|1|node $S/qa-month-reconcile.mjs $QA_OUT/month-reconcile"
   "supervisor-chain|1|node $S/supervisor-chain.mjs $QA_OUT/supervisor-chain.json"
   "e2e-forms|1|node $S/qa-e2e-forms.mjs $QA_OUT/e2e"
+  "pickers|1|node $S/qa-e2e-pickers.mjs $QA_OUT/pickers"
   "bangla-pdf|1|node $S/qa-bangla-pdf.mjs $QA_OUT/bangla-pdf"
   "bigdata|1|N=${BIGDATA_N:-2000} node $S/qa-bigdata.mjs $QA_OUT/bigdata.json"
 )

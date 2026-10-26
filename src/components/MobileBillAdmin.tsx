@@ -842,7 +842,6 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
     status: sim?.status || 'active',
     note: sim?.note || ''
   });
-  const [empQ, setEmpQ] = useState('');
   const [detail, setDetail] = useState<SimDetail | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -854,14 +853,12 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
 
   const emp = meta.employees.find((e) => String(e.id) === f.employee_id) || null;
   const typeLimit = emp ? emp.type_limit : meta.policies.find((p) => !p.employee_type)?.limit_amount ?? null;
-  const empOptions = useMemo(() => {
-    const s = empQ.trim().toLowerCase();
-    // Only people still here — whoever the SIM is already given to stays listed.
-    return meta.employees
-      .filter((e: any) => e.is_active !== false || String(e.id) === f.employee_id)
-      .filter((e) => !s || String(e.id) === f.employee_id || [e.name, e.employee_code, e.department, e.designation].some((v) => String(v || '').toLowerCase().includes(s)))
-      .slice(0, 300);
-  }, [meta.employees, empQ, f.employee_id]);
+  // Only people still here — whoever the SIM is already given to stays listed.
+  // Typing a name, ID or department in the field finds them.
+  const empOptions = useMemo(
+    () => meta.employees.filter((e: any) => e.is_active !== false || String(e.id) === f.employee_id),
+    [meta.employees, f.employee_id]
+  );
 
   const save = async () => {
     setSaving(true);
@@ -908,7 +905,6 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
           </div>
           <div>
             <label className={labelCls}>Given to</label>
-            <input className={`${inputCls} mb-1.5`} value={empQ} onChange={(e) => setEmpQ(e.target.value)} placeholder="Search employee name / ID / department…" />
             <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
               <option value="">— Nobody (spare SIM) —</option>
               {empOptions.map((e) => (

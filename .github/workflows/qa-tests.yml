@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: "Only these suites (space separated, empty = all): unit bangla-excel bangla-esign concurrency companies group-hr dates month-reconcile supervisor-chain e2e-forms bangla-pdf bigdata"
+        description: "Only these suites (space separated, empty = all): unit bangla-excel bangla-esign concurrency companies group-hr dates month-reconcile supervisor-chain e2e-forms pickers bangla-pdf bigdata"
         required: false
         default: ""
   push:

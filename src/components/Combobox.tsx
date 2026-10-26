@@ -24,6 +24,8 @@ import { ChevronDown } from 'lucide-react';
 // options matching what is already typed, and Android WebViews hardly show
 // it at all.
 
+const SHOW_MAX = 200;
+
 export interface ComboOption {
   value: string;
   label: string;
@@ -90,7 +92,9 @@ function ComboList({ anchor, options, active, setActive, selected, onPick, empty
       {options.length === 0 ? (
         <div className="px-3 py-2 text-xs text-slate-500">{empty}</div>
       ) : (
-        options.map((o, i) => (
+        // A long list (thousands of employees) shows the first ones; typing
+        // finds the rest — keeps the list quick to open on a phone.
+        options.slice(0, SHOW_MAX).map((o, i) => (
           <button
             key={`${o.value}-${i}`}
             type="button"
@@ -109,6 +113,9 @@ function ComboList({ anchor, options, active, setActive, selected, onPick, empty
             {o.label || ' '}
           </button>
         ))
+      )}
+      {options.length > SHOW_MAX && (
+        <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{options.length - SHOW_MAX} more — type to find them.</div>
       )}
     </div>,
     document.body
