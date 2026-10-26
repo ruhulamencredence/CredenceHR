@@ -8,6 +8,7 @@
 // (PUT /api/assets/requisitions/:id/items). Every change is kept in the
 // requisition's History and the requester is notified.
 
+import { UnitPicker } from './UnitPicker';
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Pencil, RotateCcw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -176,7 +177,7 @@ export function AssetRequisitionEditItemsModal({ token, requisitionId, requester
                   </label>
                   <label className="col-span-3 sm:col-span-2">
                     <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Unit</span>
-                    <input disabled={r.removed} value={r.unit} onChange={(e) => update(idx, { unit: e.target.value })} className={inputClass} />
+                    <UnitPicker disabled={r.removed} value={r.unit} onChange={(unit) => update(idx, { unit })} className={inputClass} />
                   </label>
                   <label className="col-span-6">
                     <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Purpose</span>

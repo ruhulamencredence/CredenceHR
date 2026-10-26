@@ -16,6 +16,7 @@
 // mode 'approve'  -> PUT  /api/assets/requisitions/:id/approve-and-fulfill
 //                    (the Template's Asset Fulfiller Layer on Pending Approvals)
 
+import { UnitPicker } from './UnitPicker';
 import React, { useState } from 'react';
 import { X, Trash2, PackageCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -194,7 +195,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
                       />
                     </td>
                     <td className="p-0 border border-slate-200 align-top">
-                      <input value={l.unit} onChange={(e) => update(idx, { unit: e.target.value })} placeholder="pcs" className={cellInput} />
+                      <UnitPicker value={l.unit} onChange={(unit) => update(idx, { unit })} className={cellInput} />
                     </td>
                     <td className="p-0 border border-slate-200 align-top">
                       <input value={l.serial_number} onChange={(e) => update(idx, { serial_number: e.target.value })} placeholder="Optional" className={cellInput} />

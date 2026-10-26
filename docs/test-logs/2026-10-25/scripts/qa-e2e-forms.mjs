@@ -3,7 +3,9 @@
 // database. Login (wrong and right password), New Employee (with a bad date
 // of birth first), an employee applying for leave, the approver approving
 // it from Approve Applications, and the Timesheet correction form's night
-// shift. A screenshot is kept for every step that fails.
+// shift, and an Asset requisition with units picked from the list and typed
+// ("Other…") in the full-screen popup. A screenshot is kept for every step
+// that fails.
 // Usage: node qa-e2e-forms.mjs <out-dir>
 import fs from 'fs';
 import path from 'path';
@@ -158,6 +160,29 @@ await page.waitForTimeout(2500);
 const corr = sql(`SELECT DATE_FORMAT(requested_check_in_at,'%Y-%m-%d %H:%i'), DATE_FORMAT(requested_check_out_at,'%Y-%m-%d %H:%i') FROM attendance_corrections WHERE user_id=${uid} ORDER BY id DESC LIMIT 1`);
 const nextD = new Date(Date.parse(`${d2}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
 await T('E2E-10', hint && corr === `${d2} 22:00\t${nextD} 06:00`, 'Timesheet correction: In 22:00 / Out 06:00 shows "Next day" and is saved as a night shift ending the next morning', `hint ${hint}; saved ${corr}`);
+
+// 6. Asset requisition: units from the list and a typed one, full-screen popup.
+await page.goto(BASE + '/self/asset-management', { waitUntil: 'domcontentloaded' });
+await (await onScreen(page.getByRole('button', { name: /New Requisition/i }))).click();
+const dlg = page.locator('[role=dialog]');
+await dlg.waitFor({ timeout: 10000 });
+await page.waitForTimeout(700); // the popup's entrance animation
+const bb = await dlg.boundingBox();
+const vp = page.viewportSize();
+const units = await page.getByLabel('Unit').first().evaluate((el) => [...el.options].map((o) => o.value));
+await T('E2E-11', !!bb && bb.width >= vp.width - 40 && bb.height >= vp.height - 40 && units.length > 5 && units.includes('box') && units.includes('kg'), 'New Requisition opens full screen and offers more units than "pcs"', `box ${JSON.stringify(bb)}; units ${units.join(',')}`);
+await page.getByLabel('Item name').first().fill('A4 Paper');
+await page.getByLabel('Purpose').first().fill('Printing');
+await page.getByLabel('Unit').first().selectOption('ream');
+await page.getByRole('button', { name: '+ Add Item' }).click();
+await page.getByLabel('Item name').nth(1).fill('Engine oil');
+await page.getByLabel('Purpose').nth(1).fill('Generator');
+await page.getByLabel('Unit').nth(1).selectOption('__other__');
+await page.getByLabel('Unit').nth(1).fill('drum');
+await page.getByRole('button', { name: 'Submit Request' }).click();
+await page.waitForTimeout(2500);
+const reqItems = sql(`SELECT GROUP_CONCAT(CONCAT(item_name, ':', unit) ORDER BY id) FROM asset_requisition_items WHERE requisition_id = (SELECT MAX(id) FROM asset_requisitions WHERE employee_user_id = ${uid})`);
+await T('E2E-12', reqItems === 'A4 Paper:ream,Engine oil:drum', 'Requisition saved with the picked unit (ream) and a typed one (drum)', reqItems);
 
 const sum = { PASS: R.filter((r) => r.status === 'PASS').length, FAIL: R.filter((r) => r.status === 'FAIL').length };
 console.log('\nSUMMARY', JSON.stringify(sum));
