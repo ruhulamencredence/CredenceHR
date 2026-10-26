@@ -704,6 +704,65 @@ export const MailCompose: React.FC<{
   // usable), minimised to its title bar, or full size over a dimmed page.
   // On a phone it is the whole screen.
   const [mode, setMode] = useState<'normal' | 'min' | 'max'>('normal');
+
+  // Computer: the window can be dragged bigger or smaller from its left edge,
+  // top edge or top-left corner (it sits at the bottom right). The size is
+  // remembered on this device; double-click the corner for the usual size.
+  const SIZE_KEY = 'credence_compose_size';
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const on = () => setWide(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null');
+      return v && v.w > 0 && v.h > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const fit = (w: number, h: number) => ({
+    w: Math.round(Math.min(Math.max(w, 380), window.innerWidth - 32)),
+    h: Math.round(Math.min(Math.max(h, 320), window.innerHeight - 16))
+  });
+  const winRef = useRef<HTMLDivElement>(null);
+  const startResize = (dir: 'x' | 'y' | 'xy') => (e: React.PointerEvent) => {
+    if (e.button !== 0 || !winRef.current) return;
+    e.preventDefault();
+    const r = winRef.current.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+    let last = { w: r.width, h: r.height };
+    const move = (ev: PointerEvent) => {
+      last = fit(dir === 'y' ? start.w : start.w + (start.x - ev.clientX), dir === 'x' ? start.h : start.h + (start.y - ev.clientY));
+      setSize(last);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(SIZE_KEY, JSON.stringify(last));
+      } catch {
+        // storage unavailable — the size lasts until the window closes
+      }
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const resetSize = () => {
+    setSize(null);
+    try {
+      localStorage.removeItem(SIZE_KEY);
+    } catch {
+      // ignore
+    }
+  };
+  // A remembered size never larger than this screen.
+  const sized = wide && mode === 'normal' && size ? fit(size.w, size.h) : null;
   const [formatBar, setFormatBar] = useState(true);
   const [showBcc, setShowBcc] = useState(!!init.bcc);
   const [showCcOnly, setShowCcOnly] = useState(!!init.cc);
@@ -956,6 +1015,7 @@ export const MailCompose: React.FC<{
     <>
       {mode === 'max' && <div className="fixed inset-0 z-[89] liquid-glass-backdrop" onClick={() => setMode('normal')} />}
       <div
+        ref={winRef}
         // phones: full screen, so start below the status bar (--native-safe-area-inset-top is set
         // by the Android app, where env() reads 0)
         className={`fixed z-[90] bg-white flex flex-col overflow-hidden max-sm:pt-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] ${
@@ -963,8 +1023,24 @@ export const MailCompose: React.FC<{
             ? 'inset-0 sm:inset-x-8 sm:inset-y-[6vh] sm:mx-auto sm:max-w-5xl sm:rounded-2xl shadow-2xl'
             : `inset-0 sm:inset-auto sm:right-4 sm:bottom-0 sm:rounded-t-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] ${mode === 'min' ? 'sm:w-72 sm:h-10' : 'sm:w-[560px] sm:h-[min(620px,calc(100vh-5rem))]'}`
         }`}
-        style={keyboardInset ? { paddingBottom: keyboardInset } : undefined}
+        style={{ ...(keyboardInset ? { paddingBottom: keyboardInset } : {}), ...(sized ? { width: sized.w, height: sized.h } : {}) }}
       >
+        {wide && mode === 'normal' && (
+          <>
+            <div onPointerDown={startResize('x')} className="absolute left-0 top-3 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-blue-500/20" aria-hidden="true" />
+            <div onPointerDown={startResize('y')} className="absolute top-0 left-3 right-0 h-1.5 cursor-ns-resize z-10 hover:bg-blue-500/20" aria-hidden="true" />
+            <div
+              onPointerDown={startResize('xy')}
+              onDoubleClick={resetSize}
+              title="Drag to resize · double-click for the usual size"
+              className="absolute left-0 top-0 w-4 h-4 cursor-nwse-resize z-20 group"
+            >
+              <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 m-0.5 text-slate-400 group-hover:text-blue-600" aria-hidden="true">
+                <path d="M1 9 L9 1 M1 5 L5 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+              </svg>
+            </div>
+          </>
+        )}
         {header}
         <div className={mode === 'min' ? 'hidden' : 'flex-1 min-h-0 flex flex-col'}>{body}</div>
       </div>
