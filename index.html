@@ -11,6 +11,16 @@
          StatusBar.setBackgroundColor() in App.tsx, so web and native match. -->
     <meta name="theme-color" content="#6300C6" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- "Add to Home Screen" (iPhone Safari, Android Chrome): opens full
+         screen like an app, with the CredenceHR icon and name. The iPhone
+         reads the apple-* tags; everything else reads the manifest. The
+         layout already leaves room for the status bar / home indicator via
+         env(safe-area-inset-*). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CredenceHR" />
+    <link rel="apple-touch-icon" href="/icons/app-180.png" />
     <title>CredenceHR</title>
     <meta name="description" content="CredenceHR by Credence." />
     <meta property="og:title" content="CredenceHR" />

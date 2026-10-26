@@ -3,6 +3,7 @@ import { ArrowUp, MapPin, Building2, Fingerprint } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import googlePlayIcon from '../assets/google-play-icon.png';
+import { AddToHomeScreenButton, isIOSDevice, isStandalone } from './AddToHomeScreen';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
@@ -585,7 +586,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           {/* APK download — WEB build only. Someone already inside the native
               Android app has no use for this, so it's hidden there the same
               way the location notice above is shown only for isNativeApp. */}
-          {!isNativeApp && !ownerMode && (
+          {/* iPhone / iPad get "Add to Home Screen" instead (AddToHomeScreen.tsx);
+              opened from the Home Screen already, neither is shown. */}
+          {!isNativeApp && !ownerMode && !isStandalone() && isIOSDevice() && <AddToHomeScreenButton />}
+          {!isNativeApp && !ownerMode && !isStandalone() && !isIOSDevice() && (
             <a
               href="/downloads/CredenceHR.apk"
               download="CredenceHR.apk"

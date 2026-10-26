@@ -218,6 +218,15 @@ APK(s)** ক্লিক করে APK জেনারেট করুন। App
 npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBackgroundColorDark '#415EB4'
 ```
 
+### iPhone: "Add to Home Screen" (App Store ছাড়া)
+
+iPhone/iPad-এ login পাতায় APK-এর বদলে **"iPhone Home Screen"** বোতাম দেখায়
+(`src/components/AddToHomeScreen.tsx`)। চাপলে Safari-তে Share → Add to Home
+Screen → Add, এই তিন ধাপ দেখায়। Home Screen-এর আইকন থেকে খুললে app পুরো
+পর্দায় খোলে (`public/manifest.webmanifest`, `public/icons/`, `index.html`-এর
+`apple-*` tag)। Notification iOS 16.4 থেকে চলে। Background location tracking
+আর APK-এর fingerprint login এখানে নেই।
+
 ### Login পাতার "Android (APK)" বোতাম
 
 বোতামটা `/downloads/CredenceHR.apk` নামায় (`AndroidApkRoute.ts`)। ফাইলটা
