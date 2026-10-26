@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { X } from 'lucide-react';
 
 // Unit of an asset requisition / fulfilment line. A plain dropdown of the
 // usual units plus "Other…" for anything else (typed). It replaces an
@@ -36,7 +37,7 @@ export const UnitPicker: React.FC<{
           disabled={disabled}
           required={required}
           autoFocus={!value}
-          className={`${className} pr-16`}
+          className={`${className} !pr-7`}
         />
         <button
           type="button"
@@ -45,10 +46,11 @@ export const UnitPicker: React.FC<{
             setCustom(false);
             onChange('pcs');
           }}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-full text-[11px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100"
-          title="Pick from the list"
+          className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+          title="Pick from the list instead"
+          aria-label="Pick from the list instead"
         >
-          List
+          <X className="w-3 h-3" />
         </button>
       </div>
     );
