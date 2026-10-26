@@ -66,6 +66,34 @@ test("a web page, a zip without an APK, or with two, is not sent", () => {
   assert.equal(apkInside(makeZip([{ name: "a.apk", data: APK }, { name: "b.apk", data: APK }])), null);
 });
 
+test("the login page's button: any APK or artifact zip in the folder, newest first, saved as CredenceHR.apk", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apk-test-"));
+  const newer = makeZip([{ name: "AndroidManifest.xml", data: Buffer.from("newer") }]);
+  fs.writeFileSync(path.join(dir, "notes.txt"), "x");
+  fs.writeFileSync(path.join(dir, "old.apk"), APK);
+  fs.utimesSync(path.join(dir, "old.apk"), new Date(2020, 0, 1), new Date(2020, 0, 1));
+  fs.writeFileSync(path.join(dir, "CredenceHR-android-debug (3).zip"), makeZip([{ name: "app-debug.apk", data: newer }]));
+  const prev = process.env.APK_DIR;
+  process.env.APK_DIR = dir;
+  const app = express();
+  registerApkDownload(app);
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const r = await fetch(`${base}/downloads/CredenceHR.apk`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("content-disposition"), 'attachment; filename="CredenceHR.apk"');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), newer);
+    // Other names are only ever their own file.
+    assert.equal((await fetch(`${base}/downloads/Else.apk`)).status, 404);
+  } finally {
+    server.close();
+    if (prev === undefined) delete process.env.APK_DIR;
+    else process.env.APK_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the route: right type and file name, unwraps the artifact, 404 instead of the web page", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apk-test-"));
   fs.writeFileSync(path.join(dir, "CredenceHR.apk"), APK);

@@ -226,10 +226,10 @@ npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBa
 অন্য ফোল্ডার)। `dist/downloads`-এ রাখবেন না: পরের `npm run build` সেটা
 মুছে দেয়।
 
-- GitHub-এর **Android build** থেকে নামানো `CredenceHR-android-debug.zip`
-  খুলে ভেতরের `app-debug.apk`-কে `CredenceHR.apk` নাম দিয়ে রাখুন। zip-টাই
-  রাখলেও (`CredenceHR-android-debug.zip` নামে বা `CredenceHR.apk` নাম দিয়ে)
-  চলবে: সার্ভার ভেতর থেকে APK বের করে পাঠায়।
+- নাম বদলানো লাগবে না: `CredenceHR.apk` না থাকলে বোতাম `downloads/`-এর
+  সবচেয়ে নতুন `.apk` পাঠায়, অথবা GitHub-এর **Android build** থেকে নামানো
+  `CredenceHR-android-debug.zip`-এর ভেতরের APK। ফোনে নাম হয়
+  `CredenceHR.apk`। শুধু যে version দিতে চান সেটাই রাখুন।
 - ফোন পায় `application/vnd.android.package-archive` ধরন আর
   `CredenceHR.apk` নাম, তাই zip বা web পাতা হয়ে নামে না।
 - ফাইল না থাকলে বা সেটা APK না হলে 404 আর একটা লেখা আসে

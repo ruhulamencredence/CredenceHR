@@ -12,7 +12,8 @@
 //
 // Where the file is looked for, first match wins:
 //   APK_DIR (env), <app folder>/downloads, dist/downloads, public/downloads;
-// in each, CredenceHR.apk, else CredenceHR.zip / CredenceHR-android-debug.zip.
+// in each, CredenceHR.apk, else CredenceHR.zip / CredenceHR-android-debug.zip,
+// else (for the login page's button) the newest APK or APK zip there.
 // <app folder>/downloads is the place to put it: `npm run build` empties
 // dist/, so a file put there disappears on the next deploy.
 import type { Express } from "express";
@@ -23,6 +24,8 @@ import zlib from "zlib";
 
 const APK_TYPE = "application/vnd.android.package-archive";
 const NAME_RE = /^[A-Za-z0-9._-]+\.apk$/i;
+// What the login page's "Android (APK)" button asks for (AuthScreen.tsx).
+const LOGIN_PAGE_APK = "CredenceHR.apk";
 
 type ZipEntry = { name: string; method: number; compSize: number; size: number; localOffset: number };
 
@@ -81,9 +84,10 @@ export function apkInside(buf: Buffer): Buffer | "self" | null {
   return isApk(zipEntries(inner)) ? inner : null;
 }
 
+const apkDirs = () => [process.env.APK_DIR, path.join(process.cwd(), "downloads"), path.join(process.cwd(), "dist", "downloads"), path.join(process.cwd(), "public", "downloads")];
+
 function findApk(name: string): string | null {
-  const dirs = [process.env.APK_DIR, path.join(process.cwd(), "downloads"), path.join(process.cwd(), "dist", "downloads"), path.join(process.cwd(), "public", "downloads")];
-  for (const d of dirs) {
+  for (const d of apkDirs()) {
     if (!d) continue;
     const f = path.join(d, name);
     try {
@@ -91,6 +95,31 @@ function findApk(name: string): string | null {
     } catch {
       // not here
     }
+  }
+  return null;
+}
+
+// The login page's button (CredenceHR.apk) when no file has that name: the
+// newest APK — or zip holding one — in the first folder that has any, so an
+// app-debug.apk or CredenceHR-android-debug.zip dropped in works unrenamed.
+// Only APK_DIR and <app folder>/downloads: dist/ and public/ still carry an
+// old pre-rebrand MBO.apk that must never go out as CredenceHR.apk.
+function newestApk(): string | null {
+  for (const d of apkDirs().slice(0, 2)) {
+    if (!d) continue;
+    let files: { f: string; t: number }[] = [];
+    try {
+      files = fs
+        .readdirSync(d)
+        .filter((n) => /\.(apk|zip)$/i.test(n))
+        .map((n) => path.join(d, n))
+        .filter((f) => fs.statSync(f).isFile())
+        .map((f) => ({ f, t: fs.statSync(f).mtimeMs }))
+        .sort((a, b) => b.t - a.t);
+    } catch {
+      continue; // no such folder
+    }
+    for (const { f } of files) if (servable(f)) return f;
   }
   return null;
 }
@@ -136,7 +165,8 @@ export function registerApkDownload(app: Express) {
     // GitHub's artifact zip put there as it came (CredenceHR-android-debug.zip)
     // or as <name>.zip counts too — the APK inside it is sent.
     const base = name.replace(/\.apk$/i, "");
-    const file = findApk(name) || findApk(`${base}.zip`) || findApk(`${base}-android-debug.zip`);
+    const file =
+      findApk(name) || findApk(`${base}.zip`) || findApk(`${base}-android-debug.zip`) || (name === LOGIN_PAGE_APK ? newestApk() : null);
     const send = file && servable(file);
     if (!send) return notHere();
     res.sendFile(send, {

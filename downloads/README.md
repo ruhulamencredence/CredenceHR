@@ -9,10 +9,11 @@ CredenceHR/downloads/CredenceHR.apk
 The login page's "Android (APK)" button downloads it from
 `/downloads/CredenceHR.apk` (AndroidApkRoute.ts).
 
-- From GitHub (Actions → Android build → Artifacts) you get
-  `CredenceHR-android-debug.zip`. Unzip it and rename `app-debug.apk` to
-  `CredenceHR.apk`, or drop the zip in here as it is: the server sends the
-  APK inside it.
+- Any name works: with no `CredenceHR.apk` here, the button sends the
+  newest `.apk` in this folder, or the APK inside the newest GitHub zip
+  (Actions → Android build → Artifacts → `CredenceHR-android-debug.zip`),
+  and the phone always saves it as `CredenceHR.apk`. Keep only the version
+  you want people to get.
 - Git ignores everything in this folder except this file, so a `git pull`
   or a new build never deletes the APK, and the APK never goes into the
   repository.
@@ -21,6 +22,7 @@ The login page's "Android (APK)" button downloads it from
 
 ---
 
-বাংলায়: সার্ভারে এই ফোল্ডারে APK রাখুন, নাম `CredenceHR.apk`। GitHub থেকে
-নামানো zip খুলে ভেতরের `app-debug.apk`-এর নাম বদলে দিন, অথবা zip-টাই
-রাখুন। git এই ফোল্ডারের APK নেয় না, মোছেও না।
+বাংলায়: সার্ভারে এই ফোল্ডারে APK (বা GitHub থেকে নামানো zip) রাখুন। নাম
+বদলানো লাগবে না: login পাতার বোতাম এখানকার সবচেয়ে নতুন APK নামায়, ফোনে
+নাম হয় `CredenceHR.apk`। শুধু যে version দিতে চান সেটাই রাখুন। git এই
+ফোল্ডারের APK নেয় না, মোছেও না।
