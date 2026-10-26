@@ -66,6 +66,7 @@ import { ColumnFilterMenu } from './ColumnFilterMenu';
 import { LoadingBlock } from './LoadingBlock';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { Combobox } from './Combobox';
 // ---------------------------------------------------------------------------
 // Types (mirror HrOpsReportsRoutes.ts)
 // ---------------------------------------------------------------------------
@@ -924,22 +925,28 @@ const Builder: React.FC<{
                           />
                         </>
                       ) : (
-                        <input
-                          type={c.type === 'date' && f.op !== 'next_days' && f.op !== 'past_days' ? 'date' : c.type === 'number' || c.type === 'money' || f.op.endsWith('_days') || f.op === 'count_gt' ? 'number' : 'text'}
-                          value={f.value ?? ''}
-                          onChange={(e) => set({ value: e.target.value })}
-                          className={`${inputCls} !py-1 !text-xs`}
-                          placeholder={c.type === 'list' ? 'e.g. XYZ Company' : ''}
-                          list={c.type === 'text' ? `vals-${i}` : undefined}
-                          onFocus={() => loadValues(f.key)}
-                        />
+                        c.type === 'text' && !f.op.endsWith('_days') && f.op !== 'count_gt' ? (
+                          <Combobox
+                            free
+                            ariaLabel={`${c.label} value`}
+                            value={String(f.value ?? '')}
+                            onChange={(v) => set({ value: v })}
+                            options={valuesFor[f.key] || []}
+                            className={`${inputCls} !py-1 !text-xs`}
+                            onFocus={() => loadValues(f.key)}
+                          />
+                        ) : (
+                          <input
+                            type={c.type === 'date' && f.op !== 'next_days' && f.op !== 'past_days' ? 'date' : c.type === 'number' || c.type === 'money' || f.op.endsWith('_days') || f.op === 'count_gt' ? 'number' : 'text'}
+                            value={f.value ?? ''}
+                            onChange={(e) => set({ value: e.target.value })}
+                            className={`${inputCls} !py-1 !text-xs`}
+                            placeholder={c.type === 'list' ? 'e.g. XYZ Company' : ''}
+                            onFocus={() => loadValues(f.key)}
+                          />
+                        )
                       ))}
                   </div>
-                  <datalist id={`vals-${i}`}>
-                    {(valuesFor[f.key] || []).map((v) => (
-                      <option key={v} value={v} />
-                    ))}
-                  </datalist>
                 </div>
               );
             })}

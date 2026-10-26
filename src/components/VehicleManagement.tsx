@@ -22,6 +22,7 @@ import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
 import { ArrowRight, CalendarDays, Car, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
+import { SearchSelect } from './Combobox';
 import {
   RIDE_CARD,
   RIDE_WELL,
@@ -563,22 +564,22 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     set: (v: { vehicle_id: string; driver_user_id: string }) => void
   ) => (
     <>
-      <select value={value.vehicle_id} onChange={(e) => set({ ...value, vehicle_id: e.target.value })} className={RIDE_INPUT_SM}>
+      <SearchSelect value={value.vehicle_id} onChange={(e) => set({ ...value, vehicle_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a vehicle…</option>
         {availableVehicles.map((v) => (
           <option key={v.id} value={v.id}>
             {v.model} ({v.vehicle_no})
           </option>
         ))}
-      </select>
-      <select value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
+      </SearchSelect>
+      <SearchSelect value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a driver…</option>
         {driverCandidates.map((d) => (
           <option key={d.id} value={d.id}>
             {d.name}
           </option>
         ))}
-      </select>
+      </SearchSelect>
     </>
   );
   // A request card for the Approved by Me / Direct Book lists.
@@ -1157,7 +1158,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
             <form onSubmit={submitDirectBook} className={`space-y-3 max-w-2xl p-5 ${card}`}>
               <div>
                 <label className={RIDE_LABEL}>Employee</label>
-                <select
+                <SearchSelect
                   required
                   value={directBookForm.employee_user_id}
                   onChange={(e) => setDirectBookForm({ ...directBookForm, employee_user_id: e.target.value })}
@@ -1170,7 +1171,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       {e.designation ? ` — ${e.designation}` : ''}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className={RIDE_LABEL}>Purpose</label>
@@ -1240,7 +1241,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={RIDE_LABEL}>Vehicle</label>
-                  <select
+                  <SearchSelect
                     required
                     value={directBookForm.vehicle_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, vehicle_id: e.target.value })}
@@ -1252,11 +1253,11 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                         {v.model} ({v.vehicle_no})
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
                 <div>
                   <label className={RIDE_LABEL}>Driver</label>
-                  <select
+                  <SearchSelect
                     required
                     value={directBookForm.driver_user_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, driver_user_id: e.target.value })}
@@ -1268,7 +1269,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                         {d.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                   <p className="text-[11px] text-slate-400 mt-1">Must be a login account — needed for the Live Ride Map's location tracking.</p>
                 </div>
               </div>

@@ -7,6 +7,7 @@ import { Spinner } from './Spinner';
 import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 interface ClaimsPanelProps {
   token: string;
   users: User[];
@@ -98,7 +99,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
           <div className="min-w-0">
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-            <select
+            <SearchSelect
               value={userFilter}
               onChange={(e) => setUserFilter(e.target.value)}
               className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -107,7 +108,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
               {users.filter((u) => u.role === 'user').map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div className="min-w-0">
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>

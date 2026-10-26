@@ -18,6 +18,7 @@ import {
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset } from '../../lib/useKeyboardInset';
+import { SearchSelect } from '../Combobox';
 import {
   AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
   loadDirectory, loadMailGroups, mailFetch, type ComposeGroups
@@ -594,13 +595,13 @@ export const MailCompose: React.FC<{
       {accounts.length > 1 && (
         <div className={fieldRow}>
           <span className="text-sm text-slate-500 shrink-0">From</span>
-          <select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none">
+          <SearchSelect value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none">
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} &lt;{a.emailAddress}&gt;
               </option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
       )}
       <AddressField
@@ -760,23 +761,23 @@ export const MailCompose: React.FC<{
         {templates.length > 0 && (
           <label className={`${toolBtn} relative flex items-center`} title="Templates">
             <FileText className="w-4 h-4" />
-            <select value="" onChange={(e) => insertTemplate(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Insert a template">
+            <SearchSelect value="" onChange={(e) => insertTemplate(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Insert a template">
               <option value="">Template</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.title}</option>
               ))}
-            </select>
+            </SearchSelect>
           </label>
         )}
         {signatures.length > 0 && (
           <label className={`${toolBtn} relative flex items-center`} title={`Signature: ${signatures.find((x) => x.id === sigId)?.name || 'none'}`}>
             <PenLine className="w-4 h-4" />
-            <select value={sigId} onChange={(e) => changeSignature(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Signature">
+            <SearchSelect value={sigId} onChange={(e) => changeSignature(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Signature">
               <option value="">No signature</option>
               {signatures.map((x) => (
                 <option key={x.id} value={x.id}>{x.name}</option>
               ))}
-            </select>
+            </SearchSelect>
           </label>
         )}
         <div className="flex-1" />

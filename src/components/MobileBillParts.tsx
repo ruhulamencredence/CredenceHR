@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 
+import { SearchSelect } from './Combobox';
 export interface MbEmployee {
   id: number;
   employee_code: string | null;
@@ -230,13 +231,13 @@ export const LimitRequestForm: React.FC<{
         <div className="space-y-3">
           <div>
             <label className={labelCls}>SIM</label>
-            <select className={inputCls} value={simId} onChange={(e) => setSimId(Number(e.target.value))}>
+            <SearchSelect className={inputCls} value={simId} onChange={(e) => setSimId(Number(e.target.value))}>
               {active.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.phone_number} · {s.operator} · limit {tk(s.limit_amount)}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className={labelCls}>For</label>

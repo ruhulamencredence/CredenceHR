@@ -13,6 +13,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { LeaveDurationCalendar } from './LeaveDurationCalendar';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface NewLeaveApplicationModalProps {
   token: string;
   onClose: () => void;
@@ -395,7 +396,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                 Reliever <span className="text-rose-500">*</span>
               </label>
-              <select
+              <SearchSelect
                 value={relieverId}
                 onChange={(e) => setRelieverId(e.target.value)}
                 className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -406,7 +407,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                     {r.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <p className="text-[11px] text-slate-400 mt-1">
                 Whoever will cover your work while you're away — they review this first, before it goes to your approver(s).
               </p>

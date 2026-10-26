@@ -17,6 +17,7 @@ import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface Feedback {
   id: number;
   user_name: string | null;
@@ -430,7 +431,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
             </label>
             <label className="block">
               <span className="text-[11px] font-semibold text-slate-600">About a person (optional)</span>
-              <select
+              <SearchSelect
                 value={form.against_user_id}
                 onChange={(e) => setForm({ ...form, against_user_id: e.target.value })}
                 className="mt-1 w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -441,7 +442,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <span className="text-[10px] text-slate-400">They'll be notified and asked for their feedback; they won't see who raised it.</span>
             </label>
             <label className="block">

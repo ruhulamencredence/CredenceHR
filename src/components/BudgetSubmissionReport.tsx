@@ -16,6 +16,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 type Status = 'not_submitted' | 'job_submitted' | 'final_submitted';
 
 interface Submitter {
@@ -163,7 +164,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[220px]">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Budget</label>
-            <select
+            <SearchSelect
               value={budgetId}
               onChange={(e) => setBudgetId(e.target.value)}
               className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -175,7 +176,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
                   {b.is_published ? '' : ' (not published)'}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div className="relative flex-1 min-w-[200px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />

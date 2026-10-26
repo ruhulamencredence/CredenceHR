@@ -11,6 +11,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface PayrollListPanelProps {
   token: string;
   // false = Payroll "View only": no Delete.
@@ -256,7 +257,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token, canEd
           onChange={(e) => setMonthYear(e.target.value)}
           className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
-        <select
+        <SearchSelect
           value={department}
           onChange={(e) => setDepartment(e.target.value)}
           className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -265,7 +266,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token, canEd
           {departments.map((d) => (
             <option key={d.id} value={d.name}>{d.name}</option>
           ))}
-        </select>
+        </SearchSelect>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}

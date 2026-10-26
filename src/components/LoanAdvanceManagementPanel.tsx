@@ -44,6 +44,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface LoanAdvanceManagementPanelProps {
   token: string;
 }
@@ -613,7 +614,7 @@ const AdvanceFormModal: React.FC<{
           {!advance && (
             <div>
               <label className="block text-[11px] text-slate-500 mb-1">Employee</label>
-              <select
+              <SearchSelect
                 value={employeeId}
                 onChange={(e) => setEmployeeId(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -624,7 +625,7 @@ const AdvanceFormModal: React.FC<{
                     {e.name}{e.employee_code ? ` (${e.employee_code})` : ''}{e.department ? ` — ${e.department}` : ''}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
           )}
           {!advance && (

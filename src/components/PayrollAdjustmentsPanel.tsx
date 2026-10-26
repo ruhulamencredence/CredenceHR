@@ -20,6 +20,7 @@ import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface EmployeeLite {
   id: number;
   employee_code: string | null;
@@ -561,14 +562,14 @@ const PayItemForm: React.FC<{
         <>
           <div>
             <label className={labelCls}>Item</label>
-            <select className={inputCls} value={componentId} onChange={(e) => setComponentId(e.target.value)}>
+            <SearchSelect className={inputCls} value={componentId} onChange={(e) => setComponentId(e.target.value)}>
               {components.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} — {c.component_type === 'earning' ? 'paid with salary' : 'taken from salary'}
                 </option>
               ))}
               <option value="other">Other — type a name</option>
-            </select>
+            </SearchSelect>
             <p className="text-[10px] text-slate-400 mt-1">The list comes from Salary Setup → Salary Components.</p>
           </div>
           {!comp && (
@@ -671,7 +672,6 @@ const AdjustmentForm: React.FC<{
   onSave: (body: any) => void;
 }> = ({ employees, call, onClose, onSave }) => {
   const [employeeId, setEmployeeId] = useState('');
-  const [search, setSearch] = useState('');
   const [kind, setKind] = useState<'arrear' | 'recovery'>('recovery');
   const [forMonth, setForMonth] = useState(prevMonth(thisMonth()));
   const [total, setTotal] = useState('');
@@ -693,9 +693,6 @@ const AdjustmentForm: React.FC<{
       .catch(() => setRef(null));
   }, [employeeId, forMonth, call]);
 
-  const shown = employees.filter(
-    (e) => !search.trim() || [e.name, e.employee_code, e.department].some((v) => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))
-  );
   const n = Math.max(1, Math.min(24, Math.round(Number(installments) || 1)));
   const otTotal = Number(otHours) > 0 && Number(otRate) > 0 ? Math.round(Number(otHours) * Number(otRate) * 100) / 100 : 0;
   const totalAmount = otTotal > 0 ? otTotal : Number(total);
@@ -726,17 +723,17 @@ const AdjustmentForm: React.FC<{
     >
       <div>
         <label className={labelCls}>Employee</label>
-        <input className={`${inputCls} mb-1.5`} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, ID or department" />
-        <select className={inputCls} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} size={Math.min(6, Math.max(2, shown.length + 1))}>
+        {/* Type a name, ID or department to find the employee. */}
+        <SearchSelect className={inputCls} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
           <option value="">— choose —</option>
-          {shown.map((e) => (
+          {employees.map((e) => (
             <option key={e.id} value={e.id}>
               {e.name}
               {e.employee_code ? ` (${e.employee_code})` : ''}
               {e.department ? ` — ${e.department}` : ''}
             </option>
           ))}
-        </select>
+        </SearchSelect>
       </div>
       <div className="grid grid-cols-2 gap-2">
         {(

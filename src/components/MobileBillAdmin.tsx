@@ -52,6 +52,8 @@ import { MobileBillReports } from './MobileBillReports';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
+import { Combobox } from './Combobox';
 type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
 
@@ -907,7 +909,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
           <div>
             <label className={labelCls}>Given to</label>
             <input className={`${inputCls} mb-1.5`} value={empQ} onChange={(e) => setEmpQ(e.target.value)} placeholder="Search employee name / ID / department…" />
-            <select className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
+            <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
               <option value="">— Nobody (spare SIM) —</option>
               {empOptions.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -916,7 +918,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
                   {e.department ? ` — ${e.department}` : ''}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
             {emp && (
               <p className="text-[11px] text-slate-500 mt-1">
                 {[emp.designation, emp.department, emp.work_station].filter(Boolean).join(' · ')} · Type: {emp.employee_type || 'not set'}
@@ -1307,12 +1309,15 @@ const LimitsTab: React.FC<{ token: string }> = ({ token }) => {
           <div className="space-y-3">
             <div>
               <label className={labelCls}>Employee type (leave empty for Default)</label>
-              <input className={inputCls} list="mb-types" value={form.employee_type} onChange={(e) => setForm({ ...form, employee_type: e.target.value })} placeholder="e.g. Management, Officer, Staff" />
-              <datalist id="mb-types">
-                {types.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
+              <Combobox
+                free
+                ariaLabel="Employee type"
+                className={inputCls}
+                value={form.employee_type}
+                onChange={(v) => setForm({ ...form, employee_type: v })}
+                options={types}
+                placeholder="e.g. Management, Officer, Staff"
+              />
             </div>
             <div>
               <label className={labelCls}>Monthly limit (৳)</label>

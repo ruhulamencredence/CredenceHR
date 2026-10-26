@@ -12,6 +12,7 @@ import { ClaimBillLines } from './ClaimBillLines';
 import { formatDate } from '../lib/formatDate';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
+import { SearchSelect } from './Combobox';
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem extends ClaimReviewFields {
@@ -547,7 +548,7 @@ useLiveRefresh(() => load());
                         <Car className="w-3 h-3 text-blue-500" /> Pick a vehicle to approve and confirm this ride in one step.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <select
+                        <SearchSelect
                           value={assignForm[item.id]?.vehicle_id || ''}
                           onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: e.target.value, driver_user_id: prev[item.id]?.driver_user_id || '' } }))}
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -558,8 +559,8 @@ useLiveRefresh(() => load());
                               {v.model} ({v.vehicle_no})
                             </option>
                           ))}
-                        </select>
-                        <select
+                        </SearchSelect>
+                        <SearchSelect
                           value={assignForm[item.id]?.driver_user_id || ''}
                           onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: prev[item.id]?.vehicle_id || '', driver_user_id: e.target.value } }))}
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -570,7 +571,7 @@ useLiveRefresh(() => load());
                               {d.name}
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                         <button
                           type="button"
                           disabled={actingId === item.id}

@@ -22,6 +22,7 @@ import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from
 import { LoadingBlock } from './LoadingBlock';
 import { ApproverSignatureCard } from './ApproverSignatureCard';
 
+import { SearchSelect } from './Combobox';
 interface ApproveApplicationsProps {
   token: string;
   onBack: () => void;
@@ -652,7 +653,7 @@ useLiveRefresh(() => load(true));
                           <Car className="w-3 h-3 shrink-0 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
-                          <select
+                          <SearchSelect
                             value={assignForm[key]?.vehicle_id || ''}
                             onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: e.target.value, driver_user_id: prev[key]?.driver_user_id || '' } }))}
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -663,8 +664,8 @@ useLiveRefresh(() => load(true));
                                 {v.model} ({v.vehicle_no})
                               </option>
                             ))}
-                          </select>
-                          <select
+                          </SearchSelect>
+                          <SearchSelect
                             value={assignForm[key]?.driver_user_id || ''}
                             onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: prev[key]?.vehicle_id || '', driver_user_id: e.target.value } }))}
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -675,7 +676,7 @@ useLiveRefresh(() => load(true));
                                 {d.name}
                               </option>
                             ))}
-                          </select>
+                          </SearchSelect>
                           <button
                             type="button"
                             disabled={actingKey === key}

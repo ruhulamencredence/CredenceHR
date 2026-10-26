@@ -15,6 +15,7 @@ import { Fingerprint, Link2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 export interface UnlinkedPin {
   pin: string;
   punches: number;
@@ -122,7 +123,7 @@ export const UnlinkedPinsModal: React.FC<{
                       </td>
                       <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{when(u.last_punch)}</td>
                       <td className="px-3 py-2 min-w-[220px]">
-                        <select
+                        <SearchSelect
                           value={choice[u.pin] || ''}
                           onChange={(e) => setChoice((c) => ({ ...c, [u.pin]: e.target.value }))}
                           className="w-full px-2 py-1.5 bg-white/80 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-200 focus:outline-none"
@@ -135,7 +136,7 @@ export const UnlinkedPinsModal: React.FC<{
                               {u.suggestion?.id === e.id ? ' — matches Employee ID' : ''}
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                       </td>
                       <td className="px-3 py-2 text-right">
                         <button

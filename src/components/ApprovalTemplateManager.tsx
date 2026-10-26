@@ -8,6 +8,7 @@ import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface ApprovalTemplateManagerProps {
   token: string;
   user: User;
@@ -564,7 +565,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                       <div className="text-[11px] text-slate-500">{row.employee_role}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <select
+                      <SearchSelect
                         value={row.assigned_template_id || ''}
                         disabled={savingAssignFor === row.employee_user_id}
                         onChange={(e) => handleAssignChange(row.employee_user_id, e.target.value)}
@@ -580,7 +581,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               {t.name}
                             </option>
                           ))}
-                      </select>
+                      </SearchSelect>
                     </td>
                   </tr>
                 ))}

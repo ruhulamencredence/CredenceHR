@@ -29,6 +29,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { SearchSelect } from './Combobox';
 interface ConveyanceBillPanelProps {
   token: string;
   users: User[];
@@ -499,7 +500,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
             <div className="min-w-0">
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-              <select
+              <SearchSelect
                 value={userFilter}
                 onChange={(e) => setUserFilter(e.target.value)}
                 className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -508,7 +509,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 {plainUsers.map((u) => (
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
             <div className="min-w-0">
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">From</label>
@@ -723,7 +724,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 </button>
               </div>
               <label className="block mt-4 text-[11px] font-semibold text-slate-500 mb-1">Employee</label>
-              <select
+              <SearchSelect
                 value={behalfUserId}
                 onChange={(e) => setBehalfUserId(e.target.value)}
                 className="liquid-glass-inset w-full px-3 py-2.5 rounded-2xl text-sm text-slate-800 bg-transparent focus:outline-none"
@@ -732,7 +733,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 {behalfCandidates.map((u) => (
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
-              </select>
+              </SearchSelect>
               <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Conveyance Bill Claim.</p>
               <div className="mt-5 flex gap-2.5">
                 <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">

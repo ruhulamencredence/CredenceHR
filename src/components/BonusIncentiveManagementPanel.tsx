@@ -33,6 +33,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface BonusIncentiveManagementPanelProps {
   token: string;
 }
@@ -452,7 +453,7 @@ export const BonusIncentiveManagementPanel: React.FC<BonusIncentiveManagementPan
           )}
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">Department</label>
-            <select
+            <SearchSelect
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
               className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -461,7 +462,7 @@ export const BonusIncentiveManagementPanel: React.FC<BonusIncentiveManagementPan
               {departments.map((d) => (
                 <option key={d.id} value={d.name}>{d.name}</option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
         </div>
         <div className="flex items-center gap-4 pt-1">

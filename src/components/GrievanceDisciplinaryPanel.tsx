@@ -6,6 +6,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../lib/grievanceNav';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface GrievanceDisciplinaryPanelProps {
   token: string;
   // Inside HR Operations' own tab: no second card / page title around it.
@@ -352,7 +353,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
               {(g.status === 'open' || g.status === 'investigating') && <HrNoteBox onSend={(m) => sendNote('grievances', g.id, m)} />}
               <div className="flex flex-wrap items-center gap-2">
                 {(g.status === 'open' || g.status === 'investigating') && (
-                  <select
+                  <SearchSelect
                     value={g.assigned_to ?? ''}
                     onChange={(e) => updateGrievance(g.id, { assigned_to: e.target.value ? Number(e.target.value) : null })}
                     title="Assign to someone to investigate — they're notified and asked for feedback"
@@ -364,7 +365,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                         {u.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 )}
                 {g.status === 'open' && (
                   <button type="button" onClick={() => updateGrievance(g.id, { status: 'investigating' })} className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
@@ -414,14 +415,14 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
           </div>
           {showNewAction && (
             <div className="rounded-xl border border-dashed border-blue-300 p-3.5 mb-3 flex flex-wrap items-end gap-2">
-              <select value={newActionUserId} onChange={(e) => setNewActionUserId(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
+              <SearchSelect value={newActionUserId} onChange={(e) => setNewActionUserId(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                 <option value="">Select employee…</option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <select value={newActionType} onChange={(e) => setNewActionType(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                 {Object.entries(ACTION_TYPE_LABEL).map(([k, label]) => (
                   <option key={k} value={k}>

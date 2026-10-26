@@ -8,6 +8,7 @@ import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { Combobox } from './Combobox';
 interface LeaveManageProps {
   token: string;
   user: User;
@@ -1613,20 +1614,18 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                         </div>
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 mb-1">Designation</label>
-                          <input
-                            type="text"
-                            list="leave-workflow-designation-options"
-                            disabled={addingWorkflow}
-                            value={newWorkflowDesignation}
-                            onChange={(e) => setNewWorkflowDesignation(e.target.value)}
-                            placeholder="e.g. Manager"
-                            className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                          />
-                          <datalist id="leave-workflow-designation-options">
-                            {workflowDesignationOptions.map((d) => (
-                              <option key={d} value={d} />
-                            ))}
-                          </datalist>
+                          <div className="w-40">
+                            <Combobox
+                              free
+                              ariaLabel="Designation"
+                              disabled={addingWorkflow}
+                              value={newWorkflowDesignation}
+                              onChange={setNewWorkflowDesignation}
+                              options={workflowDesignationOptions}
+                              placeholder="e.g. Manager"
+                              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                            />
+                          </div>
                         </div>
                         <button
                           type="button"

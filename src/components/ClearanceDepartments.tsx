@@ -18,6 +18,7 @@ import { activePeople } from '../lib/activePeople';
 import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface Dept {
   id: number | null;
   department: string;
@@ -127,14 +128,14 @@ export const ClearanceDepartments: React.FC<{ token: string; users: { id: number
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Approver</label>
-            <select className={input} value={draft.approver_user_id} onChange={(e) => setDraft({ ...draft, approver_user_id: e.target.value })}>
+            <SearchSelect className={input} value={draft.approver_user_id} onChange={(e) => setDraft({ ...draft, approver_user_id: e.target.value })}>
               <option value="">Unassigned</option>
               {activePeople(users, draft.approver_user_id).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <label className="sm:col-span-2 flex items-center gap-2 text-[11px] text-slate-600">
             <input type="checkbox" checked={draft.apply_to_open} onChange={(e) => setDraft({ ...draft, apply_to_open: e.target.checked })} />
@@ -171,7 +172,7 @@ export const ClearanceDepartments: React.FC<{ token: string; users: { id: number
                     <p className="text-[11px] text-slate-500">{d.item_label}</p>
                   </div>
                 )}
-                <select
+                <SearchSelect
                   value={d.approver_user_id ?? ''}
                   disabled={busy === `approver:${d.department}` || d.id === null}
                   onChange={(e) => setApprover(d, e.target.value ? Number(e.target.value) : null)}
@@ -184,7 +185,7 @@ export const ClearanceDepartments: React.FC<{ token: string; users: { id: number
                       {u.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
                 {canSetup && d.id !== null && (
                   <div className="flex items-center gap-1 justify-end">
                     {isEditing ? (

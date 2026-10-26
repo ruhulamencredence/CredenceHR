@@ -25,6 +25,7 @@ import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPr
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface TeamMember {
   employee_id: number;
   name: string;
@@ -331,14 +332,14 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className={`${inputCls} !w-auto`} />
-        <select value={teamId} onChange={(e) => setTeamId(e.target.value)} className={`${inputCls} !w-auto`}>
+        <SearchSelect value={teamId} onChange={(e) => setTeamId(e.target.value)} className={`${inputCls} !w-auto`}>
           <option value="">All teams</option>
           {teams.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
             </option>
           ))}
-        </select>
+        </SearchSelect>
         <button type="button" className={btnGhost} disabled={!data?.rows?.length} onClick={exportXlsx}>
           <Download className="w-3.5 h-3.5" /> Excel
         </button>
@@ -497,7 +498,7 @@ const TeamForm: React.FC<{ token: string; data: TeamsData; team: Team | null; on
           </div>
           <div>
             <label className={labelCls}>Project</label>
-            <select className={inputCls} value={f.project_id} onChange={(e) => set('project_id', e.target.value)}>
+            <SearchSelect className={inputCls} value={f.project_id} onChange={(e) => set('project_id', e.target.value)}>
               <option value="">— none —</option>
               {data.projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -505,11 +506,11 @@ const TeamForm: React.FC<{ token: string; data: TeamsData; team: Team | null; on
                   {p.has_location ? ' (has location)' : ''}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className={labelCls}>Supervisor (marks attendance) *</label>
-            <select className={inputCls} value={f.supervisor_user_id} onChange={(e) => set('supervisor_user_id', e.target.value)}>
+            <SearchSelect className={inputCls} value={f.supervisor_user_id} onChange={(e) => set('supervisor_user_id', e.target.value)}>
               <option value="">— pick an account —</option>
               {data.users.map((u) => (
                 <option key={u.id} value={u.id}>
@@ -517,18 +518,18 @@ const TeamForm: React.FC<{ token: string; data: TeamsData; team: Team | null; on
                   {u.email ? ` — ${u.email}` : ''}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className={labelCls}>Backup supervisor (when the supervisor is away)</label>
-            <select className={inputCls} value={f.backup_user_id} onChange={(e) => set('backup_user_id', e.target.value)}>
+            <SearchSelect className={inputCls} value={f.backup_user_id} onChange={(e) => set('backup_user_id', e.target.value)}>
               <option value="">— none —</option>
               {data.users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div className="sm:col-span-2">
             <label className={labelCls}>Site / location name</label>

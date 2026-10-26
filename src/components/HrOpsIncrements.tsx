@@ -16,6 +16,7 @@ import { Spinner } from './Spinner';
 import { useHrApi, Notice, Badge, fmtDate, taka, inputCls, labelCls, btnPrimary, type HrOpsMeta } from './HrOpsShared';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface Policy {
   id: number;
   name: string;
@@ -142,14 +143,14 @@ export const HrOpsIncrements: React.FC<{ token: string; meta: HrOpsMeta; onGoSet
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className={labelCls}>Increment rule</label>
-          <select value={policyId} onChange={(e) => setPolicyId(Number(e.target.value))} className={inputCls}>
+          <SearchSelect value={policyId} onChange={(e) => setPolicyId(Number(e.target.value))} className={inputCls}>
             {policies.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
                 {Number(p.is_active) ? '' : ' (inactive)'}
               </option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className={labelCls}>Due from</label>

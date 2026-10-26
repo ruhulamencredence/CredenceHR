@@ -24,6 +24,7 @@ import { apiUrl } from '../lib/api';
 import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { Combobox } from './Combobox';
 // ---------------------------------------------------------------------------
 // Types (mirror HrOps360Routes.ts)
 // ---------------------------------------------------------------------------
@@ -258,20 +259,24 @@ export const RecordFields: React.FC<{ kind: RecordKind; form: Record<string, any
             </select>
           ) : (
             <>
-              <input
-                type={f.type || 'text'}
-                value={form[f.key] ?? ''}
-                placeholder={f.placeholder}
-                list={f.suggest && suggestions ? `p360-sug-${f.suggest}` : undefined}
-                onChange={(e) => onChange({ ...form, [f.key]: e.target.value })}
-                className={inputCls}
-              />
-              {f.suggest && suggestions && (
-                <datalist id={`p360-sug-${f.suggest}`}>
-                  {suggestions[f.suggest].map((n) => (
-                    <option key={n} value={n} />
-                  ))}
-                </datalist>
+              {f.suggest && suggestions && (!f.type || f.type === 'text') ? (
+                <Combobox
+                  free
+                  ariaLabel={f.label}
+                  value={String(form[f.key] ?? '')}
+                  onChange={(v) => onChange({ ...form, [f.key]: v })}
+                  options={suggestions[f.suggest]}
+                  placeholder={f.placeholder}
+                  className={inputCls}
+                />
+              ) : (
+                <input
+                  type={f.type || 'text'}
+                  value={form[f.key] ?? ''}
+                  placeholder={f.placeholder}
+                  onChange={(e) => onChange({ ...form, [f.key]: e.target.value })}
+                  className={inputCls}
+                />
               )}
               {f.suggest === 'companies' &&
                 suggestions &&
@@ -441,12 +446,15 @@ export const UploadDocumentModal: React.FC<{ token: string; userId: number; miss
         <Notice msg={msg} onClose={() => setMsg(null)} />
         <div>
           <label className={labelCls}>Document type</label>
-          <input list="p360-doc-types" value={docType} onChange={(e) => setDocType(e.target.value)} className={inputCls} placeholder="e.g. NID, CV, Educational Certificate" />
-          <datalist id="p360-doc-types">
-            {[...missing, 'NID', 'Photograph', 'CV / Resume', 'Educational Certificate', 'Experience Certificate', 'Appointment Letter (signed)', 'Medical Certificate', 'Police Clearance', 'Passport'].map((d) => (
-              <option key={d} value={d} />
-            ))}
-          </datalist>
+          <Combobox
+            free
+            ariaLabel="Document type"
+            value={docType}
+            onChange={setDocType}
+            options={[...missing, 'NID', 'Photograph', 'CV / Resume', 'Educational Certificate', 'Experience Certificate', 'Appointment Letter (signed)', 'Medical Certificate', 'Police Clearance', 'Passport']}
+            className={inputCls}
+            placeholder="e.g. NID, CV, Educational Certificate"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

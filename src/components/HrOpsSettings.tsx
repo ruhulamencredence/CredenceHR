@@ -15,6 +15,7 @@ import { Spinner } from './Spinner';
 import { useHrApi, Notice, Badge, inputCls, labelCls, btnPrimary, btnGhost, type HrOpsMeta } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 type Section = 'company' | 'approvals' | 'templates' | 'onboarding' | 'increments';
 
 // ---------------- Company ----------------
@@ -47,7 +48,7 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
         {f('signatory_designation', 'Signatory designation')}
         <div className="sm:col-span-2">
           <label className={labelCls}>Signatory account (e-signature)</label>
-          <select value={s.signatory_user_id || ''} onChange={(e) => setS({ ...s, signatory_user_id: e.target.value })} className={inputCls}>
+          <SearchSelect value={s.signatory_user_id || ''} onChange={(e) => setS({ ...s, signatory_user_id: e.target.value })} className={inputCls}>
             <option value="">— None (letters are sent to the employee to sign) —</option>
             {meta.users
               .filter((u) => u.role !== 'superadmin' || String(u.id) === s.signatory_user_id)
@@ -56,7 +57,7 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
                   {u.name}
                 </option>
               ))}
-          </select>
+          </SearchSelect>
           <p className="text-[11px] text-slate-500 mt-1">
             The person above, as a login account. Letters sent for signing from Letters go to them first and their signature goes on the letter's signature line; salary / experience certificates, NOC, release and bank letters are signed by them only. Turn on "Documents to Sign" for them in Module Access.
           </p>
@@ -275,7 +276,7 @@ const ApprovalChains: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, m
                       </button>
                     </span>
                   ))}
-                  <select
+                  <SearchSelect
                     value=""
                     onChange={(e) => {
                       const id = Number(e.target.value);
@@ -289,7 +290,7 @@ const ApprovalChains: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, m
                         {u.name} ({u.role})
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
               </div>
             ))}
@@ -648,14 +649,14 @@ const IncrementRules: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, m
             </div>
             <div>
               <label className={labelCls}>Only department</label>
-              <select value={edit.department_id || ''} onChange={(e) => setEdit({ ...edit, department_id: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
+              <SearchSelect value={edit.department_id || ''} onChange={(e) => setEdit({ ...edit, department_id: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
                 <option value="">All departments</option>
                 {meta.departments.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
             <div>
               <label className={labelCls}>Only grade</label>

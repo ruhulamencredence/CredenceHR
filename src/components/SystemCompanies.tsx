@@ -20,6 +20,7 @@ import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, 
 import { useMyCompanies } from '../lib/company';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface Company {
   id: number;
   name: string;
@@ -234,13 +235,13 @@ const CopyModal: React.FC<{ token: string; user: AccessUser; companies: Company[
         </p>
         <div>
           <label className={labelCls}>Copy from</label>
-          <select className={inputCls} value={from} onChange={(e) => setFrom(Number(e.target.value))}>
+          <SearchSelect className={inputCls} value={from} onChange={(e) => setFrom(Number(e.target.value))}>
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({user.module_counts[c.id] || 0} modules)
               </option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className={labelCls}>To</label>
@@ -516,7 +517,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                         {isSa ? (
                           <span className="text-slate-400">All companies</span>
                         ) : (
-                          <select
+                          <SearchSelect
                             className={`${inputCls} !py-1 !text-xs`}
                             value={u.default_company_id || ''}
                             onChange={(e) => saveAccess(u, u.company_ids, Number(e.target.value))}
@@ -528,7 +529,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                                   {c.short_code}
                                 </option>
                               ))}
-                          </select>
+                          </SearchSelect>
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">

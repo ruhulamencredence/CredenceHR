@@ -32,6 +32,7 @@ import { User } from '../types';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 
+import { SearchSelect } from './Combobox';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -519,7 +520,7 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="mt-3">
                   {assigningFor === r.id ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      <select
+                      <SearchSelect
                         value={assignForm.vehicle_id}
                         onChange={(e) => setAssignForm({ ...assignForm, vehicle_id: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
@@ -530,8 +531,8 @@ useLiveRefresh(() => loadRequisitions());
                             {v.model} ({v.vehicle_no})
                           </option>
                         ))}
-                      </select>
-                      <select
+                      </SearchSelect>
+                      <SearchSelect
                         value={assignForm.driver_user_id}
                         onChange={(e) => setAssignForm({ ...assignForm, driver_user_id: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
@@ -542,7 +543,7 @@ useLiveRefresh(() => loadRequisitions());
                             {u.name}
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       <button onClick={() => assign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
                         Confirm Assignment
                       </button>
@@ -582,7 +583,7 @@ useLiveRefresh(() => loadRequisitions());
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Requesting For</label>
-                <select
+                <SearchSelect
                   required
                   value={emergencyForm.employee_user_id}
                   onChange={(e) => setEmergencyForm({ ...emergencyForm, employee_user_id: e.target.value })}
@@ -594,13 +595,13 @@ useLiveRefresh(() => loadRequisitions());
                       {u.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Supervisor Approver <span className="text-gray-400 font-normal">(optional override)</span>
                 </label>
-                <select
+                <SearchSelect
                   value={emergencyForm.supervisor_user_id}
                   onChange={(e) => setEmergencyForm({ ...emergencyForm, supervisor_user_id: e.target.value })}
                   className="w-full border rounded px-3 py-2 text-sm"
@@ -611,7 +612,7 @@ useLiveRefresh(() => loadRequisitions());
                       {u.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
             </div>
             <div>

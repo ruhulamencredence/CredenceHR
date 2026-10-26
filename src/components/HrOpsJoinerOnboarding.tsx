@@ -17,6 +17,7 @@ import { LetterComposer } from './HrOpsLetters';
 import { confirmDialog } from '../lib/confirmDialog';
 import { OnboardingSummary, openOnboardingFile, type OnboardingFormState } from './OnboardingForm';
 
+import { SearchSelect } from './Combobox';
 export interface OnboardingAccess {
   onboarding_create: boolean;
   onboarding_review: boolean;
@@ -226,7 +227,7 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; candidateId?: nu
       <div className="space-y-3">
         <div>
           <label className={labelCls}>Hired candidate (Recruitment)</label>
-          <select value={candidateId} onChange={(e) => pick(e.target.value)} className={inputCls} disabled={!candidates}>
+          <SearchSelect value={candidateId} onChange={(e) => pick(e.target.value)} className={inputCls} disabled={!candidates}>
             <option value="">{candidates === null ? 'Loading…' : candidates.length ? '— Not from Recruitment —' : 'No hired candidates waiting'}</option>
             {(candidates || []).map((c) => (
               <option key={c.id} value={c.id}>
@@ -234,7 +235,7 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; candidateId?: nu
                 {c.posting_title ? ` — ${c.posting_title}` : ''}
               </option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className={labelCls}>Full name *</label>
@@ -257,25 +258,25 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; candidateId?: nu
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Department</label>
-            <select value={f.department_id} onChange={set('department_id')} className={inputCls}>
+            <SearchSelect value={f.department_id} onChange={set('department_id')} className={inputCls}>
               <option value="">—</option>
               {meta.departments.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className={labelCls}>Branch</label>
-            <select value={f.branch_id} onChange={set('branch_id')} className={inputCls}>
+            <SearchSelect value={f.branch_id} onChange={set('branch_id')} className={inputCls}>
               <option value="">—</option>
               {meta.branches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
         </div>
         <div>

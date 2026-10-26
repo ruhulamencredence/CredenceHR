@@ -33,6 +33,7 @@ import { MailRulesPopup, MailTemplatesPopup, MailContactsPopup, MailPlannerPopup
 import { MailAnalyticsPopup } from './MailAnalytics';
 import { MyGroupsPopup } from './MailGroups';
 
+import { SearchSelect } from '../Combobox';
 type Tool =
   | { kind: 'settings'; tab?: string }
   | { kind: 'rules'; prefill?: Partial<MailFilter> }
@@ -1099,7 +1100,7 @@ export const CredenceMail: React.FC<{
       {accounts.length > 0 && !ro && (
         <div className="flex items-center gap-1.5">
           {accounts.length > 1 && (
-            <select
+            <SearchSelect
               value={accountFilter}
               onChange={(e) => {
                 setAccountFilter(Number(e.target.value));
@@ -1109,7 +1110,7 @@ export const CredenceMail: React.FC<{
             >
               <option value={0}>All mailboxes</option>
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.emailAddress}</option>)}
-            </select>
+            </SearchSelect>
           )}
           <button type="button" onClick={() => setMailboxes(true)} className="text-xs px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 hidden sm:inline-flex items-center gap-1.5">
             <Server className="w-3.5 h-3.5" /> Mailboxes
@@ -1425,14 +1426,14 @@ export const CredenceMail: React.FC<{
                 <button type="button" onClick={() => setDrawer(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close"><X className="w-4 h-4" /></button>
               </div>
               {accounts.length > 1 && (
-                <select
+                <SearchSelect
                   value={accountFilter}
                   onChange={(e) => { setAccountFilter(Number(e.target.value)); setSelectedId(null); setDrawer(false); }}
                   className="text-sm px-3 py-2 rounded-xl bg-white/80 border border-slate-200"
                 >
                   <option value={0}>All mailboxes</option>
                   {accounts.map((a) => <option key={a.id} value={a.id}>{a.emailAddress}</option>)}
-                </select>
+                </SearchSelect>
               )}
               <div className="liquid-glass-inset rounded-[24px] p-2">{folderNav}</div>
               {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>}

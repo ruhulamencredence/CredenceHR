@@ -12,6 +12,7 @@ import { SendForSigningButton, useSignSources } from './SendForSigningButton';
 import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
+import { SearchSelect } from './Combobox';
 interface ExitOffboardingPanelProps {
   token: string;
 }
@@ -380,7 +381,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
-              <select
+              <SearchSelect
                 value={newUserId}
                 onChange={(e) => setNewUserId(e.target.value)}
                 className="w-52 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -391,7 +392,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                     {u.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">Type</label>

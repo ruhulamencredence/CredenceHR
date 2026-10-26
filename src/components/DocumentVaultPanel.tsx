@@ -9,6 +9,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface DocumentVaultPanelProps {
   token: string;
 }
@@ -208,7 +209,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/60 flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
-            <select value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
+            <SearchSelect value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
               <option value="">Select…</option>
               {activePeople(users, uploadUserId).map((u) => (
                 <option key={u.id} value={u.id}>
@@ -216,7 +217,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
                   {u.employee_code ? ` (${u.employee_code})` : ''}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Document Type</label>

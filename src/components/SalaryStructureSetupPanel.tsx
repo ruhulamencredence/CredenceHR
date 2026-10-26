@@ -44,6 +44,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface SalaryStructureSetupPanelProps {
   token: string;
 }
@@ -909,7 +910,7 @@ const AssignGradeModal: React.FC<{
             <div className="p-5 space-y-3">
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Employee</label>
-                <select
+                <SearchSelect
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value)}
                   disabled={loadingEmployees}
@@ -921,7 +922,7 @@ const AssignGradeModal: React.FC<{
                       {e.name}{e.employee_code ? ` (${e.employee_code})` : ''}{e.department ? ` — ${e.department}` : ''}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Effective Date</label>

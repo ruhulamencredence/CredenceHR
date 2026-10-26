@@ -17,6 +17,7 @@ import { apiUrl } from '../lib/api';
 import { getChatSocket } from '../lib/chatSocket';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 export interface SupportSession {
   id: number;
   user_id: number;
@@ -369,12 +370,12 @@ export const SupportInbox: React.FC<{
           )}
           {showTransfer && open && (
             <div className="space-y-1.5">
-              <select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} className="w-full rounded-xl bg-white/70 border border-white/80 px-2.5 py-1.5 text-xs text-slate-900 outline-none">
+              <SearchSelect value={transferTo} onChange={(e) => setTransferTo(e.target.value)} className="w-full rounded-xl bg-white/70 border border-white/80 px-2.5 py-1.5 text-xs text-slate-900 outline-none">
                 <option value="">— কার কাছে পাঠাবেন —</option>
                 {(agents || []).map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
-              </select>
+              </SearchSelect>
               {agents && agents.length === 0 && <p className="text-[11px] text-slate-500">আর কেউ live support-এ নেই। Module Access থেকে কাউকে "Assistant live support" দিন।</p>}
               <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="নোট (ঐচ্ছিক)" className="w-full rounded-xl bg-white/70 border border-white/80 px-2.5 py-1.5 text-xs text-slate-900 outline-none" />
               <button

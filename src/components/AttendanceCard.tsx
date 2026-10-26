@@ -13,6 +13,7 @@ import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface AttendanceCardProps {
   token: string;
   projects: Project[];
@@ -324,7 +325,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
       {projects.length > 1 && (
         <div className="mb-2">
-          <select
+          <SearchSelect
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
             className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
@@ -333,7 +334,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.project_name}</option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
       )}
 

@@ -11,6 +11,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface DeliveryDateConditionsPanelProps {
   token: string;
 }
@@ -236,7 +237,7 @@ const ConditionTypeSection: React.FC<{
                 <label className="block text-[11px] text-slate-500 mb-1">
                   {overrideForm.scope === 'project' ? 'Project' : 'Budget'}
                 </label>
-                <select
+                <SearchSelect
                   value={overrideForm.scope_id}
                   onChange={(e) => setOverrideForm((f) => ({ ...f, scope_id: e.target.value }))}
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none"
@@ -245,7 +246,7 @@ const ConditionTypeSection: React.FC<{
                   {overrideForm.scope === 'project'
                     ? projects.map((p) => <option key={p.id} value={p.id}>{p.project_name}</option>)
                     : budgets.map((b) => <option key={b.id} value={b.id}>{b.budget_name}</option>)}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Minimum days notice</label>

@@ -22,6 +22,7 @@ import { apiUrl } from '../lib/api';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
 
+import { SearchSelect } from './Combobox';
 interface Asset {
   id: number;
   asset_tag: string;
@@ -333,7 +334,7 @@ useLiveRefresh(() => {
                         placeholder="How was this resolved?"
                         className="w-full border rounded px-2 py-1.5 text-xs"
                       />
-                      <select
+                      <SearchSelect
                         value={resolveReplacementId}
                         onChange={(e) => setResolveReplacementId(e.target.value)}
                         className="w-full border rounded px-2 py-1.5 text-xs"
@@ -344,7 +345,7 @@ useLiveRefresh(() => {
                             Replace with: {a.name} ({a.asset_tag})
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       <div className="flex gap-2">
                         <button
                           onClick={() => resolveClaim(c.id)}

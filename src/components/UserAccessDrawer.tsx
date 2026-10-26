@@ -22,6 +22,7 @@ import { apiUrl } from '../lib/api';
 import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
   | 'can_job_edit'
@@ -626,7 +627,7 @@ export function UserAccessDrawer({
               {canEdit && templates.length > 0 && (
                 <div className="mt-3 flex items-center gap-2">
                   <LayoutTemplate className="w-4 h-4 text-slate-400 shrink-0" />
-                  <select
+                  <SearchSelect
                     value=""
                     disabled={busy === 'template'}
                     onChange={(e) => applyTemplate(e.target.value)}
@@ -638,7 +639,7 @@ export function UserAccessDrawer({
                         {t.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                   {busy === 'template' && <Spinner size={14} />}
                 </div>
               )}
@@ -658,7 +659,7 @@ export function UserAccessDrawer({
                     {u.can_use_attendance && (
                       <label className="block">
                         <span className="text-[11px] text-slate-500">Allowed project for check-in</span>
-                        <select
+                        <SearchSelect
                           value={u.attendance_project_id ?? ''}
                           disabled={busy === 'attendance_project'}
                           onChange={(e) => run('attendance_project', () => onAttendanceProject(e.target.value ? Number(e.target.value) : null))}
@@ -670,7 +671,7 @@ export function UserAccessDrawer({
                               {p.project_name}
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                       </label>
                     )}
                   </FeatureRow>

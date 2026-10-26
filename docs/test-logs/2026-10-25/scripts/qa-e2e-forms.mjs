@@ -70,7 +70,17 @@ await page.goto(BASE + '/admin/employees', { waitUntil: 'domcontentloaded' });
 await page.getByRole('button', { name: 'New Employee' }).click();
 await page.getByPlaceholder('Full name').fill('Ui Form Person');
 await page.getByPlaceholder('e.g. Executive').fill('Executive');
-await page.locator('select').filter({ hasText: '— None —' }).first().selectOption({ label: 'HR' });
+// Department: a search-and-pick field — typing only searches; text that was
+// not picked from the list is dropped when leaving the field.
+const dep = page.getByPlaceholder('— None —').first();
+await dep.fill('zzzz');
+const noMatch = await page.getByText(/Nothing matches/).isVisible().catch(() => false);
+await page.getByPlaceholder('e.g. Executive').click();
+await page.waitForTimeout(400);
+const depAfter = await dep.inputValue();
+await T('E2E-02b', noMatch && depAfter === '', 'Search-and-pick field: unmatched typing shows "Nothing matches" and is dropped, nothing is chosen', `no-match shown ${noMatch}; field now "${depAfter}"`);
+await dep.fill('hr');
+await page.getByRole('option', { name: /^HR\b/ }).first().click();
 await page.getByPlaceholder('name@company.com').fill('ui.form.person@credence.test');
 await page.getByPlaceholder('e.g. 01877772209').fill('01711000222');
 const dates = page.locator('input[type=date]');

@@ -13,6 +13,7 @@ import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboard
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface NewConveyanceClaimModalProps {
   token: string;
   onClose: () => void;
@@ -513,7 +514,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                       </button>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <select
+                      <SearchSelect
                         value={b.category_id}
                         onChange={(e) => updateBill(b.key, { category_id: e.target.value })}
                         aria-label={`Bill ${i + 1} category`}
@@ -525,7 +526,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                             {c.name}
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       <input
                         type="date"
                         value={b.bill_date}

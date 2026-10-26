@@ -20,6 +20,7 @@ import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessage, type SupportSession } from './AssistantSupport';
 import { useIsPhone, useScrolling } from '../lib/useScrolling';
 
+import { SearchSelect } from './Combobox';
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
 // Nothing is sent until the person presses "জমা দিন" on the card.
@@ -160,12 +161,12 @@ const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: (resu
       {needsReliever && (
         <label className="block text-[11px] text-slate-500">
           Reliever (আপনার অনুপস্থিতিতে কাজ দেখবেন)
-          <select value={reliever} onChange={(e) => setReliever(e.target.value)} className={field}>
+          <SearchSelect value={reliever} onChange={(e) => setReliever(e.target.value)} className={field}>
             <option value="">— বেছে নিন —</option>
             {draft.relievers.map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
-          </select>
+          </SearchSelect>
         </label>
       )}
       <label className="block text-[11px] text-slate-500">

@@ -14,6 +14,7 @@ import { Spinner } from './Spinner';
 import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 // ---- Voucher sections ----
 // The Payment Voucher groups a Bill's lines by category, each with the
 // columns it needs: travel categories (and Movement Claim / manual items,
@@ -429,7 +430,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
               <div className="min-w-0">
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-                <select
+                <SearchSelect
                   value={userFilter}
                   onChange={(e) => setUserFilter(e.target.value)}
                   className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none"
@@ -438,7 +439,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   {plainUsers.map((u) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div className="min-w-0">
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>

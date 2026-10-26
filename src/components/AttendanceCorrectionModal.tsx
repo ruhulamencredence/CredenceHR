@@ -12,6 +12,7 @@ import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface AttendanceCorrectionModalProps {
   token: string;
   dateStr: string;
@@ -234,7 +235,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
               {options.length > 1 && (
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-500 mb-1">Project *</label>
-                  <select
+                  <SearchSelect
                     value={projectId}
                     onChange={(e) => handleProjectChange(Number(e.target.value))}
                     className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -244,7 +245,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
                         {o.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
               )}
               {options.length === 1 && (

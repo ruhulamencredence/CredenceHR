@@ -37,6 +37,7 @@ import { letterFileName } from '../lib/hrLetterPdf';
 import { LoadingBlock } from './LoadingBlock';
 import { SendForSigningButton, useSignSources } from './SendForSigningButton';
 
+import { SearchSelect } from './Combobox';
 interface Template {
   id: number;
   letter_type: string;
@@ -227,7 +228,7 @@ export const LetterComposer: React.FC<{
             </div>
             <div>
               <label className={labelCls}>Template</label>
-              <select value={templateId} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : '')} className={inputCls}>
+              <SearchSelect value={templateId} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : '')} className={inputCls}>
                 <option value="">Default for this type</option>
                 {templates
                   .filter((t) => (init.hr_action_id ? true : t.letter_type === letterType) && Number(t.is_active) !== 0)
@@ -237,7 +238,7 @@ export const LetterComposer: React.FC<{
                       {Number(t.is_default) ? ' (default)' : ''}
                     </option>
                   ))}
-              </select>
+              </SearchSelect>
               {!init.hr_action_id && typeTemplates.length === 0 && <p className="text-[11px] text-amber-600 mt-1">No template for this type yet — add one in Settings.</p>}
             </div>
             <div>

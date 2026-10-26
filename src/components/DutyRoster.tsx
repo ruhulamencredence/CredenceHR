@@ -19,6 +19,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { shiftTime, type Shift } from '../lib/roster';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn, Toggle } from './mail/MailPopup';
 
+import { SearchSelect } from './Combobox';
 interface Cell {
   shift_id: number | null;
   is_off: boolean;
@@ -228,7 +229,7 @@ const PatternForm: React.FC<{
           {WEEK_ORDER.map((wd) => (
             <li key={wd} className="flex items-center gap-3 px-3 py-2">
               <span className="w-12 text-sm font-semibold text-slate-700">{WD[wd]}</span>
-              <select className={`${inputCls} py-1.5`} value={byWeekday[wd] ?? ''} onChange={(e) => setByWeekday((x) => ({ ...x, [wd]: e.target.value }))}>
+              <SearchSelect className={`${inputCls} py-1.5`} value={byWeekday[wd] ?? ''} onChange={(e) => setByWeekday((x) => ({ ...x, [wd]: e.target.value }))}>
                 <option value="">Leave as it is</option>
                 {shifts.map((s) => (
                   <option key={s.id} value={String(s.id)}>
@@ -237,7 +238,7 @@ const PatternForm: React.FC<{
                 ))}
                 <option value="off">Off day</option>
                 <option value="clear">Clear (follow the calendar)</option>
-              </select>
+              </SearchSelect>
             </li>
           ))}
         </ul>

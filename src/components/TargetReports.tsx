@@ -23,6 +23,7 @@ import { fmtDate, periodLabel, ProgressBar, STATUS_LABEL, StatusBadge, Target, T
 import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 
+import { SearchSelect } from './Combobox';
 interface Counts {
   targets: number;
   counted: number;
@@ -262,7 +263,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
         </div>
         <div>
           <label className={lbl}>Employee</label>
-          <select className={`${sel} max-w-[200px]`} value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <SearchSelect className={`${sel} max-w-[200px]`} value={userId} onChange={(e) => setUserId(e.target.value)}>
             <option value="">All</option>
             {(data?.people || [])
               .filter((p) => !department || String(p.department || '').toLowerCase() === department.toLowerCase())
@@ -272,7 +273,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
                   {p.employee_code ? ` (${p.employee_code})` : ''}
                 </option>
               ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className={lbl}>Status</label>

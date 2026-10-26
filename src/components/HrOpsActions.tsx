@@ -33,6 +33,7 @@ import {
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface HrAction {
   id: number;
   employee_id: number;
@@ -234,32 +235,32 @@ export const NewActionModal: React.FC<{
               {LABEL[k]} {emp && <span className="font-normal text-slate-400">· now: {current[k]}</span>}
             </label>
             {k === 'company_id' ? (
-              <select value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
+              <SearchSelect value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
                 <option value="">Pick company…</option>
                 {groupCompanies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             ) : k === 'department_id' ? (
-              <select value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
+              <SearchSelect value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
                 <option value="">{type === 'transfer' ? 'Pick department…' : 'No change'}</option>
                 {meta.departments.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             ) : k === 'branch_id' ? (
-              <select value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
+              <SearchSelect value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
                 <option value="">No change</option>
                 {meta.branches.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             ) : k === 'supervisor_id' ? (
               <EmployeePicker employees={employees.filter((e) => e.id !== employeeId)} value={to[k] ? Number(to[k]) : null} onChange={(id) => set(k, id ? String(id) : '')} placeholder="No change" />
             ) : k === 'gross_salary' ? (

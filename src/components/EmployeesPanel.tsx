@@ -14,6 +14,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 import { useMyCompanies } from '../lib/company';
 
+import { SearchSelect } from './Combobox';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
@@ -1524,7 +1525,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
-                  <select
+                  <SearchSelect
                     value={form.department_id ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null }))}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -1533,7 +1534,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>{d.name}{d.supervisor_name ? ` (Supervisor: ${d.supervisor_name})` : ''}</option>
                     ))}
-                  </select>
+                  </SearchSelect>
                   {departments.length === 0 && (
                     <p className="mt-1 text-[11px] text-slate-400">
                       No Departments set up yet — add one from Admin Panel -&gt; Departments.
@@ -1744,7 +1745,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                       <TextField label="Division" value={form.division} onChange={(v) => setForm((f) => ({ ...f, division: v }))} placeholder="e.g. Corporate Office" />
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
-                        <select
+                        <SearchSelect
                           value={form.branch_id ?? ''}
                           onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null }))}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -1755,7 +1756,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                               {b.branch_name} ({b.branch_type === 'project_site' ? 'Project' : 'Head Office'})
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                         {branches.length === 0 && (
                           <p className="mt-1 text-[11px] text-slate-400">
                             No Branches set up yet — add one from Admin Panel -&gt; Branches.
@@ -2245,7 +2246,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <label className={fieldLabelClass}>New Department</label>
-                  <select
+                  <SearchSelect
                     value={transferForm.to_department_id}
                     onChange={(e) => setTransferForm((f) => ({ ...f, to_department_id: e.target.value }))}
                     className={fieldInputClass}
@@ -2256,7 +2257,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
                 <TextField
                   label="New Designation"

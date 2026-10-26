@@ -32,6 +32,7 @@ import { AccessViewer, canEditUserModules } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 
+import { SearchSelect } from './Combobox';
 type SectionKey = 'general' | 'pepm' | 'hr' | 'attendance' | 'claims' | 'employees' | 'hrops' | 'payroll' | 'mail' | 'mis' | 'other';
 
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
@@ -789,7 +790,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             </div>
             <div className="relative sm:w-[230px]">
               <Copy className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <select
+              <SearchSelect
                 value=""
                 onChange={(e) => e.target.value && copyFrom(Number(e.target.value))}
                 className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600 cursor-pointer appearance-none"
@@ -802,7 +803,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                       {u.name} ({u.role === 'admin' ? 'Admin' : 'User'})
                     </option>
                   ))}
-              </select>
+              </SearchSelect>
             </div>
           </div>
           {selected.length > 1 && (

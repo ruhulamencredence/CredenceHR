@@ -11,6 +11,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { ClaimChangesNotice, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface ApprovalManagerProps {
   token: string;
   user: User;
@@ -506,7 +507,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                             />
                           )}
                           {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && !r.conveyance_disburser_step && (
-                            <select
+                            <SearchSelect
                               value={billChoice[r.id] || ''}
                               onFocus={() => ensureUserBillsLoaded(r.requested_by)}
                               onChange={(e) => setBillChoice((prev) => ({ ...prev, [r.id]: e.target.value }))}
@@ -518,7 +519,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                   Bill #{b.id} — {formatDate(b.bill_date)}
                                 </option>
                               ))}
-                            </select>
+                            </SearchSelect>
                           )}
                           {r.source_type === 'user_claim' && <ClaimChangesNotice item={r} className="w-full" />}
                           <input
@@ -659,7 +660,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               })}
 
               <div className="flex gap-2 pt-2">
-                <select
+                <SearchSelect
                   value={addApproverId}
                   onChange={(e) => setAddApproverId(e.target.value)}
                   className="flex-1 text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -672,7 +673,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         {u.name} ({u.role})
                       </option>
                     ))}
-                </select>
+                </SearchSelect>
                 <button
                   type="button"
                   onClick={addToChainDraft}

@@ -16,6 +16,7 @@ import { useHrApi, Modal, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGh
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface GroupCompany {
   id: number;
   name: string;
@@ -165,14 +166,14 @@ export const CompanyAssignmentsModal: React.FC<{ token: string; employeeId: numb
                 <div className="grid sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Company *</label>
-                    <select className={inputCls} value={f.company_id} onChange={(e) => setF((p) => ({ ...p, company_id: e.target.value }))}>
+                    <SearchSelect className={inputCls} value={f.company_id} onChange={(e) => setF((p) => ({ ...p, company_id: e.target.value }))}>
                       <option value="">Pick…</option>
                       {choices.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
                         </option>
                       ))}
-                    </select>
+                    </SearchSelect>
                   </div>
                   <div>
                     <label className={labelCls}>Employee ID there</label>
