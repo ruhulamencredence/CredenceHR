@@ -620,15 +620,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   );
 };
 
-// A spotlight shining down from just under the logo onto the hero
-// illustration: a small bright source, a widening beam and a pool of light
-// on the floor (styles: .hero-spot-* in index.css). Sits over the
-// illustration, sized in % of it.
+// A spotlight shining down onto the people in the hero illustration: a small
+// bright source, a widening beam and a pool of light where it lands on the
+// table (styles: .hero-spot-* in index.css). Sits over the illustration, sized
+// and placed in % of it — the beam starts just above the group and ends at the
+// table, so it frames the people instead of the whole picture.
 const HeroSpotlight: React.FC = () => (
   <>
-    <div className="hero-spot hero-spot-beam" style={{ top: '-6%', width: '115%', height: '102%', zIndex: -1 }} />
-    <div className="hero-spot hero-spot-pool" style={{ bottom: '4%', width: '110%', height: '18%', zIndex: -1 }} />
-    <div className="hero-spot hero-spot-source" style={{ top: '-7%' }} />
+    <div className="hero-spot hero-spot-beam" style={{ top: '29%', width: '42%', height: '30%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-pool" style={{ top: '54%', width: '46%', height: '9%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-source" style={{ top: '27.5%' }} />
   </>
 );
 
