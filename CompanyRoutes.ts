@@ -445,9 +445,12 @@ export async function nextEmployeeCode(queryDB: QueryDB, companyId: number): Pro
   const prefix = String(c.short_code).toUpperCase();
   const employees: any[] = (await queryDB("/*unscoped*/ SELECT employee_id FROM all_employees").catch(() => [])) || [];
   const assigned: any[] = (await queryDB("SELECT employee_code FROM employee_company_assignments").catch(() => [])) || [];
+  // An Employee ID is also a Login ID (EmployeeLoginId.ts): skip past any
+  // already taken by a login, e.g. one left behind by a deleted employee.
+  const logins: any[] = (await queryDB("/*unscoped*/ SELECT username FROM users WHERE username LIKE ?", [`${prefix}-%`]).catch(() => [])) || [];
   let max = 0;
   let width = 4;
-  for (const v of [...employees.map((e) => e.employee_id), ...assigned.map((a) => a.employee_code)]) {
+  for (const v of [...employees.map((e) => e.employee_id), ...assigned.map((a) => a.employee_code), ...logins.map((u) => u.username)]) {
     const m = String(v || "").toUpperCase().match(new RegExp(`^${prefix}-(\\d+)$`));
     if (m) {
       max = Math.max(max, Number(m[1]));
