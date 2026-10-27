@@ -109,6 +109,20 @@ export default function App() {
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
   // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
   const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
+  // HR Operations' open tab (HROperationsPanel.tsx tells us), so the sidebar
+  // highlights that tab's own item instead of always "Monthly Report".
+  const [hrOpsTab, setHrOpsTab] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('hr_ops_tab') || 'dashboard';
+    } catch {
+      return 'dashboard';
+    }
+  });
+  useEffect(() => {
+    const on = (e: Event) => setHrOpsTab(String((e as CustomEvent).detail || 'dashboard'));
+    window.addEventListener('credence:hr-ops-active', on);
+    return () => window.removeEventListener('credence:hr-ops-active', on);
+  }, []);
   // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — see
   // LeaveNavRequest in types.ts.
   const [leaveNavRequest, setLeaveNavRequest] = useState<LeaveNavRequest | null>(null);
@@ -1116,6 +1130,20 @@ export default function App() {
     if (showAlertsPage) return 'alerts';
     if (showProfilePage) return null;
     if (selfServiceView) return selfServiceView;
+    if (isAdminView && adminActiveTab === 'hr_operations') {
+      const byTab: Record<string, string> = {
+        dashboard: 'hr_operations',
+        actions: 'hr_operations_actions',
+        grievance: 'grievance_disciplinary',
+        service_book: 'hr_operations_service_book',
+        letters: 'hr_operations_letters',
+        onboarding: 'hr_operations_onboarding',
+        increments: 'hr_operations_increments',
+        reports: 'hr_operations_reports',
+        settings: 'hr_operations_settings'
+      };
+      return byTab[hrOpsTab] || 'hr_operations';
+    }
     if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
     if (viewport === 'mobile') return mapUserSectionToSidebarKey(userActiveSection.mobile);
     if (userActiveSection.mobile && CLAIMS_TYPE_SECTIONS.has(userActiveSection.mobile)) {

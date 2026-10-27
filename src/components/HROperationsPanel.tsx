@@ -45,6 +45,8 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
 // event (the Admin Panel itself only knows the module, not its tabs).
 export const HR_OPS_TAB_EVENT = 'credence:hr-ops-tab';
 const TAB_STORAGE_KEY = 'hr_ops_tab';
+// Fired with the open tab, so the sidebar can highlight its own item for it.
+export const HR_OPS_ACTIVE_EVENT = 'credence:hr-ops-active';
 
 export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean }> = ({ token, canGrievance = false }) => {
   const api = useHrApi(token);
@@ -77,6 +79,7 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
     } catch {
       // ignore
     }
+    window.dispatchEvent(new CustomEvent(HR_OPS_ACTIVE_EVENT, { detail: tab }));
   }, [tab]);
   useEffect(() => {
     const onTab = (e: Event) => {
