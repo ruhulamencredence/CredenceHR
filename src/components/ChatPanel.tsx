@@ -1797,7 +1797,8 @@ const MemberPickerModal: React.FC<{
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
 
-  const filtered = directory.filter((d) => d.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const q = search.trim().toLowerCase();
+  const filtered = directory.filter((d) => `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q));
 
   return (
     <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
@@ -1815,7 +1816,7 @@ const MemberPickerModal: React.FC<{
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search people..."
+              placeholder="Search name or department..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
@@ -1838,7 +1839,12 @@ const MemberPickerModal: React.FC<{
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
               >
                 <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
-                <span className="flex-1 text-left text-sm text-slate-900 truncate">{d.name}</span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-sm text-slate-900 truncate">{d.name}</span>
+                  {(d.designation || d.department) && (
+                    <span className="block text-[11px] text-slate-500 truncate">{[d.designation, d.department].filter(Boolean).join(' · ')}</span>
+                  )}
+                </span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                   {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
                 </div>

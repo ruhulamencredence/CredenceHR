@@ -2040,6 +2040,9 @@ export interface ChatDirectoryUser {
   email: string | null;
   username?: string | null;
   role: UserRole;
+  // From the employee record (blank for accounts with none).
+  department?: string | null;
+  designation?: string | null;
 }
 
 export interface ChatRoom {

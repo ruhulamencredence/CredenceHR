@@ -419,7 +419,10 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   app.get("/api/chat/directory", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const rows = await queryDB(
-        `SELECT id, name, email, username, role FROM users u WHERE id != ? AND ${CHAT_ON_SQL("u")} ORDER BY name ASC`,
+        `SELECT u.id, u.name, u.email, u.username, u.role,
+                (SELECT e.department FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS department,
+                (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation
+         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} ORDER BY u.name ASC`,
         [req.user.id]
       );
       res.json(rows);
