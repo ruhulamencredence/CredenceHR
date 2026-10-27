@@ -7,6 +7,7 @@ import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { BellRing, Check, Trash2, X } from 'lucide-react';
+import { confirmDialog } from '../lib/confirmDialog';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
@@ -147,6 +148,17 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
+    } catch {
+      // Best-effort, same as markRead above.
+    }
+  };
+
+  const clearAll = async () => {
+    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
+    setAlerts([]);
+    setUnreadCount(0);
+    try {
+      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
     } catch {
       // Best-effort, same as markRead above.
     }
@@ -389,6 +401,11 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
                       <Check className="w-3.5 h-3.5" /> Mark all read
                     </button>
                   )}
+                  {alerts.length > 0 && (
+                    <button type="button" onClick={clearAll} className="liquid-glass-chip flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600">
+                      <Trash2 className="w-3.5 h-3.5" /> Clear all
+                    </button>
+                  )}
                   <button type="button" onClick={() => setOpen(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close alerts">
                     <X className="w-4 h-4" />
                   </button>
@@ -452,17 +469,25 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             <span className="text-sm font-semibold" style={{ color: 'var(--g-text)' }}>
               Alerts
             </span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={markAllRead}
-                className="text-xs font-medium flex items-center gap-1 hover:opacity-70"
-                style={{ color: 'var(--g-accent)' }}
-              >
-                <Check className="w-3.5 h-3.5" />
-                Mark all read
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  className="text-xs font-medium flex items-center gap-1 hover:opacity-70"
+                  style={{ color: 'var(--g-accent)' }}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark all read
+                </button>
+              )}
+              {alerts.length > 0 && (
+                <button type="button" onClick={clearAll} className="text-xs font-medium flex items-center gap-1 text-rose-600 hover:opacity-70">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto">

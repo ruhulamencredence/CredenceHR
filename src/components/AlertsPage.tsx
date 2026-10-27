@@ -7,6 +7,7 @@ import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Check, ChevronLeft, Trash2 } from 'lucide-react';
+import { confirmDialog } from '../lib/confirmDialog';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
@@ -91,6 +92,16 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     setAlerts((prev) => prev.map((a) => ({ ...a, is_read: true })));
     try {
       await fetch(apiUrl('/api/alerts/read-all'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // Best-effort, same as markRead above.
+    }
+  };
+
+  const clearAll = async () => {
+    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
+    setAlerts([]);
+    try {
+      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
     } catch {
       // Best-effort, same as markRead above.
     }
@@ -316,6 +327,17 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                 </p>
               </div>
             </div>
+            <div className="flex items-center gap-2 shrink-0">
+            {alerts.length > 0 && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors shrink-0 max-sm:rounded-full max-sm:font-semibold max-sm:bg-white/60 max-sm:border max-sm:border-white/80"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear all
+              </button>
+            )}
             {unreadCount > 0 && (
               <button
                 type="button"
@@ -327,6 +349,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                 Mark all read
               </button>
             )}
+            </div>
           </div>
 
           {/* Phones: each alert is its own glass card (same look as the
