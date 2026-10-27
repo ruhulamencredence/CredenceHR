@@ -804,6 +804,8 @@ export interface User {
   is_blocked?: boolean | number;
   // The linked Employee record is active (false once Resigned / Terminated / blocked).
   employee_active?: boolean;
+  // Department of the linked Employee record (Users page filter).
+  department?: string | null;
   blocked_reason?: string | null;
   blocked_at?: string | null;
   // Admin Dashboard in the mother company shows every company of the group.

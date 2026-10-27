@@ -705,6 +705,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
   // Quick filter chips above the list (see USER_ACCESS_FILTERS).
   const [userAccessFilter, setUserAccessFilter] = useState<string>('all');
+  // Department filter ('' = all, '__none__' = no department) — from each account's linked Employee record.
+  const [userDeptFilter, setUserDeptFilter] = useState('');
   // Account open on the "Manage" page (UserAccessDrawer), by id so it
   // always shows the latest copy from `users`.
   const [managingUserId, setManagingUserId] = useState<number | null>(null);
@@ -737,6 +739,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     return users.filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
       if (accessFilter && !accessFilter.match(u)) return false;
+      if (userDeptFilter) {
+        const d = (u.department || '').trim();
+        if (userDeptFilter === '__none__' ? d !== '' : d.toLowerCase() !== userDeptFilter.toLowerCase()) return false;
+      }
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -744,13 +750,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter, userAccessFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
   // Only one page of the (filtered) accounts is drawn at a time.
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(50);
   useEffect(() => {
     setUserPage(1);
-  }, [userSearchText, userRoleFilter, userAccessFilter]);
+  }, [userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
   const pagedUsers = useMemo(
     () => filteredUsers.slice((userPage - 1) * userPageSize, userPage * userPageSize),
     [filteredUsers, userPage, userPageSize]
@@ -6337,6 +6343,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
+              <select
+                aria-label="Department filter"
+                value={userDeptFilter}
+                onChange={(e) => setUserDeptFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer max-w-[11rem]"
+              >
+                <option value="">All departments</option>
+                {[...new Set(users.map((u) => (u.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+                <option value="__none__">No department</option>
+              </select>
               <button
                 type="button"
                 onClick={() => setShowAccessTemplates(true)}
@@ -6374,7 +6392,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               );
             })}
-            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all') && (
+            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all' || userDeptFilter) && (
               <span className="ml-auto text-[11px] text-slate-500">
                 Showing {filteredUsers.length} of {users.length} users
               </span>

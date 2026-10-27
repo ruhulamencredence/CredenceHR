@@ -404,8 +404,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       // Whether the linked Employee record is active (no record: counts as active),
       // so pickers can leave out people who have left.
-      const empRows: any[] = (await queryDB("SELECT user_id, is_active FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const empRows: any[] = (await queryDB("SELECT user_id, is_active, department FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
       const inactiveUsers = new Set(empRows.filter((e: any) => Number(e.is_active) === 0).map((e: any) => Number(e.user_id)));
+      const departmentByUser = new Map<number, string>();
+      for (const e of empRows) if (e.department && !departmentByUser.has(Number(e.user_id))) departmentByUser.set(Number(e.user_id), String(e.department));
       // ?slim=1 : who's who only, for pickers and filters (no access switches).
       if (String(req.query.slim || "") === "1") {
         return res.json(
@@ -423,6 +425,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       res.json(visibleUsers.map((u: any) => ({
         ...u,
         employee_active: !inactiveUsers.has(Number(u.id)),
+        // From the linked Employee record (Users page department filter).
+        department: departmentByUser.get(Number(u.id)) || null,
         last_login_lat: canSeeLocation ? u.last_login_lat : undefined,
         last_login_lng: canSeeLocation ? u.last_login_lng : undefined,
         last_login_at: canSeeLocation ? u.last_login_at : undefined,

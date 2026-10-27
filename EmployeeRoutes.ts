@@ -73,12 +73,18 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
       const status = String(req.query.status || "all");
       const q = String(req.query.q || "").trim().toLowerCase();
+      // ?department=<name> narrows to one department; "__none__" = no department set.
+      const departmentFilter = String(req.query.department || "").trim().toLowerCase();
       const activeCount = allSorted.filter((e: any) => !!Number(e.is_active)).length;
       const matched = paged
         ? allSorted.filter((e: any) => {
             const active = !!Number(e.is_active);
             if (status === "active" && !active) return false;
             if (status === "inactive" && active) return false;
+            if (departmentFilter) {
+              const d = String(e.department || "").trim().toLowerCase();
+              if (departmentFilter === "__none__" ? d !== "" : d !== departmentFilter) return false;
+            }
             if (!q) return true;
             return [e.name, e.employee_id, e.designation, e.department, e.email, e.phone].some((v) => String(v || "").toLowerCase().includes(q));
           })

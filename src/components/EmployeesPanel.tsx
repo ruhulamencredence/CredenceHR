@@ -315,6 +315,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // The directory shows one page at a time — drawing every employee at once
   // made the tab (and typing in the edit form above it) slow.
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  // Department filter: '' = all, '__none__' = no department, else the department's name.
+  const [deptFilter, setDeptFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   // The server pages and searches the directory; `employees` is just the page on screen.
@@ -323,7 +325,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // Who's who for the Supervisor / Transfer pickers (light: id, code, name…).
   const [pickerEmployees, setPickerEmployees] = useState<Employee[]>([]);
   const empReq = useRef(0);
-  const listQuery = useRef({ page: 1, pageSize: 50, q: '', status: 'all' });
+  const listQuery = useRef({ page: 1, pageSize: 50, q: '', status: 'all', department: '' });
   // Directory (the employee table) vs. all-employees Change History.
   const [view, setView] = useState<'directory' | 'history'>('directory');
 
@@ -452,10 +454,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // One page of the directory, as the search / status / page currently say.
   const fetchEmployees = useCallback(async () => {
     const req = ++empReq.current;
-    const { page: p, pageSize: size, q, status } = listQuery.current;
+    const { page: p, pageSize: size, q, status, department } = listQuery.current;
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(p), limit: String(size), q, status });
+      if (department) params.set('department', department);
       const res = await fetch(apiUrl(`/api/employees?${params.toString()}`), { headers: authHeaders });
       if (req !== empReq.current) return; // a newer request is on its way
       if (res.ok) {
@@ -1190,11 +1193,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     const t = setTimeout(() => setAppliedSearch(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [appliedSearch, statusFilter, pageSize]);
+  useEffect(() => setPage(1), [appliedSearch, statusFilter, deptFilter, pageSize]);
   useEffect(() => {
-    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter };
+    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter };
     fetchEmployees();
-  }, [page, pageSize, appliedSearch, statusFilter, fetchEmployees]);
+  }, [page, pageSize, appliedSearch, statusFilter, deptFilter, fetchEmployees]);
   const filtered = employees;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -1270,6 +1273,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
             <option value="all">All ({counts.all})</option>
             <option value="active">Active ({counts.active})</option>
             <option value="inactive">Inactive ({counts.inactive})</option>
+          </select>
+          <select
+            aria-label="Department filter"
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            <option value="">All departments</option>
+            {[...new Set(departments.map((d) => d.name))].sort((a, b) => a.localeCompare(b)).map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+            <option value="__none__">No department</option>
           </select>
         </div>
       )}
