@@ -444,6 +444,8 @@ body::before {
 */
 html[data-ui="mono"] {
   --g-bg: #f2f2f3;
+  /* Until an app background is picked (and on the sign-in page) */
+  --g-bg-gradient: linear-gradient(180deg, #f6f6f7 0%, #f1f1f2 100%);
   --g-surface: #ffffff;
   --g-surface-muted: #f6f6f7;
   --g-border: #e7e7ea;
@@ -493,6 +495,21 @@ html[data-ui="mono"] {
   --color-indigo-50: var(--mono-50); --color-indigo-100: var(--mono-100); --color-indigo-200: var(--mono-200); --color-indigo-300: var(--mono-300); --color-indigo-400: var(--mono-400); --color-indigo-500: var(--mono-500); --color-indigo-600: var(--mono-600); --color-indigo-700: var(--mono-700); --color-indigo-800: var(--mono-800); --color-indigo-900: var(--mono-900); --color-indigo-950: var(--mono-950);
   --color-fuchsia-50: var(--mono-50); --color-fuchsia-100: var(--mono-100); --color-fuchsia-200: var(--mono-200); --color-fuchsia-300: var(--mono-300); --color-fuchsia-400: var(--mono-400); --color-fuchsia-500: var(--mono-500); --color-fuchsia-600: var(--mono-600); --color-fuchsia-700: var(--mono-700); --color-fuchsia-800: var(--mono-800); --color-fuchsia-900: var(--mono-900); --color-fuchsia-950: var(--mono-950);
   --color-blue-50: var(--mono-50); --color-blue-100: var(--mono-100); --color-blue-200: var(--mono-200); --color-blue-300: var(--mono-300); --color-blue-400: var(--mono-400); --color-blue-500: var(--mono-500); --color-blue-600: var(--mono-600); --color-blue-700: var(--mono-700); --color-blue-800: var(--mono-800); --color-blue-900: var(--mono-900); --color-blue-950: var(--mono-950);
+}
+/* Sign-in page: the sky-blue / violet glow turns neutral grey, the hero
+   illustration goes black-and-white and its spotlight loses the yellow. */
+html[data-ui="mono"] .auth-glow {
+  background: radial-gradient(ellipse 900px 650px at 50% 55%, rgba(255, 255, 255, 0.9) 0%, rgba(228, 228, 231, 0.45) 45%, rgba(255, 255, 255, 0) 72%) !important;
+}
+html[data-ui="mono"] .hero-art { filter: grayscale(1) contrast(1.05); }
+html[data-ui="mono"] .hero-spot-beam {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(244, 244, 245, 0.7) 40%, rgba(244, 244, 245, 0.45) 75%, rgba(244, 244, 245, 0.12) 100%);
+}
+html[data-ui="mono"] .hero-spot-source {
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 1) 0%, rgba(244, 244, 245, 0.85) 35%, rgba(228, 228, 231, 0) 75%);
+}
+html[data-ui="mono"] .hero-spot-pool {
+  background: radial-gradient(ellipse at center, rgba(228, 228, 231, 0.8) 0%, rgba(228, 228, 231, 0.35) 45%, rgba(255, 255, 255, 0) 72%);
 }
 /* Cards: white with a hairline border and a barely-there shadow. */
 html[data-ui="mono"] .gemini-card {
