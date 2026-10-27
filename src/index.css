@@ -52,16 +52,44 @@
    Claim", ...), and transform would pin that button to THIS wrapper's box
    instead of the viewport — margin-top produces the same slide-in look
    without ever becoming a containing block. */
+/* A page coming into view. transform + opacity only (no layout work each
+   frame, smooth on phones); `margin` used to move the whole layout. */
 @keyframes mobile-page-in {
-  from { opacity: 0; margin-top: 10px; }
-  to { opacity: 1; margin-top: 0; }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 .mobile-page-in {
   animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) both;
 }
+/* Phones: a bottom-nav page slides in from the side of the tab tapped —
+   from the right going forward (Home -> Claim -> Timesheet -> Leave), from
+   the left going back (UserPanel.tsx goToMobileSection sets data-page-dir),
+   in step with the nav's white circle (BottomNav.tsx, same 0.28s). */
+@keyframes mobile-page-in-forward {
+  from { opacity: 0; transform: translateX(28%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mobile-page-in-back {
+  from { opacity: 0; transform: translateX(-28%); }
+  to { opacity: 1; transform: none; }
+}
+@media (max-width: 767px) {
+  html[data-page-dir="forward"] .mobile-page-in {
+    animation: mobile-page-in-forward 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  html[data-page-dir="back"] .mobile-page-in {
+    animation: mobile-page-in-back 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+/* Reduce motion: a plain fade, nothing sliding. */
+@keyframes mobile-page-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .mobile-page-in {
-    animation: none;
+  .mobile-page-in,
+  html[data-page-dir] .mobile-page-in {
+    animation: mobile-page-fade 0.15s linear both;
   }
 }
 

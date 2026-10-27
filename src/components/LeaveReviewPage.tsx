@@ -4,7 +4,7 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
 import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
@@ -17,6 +17,8 @@ interface LeaveReviewPageProps {
   // this page takes over the whole screen (mobile tile-menu section and/or
   // desktop nav target) same as those, so it's always passed here.
   onBack: () => void;
+  // False while the phone's bottom nav keeps this page mounted but hidden.
+  active?: boolean;
 }
 
 // Server-resolved label (LeaveApplication.leave_type_label) covers both the
@@ -46,7 +48,7 @@ const TABS: { key: ReviewTab; label: string }[] = [
 // Sick/Leave-without-Pay + custom categories) — merged in from the old
 // separate "My Leave" page (MyLeave.tsx, now deleted) so there's one
 // "Leave Application" interface instead of two.
-export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack }) => {
+export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack, active = true }) => {
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ReviewTab>('pending');
@@ -76,8 +78,8 @@ useLiveRefresh(() => load(true));
     }
   };
 
-  const loadBalance = async () => {
-    setBalanceLoading(true);
+  const loadBalance = async (silent?: boolean) => {
+    if (!silent) setBalanceLoading(true);
     try {
       const res = await fetch(apiUrl('/api/leave-balances/mine'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
@@ -97,6 +99,18 @@ useLiveRefresh(() => load(true));
     loadBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Shown again (the phone's bottom nav keeps this page mounted): keep what
+  // it has on screen and bring it up to date quietly.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) {
+      load(true);
+      loadBalance(true);
+    }
+    wasActive.current = active;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const filtered = applications.filter((a) => a.status === tab);
 

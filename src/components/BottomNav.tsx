@@ -156,7 +156,8 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
       return;
     }
     const dir = Math.sign(to - from);
-    const duration = 300 + Math.min(3, Math.round(Math.abs(to - from) / itemWidth)) * 60;
+    // Same 0.28s as the page sliding in (index.css mobile-page-in-forward/back).
+    const duration = 280;
     // Timed from the first frame: a frame's timestamp can be from just
     // before this effect ran, which would start the slide slightly backwards.
     let start = -1;

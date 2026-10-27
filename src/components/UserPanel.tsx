@@ -1039,6 +1039,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const trackingStatus = useTrackingStatus(token, canSeeTracking);
   const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
+  // Timesheet stays mounted (hidden) once opened from the bottom nav.
+  const [timesheetVisited, setTimesheetVisited] = useState(false);
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
@@ -1103,9 +1105,24 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // the header before the new page's actual content came into view. Every
   // plain "go to this section" call below uses this instead of calling
   // setMobileActiveSection directly, so the page always starts at the top.
+  //
+  // Bottom nav tabs (Home, Claim, Timesheet, Leave / Directory) slide in
+  // from the side of the tab tapped (index.css, html[data-page-dir]) and
+  // come back where they were scrolled to; every other page starts at the top.
+  const tabScroll = useRef<Record<string, number>>({});
   const goToMobileSection = (section: typeof mobileActiveSection) => {
+    const order = (x: typeof mobileActiveSection) =>
+      x === null ? 0 : x === 'claim' || x === 'claims' || x === 'conveyanceClaim' ? 1 : x === 'timesheet' ? 2 : x === 'leave' || x === 'employeeDirectory' ? 3 : 1.5;
+    const isTab = (x: typeof mobileActiveSection) => x === null || x === 'claim' || x === 'timesheet' || x === 'leave' || x === 'employeeDirectory';
+    // The tab already open: just back to its top, as before.
+    if (section === mobileActiveSection) return void window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.documentElement.dataset.pageDir = order(section) >= order(mobileActiveSection) ? 'forward' : 'back';
+    if (isTab(mobileActiveSection)) tabScroll.current[String(mobileActiveSection)] = window.scrollY;
+    const to = isTab(section) ? tabScroll.current[String(section)] || 0 : 0;
+    if (section === 'timesheet') setTimesheetVisited(true);
     setMobileActiveSection(section);
     window.scrollTo({ top: 0 });
+    if (to) requestAnimationFrame(() => window.scrollTo({ top: to }));
   };
   // Whether one of the Claims sections (Movement Claim, My Claims, Conveyance
   // Bill Claim) is the active section — on desktop this now means "show that
@@ -3298,7 +3315,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} />
           </div>
         )}
-        <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} />
+        <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} active={mobileActiveSection === 'leave'} />
       </div>
 
       {/* Employee Directory — company-wide roster, ungated for every account
@@ -3327,9 +3344,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Mounted only while open, so it loads fresh every time — kept
           mounted in the background it showed the data from when the
           Dashboard first loaded (e.g. "Absent" right after a Check In). */}
-      {mobileActiveSection === 'timesheet' && (
-        <div className="block max-md:!mt-0 mobile-page-in">
-          <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
+      {/* Mounted on the first visit and kept (hidden) after, so coming back
+          shows it at once; it refreshes itself whenever it is shown again
+          (Timesheet's `active`), which keeps a Check In made meanwhile. */}
+      {(timesheetVisited || mobileActiveSection === 'timesheet') && (
+        <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+          <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} active={mobileActiveSection === 'timesheet'} />
         </div>
       )}
 

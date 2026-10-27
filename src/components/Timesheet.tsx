@@ -4,7 +4,7 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil, AlarmClock, Plane } from 'lucide-react';
 import { AttendanceRecord, AttendanceCorrection, Project, HolidayEntry } from '../types';
@@ -29,6 +29,8 @@ interface TimesheetProps {
   // Correct Attendance modal, which drops its own Project picker entirely
   // once this is set (see AttendanceCorrectionModal.tsx).
   attendanceProjectId?: number | null;
+  // False while the phone's bottom nav keeps this page mounted but hidden.
+  active?: boolean;
 }
 
 type TimesheetTab = 'month' | 'day' | 'range';
@@ -252,7 +254,7 @@ const CountsLegend: React.FC<{
 // Navbar's web-only "Self Service" header menu, GlobalSidebar's mobile
 // drawer, and (in future) a Dashboard tile — same "Back" pattern as
 // LeaveApplication/LeaveManagement.
-export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId }) => {
+export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId, active = true }) => {
   // Same isNativeApp split as LeaveManage.tsx / LeaveReviewPage.tsx: the
   // web build keeps the "Self Service / Timesheet" module-path breadcrumb,
   // the Android APK build hides it — the bottom nav is the only way to leave
@@ -265,10 +267,13 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // GlobalSidebar (App.tsx renders it directly, with UserPanel unmounted) and
   // the bottom nav (UserPanel's own section) — and only the component itself
   // is present on both paths.
+  // Only while it's the page on screen — the phone's bottom nav keeps this
+  // page mounted (hidden) between visits.
   useEffect(() => {
+    if (!active) return;
     setHeaderPageTitle('Timesheet');
     return () => setHeaderPageTitle(null);
-  }, []);
+  }, [active]);
 
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
@@ -349,6 +354,20 @@ useLiveRefresh(() => loadData());
       ref.cancelled = true;
     };
   }, [token]);
+
+  // Back on this page (bottom nav): what it had shows at once, and the
+  // latest (e.g. a Check In just made) arrives quietly — no blank / loading
+  // step in between.
+  const [updating, setUpdating] = useState(false);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current && !loading) {
+      setUpdating(true);
+      loadData().finally(() => setUpdating(false));
+    }
+    wasActive.current = active;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // "YYYY-MM-DD" -> every attendance row recorded that day (almost always
   // one, but a User who checked into more than one Project the same day gets
@@ -532,6 +551,11 @@ useLiveRefresh(() => loadData());
             })}
           </div>
 
+          {updating && (
+            <div className="mx-3 sm:mx-6 mt-2 text-[11px] text-slate-500 flex items-center gap-1.5" role="status">
+              <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" aria-hidden="true" /> Updating…
+            </div>
+          )}
           {loading ? (
             <LoadingBlock />
           ) : (
