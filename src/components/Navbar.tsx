@@ -137,7 +137,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   // header on the native Android APK (per request) — the web build keeps the
   // solid header either way.
   const isNativeApp = Capacitor.isNativePlatform();
-  const transparentHeader = isNativeApp;
+  // Phone-width web (mobile browser, iPhone "Add to Home Screen") gets the
+  // same purple header as the app — the white one left the status bar strip
+  // white too. Desktop keeps the solid header.
+  const [phoneWidth, setPhoneWidth] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const on = () => setPhoneWidth(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const transparentHeader = isNativeApp || phoneWidth;
 
   // Today's Date & Day — web header only (see the "hidden md:flex" wrapper
   // below), same dd-MMM-yyyy convention as formatDate.ts elsewhere in the

@@ -48,7 +48,7 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
     );
     setBusy(false);
     if (r.status === 'granted') {
-      setNote('Done — you will get desktop notifications, even with this tab closed.');
+      setNote('Done — you will get notifications, even with CredenceHR closed.');
       setTimeout(() => setShow(false), 3000);
     } else if (r.status === 'denied') {
       setNote('Notifications are blocked for this site. Allow them from the lock icon next to the address, then reload.');
@@ -65,7 +65,7 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
     <div
       role="dialog"
       aria-label="Desktop notifications"
-      className="fixed z-[60] bottom-5 left-5 w-[340px] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-slate-200 bg-white shadow-xl p-4"
+      className="fixed z-[60] left-5 w-[340px] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-slate-200 bg-white shadow-xl p-4 bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] md:bottom-5"
     >
       <button type="button" onClick={later} aria-label="Not now" className="absolute top-2.5 right-2.5 p-1 text-slate-400 hover:text-slate-700">
         <X className="w-4 h-4" />
@@ -75,9 +75,9 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
           <BellRing className="w-4 h-4" />
         </span>
         <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-900">Get desktop notifications</div>
+          <div className="text-sm font-bold text-slate-900">Get notifications</div>
           <p className="text-xs text-slate-500 mt-0.5">
-            New chat messages, approvals, leave and claims pop up on your computer — even when CredenceHR isn't open.
+            New chat messages, approvals, leave and claims pop up on this device — even when CredenceHR isn't open.
           </p>
         </div>
       </div>

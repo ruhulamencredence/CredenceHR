@@ -57,7 +57,9 @@ async function loadKeys(queryDB: QueryDB) {
     }
   }
   // The contact address push services may use to reach the sender.
-  const contact = process.env.WEB_PUSH_CONTACT || (process.env.ADMIN_EMAIL ? `mailto:${process.env.ADMIN_EMAIL}` : "mailto:admin@example.com");
+  // Apple's push service (iPhone Home Screen app) rejects a placeholder like
+  // admin@example.com, so the fallback is the site's own address.
+  const contact = process.env.WEB_PUSH_CONTACT || (process.env.ADMIN_EMAIL ? `mailto:${process.env.ADMIN_EMAIL}` : "https://hr.credencehousinglimited.com");
   webpush.setVapidDetails(contact.includes(":") ? contact : `mailto:${contact}`, keys.publicKey, keys.privateKey);
   ready = true;
 }
