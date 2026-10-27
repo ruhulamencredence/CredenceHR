@@ -190,3 +190,5 @@
 | সবাইকে বের করা | `JWT_SECRET` বদলান (সবাই লগআউট) |
 | কে কী করেছে | উপরের ৮ নম্বর অংশের লগ |
 | কাউকে ডাটা দেখা বন্ধ | Module Access থেকে অনুমতি তুলুন (সঙ্গে সঙ্গে কার্যকর) |
+
+- **Notification পরীক্ষা (`POST /api/web-push/test`):** login করা account শুধু নিজের phone/browser-এ test message পাঠাতে পারে (অন্যের নয়)। উত্তরে push service-এর (Apple/Google) host ও status code আসে, কোনো key বা token নয়। Profile → Notifications থেকে চালানো হয়।

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing } from 'lucide-react';
 import { FingerprintSettings } from './FingerprintSettings';
+import { NotificationSettings } from './NotificationSettings';
+import { Capacitor } from '@capacitor/core';
 import { canUseFingerprint } from '../lib/fingerprint';
 import { FeedbackPopup, canGiveFeedback } from './feedback/FeedbackPopup';
 import { PersonalDataForm } from './PersonalDataForm';
@@ -54,6 +56,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showAssetManagement, setShowAssetManagement] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showFingerprint, setShowFingerprint] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const appVersion = `web ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : ''}`.trim();
   const [username, setUsername] = useState(user.username || '');
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
@@ -110,6 +113,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   return (
     <div className="w-full">
       {showFeedback && <FeedbackPopup token={token} onClose={() => setShowFeedback(false)} />}
+      {showNotifications && <NotificationSettings token={token} onClose={() => setShowNotifications(false)} />}
       {showFingerprint && <FingerprintSettings token={token} user={user} onClose={() => setShowFingerprint(false)} />}
 
       {/* ---------------- Mobile layout ---------------- */}
@@ -214,6 +218,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               {canUseFingerprint(user) && (
                 <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />
               )}
+              {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} />}
               {!!username && (
                 <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} />
               )}
@@ -331,6 +336,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             {canUseFingerprint(user) && (
               <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} padded />
             )}
+            {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} padded />}
             {!!username && (
               <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
             )}

@@ -101,6 +101,28 @@ export async function sendWebPushToUserIds(
   }
 }
 
+/** A test message to this account's own browsers, with each push service's answer (Apple/Google/Mozilla) so a failure can be read. */
+export async function sendWebPushTest(queryDB: QueryDB, userId: number) {
+  if (!ready) return { available: false, results: [] as any[] };
+  const rows: any[] = (await queryDB("SELECT id, endpoint, p256dh, auth, user_agent FROM web_push_subscriptions WHERE user_id = ?", [userId])) || [];
+  const payload = JSON.stringify({ title: "CredenceHR", body: "Test notification — it works.", tag: "credence-test", data: {} });
+  const results: any[] = [];
+  for (const r of rows) {
+    let host = "";
+    try {
+      host = new URL(r.endpoint).host;
+    } catch {}
+    try {
+      const out = await webpush.sendNotification({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }, payload, { TTL: 60 });
+      results.push({ host, ok: true, status: out.statusCode });
+    } catch (err: any) {
+      if (err?.statusCode === 404 || err?.statusCode === 410) await queryDB("DELETE FROM web_push_subscriptions WHERE id = ?", [r.id]);
+      results.push({ host, ok: false, status: err?.statusCode || 0, error: String(err?.body || err?.message || err).slice(0, 300) });
+    }
+  }
+  return { available: true, results };
+}
+
 export function registerWebPushRoutes(app: Express, deps: { authenticateToken: any; queryDB: QueryDB }) {
   const { authenticateToken, queryDB } = deps;
 
@@ -125,6 +147,15 @@ export function registerWebPushRoutes(app: Express, deps: { authenticateToken: a
         [req.user.id, endpoint, p256dh, auth, ua]
       );
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Profile -> Notifications -> "Send a test": reaches only the caller's own browsers.
+  app.post("/api/web-push/test", authenticateToken, async (req: any, res) => {
+    try {
+      res.json(await sendWebPushTest(queryDB, Number(req.user.id)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
