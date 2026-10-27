@@ -147,6 +147,18 @@ html, body, #root {
   height: 100%;
 }
 
+/* iPhone: never enlarge text by itself, and never let one wide element make
+   the page wider than the screen (the app then looks zoomed, with text and
+   icons cut off at the edge). */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html, body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 body {
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   /* Keeps content clear of the Android gesture nav bar / iOS home indicator, since
