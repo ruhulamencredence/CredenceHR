@@ -792,10 +792,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           }`}
         >
           <item.icon className="w-4 h-4 shrink-0" />
-          <span className="text-[13px] truncate">{item.label}</span>
-          {groupLabelOf.get(item.key) && (
-            <span className="ml-auto pl-2 text-[10px] text-white/45 whitespace-nowrap">{groupLabelOf.get(item.key)}</span>
-          )}
+          {/* Name on its own line (never cut short by the group), the group under it. */}
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] leading-snug break-words">{item.label}</span>
+            {groupLabelOf.get(item.key) && <span className="block text-[10px] leading-tight text-white/45 truncate">{groupLabelOf.get(item.key)}</span>}
+          </span>
         </button>
       ))
     ) : (
