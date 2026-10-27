@@ -16,6 +16,7 @@ import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusMod
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
+import { AttendanceGauge, DayStatus, PeriodButton, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, periodLabel, useIsPhone } from './TimesheetPhone';
 
 interface TimesheetProps {
   token: string;
@@ -307,6 +308,23 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   const [rangeFrom, setRangeFrom] = useState(firstOfThisMonth);
   const [rangeTo, setRangeTo] = useState(today);
 
+  // Phone layout (TimesheetPhone.tsx): one period button + bottom sheet in
+  // place of the tabs/selects, and a gauge whose legend filters the list.
+  const isPhone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
+  const period: TimesheetPeriod = { mode: tab, year: selYear, month: selMonth, day: selDay, from: rangeFrom, to: rangeTo };
+  const applyPeriod = (p: TimesheetPeriod) => {
+    setTab(p.mode);
+    setSelYear(p.year);
+    setSelMonth(p.month);
+    setSelDay(p.day);
+    setRangeFrom(p.from);
+    setRangeTo(p.to);
+    setStatusFilter(null);
+    setSheetOpen(false);
+  };
+
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => loadData());
   const loadData = async (cancelledRef?: { cancelled: boolean }) => {
@@ -438,6 +456,23 @@ useLiveRefresh(() => loadData());
   const monthCounts = countsFor(monthDates);
   const rangeCounts = countsFor(rangeDates);
 
+  // One status per date for the phone gauge / list.
+  const dayStatus = (d: string): DayStatus => {
+    if ((byDate.get(d) || []).length > 0) return lateDays[d] === 'extreme' ? 'extreme' : lateDays[d] === 'delay' ? 'delay' : 'ontime';
+    if (leaveByDate.has(d)) return 'leave';
+    const h = holidayByDate.get(d);
+    if (h) return h.day_type === 'weekend' ? 'weekend' : 'holiday';
+    return 'absent';
+  };
+  const gaugeCounts = (dates: string[]) => {
+    const c = { ontime: 0, delay: 0, extreme: 0, absent: 0, leave: 0 };
+    for (const d of dates) {
+      const st = dayStatus(d);
+      if (st in c) c[st as keyof typeof c]++;
+    }
+    return c;
+  };
+
   // Fetch Delay / Extreme Delay for whatever window is on screen.
   const lateWindow =
     tab === 'month' ? [monthDates[0], monthDates[monthDates.length - 1]] : tab === 'range' ? [rangeDates[0], rangeDates[rangeDates.length - 1]] : [selDay, selDay];
@@ -493,12 +528,64 @@ useLiveRefresh(() => loadData());
     return Array.from(years).sort((a, b) => b - a);
   }, [records, todayYear]);
 
+  const renderPhoneDays = (datesAsc: string[], datesDesc: string[], emptyText: string) => {
+    if (datesAsc.length === 0) {
+      return <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">{emptyText}</div>;
+    }
+    const shown = statusFilter ? datesDesc.filter((d) => dayStatus(d) === statusFilter) : datesDesc;
+    const FILTER_TITLE: Record<StatusFilter, string> = { ontime: 'On time days', delay: 'Delay days', extreme: 'Extreme delay days', absent: 'Absent days' };
+    return (
+      <div className="flex flex-col gap-3">
+        <AttendanceGauge counts={gaugeCounts(datesAsc)} period={periodLabel(period)} filter={statusFilter} onFilter={setStatusFilter} />
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div className="text-[13px] font-bold text-zinc-700">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
+          {statusFilter && (
+            <button type="button" onClick={() => setStatusFilter(null)} className="text-xs font-semibold text-[color:var(--g-accent,#7f00ff)] px-1 py-1.5">
+              Show all
+            </button>
+          )}
+        </div>
+        {shown.length === 0 ? (
+          <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">Nothing to show for this choice.</div>
+        ) : (
+          shown.map((d) => {
+            const recs = byDate.get(d) || [];
+            const st = dayStatus(d);
+            const ins = (recs.map((r) => r.check_in_at).filter(Boolean) as string[]).sort();
+            const outs = (recs.map((r) => r.check_out_at).filter(Boolean) as string[]).sort();
+            const holiday = holidayByDate.get(d);
+            const times = recs.length ? `${formatTime(ins[0])} – ${outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}` : st === 'weekend' ? 'Weekend' : st === 'holiday' ? 'Holiday' : '—';
+            const where = recs.length
+              ? Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ') || 'Checked in'
+              : st === 'leave'
+              ? leaveByDate.get(d) || 'Leave'
+              : holiday
+              ? holiday.title || 'Day off'
+              : 'No check-in';
+            const corr = correctionsByDate.get(d);
+            return (
+              <PhoneDayCard
+                key={d}
+                dateStr={d}
+                status={st}
+                times={times}
+                where={where}
+                correction={corr?.status === 'pending' ? 'pending' : corr?.status === 'rejected' ? 'rejected' : undefined}
+                onClick={() => openDateCard(d)}
+              />
+            );
+          })
+        )}
+      </div>
+    );
+  };
+
   const selectClass =
     'text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none';
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
-      <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+      <div className={`w-full ${isPhone ? 'px-0' : 'px-2'} sm:px-6 lg:px-8 pt-3 pb-8`}>
         {/* Breadcrumb is desktop-only: hidden on the APK (isNativeApp) and,
             via hidden md:block, on a narrow browser window too — the mobile
             layout shows "Timesheet" in the header instead, so the
@@ -512,7 +599,9 @@ useLiveRefresh(() => loadData());
             big rounded corners), same as Conveyance Bill Claim / My Claims /
             Leave Applications; the md: overrides keep the original plain
             white panel on desktop. */}
-        <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
+        {/* On a phone the cards (period button, gauge, days) sit straight on
+            the page, without this panel around them. */}
+        <div className={isPhone ? '' : 'bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none'}>
           {/* Hidden on mobile — the header shows this page's own "Timesheet"
               title in the logo's place (see headerPageTitle.ts), so repeating
               it here would just be a duplicate. Desktop has no such takeover
@@ -533,6 +622,11 @@ useLiveRefresh(() => loadData());
               rounded-pill treatment LeaveReviewPage's Review/Approved/Rejected
               switcher uses. Extra top padding on mobile since the header row
               above is hidden there. */}
+          {isPhone ? (
+            <div className="mx-3 mt-1">
+              <PeriodButton period={period} onClick={() => setSheetOpen(true)} />
+            </div>
+          ) : (
           <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
             {TABS.map((t) => {
               const active = tab === t.key;
@@ -550,6 +644,7 @@ useLiveRefresh(() => loadData());
               );
             })}
           </div>
+          )}
 
           {updating && (
             <div className="mx-3 sm:mx-6 mt-2 text-[11px] text-slate-500 flex items-center gap-1.5" role="status">
@@ -559,9 +654,10 @@ useLiveRefresh(() => loadData());
           {loading ? (
             <LoadingBlock />
           ) : (
-            <div className="px-3 sm:px-6 py-5">
+            <div className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
               {/* Month Wise */}
-              {tab === 'month' && (
+              {tab === 'month' && isPhone && renderPhoneDays(monthDates, monthDatesDesc, "This month hasn't started yet.")}
+              {tab === 'month' && !isPhone && (
                 <>
                   <div className="flex flex-wrap items-center gap-3 mb-4">
                     <select aria-label="Month" value={selMonth} onChange={(e) => setSelMonth(Number(e.target.value))} className={selectClass}>
@@ -595,7 +691,7 @@ useLiveRefresh(() => loadData());
               {/* Day Wise */}
               {tab === 'day' && (
                 <>
-                  <div className="mb-4">
+                  <div className="mb-4 hidden md:block">
                     <input
                       type="date"
                       value={selDay}
@@ -675,7 +771,8 @@ useLiveRefresh(() => loadData());
               )}
 
               {/* Custom Range */}
-              {tab === 'range' && (
+              {tab === 'range' && isPhone && renderPhoneDays(rangeDates, rangeDatesDesc, 'Pick a valid From / To date to see the report.')}
+              {tab === 'range' && !isPhone && (
                 <>
                   <div className="flex flex-wrap items-end gap-3 mb-4">
                     <div>
@@ -720,6 +817,15 @@ useLiveRefresh(() => loadData());
           )}
         </div>
       </div>
+
+      <PeriodSheet
+        open={sheetOpen && active}
+        value={period}
+        today={today}
+        minYear={yearOptions[yearOptions.length - 1]}
+        onClose={() => setSheetOpen(false)}
+        onApply={applyPeriod}
+      />
 
       {correctionDate && (
         <AttendanceCorrectionModal
