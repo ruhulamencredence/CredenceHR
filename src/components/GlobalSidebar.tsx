@@ -684,7 +684,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'g_employees',
       label: 'Employee Management',
       icon: Contact,
-      entries: pick('employees', 'departments', 'tracking', 'recruitment', 'performance_management', 'exit_offboarding', 'grievance_disciplinary', 'document_vault')
+      // A person's whole journey in one place: joining (Recruitment ->
+      // Onboarding) and leaving (Exit / Offboarding) sit together.
+      entries: pick(
+        'employees', 'departments', 'tracking',
+        { heading: 'Joining & Exit' }, 'recruitment', 'hr_operations_onboarding', 'exit_offboarding',
+        { heading: 'People & Records' }, 'performance_management', 'grievance_disciplinary', 'document_vault'
+      )
     },
     {
       key: 'g_attendance',
@@ -699,7 +705,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Briefcase,
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
-        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_grievance', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments',
         { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
         { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
         { heading: 'Settings' }, 'hr_operations_settings'
