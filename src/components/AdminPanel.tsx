@@ -4126,7 +4126,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Department</label>
-                <select
+                <SearchSelect
                   value={reportDepartmentFilter}
                   onChange={(e) => setReportDepartmentFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
@@ -4135,7 +4135,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {reportDepartments.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
 
               {attendanceReportView === 'month' ? (
@@ -4151,7 +4151,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-slate-500 mb-1">Month</label>
-                    <select
+                    <SearchSelect
                       value={reportMonth}
                       onChange={(e) => setReportMonth(Number(e.target.value))}
                       className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -4161,7 +4161,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           {new Date(2000, m - 1, 1).toLocaleString('en-US', { month: 'long' })}
                         </option>
                       ))}
-                    </select>
+                    </SearchSelect>
                   </div>
                   <button
                     type="button"
