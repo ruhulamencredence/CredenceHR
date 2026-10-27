@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
@@ -306,6 +307,8 @@ async function initDB() {
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
+    // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
+    await backfillEmployeeLoginIds(queryDB);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
   } catch (err: any) {

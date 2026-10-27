@@ -850,8 +850,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
     e.preventDefault();
     if (!form.name.trim()) return setMessage({ type: 'error', text: 'Please enter the employee name.' });
     if (!editingId && form.create_login) {
-      if (!form.login_username.trim() && !form.email.trim()) {
-        return setMessage({ type: 'error', text: 'Enter a login username, or an Email above, to create this employee\u2019s login.' });
+      if (!form.employee_id.trim() && !form.login_username.trim() && !form.email.trim()) {
+        return setMessage({ type: 'error', text: 'Enter the Employee ID above — it is the employee\u2019s Login ID.' });
       }
       const pwBad = passwordProblem(form.login_password);
       if (pwBad) {
@@ -1073,8 +1073,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const handleCreateLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!creatingLoginFor) return;
-    if (!loginForm.login_username.trim() && !creatingLoginFor.email) {
-      return setMessage({ type: 'error', text: 'Enter a login username — this employee has no Email on file to fall back to.' });
+    if (!creatingLoginFor.employee_id && !loginForm.login_username.trim() && !creatingLoginFor.email) {
+      return setMessage({ type: 'error', text: 'Give this employee an Employee ID first — it is their Login ID.' });
     }
     const pwBad = passwordProblem(loginForm.login_password);
     if (pwBad) {
@@ -1681,14 +1681,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   {form.create_login && (
                     <div className="grid sm:grid-cols-2 gap-3 pl-11">
                       <div>
-                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Username (optional)</label>
-                        <input
-                          type="text"
-                          value={form.login_username}
-                          onChange={(e) => setForm((f) => ({ ...f, login_username: e.target.value }))}
-                          placeholder="Falls back to Email above"
-                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        />
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login ID</label>
+                        {form.employee_id.trim() ? (
+                          <div className="px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-900 text-sm font-mono">{form.employee_id.trim()}</div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={form.login_username}
+                            onChange={(e) => setForm((f) => ({ ...f, login_username: e.target.value }))}
+                            placeholder="Enter the Employee ID above"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login Password *</label>
@@ -1701,7 +1705,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         />
                       </div>
                       <p className="sm:col-span-2 text-[11px] text-slate-400">
-                        Signs in with the Email above (or this Username) + this password, as a regular User.
+                        Signs in with the Employee ID as Login ID (the Email above works too) + this password, as a regular User.
                       </p>
 
                       {/* Project Access — same user_project_permissions grant Admin Panel ->
@@ -2410,14 +2414,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                 Creates a User account for <span className="font-semibold text-slate-700">{creatingLoginFor.name}</span>.
               </p>
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Username (optional)</label>
-                <input
-                  type="text"
-                  value={loginForm.login_username}
-                  onChange={(e) => setLoginForm((f) => ({ ...f, login_username: e.target.value }))}
-                  placeholder={creatingLoginFor.email ? `Falls back to ${creatingLoginFor.email}` : 'Required — no Email on file'}
-                  className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                />
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login ID</label>
+                {creatingLoginFor.employee_id ? (
+                  <>
+                    <div className="px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-900 text-sm font-mono">{creatingLoginFor.employee_id}</div>
+                    <p className="mt-1 text-[11px] text-slate-400">Their Employee ID{creatingLoginFor.email ? ` — ${creatingLoginFor.email} signs in too` : ''}.</p>
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    value={loginForm.login_username}
+                    onChange={(e) => setLoginForm((f) => ({ ...f, login_username: e.target.value }))}
+                    placeholder={creatingLoginFor.email ? `No Employee ID — falls back to ${creatingLoginFor.email}` : 'No Employee ID — give them one first'}
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login Password *</label>

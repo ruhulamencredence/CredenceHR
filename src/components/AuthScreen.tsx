@@ -474,14 +474,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
-                Email or Project Name
+                Login ID
               </label>
               <input
                 type="text"
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="you@company.com or Project Name"
+                placeholder="Employee ID, email or Project Name"
                 className="block w-full px-5 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                 style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
                 onFocus={(e) => {

@@ -88,8 +88,8 @@ export const ForgotPasswordPopup: React.FC<{
 
   const idField = (
     <div>
-      <label className={labelCls}>Email or Project Name (your Login ID)</label>
-      <input className={inputCls} value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoFocus placeholder="you@company.com" />
+      <label className={labelCls}>Your Login ID (Employee ID, email or Project Name)</label>
+      <input className={inputCls} value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoFocus placeholder="e.g. CPL-0201" />
     </div>
   );
   const back = !only && step !== 'choose' && step !== 'done' && (

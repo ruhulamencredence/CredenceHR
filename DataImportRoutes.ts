@@ -40,6 +40,7 @@ import { activeCompanyId, activeGroupId } from "./companyContext";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
 import { leaveDayCount } from "./leaveDayCount";
+import { employeeIdConflict } from "./EmployeeLoginId";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -118,7 +119,7 @@ export const IMPORT_KINDS: Kind[] = [
         type: "text",
         aliases: ["user name", "username", "user id", "login", "login email"],
         example: "rahim",
-        note: "Email or username they sign in with. With a Password, creates their login (role User) with the default Access Template; skipped if they already have one"
+        note: "They sign in with their Employee ID; an email here signs in too. Blank with a Password = Employee ID only. Creates their login (role User) with the default Access Template; skipped if they already have one"
       },
       { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "1234", note: "Any password" },
       {
@@ -475,6 +476,12 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         if (prep.seenCodes.has(codeKey)) fail(`Employee ID ${code} appears twice in the sheet.`);
         prep.seenCodes.add(codeKey);
         const existing = ctx.byCode.get(codeKey);
+        // The Employee ID is also the Login ID (EmployeeLoginId.ts): a new one
+        // can't match another company's employee or another account's login.
+        if (!existing && code) {
+          const clash = await employeeIdConflict(queryDB, code);
+          if (clash) fail(clash);
+        }
         const set: Record<string, any> = { name: str(v.name) };
         const notes: string[] = [];
         const textKeys = [
@@ -520,7 +527,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         // anything else is a username, stored the way sign-in reads it (no
         // spaces, lower case).
         let login: { email: string | null; username: string | null; password: string } | null = null;
-        const loginId = str(v.login_id);
+        // Login ID left blank with a Password: they sign in with the Employee ID.
+        const loginId = str(v.login_id) || (str(v.login_password) ? code : "");
         const password = str(v.login_password);
         if (loginId || password) {
           if (!loginId) fail("Password given without a Login ID.");
@@ -534,8 +542,13 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             const id = isEmail ? loginId.toLowerCase().slice(0, 255) : loginId.replace(/\s+/g, "").toLowerCase().slice(0, 100);
             if (prep.takenLogins.has(id)) fail(`Login ID "${id}" is already used by another account.`);
             prep.takenLogins.add(id);
+            // The Employee ID becomes their Login ID as well.
+            if (code && code.toLowerCase() !== id) {
+              if (prep.takenLogins.has(code.toLowerCase())) fail(`Employee ID ${code} is already another account's Login ID.`);
+              prep.takenLogins.add(code.toLowerCase());
+            }
             login = { email: isEmail ? id : null, username: isEmail ? null : id, password };
-            notes.push(`Login: ${id}${!isEmail && id !== loginId ? ` (written "${loginId}")` : ""}`);
+            notes.push(code ? `Login ID: ${code}${isEmail ? ` (and ${id})` : ""}` : `Login: ${id}${!isEmail && id !== loginId ? ` (written "${loginId}")` : ""}`);
             notes.push(
               prep.defaultTemplate
                 ? `Access: "${prep.defaultTemplate.name}" template`
@@ -601,10 +614,11 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const createLogin = async (employeeId: number) => {
           if (!login || ctx.dryRun) return;
           const hash = await bcrypt.hash(login.password, 10);
+          // Signs in with the Employee ID (and the email, if one was given).
           const u = await queryDB("INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, 'user')", [
             set.name,
             login.email,
-            login.username,
+            code || login.username,
             hash
           ]);
           await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [u.insertId, employeeId]);

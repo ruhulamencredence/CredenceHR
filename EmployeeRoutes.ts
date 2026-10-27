@@ -18,6 +18,7 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
+import { employeeIdConflict, syncEmployeeLoginId } from "./EmployeeLoginId";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -238,6 +239,9 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (fieldBad) return res.status(400).json({ error: fieldBad });
       const zkPin = await checkZkDevicePin(req.body, null);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
+      // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice.
+      const idClash = await employeeIdConflict(queryDB, employee_id);
+      if (idClash) return res.status(409).json({ error: idClash });
       const branch = await resolveEmployeeBranch(req.body);
 
       let newUserId: number | null = null;
@@ -246,9 +250,11 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
 
       if (create_login) {
         const loginEmail = (login_email && String(login_email).trim()) || (email && String(email).trim()) || null;
-        const loginUsername = login_username && String(login_username).trim() ? String(login_username).trim() : null;
+        // Login ID = the Employee ID; a typed username only when there is none.
+        const loginUsername =
+          (employee_id && String(employee_id).trim()) || (login_username && String(login_username).trim() ? String(login_username).trim() : null);
         if (!loginEmail && !loginUsername) {
-          return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
+          return res.status(400).json({ error: "Give the employee an Employee ID (their Login ID) to create a login." });
         }
         const pwBad = passwordProblem(login_password, { email: loginEmail, username: loginUsername, name });
         if (pwBad) {
@@ -260,7 +266,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         }
         if (loginUsername) {
           const existingUsername = await queryDB("SELECT id FROM users WHERE username = ?", [loginUsername]);
-          if (existingUsername.length > 0) return res.status(400).json({ error: "That username is already taken." });
+          if (existingUsername.length > 0) return res.status(400).json({ error: "That Login ID is already used by another account." });
         }
 
         const password_hash = await bcrypt.hash(String(login_password), 10);
@@ -346,6 +352,10 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (fieldBad) return res.status(400).json({ error: fieldBad });
       const zkPin = await checkZkDevicePin(req.body, id);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
+      if (String(employee_id ?? "").trim().toLowerCase() !== String(existing[0].employee_id ?? "").trim().toLowerCase()) {
+        const idClash = await employeeIdConflict(queryDB, employee_id, { employeeRowId: id, userId: existing[0].user_id || null });
+        if (idClash) return res.status(409).json({ error: idClash });
+      }
       const branch = await resolveEmployeeBranch(req.body);
 
       const extColumns = EMPLOYEE_EXT_FIELDS;
@@ -408,6 +418,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (zkPin.set && (existing[0].zk_device_pin ?? null) !== zkPin.pin) {
         await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, id]);
       }
+      // A new Employee ID becomes the login's Login ID too.
+      await syncEmployeeLoginId(queryDB, id, existing[0].employee_id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -718,9 +730,12 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
 
       const { login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
       const loginEmail = (login_email && String(login_email).trim()) || (employee.email && String(employee.email).trim()) || null;
-      const loginUsername = login_username && String(login_username).trim() ? String(login_username).trim() : null;
+      // Login ID = the Employee ID (EmployeeLoginId.ts); a typed username only when there is none.
+      const loginUsername =
+        (employee.employee_id && String(employee.employee_id).trim()) ||
+        (login_username && String(login_username).trim() ? String(login_username).trim() : null);
       if (!loginEmail && !loginUsername) {
-        return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
+        return res.status(400).json({ error: "Give the employee an Employee ID (their Login ID) to create a login." });
       }
       const pwBad = passwordProblem(login_password, { email: loginEmail, username: loginUsername, name: employee.name });
       if (pwBad) {
@@ -732,7 +747,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       }
       if (loginUsername) {
         const existingUsername = await queryDB("SELECT id FROM users WHERE username = ?", [loginUsername]);
-        if (existingUsername.length > 0) return res.status(400).json({ error: "That username is already taken." });
+        if (existingUsername.length > 0) return res.status(400).json({ error: "That Login ID is already used by another account." });
       }
 
       const password_hash = await bcrypt.hash(String(login_password), 10);
@@ -797,6 +812,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       }
 
       await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [userId, id]);
+      await syncEmployeeLoginId(queryDB, id);
       res.json({ success: true, user_id: userId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

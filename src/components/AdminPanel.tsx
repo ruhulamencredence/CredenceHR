@@ -6505,7 +6505,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 truncate">{u.name}</div>
-                            <div className="text-xs text-slate-500 truncate">{u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}</div>
+                            <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
                           </div>
                         </div>
                       </td>
@@ -6578,7 +6578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
+                      <div className="text-xs text-slate-500 truncate">{u.username ? `${u.username}${u.email ? ` · ${u.email}` : ''}` : u.email || '—'}</div>
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>

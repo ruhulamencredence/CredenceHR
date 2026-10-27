@@ -66,8 +66,9 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       const usernameCandidate = identifier.replace(/\s+/g, "").toLowerCase();
 
       const users = await queryDB(
-        "SELECT * FROM users WHERE email = ? OR username = ?",
-        [identifier, usernameCandidate]
+        // username is also an employee's Login ID — their Employee ID (EmployeeLoginId.ts).
+        "SELECT * FROM users WHERE email = ? OR username = ? OR username = ?",
+        [identifier, usernameCandidate, identifier]
       );
       // Password guessing is stopped (LoginGuard.ts): 5 wrong tries lock the
       // account for 15 minutes, 30 from one address make it wait. Unknown
