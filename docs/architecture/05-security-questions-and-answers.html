@@ -27,6 +27,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
+<td>কর্মীরা কী দিয়ে লগইন করে? দুজনের একই ID হতে পারে?</td>
+<td>নিজের Employee ID (যেমন <code>CPL-0201</code>), বা ইমেইল। একই Login ID দুজনের হতে পারে না: ডাটাবেসে UNIQUE, আর নতুন বা বদলানো Employee ID অন্য কারও ID/username/email-এর সাথে মিললে সার্ভার রাজি হয় না।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>পাসওয়ার্ড কীভাবে রাখা হয়?</td>
 <td>bcrypt hash (cost 10)। সরল পাসওয়ার্ড কোথাও রাখা হয় না, লগেও না।</td>
 <td>✅</td>
