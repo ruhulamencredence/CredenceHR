@@ -8,6 +8,15 @@ erDiagram
     decimal rating
     enum status
   }
+  employee_requisitions {
+    int id PK
+    int user_id FK
+    int employee_id FK
+    int sim_id FK
+    int company_id
+    int application_id
+    varchar kind
+  }
   hr_action_approval_steps {
     int id PK
     varchar action_type
@@ -166,6 +175,9 @@ erDiagram
   departments {
     int id PK
   }
+  mobile_sims {
+    int id PK
+  }
   salary_structures {
     int id PK
   }
@@ -174,6 +186,9 @@ erDiagram
   }
   job_candidates ||--o{ candidate_interviews : "candidate_id"
   users ||--o{ candidate_interviews : "interviewer_id"
+  users ||..o{ employee_requisitions : "user_id"
+  all_employees ||..o{ employee_requisitions : "employee_id"
+  mobile_sims ||..o{ employee_requisitions : "sim_id"
   all_employees ||--o{ hr_actions : "employee_id"
   salary_structures ||..o{ hr_actions : "salary_structure_id"
   departments ||..o{ hr_increment_policies : "department_id"

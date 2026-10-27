@@ -129,6 +129,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // opened an application may also approve it ("1" = they may not).
   onboarding_expiry_days: "14",
   onboarding_creator_cannot_approve: "1",
+  // Whether a joiner may ask for a SIM / ID card from My Onboarding
+  // (RequisitionRoutes.ts). Off until HR turns it on.
+  onboarding_requisitions: "0",
   // HR reminders (HrRemindersRoutes.ts): on/off, how many days before each
   // date to remind (comma-separated; 0 = on the day / overdue), whether the
   // Employee's direct supervisor is told too, the retirement age, and which

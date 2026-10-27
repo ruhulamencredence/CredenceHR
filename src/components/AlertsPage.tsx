@@ -158,6 +158,19 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'dashboard' })), 0);
           }
+        : alert.type === 'requisition'
+        ? alert.related_type === 'requisition_hr'
+          ? () => {
+              // HR: HR Operations -> SIM & ID Card.
+              try {
+                sessionStorage.setItem('hr_ops_tab', 'requisitions');
+              } catch {
+                // storage unavailable
+              }
+              window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }));
+              setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'requisitions' })), 0);
+            }
+          : () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRequisitions' }))
         : alert.type === 'hr_action' && alert.related_type === 'onboarding_application'
         ? () => {
             // HR: Onboarding -> New Joiners.

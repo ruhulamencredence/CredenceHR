@@ -14,7 +14,7 @@
 // account that also holds that module.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel } from 'lucide-react';
+import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel, CreditCard } from 'lucide-react';
 import { HrOpsBodySkeleton } from './HrOpsSkeleton';
 import { useHrApi, Notice, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { HrOpsDashboard } from './HrOpsDashboard';
@@ -26,8 +26,9 @@ import { HrOpsIncrements } from './HrOpsIncrements';
 import { HrOpsSettings } from './HrOpsSettings';
 import { HrOpsReports } from './HrOpsReports';
 import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
+import { HrRequisitions } from './HrRequisitions';
 
-export type HrOpsTab = 'dashboard' | 'actions' | 'service_book' | 'letters' | 'onboarding' | 'increments' | 'reports' | 'grievance' | 'settings';
+export type HrOpsTab = 'dashboard' | 'actions' | 'service_book' | 'letters' | 'onboarding' | 'increments' | 'reports' | 'grievance' | 'requisitions' | 'settings';
 
 const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'dashboard', label: 'Monthly Report', icon: LayoutDashboard },
@@ -38,6 +39,7 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
   { key: 'increments', label: 'Increments', icon: TrendingUp },
   { key: 'reports', label: 'Employee Reports', icon: FileSpreadsheet },
+  { key: 'requisitions', label: 'SIM & ID Card', icon: CreditCard },
   { key: 'settings', label: 'Settings', icon: Settings }
 ];
 
@@ -48,13 +50,15 @@ const TAB_STORAGE_KEY = 'hr_ops_tab';
 // Fired with the open tab, so the sidebar can highlight its own item for it.
 export const HR_OPS_ACTIVE_EVENT = 'credence:hr-ops-active';
 
-export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean }> = ({ token, canGrievance = false }) => {
+export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean }> = ({ token, canGrievance = false, canRequisitions = false }) => {
   const api = useHrApi(token);
-  const tabs = TABS.filter((t) => t.key !== 'grievance' || canGrievance);
+  // A tab only for an account with its permission (grievance module / "requisitions" layer).
+  const allowed = (t: HrOpsTab) => (t !== 'grievance' || canGrievance) && (t !== 'requisitions' || canRequisitions);
+  const tabs = TABS.filter((t) => allowed(t.key));
   const [tab, setTab] = useState<HrOpsTab>(() => {
     try {
       const t = sessionStorage.getItem(TAB_STORAGE_KEY) as HrOpsTab | null;
-      if (t && TABS.some((x) => x.key === t) && (t !== 'grievance' || canGrievance)) return t;
+      if (t && TABS.some((x) => x.key === t) && allowed(t)) return t;
     } catch {
       // storage unavailable
     }
@@ -84,11 +88,11 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
   useEffect(() => {
     const onTab = (e: Event) => {
       const t = (e as CustomEvent).detail as HrOpsTab;
-      if (TABS.some((x) => x.key === t) && (t !== 'grievance' || canGrievance)) setTab(t);
+      if (TABS.some((x) => x.key === t) && allowed(t)) setTab(t);
     };
     window.addEventListener(HR_OPS_TAB_EVENT, onTab);
     return () => window.removeEventListener(HR_OPS_TAB_EVENT, onTab);
-  }, [canGrievance]);
+  }, [canGrievance, canRequisitions]);
 
   const changed = () => {
     loadEmployees();
@@ -147,6 +151,8 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
           <HrOpsOnboarding token={token} meta={meta} employees={employees} />
         ) : tab === 'grievance' && canGrievance ? (
           <GrievanceDisciplinaryPanel token={token} embedded />
+        ) : tab === 'requisitions' && canRequisitions ? (
+          <HrRequisitions token={token} />
         ) : tab === 'reports' ? (
           <HrOpsReports token={token} onOpenEmployee={openEmployee} />
         ) : tab === 'increments' ? (

@@ -102,6 +102,14 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
             />
             Whoever opens an application can't approve it
           </label>
+          <label className="flex items-center gap-2 text-xs text-slate-700 pb-2">
+            <input
+              type="checkbox"
+              checked={String(s.onboarding_requisitions ?? '0') === '1'}
+              onChange={(e) => setS({ ...s, onboarding_requisitions: e.target.checked ? '1' : '0' })}
+            />
+            Joiners can ask for a SIM / ID card
+          </label>
         </div>
         <p className="text-[11px] text-slate-500">
           Counted until the joiner submits; sending it back starts the count again. When it runs out the application expires and its login is blocked. A Superadmin may

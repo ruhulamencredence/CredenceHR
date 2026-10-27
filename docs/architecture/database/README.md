@@ -8,15 +8,15 @@
 <!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২১৫** |
-| কলাম | **২,৩১৩** |
-| ঘোষিত Foreign Key | **২৪৯** (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১৪) |
-| `company_id` আছে এমন টেবিল (multi-company) | ৫৬ |
+| টেবিল | **২১৬** |
+| কলাম | **২,৩৩২** |
+| ঘোষিত Foreign Key | **২৪৯** (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১২, NO ACTION ২) |
+| `company_id` আছে এমন টেবিল (multi-company) | ৫৭ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ২৮টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
-| সবচেয়ে বেশি কলামের টেবিল | `users` (৬৩), `all_employees` (৪৯), `payrolls` (৪২) |
+| সবচেয়ে বেশি কলামের টেবিল | `users` (৬৪), `all_employees` (৪৯), `payrolls` (৪২) |
 <!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৫<!--/n--> টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৬<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 [PDF (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.pdf) · [SVG](diagrams/full-application-er.svg) · [PNG](diagrams/full-application-er.png) · [Graphviz সোর্স](diagrams/full-application-er.dot)
@@ -64,7 +64,7 @@
 
 </details>
 
-### H. HR Operations, Onboarding & Recruitment (18টি টেবিল)
+### H. HR Operations, Onboarding & Recruitment (19টি টেবিল)
 
 HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), নতুন কর্মীর onboarding, নিয়োগ।
 
@@ -76,7 +76,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`candidate_interviews`, `hr_action_approval_steps`, `hr_actions`, `hr_increment_policies`, `hr_info_requests`, `hr_letter_requests`, `hr_letter_templates`, `hr_letters`, `hr_onboarding_items`, `hr_onboarding_tasks`, `hr_ops_settings`, `hr_reminder_log`, `hr_report_runs`, `hr_saved_reports`, `job_candidates`, `job_postings`, `onboarding_applications`, `onboarding_documents`
+`candidate_interviews`, `employee_requisitions`, `hr_action_approval_steps`, `hr_actions`, `hr_increment_policies`, `hr_info_requests`, `hr_letter_requests`, `hr_letter_templates`, `hr_letters`, `hr_onboarding_items`, `hr_onboarding_tasks`, `hr_ops_settings`, `hr_reminder_log`, `hr_report_runs`, `hr_saved_reports`, `job_candidates`, `job_postings`, `onboarding_applications`, `onboarding_documents`
 
 </details>
 
@@ -261,7 +261,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | <!--n:tables-->২১৫<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২১৬<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -274,6 +274,6 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৫<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৬<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
 জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

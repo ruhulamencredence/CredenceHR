@@ -85,6 +85,7 @@ type FlagKey =
   | 'can_take_break'
   | 'can_sign_documents'
   | 'can_view_payslip'
+  | 'can_request_items'
   | 'can_email_reports';
 
 interface FlagDef {
@@ -136,6 +137,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
   { key: 'can_view_service_book', label: 'My Service Book', desc: 'Their own service record, read only.', section: 'employees', endpoint: 'service-book-access' },
 
+  { key: 'can_request_items', label: 'SIM & ID Card requests', desc: 'Ask HR for a company SIM or an ID card (new, lost, damaged).', section: 'hr', endpoint: 'request-items-access' },
   { key: 'can_view_payslip', label: 'My Payslip', desc: 'See and download their approved payslips.', section: 'payroll', endpoint: 'payslip-access' },
   { key: 'can_view_loan_request', label: 'Loan / Advance Request', desc: 'Apply for a loan or salary advance.', section: 'payroll', endpoint: 'loan-request-access' },
 

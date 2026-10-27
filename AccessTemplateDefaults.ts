@@ -33,7 +33,8 @@ export const TEMPLATE_FEATURE_COLUMNS: Record<string, string[]> = {
   can_view_roster: ["can_view_roster"],
   can_take_break: ["can_take_break"],
   can_sign_documents: ["can_sign_documents"],
-  can_view_payslip: ["can_view_payslip"]
+  can_view_payslip: ["can_view_payslip"],
+  can_request_items: ["can_request_items"]
 };
 export const TEMPLATE_FEATURES = Object.keys(TEMPLATE_FEATURE_COLUMNS);
 

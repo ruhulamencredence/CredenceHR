@@ -2884,6 +2884,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Users module layers for this account (Module Access -> Users). No saved
   // layers = the defaults, which never include Block Account.
+  // HR Operations layers (Module Access -> HR Operations), same rule.
+  const hrOpsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.hr_operations;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -4732,7 +4738,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* TAB: DATA IMPORT — employees, leave, claims and attendance history from Excel/CSV (DataImport.tsx). */}
       {activeTab === 'data_import' && canSeeDataImport && <DataImport token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
-      {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} />}
+      {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} canRequisitions={hrOpsLayer('requisitions')} />}
       {activeTab === 'task_management' && <TaskManagement token={token} user={user} />}
       {activeTab === 'target_reports' && <TargetReports token={token} user={user} />}
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}

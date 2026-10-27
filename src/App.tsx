@@ -34,6 +34,7 @@ const MyBreak = lazy(retryImport(() => import('./components/MyBreak').then(m => 
 // PEPM Operation -> Material Receive (users.can_receive_material, MprDispatchRoutes.ts).
 const MaterialReceive = lazy(retryImport(() => import('./components/MaterialReceive').then(m => ({ default: m.MaterialReceive }))));
 // Documents to Sign (Self Service, users.can_sign_documents).
+const MyRequisitions = lazy(retryImport(() => import('./components/MyRequisitions').then(m => ({ default: m.MyRequisitions }))));
 const MySignatures = lazy(retryImport(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures }))));
 // My Payslip (Self Service, users.can_view_payslip).
 const MyPayslips = lazy(retryImport(() => import('./components/MyPayslips').then(m => ({ default: m.MyPayslips }))));
@@ -150,7 +151,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -171,6 +172,7 @@ export default function App() {
       if (saved === 'mySignatures' && canOpenSelfView('mySignatures', user)) return 'mySignatures';
       if (saved === 'myPayslips' && canOpenSelfView('myPayslips', user)) return 'myPayslips';
       if (saved === 'materialReceive' && canOpenSelfView('materialReceive', user)) return 'materialReceive';
+      if (saved === 'myRequisitions' && canOpenSelfView('myRequisitions', user)) return 'myRequisitions';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -920,7 +922,7 @@ export default function App() {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -1140,6 +1142,7 @@ export default function App() {
         onboarding: 'hr_operations_onboarding',
         increments: 'hr_operations_increments',
         reports: 'hr_operations_reports',
+        requisitions: 'hr_operations_requisitions',
         settings: 'hr_operations_settings'
       };
       return byTab[hrOpsTab] || 'hr_operations';
@@ -1208,7 +1211,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1572,6 +1575,8 @@ export default function App() {
           <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
           <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
+        ) : selfServiceView === 'myRequisitions' && canOpenSelfView('myRequisitions', user) ? (
+          <MyRequisitions token={token} userName={user.name} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
           <MyPayslips token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTargets' ? (

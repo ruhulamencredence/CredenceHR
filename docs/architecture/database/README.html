@@ -26,19 +26,19 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>টেবিল</td>
-<td><strong>২১৫</strong></td>
+<td><strong>২১৬</strong></td>
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,৩১৩</strong></td>
+<td><strong>২,৩৩২</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
-<td><strong>২৪৯</strong> (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১৪)</td>
+<td><strong>২৪৯</strong> (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১২, NO ACTION ২)</td>
 </tr>
 <tr>
 <td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
-<td>৫৬</td>
+<td>৫৭</td>
 </tr>
 <tr>
 <td>ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম)</td>
@@ -46,13 +46,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>সবচেয়ে বেশি কলামের টেবিল</td>
-<td><code>users</code> (৬৩), <code>all_employees</code> (৪৯), <code>payrolls</code> (৪২)</td>
+<td><code>users</code> (৬৪), <code>all_employees</code> (৪৯), <code>payrolls</code> (৪২)</td>
 </tr>
 </tbody>
 </table>
 <!-- /AUTO:stats -->
 
-<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৫<!--/n--> টেবিল)</h2>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৬<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 <a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
 <ul>
@@ -88,14 +88,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="h-hr-operations-onboarding-recruitment-18">H. HR Operations, Onboarding &amp; Recruitment (18টি টেবিল)</h3>
+<h3 id="h-hr-operations-onboarding-recruitment-19">H. HR Operations, Onboarding &amp; Recruitment (19টি টেবিল)</h3>
 <p>HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), নতুন কর্মীর onboarding, নিয়োগ।</p>
 <p>মূল টেবিল: <code>hr_actions</code>, <code>hr_letters</code>, <code>onboarding_applications</code>, <code>job_postings</code>, <code>job_candidates</code></p>
 <p><img alt="H. HR Operations, Onboarding &amp; Recruitment" src="diagrams/h-hr-operations-onboarding-recruitment.png" /></p>
 <p><a href="diagrams/h-hr-operations-onboarding-recruitment.svg">বড় SVG</a> · <a href="diagrams/h-hr-operations-onboarding-recruitment.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`candidate_interviews`, `hr_action_approval_steps`, `hr_actions`, `hr_increment_policies`, `hr_info_requests`, `hr_letter_requests`, `hr_letter_templates`, `hr_letters`, `hr_onboarding_items`, `hr_onboarding_tasks`, `hr_ops_settings`, `hr_reminder_log`, `hr_report_runs`, `hr_saved_reports`, `job_candidates`, `job_postings`, `onboarding_applications`, `onboarding_documents`
+`candidate_interviews`, `employee_requisitions`, `hr_action_approval_steps`, `hr_actions`, `hr_increment_policies`, `hr_info_requests`, `hr_letter_requests`, `hr_letter_templates`, `hr_letters`, `hr_onboarding_items`, `hr_onboarding_tasks`, `hr_ops_settings`, `hr_reminder_log`, `hr_report_runs`, `hr_saved_reports`, `job_candidates`, `job_postings`, `onboarding_applications`, `onboarding_documents`
 
 </details>
 
@@ -232,7 +232,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td><code>data-dictionary.md</code></td>
-<td><!--n:tables-->২১৫<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+<td><!--n:tables-->২১৬<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
 </tr>
 <tr>
 <td><code>diagrams/*.mmd</code></td>
@@ -256,6 +256,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <p>নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর <strong>Docs sync</strong> কাজটি সার্ভার চালিয়ে <code>information_schema</code> পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে <code>npm run docs:db</code> (বিস্তারিত <code>../README.md</code>-এর "স্বয়ংক্রিয় আপডেট")।</p>
 <h2 id="drawio">draw.io ফাইল</h2>
 <p><code>credencehr-database.drawio</code> — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৫<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৬<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা <code>data-dictionary.md</code> তে।
 জেনারেটর: <code>../tools/db/drawio_*</code> (<code>npm run docs:db</code> নিজে চালায়)।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

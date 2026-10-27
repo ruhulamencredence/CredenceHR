@@ -917,6 +917,8 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           "UPDATE users SET username = ?, email = ?, name = ?, is_onboarding = 0, onboarding_expires_at = NULL, must_change_password = 1 WHERE id = ? AND is_onboarding = 1",
           [code, p.personal_email || null, a.name, Number(a.user_id)]
         );
+        // 5b. Their SIM / ID card requests now belong to the Employee (RequisitionRoutes.ts).
+        await q("UPDATE employee_requisitions SET employee_id = ? WHERE application_id = ? AND employee_id IS NULL", [employeeId, id]).catch(() => {});
         // 6. Documents -> Document Vault (same login, so the key holds).
         await q(
           "INSERT INTO employee_documents (user_id, doc_type, file_name, file_mimetype, file_data, uploaded_by) SELECT ?, doc_type, file_name, file_mime, file_data, ? FROM onboarding_documents WHERE application_id = ? ORDER BY id",

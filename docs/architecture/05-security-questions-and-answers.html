@@ -89,6 +89,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
+<td>কর্মী কি অন্যের SIM/ID card request দেখতে বা নিজে issue করতে পারে?</td>
+<td>না। কর্মী শুধু নিজের request দেখেন ও বাতিল করেন (সুইচ ডিফল্টে বন্ধ); issue বা turn down শুধু HR Operations-এর আলাদা <code>requisitions</code> layer দিয়ে, যা ডিফল্টে কারও নেই। নতুন joiner-এর request-এর route শুধু onboarding login খুলতে পারে, আর approve না হওয়া পর্যন্ত কিছু issue হয় না।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়?</td>
 <td>তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)।</td>
 <td>✅</td>

@@ -9,9 +9,10 @@
 // known fields and decides what is still missing (OnboardingSelfServiceRoutes.ts).
 
 import React, { useState } from 'react';
-import { Plus, Trash2, Upload, FileText, Eye, Save, Send, AlertTriangle, User as UserIcon, MapPin, Phone, HeartHandshake, FolderOpen } from 'lucide-react';
+import { Plus, Trash2, Upload, FileText, Eye, Save, Send, AlertTriangle, User as UserIcon, MapPin, Phone, HeartHandshake, FolderOpen, CreditCard } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
+import { RequisitionPanel } from './MyRequisitions';
 
 export interface PersonEntry {
   name: string;
@@ -419,6 +420,17 @@ export const OnboardingForm: React.FC<{
           </div>
         )}
       </Card>
+
+      {/* SIM / ID card requests — only while HR has them turned on (RequisitionRoutes.ts). */}
+      <RequisitionPanel
+        token={token}
+        joiner
+        wrap={(body) => (
+          <Card icon={CreditCard} title="SIM & ID card" hint="Ask HR for a company SIM or an ID card. They are handed over once you join.">
+            {body}
+          </Card>
+        )}
+      />
 
       {editable && (
         <>

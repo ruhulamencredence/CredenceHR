@@ -148,6 +148,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </pre>
 <p>ফাইল: <code>RecruitmentRoutes.ts</code>, <code>OnboardingSelfServiceRoutes.ts</code>, <code>HROperationsRoutes.ts</code>, <code>ExitOffboardingRoutes.ts</code>, <code>EmployeeRecordsGuard.ts</code>।
 গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি <strong>কর্মী নন</strong> (<code>all_employees</code>-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 <code>ONBOARDING_ONLY</code>)।</p>
+<p><strong>SIM ও ID card requisition</strong> (<code>RequisitionRoutes.ts</code>, টেবিল <code>employee_requisitions</code>): কর্মী Self Service → "SIM &amp; ID Card" থেকে (সুইচ <code>users.can_request_items</code>, ডিফল্টে বন্ধ) আর নতুন joiner My Onboarding থেকে (HR Ops Settings → "Joiners can ask for a SIM / ID card", ডিফল্টে বন্ধ) SIM বা ID card চান (New / Lost / Damaged / Replacement)। HR Operations → "SIM &amp; ID Card" (layer <code>requisitions</code>, explicit-only) থেকে HR issue করে: SIM হলে Mobile Bill-এ ওই কর্মীকে আগে দেওয়া SIM বেছে নেয়, ID card হলে কার্ড নম্বর লেখে (onboarding checklist-এর "ID card issued" নিজে টিক হয়); অথবা কারণসহ turn down। কর্মী alert পান। Joiner-এর request onboarding approve হলে কর্মীর নামে যায়; তার আগে issue করা যায় না।</p>
 <hr />
 <h2 id="workflow_1">৬. ছুটির workflow</h2>
 <pre class="mermaid">flowchart TD

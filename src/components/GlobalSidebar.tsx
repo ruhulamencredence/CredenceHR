@@ -51,7 +51,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -387,6 +387,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_sign_documents) {
     selfServiceItems.push({ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, onClick: () => onGoToSelfServiceTab('mySignatures') });
   }
+  // SIM & ID Card (MyRequisitions.tsx) — ask HR for a SIM or an ID card.
+  // users.can_request_items, off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_request_items) {
+    selfServiceItems.push({ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions') });
+  }
   // My Payslip (MyPayslips.tsx) — this account's approved / paid payslips.
   // users.can_view_payslip, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_payslip) {
@@ -573,6 +578,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
         { key: 'hr_operations_increments', label: 'Increments', icon: TrendingUp, onClick: () => openHrOps('increments') },
         { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports') },
+        // SIM & ID card requests — only with the explicit "requisitions" layer.
+        ...(isSuperAdmin || (user.module_permission_layers?.hr_operations || []).includes('requisitions')
+          ? [{ key: 'hr_operations_requisitions', label: 'SIM & ID Card Requests', icon: CreditCard, onClick: () => openHrOps('requisitions') }]
+          : []),
         { key: 'hr_operations_settings', label: 'HR Ops Settings', icon: Settings, onClick: () => openHrOps('settings') },
       ]
     : [];
@@ -674,7 +683,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myBreak') },
-    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myPayslips', 'myMobileSim', 'myLoans', 'myLetters') },
+    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myPayslips', 'myMobileSim', 'myRequisitions', 'myLoans', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
@@ -705,7 +714,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Briefcase,
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
-        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments', 'hr_operations_requisitions',
         { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
         { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
         { heading: 'Settings' }, 'hr_operations_settings'
