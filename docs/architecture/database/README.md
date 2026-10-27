@@ -10,7 +10,7 @@
 |---|---|
 | টেবিল | **২১৬** |
 | কলাম | **২,৩৩২** |
-| ঘোষিত Foreign Key | **২৪৯** (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১২, NO ACTION ২) |
+| ঘোষিত Foreign Key | **২৪৯** (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১৪) |
 | `company_id` আছে এমন টেবিল (multi-company) | ৫৭ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ২৮টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
 | সবচেয়ে বেশি কলামের টেবিল | `users` (৬৪), `all_employees` (৪৯), `payrolls` (৪২) |
