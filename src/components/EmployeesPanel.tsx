@@ -1274,7 +1274,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
             <option value="active">Active ({counts.active})</option>
             <option value="inactive">Inactive ({counts.inactive})</option>
           </select>
-          <select
+          <SearchSelect
             aria-label="Department filter"
             value={deptFilter}
             onChange={(e) => setDeptFilter(e.target.value)}
@@ -1285,7 +1285,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               <option key={n} value={n}>{n}</option>
             ))}
             <option value="__none__">No department</option>
-          </select>
+          </SearchSelect>
         </div>
       )}
 

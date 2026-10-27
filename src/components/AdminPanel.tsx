@@ -6343,7 +6343,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
-              <select
+              <SearchSelect
                 aria-label="Department filter"
                 value={userDeptFilter}
                 onChange={(e) => setUserDeptFilter(e.target.value)}
@@ -6354,7 +6354,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option key={n} value={n}>{n}</option>
                 ))}
                 <option value="__none__">No department</option>
-              </select>
+              </SearchSelect>
               <button
                 type="button"
                 onClick={() => setShowAccessTemplates(true)}
