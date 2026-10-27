@@ -129,7 +129,8 @@ export const MONO_ACCENTS: { id: MonoAccentId; label: string; swatch: string; gl
   { id: 'rose', label: 'Rose', swatch: '#fda4af', glow: '254,205,211' }
 ];
 const ACCENT_KEY = 'mpr_mono_accent';
-const DEFAULT_ACCENT: MonoAccentId = 'sky';
+// Rose until the account picks another colour touch.
+const DEFAULT_ACCENT: MonoAccentId = 'rose';
 export function getSavedMonoAccent(): MonoAccentId {
   try {
     const v = localStorage.getItem(ACCENT_KEY);

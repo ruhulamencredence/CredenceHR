@@ -8,6 +8,7 @@ import VerifyPage from './components/VerifyPage.tsx';
 import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
 import type { User } from './types.ts';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
+import { Capacitor } from '@capacitor/core';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
 import { installChunkReload } from './lib/chunkReload.ts';
@@ -21,6 +22,14 @@ installChunkReload();
 // Applied here, before the first paint, rather than in a useEffect once
 // App has mounted — otherwise the default background gradient would flash
 // briefly before swapping to the account's saved choice.
+// The app (APK / iOS) or an iPhone "Add to Home Screen": a few things look
+// app-like there (index.css html[data-app-shell]).
+try {
+  const standalone = (navigator as any).standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
+  if (Capacitor.isNativePlatform() || standalone) document.documentElement.dataset.appShell = '1';
+} catch {
+  // not available — website look
+}
 applyBackgroundTheme(getSavedBackgroundTheme());
 
 // /chat is Chat's own standalone tab (see App.tsx's openChat, which
