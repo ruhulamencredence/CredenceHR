@@ -84,6 +84,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
+<td>Login ID</td>
+<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো</td>
+<td><code>EmployeeLoginId.ts</code>, <code>EmployeeRoutes.ts</code>, <code>DataImportRoutes.ts</code></td>
+</tr>
+<tr>
 <td>কেউ নিজে অ্যাকাউন্ট খুলতে পারে না</td>
 <td>Public registration বন্ধ; শুধু Admin/HR অ্যাকাউন্ট বানায়</td>
 <td><code>AuthRoutes.ts</code></td>
