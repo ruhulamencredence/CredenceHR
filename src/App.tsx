@@ -1619,11 +1619,11 @@ export default function App() {
         </AppErrorBoundary>
       </main>
 
-      {/* This footer line is web-only — hidden on the Capacitor Android APK
-          build so mobile app users never see it, while the website keeps
-          showing it exactly as before. */}
+      {/* This footer line is desktop-web only — hidden on the Capacitor APK
+          and on phone-width web (mobile browser, iPhone Home Screen) so a
+          phone looks the same everywhere. */}
       {!Capacitor.isNativePlatform() && (
-        <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-accent)', color: 'rgba(255,255,255,0.85)' }}>
+        <footer className="hidden md:block py-6 text-center text-xs" style={{ background: 'var(--g-accent)', color: 'rgba(255,255,255,0.85)' }}>
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
           <p className="mt-1" style={{ color: 'rgba(255,255,255,0.65)' }}>&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>
