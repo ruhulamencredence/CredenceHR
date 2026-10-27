@@ -681,6 +681,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     window.scrollTo({ top: 0 });
   };
 
+  // Employees -> a row's "Module Access" button: go to Users and open that
+  // account's Module Access page. Offered only to someone who can see Users
+  // and grant module access (same gate as the button on the Users page).
+  const [pendingModuleAccessUser, setPendingModuleAccessUser] = useState<number | null>(null);
+  const canOpenModuleAccessFromEmployees = canSee('users') && canGrantModuleAccess;
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -733,6 +739,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     window.addEventListener('credence:password-requests', open);
     return () => window.removeEventListener('credence:password-requests', open);
   }, []);
+  useEffect(() => {
+    if (pendingModuleAccessUser == null || activeTab !== 'users') return;
+    const u = users.find((x) => x.id === pendingModuleAccessUser);
+    if (!u) return;
+    setPendingModuleAccessUser(null);
+    openManageModules(u);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingModuleAccessUser, activeTab, users]);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
@@ -6567,7 +6581,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           Name, Designation, Department, Email, Phone). Plain hand-entered
           reference data, not tied to a login account. */}
       {activeTab === 'employees' && (
-        <EmployeesPanel token={token} user={user} />
+        <EmployeesPanel
+          token={token}
+          user={user}
+          onOpenModuleAccess={
+            canOpenModuleAccessFromEmployees
+              ? (userId) => {
+                  setPendingModuleAccessUser(userId);
+                  setActiveTab('users');
+                }
+              : undefined
+          }
+        />
       )}
 
       {/* TAB: DEPARTMENTS — real org-structure master data: a Department name

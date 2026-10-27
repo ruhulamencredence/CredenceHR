@@ -39,6 +39,9 @@ const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[
 interface EmployeesPanelProps {
   token: string;
   user: User;
+  // Opens this login account's Module Access page (Users). Left out for
+  // accounts that can't grant module access.
+  onOpenModuleAccess?: (userId: number) => void;
 }
 
 interface EmployeeFormState {
@@ -307,7 +310,7 @@ const EmployeesTableSkeleton: React.FC = () => {
   );
 };
 
-export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) => {
+export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onOpenModuleAccess }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -1363,6 +1366,17 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                             <ShieldCheck className="w-3 h-3" /> Has Login
                           </span>
+                          {onOpenModuleAccess && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenModuleAccess(emp.user_id!)}
+                              className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Open this account's Module Access"
+                              aria-label="Open Module Access"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleUnlinkUser(emp)}
