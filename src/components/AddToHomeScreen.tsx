@@ -5,7 +5,8 @@
 
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Share, SquarePlus, Smartphone } from 'lucide-react';
+import { X, Share, SquarePlus } from 'lucide-react';
+import appStoreIcon from '../assets/app-store-ios.svg';
 
 export const isIOSDevice = () =>
   typeof navigator !== 'undefined' &&
@@ -28,7 +29,7 @@ export const AddToHomeScreenButton: React.FC = () => {
         className="mt-5 w-full flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
         style={{ background: '#111318' }}
       >
-        <Smartphone className="w-5 h-5 shrink-0" />
+        <img src={appStoreIcon} alt="" className="w-8 h-8 shrink-0" />
         <span className="flex flex-col items-start leading-tight">
           <span className="text-[10px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
             GET THE APP ON
