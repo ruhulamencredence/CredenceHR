@@ -1019,6 +1019,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportEmployeeFilter, setReportEmployeeFilter] = useState('');
   const [reportDepartmentFilter, setReportDepartmentFilter] = useState('');
   const [reportDepartments, setReportDepartments] = useState<string[]>([]);
+  // Active / Inactive employees (by their Employee record); '' = everyone.
+  const [reportStatusFilter, setReportStatusFilter] = useState<'' | 'active' | 'inactive'>('');
   // Month Wise grid cell display — 'symbol' is the original compact P/A/H/W
   // per day (times only on hover); 'times' widens each day column and prints
   // the actual Check In/Out time stacked in the cell, for when the Admin
@@ -1066,6 +1068,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (reportProjectFilter) params.set('project_id', reportProjectFilter);
     if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
     if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+    if (reportStatusFilter) params.set('status', reportStatusFilter);
     return params;
   };
   const monthlyReportTotal = (r: any) => (r ? Number(r.total ?? r.users?.length ?? 0) : 0);
@@ -1098,6 +1101,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (reportProjectFilter) params.set('project_id', reportProjectFilter);
       if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
       if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+      if (reportStatusFilter) params.set('status', reportStatusFilter);
       const res = await fetch(apiUrl(`/api/attendance/report/daily?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setDailyReport(await res.json());
     } catch (err) {
@@ -1121,6 +1125,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
     if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
+    if (reportStatusFilter) filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : 'Inactive employees']);
     return filters;
   };
 
@@ -4135,6 +4140,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {reportDepartments.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
+                </SearchSelect>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>
+                <SearchSelect
+                  value={reportStatusFilter}
+                  onChange={(e) => setReportStatusFilter(e.target.value as '' | 'active' | 'inactive')}
+                  className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[140px]"
+                >
+                  <option value="">All Employees</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
                 </SearchSelect>
               </div>
 

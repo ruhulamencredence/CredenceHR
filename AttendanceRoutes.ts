@@ -814,6 +814,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const project_id = req.query.project_id ? Number(req.query.project_id) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
+      // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
+      const empStatus = String(req.query.status || "all");
 
       // Department-wise scope (see the deps comment above). null = unrestricted.
       // A department query param outside the caller's scope is rejected up
@@ -847,17 +849,22 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // Department (Admin Panel -> Departments) by resolveEmployeeDepartment,
       // so it stays correct whether that row was set via the Department
       // dropdown or (on an older row) never migrated off free text.
-      const allEmployeesForDept = await queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL");
+      const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
+      const inactiveUserIds = new Set<number>();
       for (const e of allEmployeesForDept) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
       }
+      const statusMatches = (id: number) =>
+        empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
       const filteredUsers = users.filter(
         (u: any) =>
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
+          statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case: `department` was
           // already validated to be within deptScope above when given, so
           // this only bites when the caller left the Department filter blank
@@ -1116,6 +1123,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const project_id = req.query.project_id ? Number(req.query.project_id) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
+      // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
+      const empStatus = String(req.query.status || "all");
 
       // Department-wise scope (see the deps comment above / the monthly
       // report route's own copy of this check). null = unrestricted.
@@ -1133,11 +1142,15 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       // Same Employee Directory lookup GET /api/attendance/report/monthly and
       // GET /api/leave-balances use — department has no column of its own on users.
-      const allEmployeesForDept = await queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL");
+      const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
+      const inactiveUserIds = new Set<number>();
       for (const e of allEmployeesForDept) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
       }
+      const statusMatches = (id: number) =>
+        empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
       const dayRows = rows.filter(
         (r: any) => String(r.attendance_date).slice(0, 10) === date && (!project_id || Number(r.project_id) === project_id)
@@ -1150,6 +1163,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
+          statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case — see the monthly
           // report route's identical comment above.
           (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
