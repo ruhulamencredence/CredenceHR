@@ -2,7 +2,12 @@
 const { chromium } = (await import(process.env.PLAYWRIGHT || "playwright")).default ?? await import(process.env.PLAYWRIGHT || "playwright");
 import fs from "fs";
 const OUT = process.env.DOCS_DB_OUT, D = OUT + "/diagrams/";
-const svg = fs.readFileSync("full.svg", "utf8");
+// fdp lays the very same graph out differently from run to run. Same graph
+// as the one committed -> keep the committed picture, so a push that changes
+// no table doesn't rewrite a 1 MB SVG (and full-diagram.html) every time.
+const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null);
+const prevSvg = read(D + "full-application-er.svg");
+const svg = prevSvg && read(D + "full-application-er.dot") === fs.readFileSync("full.dot", "utf8") ? prevSvg : fs.readFileSync("full.svg", "utf8");
 fs.writeFileSync(D + "full-application-er.svg", svg);
 fs.copyFileSync("full.dot", D + "full-application-er.dot");
 const m = svg.match(/<svg[^>]*width="([\d.]+)pt" height="([\d.]+)pt"/);
