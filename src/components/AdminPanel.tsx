@@ -42,6 +42,7 @@ import { UserBulkBar } from './UserBulkBar';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { ModuleAccessPage } from './ModuleAccessPage';
 import { JobEditDetailsPopup } from './JobEditDetailsPopup';
+import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { PagerBar } from './PagerBar';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
@@ -1382,6 +1383,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [filterBudgetId, setFilterBudgetId] = useState('');
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
+  const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
 
   // Android hardware back button: closes whichever modal is currently open
   // instead of exiting the app (see useBackButtonClose.ts). Each line is a
@@ -2124,8 +2127,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         type: 'success',
         text: `Imported ${data.items_inserted} new row(s)${
           data.items_replaced > 0 ? `, replaced ${data.items_replaced} existing row(s) matched by Project/MRF No/Description/Specification` : ''
-        }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).`
+        }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).${
+          data.notice_draft && !canSee('notices') ? ' A draft notice about it is waiting in Notices for someone to publish.' : ''
+        }`
       });
+      // "<Budget> - MPR Updated up to <date>": check and publish it now.
+      if (data.notice_draft && canSee('notices')) setBudgetNotice(data.notice_draft);
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
@@ -6862,6 +6869,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
           may open (projects, mprs, imports, reports, users, recycle, editlog). */}
+      {budgetNotice && (
+        <BudgetNoticePopup
+          token={token}
+          draft={budgetNotice}
+          onClose={() => setBudgetNotice(null)}
+          onDone={(text) => {
+            setBudgetNotice(null);
+            setMessage({ type: 'success', text });
+          }}
+        />
+      )}
+
       {showAccessTemplates && (
         <AccessTemplatesModal
           token={token}

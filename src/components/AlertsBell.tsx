@@ -143,6 +143,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
           : new CustomEvent('credence:open-admin-module', { detail: 'reports' })
       );
     }
+    // A notice drafted from a Budget import -> Admin Panel -> Notices, where it
+    // waits to be published.
+    if (alert.type === 'notice_draft') {
+      setOpen(false);
+      window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }));
+    }
   };
 
   return (

@@ -91,6 +91,11 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
           : new CustomEvent('credence:open-admin-module', { detail: 'reports' })
       );
     }
+    // A notice drafted from a Budget import -> Admin Panel -> Notices, where it
+    // waits to be published.
+    if (alert.type === 'notice_draft') {
+      window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }));
+    }
   };
 
   return (

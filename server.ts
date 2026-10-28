@@ -13,6 +13,7 @@ import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./d
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
+import { ensureBudgetNoticeSchema, draftBudgetNotice } from "./BudgetNoticeDraft";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
@@ -264,6 +265,8 @@ async function ensureSchemaMigrations() {
   }
   // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
   await ensureMprDispatchSchema(dbPool);
+  // Budget import -> draft notice (BudgetNoticeDraft.ts).
+  await ensureBudgetNoticeSchema(dbPool);
   // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
   await ensureUserAccessSchema(dbPool);
 
@@ -4895,6 +4898,9 @@ async function startServer() {
         "UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ? WHERE id = ?",
         [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, id]
       );
+      // Edited by a person: a later Budget import writes a new draft instead
+      // of overwriting these edits (BudgetNoticeDraft.ts).
+      await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
 
       // Replace the target list wholesale rather than diffing — simplest correct
       // behaviour for a form that always submits the full intended audience.
@@ -4922,6 +4928,9 @@ async function startServer() {
       const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
       await queryDB("UPDATE notices SET is_active = ? WHERE id = ?", [req.body.is_active ? 1 : 0, id]);
+      // A Budget-import draft that is published is no longer the draft the
+      // next import rewrites (BudgetNoticeDraft.ts).
+      if (req.body.is_active) await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -6530,8 +6539,17 @@ async function startServer() {
         }
       }
 
+      // "<Budget> - MPR Updated up to <date>" as a draft notice, opened for
+      // editing on the import page (BudgetNoticeDraft.ts) — never fails the import.
+      const noticeDraft = itemsInserted + itemsReplaced
+        ? await draftBudgetNotice(queryDB, createAlert, { budgetId, actorId: Number(req.user.id), today: todayInDhaka() }).catch((err: any) => {
+            console.warn("⚠️ Budget draft notice: " + err.message);
+            return null;
+          })
+        : null;
       res.json({
         success: true,
+        notice_draft: noticeDraft,
         items_inserted: itemsInserted,
         items_replaced: itemsReplaced,
         mpr_added: mprAdded,
