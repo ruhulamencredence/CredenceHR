@@ -417,7 +417,7 @@ export const AttendanceGauge: React.FC<{
           <div className="text-[11px] text-zinc-500 mt-[3px] px-2 truncate">{caption}</div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-1.5 w-full">
+      <div className="grid grid-cols-4 gap-1 w-full">
         {LEGEND.map((l) => {
           const on = filter === l.key;
           const s = STATUS_STYLE[l.key];
@@ -427,12 +427,14 @@ export const AttendanceGauge: React.FC<{
               type="button"
               aria-pressed={on}
               onClick={() => onFilter(on ? null : l.key)}
-              className="min-h-[36px] flex items-center gap-1.5 px-3 rounded-full text-xs font-semibold border"
+              className="min-w-0 min-h-[44px] flex flex-col items-center justify-center px-1 py-1 rounded-2xl border whitespace-nowrap"
               style={{ color: on ? s.fg : '#3f3f46', background: on ? s.soft : 'rgba(255,255,255,.45)', borderColor: on ? s.color : 'rgba(255,255,255,.8)' }}
             >
-              <span className="w-2 h-2 rounded-full" style={{ background: s.color }} />
-              {l.label}
-              <span className="ml-auto tabular-nums opacity-70">{counts[l.key]}</span>
+              <span className="flex items-center gap-1 text-sm font-extrabold tabular-nums leading-none">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+                {counts[l.key]}
+              </span>
+              <span className="mt-1 text-[10.5px] font-semibold leading-none max-w-full truncate">{l.label}</span>
             </button>
           );
         })}
