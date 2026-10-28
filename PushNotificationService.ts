@@ -104,7 +104,8 @@ export async function sendPushToRoomMembers(
     const rows = await queryDB(
       `SELECT t.token FROM chat_push_tokens t
        JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
-       WHERE t.user_id != ?`,
+       JOIN users u ON u.id = t.user_id
+       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)`,
       [roomId, excludeUserId]
     );
     if (rows.length === 0) return;

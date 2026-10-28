@@ -584,3 +584,6 @@ html[data-ui="mono"] .app-tile-icon {
   background-color: #18181b !important;
   box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.45) !important;
 }
+
+/* Chat: a quoted message flashes when its reply's quote is tapped (ChatPanel.tsx). */
+.chat-flash { background-color: rgba(var(--g-accent-rgb, 127, 0, 255), 0.12); }

@@ -43,6 +43,7 @@ export const ROLE_BADGE: Record<string, string> = {
 export const ROLE_LABEL: Record<string, string> = { superadmin: 'Superadmin', admin: 'Admin', user: 'User' };
 
 const FEATURE_NAME: Record<string, string> = {
+  can_use_chat: 'Chat',
   can_edit_delivery_date: 'Edit Delivery Date',
   can_job_edit: 'Job Edit',
   can_use_attendance: 'Remote Attendance',
@@ -354,6 +355,7 @@ export function UserAccessDrawer({
     { label: 'Movement Claim', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true },
+    { label: 'Chat', on: u.can_use_chat !== false },
     { label: 'AI Assistant', on: u.can_use_ai_assistant !== false }
   ];
 

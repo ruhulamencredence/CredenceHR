@@ -540,6 +540,8 @@ export interface User {
   // Credence Assistant (AiAssistantRoutes.ts): on unless switched off; its
   // report download and live support are off by default.
   can_use_ai_assistant?: boolean;
+  // Chat (ChatPanel.tsx) — Module Access switch, on unless turned off.
+  can_use_chat?: boolean;
   can_export_assistant_reports?: boolean;
   can_handle_assistant_support?: boolean;
   // Admin Panel -> Users -> Block login (UserAccessExtras.ts).
@@ -1574,6 +1576,9 @@ export interface ChatDirectoryUser {
   email: string | null;
   username?: string | null;
   role: UserRole;
+  // From the employee record (blank for accounts with none).
+  department?: string | null;
+  designation?: string | null;
 }
 
 export interface ChatRoom {
@@ -1593,6 +1598,9 @@ export interface ChatRoom {
   // Only set for type === 'direct' — the other participant, so the room list
   // can show their name/avatar instead of a room title (direct chats have none).
   other_participant: ChatDirectoryUser | null;
+  // This account's background for the conversation (chat/ChatExtras.tsx
+  // CHAT_WALLPAPERS); null = the default.
+  wallpaper?: string | null;
 }
 
 export interface ChatRoomMember {
@@ -1626,4 +1634,22 @@ export interface ChatMessage {
   reply_to_content: string | null;
   reply_to_sender_name: string | null;
   created_at: string;
+  // "Delete for everyone": set once unsent (content and attachment are gone).
+  unsent_at?: string | null;
+  // Set when the sender edited the text (shows "Edited").
+  edited_at?: string | null;
+  // A copy forwarded from another chat (shows "Forwarded").
+  is_forwarded?: number | boolean;
+  // One per account that reacted (ChatRoutes.ts loadMessages).
+  reactions?: ChatReaction[];
 }
+export interface ChatReaction {
+  emoji: string;
+  user_id: number;
+  name: string;
+}
+// Chat for this account: a Superadmin always; anyone else unless Module
+// Access -> Chat is turned off. The API checks the same switch (ChatRoutes.ts
+// canUseChat).
+export const chatAllowed = (u?: Pick<User, 'role' | 'can_use_chat'> | null): boolean =>
+  !!u && (u.role === 'superadmin' || u.can_use_chat !== false);

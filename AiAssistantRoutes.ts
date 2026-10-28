@@ -230,7 +230,8 @@ const HELP: HelpEntry[] = [
   { id: "password", title: "Password / Profile", keys: ["password", "পাসওয়ার্ড", "profile", "প্রোফাইল", "ছবি", "photo", "username"],
     steps: "আপনার **Profile** পাতায় (ওয়েবে উপরে ডান কোণে নামের অক্ষরে চাপলে খোলে) ছবি, ব্যক্তিগত তথ্য, Username আর Password বদলানো যায়। নিচের বোতামেও খোলা যাবে।", nav: "profile" },
   { id: "chat", title: "Chat", keys: ["chat", "চ্যাট", "message", "মেসেজ", "call", "কল"],
-    steps: "উপরের বারে Chat আইকন (💬) চাপুন। কাউকে খুঁজে মেসেজ পাঠান; Calls চালু থাকলে অডিও/ভিডিও কলও করা যায়।" },
+    steps: "উপরের বারে Chat আইকন (💬) চাপুন। কাউকে খুঁজে মেসেজ পাঠান; Calls চালু থাকলে অডিও/ভিডিও কলও করা যায়।",
+    can: (c) => isSuper(c) || c.flags.can_use_chat },
   { id: "payslip", title: "বেতন / Payslip", keys: ["payslip", "পে স্লিপ", "salary slip", "বেতন", "salary", "স্যালারি"],
     steps: "বেতনের হিসাব Payroll বিভাগ তৈরি করে। Payslip বা বেতন-সংক্রান্ত প্রশ্নে HR/Accounts-এ যোগাযোগ করুন। Salary certificate লাগলে My Letters থেকে চাইতে পারেন।", nav: "self:myLetters" },
   // HR / Admin pages
@@ -2238,12 +2239,14 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const loadCtx = async (req: any): Promise<Ctx | null> => {
     const u = req.user;
     if (!u || u.onb) return null;
-    const rows: any[] = (await queryDB(`SELECT name, role, can_use_ai_assistant, can_export_assistant_reports, ${SELF_FLAGS.join(", ")} FROM users WHERE id = ?`, [u.id]).catch(() => [])) || [];
+    const rows: any[] = (await queryDB(`SELECT name, role, can_use_ai_assistant, can_export_assistant_reports, can_use_chat, ${SELF_FLAGS.join(", ")} FROM users WHERE id = ?`, [u.id]).catch(() => [])) || [];
     const row = rows[0];
     if (!row) return null;
     if (row.role !== "superadmin" && !Number(row.can_use_ai_assistant ?? 1)) return null;
     const flags: Record<string, boolean> = {};
     for (const f of SELF_FLAGS) flags[f] = !!Number(row[f] || 0);
+    // Chat is on unless turned off (users.can_use_chat).
+    flags.can_use_chat = Number(row.can_use_chat ?? 1) !== 0;
     const modules = row.role === "superadmin" ? [] : await getAdminModules(u.id).catch(() => []);
     return { req, userId: u.id, name: String(row.name || ""), role: String(row.role || ""), modules, flags, today: todayInDhaka(),
       canExport: row.role === "superadmin" || !!Number(row.can_export_assistant_reports || 0) };

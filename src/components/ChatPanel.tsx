@@ -15,7 +15,7 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import { UserAvatar } from './UserAvatar';
-import { CHAT_CONVERSATION_BACKGROUND } from '../lib/backgroundTheme';
+import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
@@ -24,9 +24,9 @@ import { VoiceRecorder } from 'capacitor-voice-recorder';
 const nativeMic = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('VoiceRecorder');
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward
 } from 'lucide-react';
-import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
+import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
@@ -230,6 +230,62 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  // WhatsApp-style message menu / who reacted / own About (chat/ChatExtras.tsx).
+  const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
+  // Editing one of your own text messages (menu -> Edit): the box below
+  // holds its text and Send saves the change instead of sending a new one.
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  const [editError, setEditError] = useState('');
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  // Pinned messages of the open chat (bar under the header) and the pin popup.
+  const [pins, setPins] = useState<ChatPin[]>([]);
+  const [pinIndex, setPinIndex] = useState(0);
+  const [pinMsg, setPinMsg] = useState<ChatMessage | null>(null);
+  const fetchPins = useCallback(
+    async (roomId: number) => {
+      try {
+        const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/pins`), { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && roomId === activeRoomIdRef.current) setPins(await res.json());
+      } catch {
+        // Offline — the bar keeps what it showed.
+      }
+    },
+    [token]
+  );
+  const [toast, setToast] = useState('');
+  const [whoMsg, setWhoMsg] = useState<ChatMessage | null>(null);
+  const [showMyAbout, setShowMyAbout] = useState(false);
+  const [profileTick, setProfileTick] = useState(0);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const patchMessage = useCallback((id: number, patch: Partial<ChatMessage>) => setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m))), []);
+  const unsentPatch: Partial<ChatMessage> = { unsent_at: new Date().toISOString(), content: null, has_attachment: false, attachment_filename: null, reactions: [] };
+  const openAttachment = async (id: number) => {
+    const res = await fetch(apiUrl(`/api/chat/messages/${id}/attachment`), { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    window.open(URL.createObjectURL(await res.blob()), '_blank');
+  };
+  // Brings a quoted message into view (tapping a reply's quote) and flashes it.
+  const jumpToMessage = async (id: number) => {
+    // Not loaded yet (older than what is on screen): load earlier pages until it is.
+    let have = messages;
+    for (let i = 0; i < 10 && activeRoomId && !have.some((m) => m.id === id) && have.length; i++) {
+      const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?limit=100&beforeId=${have[0].id}`), { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      const older: ChatMessage[] = res && res.ok ? await res.json() : [];
+      if (!older.length) break;
+      have = [...older, ...have];
+      setMessages(have);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    const el = messagesContainerRef.current?.querySelector(`[data-msg-id="${id}"]`) as HTMLElement | null;
+    if (!el || !messagesContainerRef.current) {
+      setToast('That message is no longer in this chat.');
+      setTimeout(() => setToast(''), 2500);
+      return;
+    }
+    messagesContainerRef.current.scrollTop = el.offsetTop - messagesContainerRef.current.clientHeight / 3;
+    el.classList.add('chat-flash');
+    setTimeout(() => el.classList.remove('chat-flash'), 1200);
+  };
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [members, setMembers] = useState<ChatRoomMember[]>([]);
   const [showNewChatModal, setShowNewChatModal] = useState<'direct' | 'group' | 'community' | null>(null);
@@ -272,8 +328,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   useBackButtonClose(!!showNewChatModal, () => setShowNewChatModal(null));
   useBackButtonClose(showInfoPanel, () => setShowInfoPanel(false));
+  useBackButtonClose(!!menuMsg, () => setMenuMsg(null));
 
   const activeRoom = useMemo(() => rooms.find((r) => r.id === activeRoomId) || null, [rooms, activeRoomId]);
+  // Contact / group info page: About, work details, shared media, common groups.
+  const profile = useChatProfile(token, showInfoPanel ? activeRoomId : null, profileTick);
 
   const fetchRooms = useCallback(async () => {
     try {
@@ -381,7 +440,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       fetchRooms();
     };
 
+    const onReactions = ({ roomId, messageId, reactions }: { roomId: number; messageId: number; reactions: ChatReaction[] }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { reactions });
+    };
+    const onUnsent = ({ roomId, messageId }: { roomId: number; messageId: number }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { unsent_at: new Date().toISOString(), content: null, has_attachment: false, attachment_filename: null, reactions: [] });
+      setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: 'This message was deleted', last_message_type: 'text' } : r)));
+    };
     socket.on('receive_message', onReceive);
+    const onEdited = ({ roomId, messageId, content, edited_at }: { roomId: number; messageId: number; content: string; edited_at: string }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { content, edited_at });
+      setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: content } : r)));
+    };
+    const onPins = ({ roomId }: { roomId: number }) => {
+      if (roomId === activeRoomIdRef.current) void fetchPins(roomId);
+    };
+    socket.on('pins_changed', onPins);
+    socket.on('message_reactions', onReactions);
+    socket.on('message_edited', onEdited);
+    socket.on('message_unsent', onUnsent);
     socket.on('user_typing', onTyping);
     socket.on('message_read', onRead);
     socket.on('presence_change', onPresence);
@@ -394,23 +471,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
+      socket.off('pins_changed', onPins);
+      socket.off('message_reactions', onReactions);
+      socket.off('message_edited', onEdited);
+      socket.off('message_unsent', onUnsent);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchRooms, fetchMembers, user.id]);
+  }, [fetchRooms, fetchMembers, user.id, patchMessage, fetchPins]);
 
   const openRoom = useCallback(
     async (roomId: number) => {
       setActiveRoomId(roomId);
       setShowInfoPanel(false);
       setReplyTo(null);
+      setEditing(null);
+      setPins([]);
+      setPinIndex(0);
       setOtherReadMessageId(null);
       setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
+      activeRoomIdRef.current = roomId;
+      void fetchPins(roomId);
       // Members are needed up-front for @mention autocomplete in a group/
       // community, not just when the info panel is opened — see
       // handleTyping/mentionCandidates below.
@@ -614,6 +700,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const content = messageInput.trim();
     if (!content || !activeRoomId || sending) return;
     setSending(true);
+    if (editing) {
+      setEditError('');
+      fetch(apiUrl(`/api/chat/messages/${editing.id}/edit`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content })
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not edit the message');
+          if (!data.unchanged) setMessages((prev) => prev.map((m) => (m.id === editing.id ? { ...m, content: data.content, edited_at: data.edited_at } : m)));
+          setEditing(null);
+          setMessageInput('');
+        })
+        .catch((e) => setEditError(e.message))
+        .finally(() => setSending(false));
+      return;
+    }
     const socket = getChatSocket();
     const payload = { roomId: activeRoomId, content, replyToId: replyTo?.id || null };
     const finish = () => {
@@ -642,7 +746,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         })
         .catch(() => finish());
     }
-  }, [messageInput, activeRoomId, sending, replyTo, token]);
+  }, [messageInput, activeRoomId, sending, replyTo, token, editing]);
 
   // Message box grows with its content (now a <textarea>, so Enter can make
   // a new line instead of always sending — see the onKeyDown below) up to a
@@ -896,6 +1000,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
+          <button type="button" onClick={() => setShowMyAbout(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full" title="My chat profile (About)" aria-label="My chat profile">
+            <UserRound className="w-5 h-5" />
+          </button>
           <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
             <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
@@ -1105,10 +1212,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               <button
                 type="button"
                 onClick={() => {
-                  if (activeRoom.type !== 'direct') {
-                    setShowInfoPanel((v) => !v);
-                    fetchMembers(activeRoom.id);
-                  }
+                  setShowInfoPanel((v) => !v);
+                  setProfileTick((t) => t + 1);
+                  if (activeRoom.type !== 'direct') fetchMembers(activeRoom.id);
                 }}
                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
               >
@@ -1127,7 +1233,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       : activeRoom.type === 'direct'
                       ? activeRoom.other_participant && onlineUserIds.has(activeRoom.other_participant.id)
                         ? 'Online'
-                        : 'Offline'
+                        : 'Tap for contact info'
                       : 'Tap for group info'}
                   </span>
                 </div>
@@ -1162,72 +1268,119 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
-            {/* Frosted Glass kept, but faint: a soft lavender wash (the app's own
-                light background) over it, so the strips barely show and the
-                messages carry the page. */}
+            <PinnedBar
+              pins={pins}
+              index={pinIndex}
+              meId={user.id}
+              onTap={() => {
+                const p = pins[pinIndex % pins.length];
+                if (p) void jumpToMessage(p.message.id);
+                setPinIndex((i) => (i + 1) % Math.max(1, pins.length));
+              }}
+            />
+            {/* The account's wallpaper for this chat (Contact / Group info ->
+                Chat wallpaper); "Frosted" — faint Frosted Glass under a soft
+                lavender wash — when none is picked. */}
             <div
               ref={messagesContainerRef}
               className="flex-1 overflow-y-auto p-4 space-y-2"
-              style={{
-                background: `radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.22), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.3), transparent 65%), linear-gradient(180deg, rgba(253,252,255,0.86), rgba(245,240,255,0.86)), ${CHAT_CONVERSATION_BACKGROUND}`
-              }}
+              style={{ background: wallpaperCss(activeRoom.wallpaper) }}
             >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
                 const isMe = msg.sender_id === user.id;
                 const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
+                const unsent = !!msg.unsent_at;
+                // Long-press (phone) or right-click / the ⌄ button (computer)
+                // opens the message menu: react, reply, copy, delete.
+                const openMenu = () => setMenuMsg(msg);
+                const cancelPress = () => {
+                  if (longPressRef.current) clearTimeout(longPressRef.current);
+                  longPressRef.current = null;
+                };
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className="max-w-[75%] md:max-w-md">
+                  <div key={msg.id} data-msg-id={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}>
+                    <div className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       {!isMe && activeRoom.type !== 'direct' && (
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
                       <div
-                        className={`px-3 py-2 rounded-[18px] text-sm text-slate-800 border ${
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          openMenu();
+                        }}
+                        onTouchStart={() => {
+                          cancelPress();
+                          longPressRef.current = setTimeout(() => {
+                            longPressRef.current = null;
+                            navigator.vibrate?.(15);
+                            openMenu();
+                          }, 450);
+                        }}
+                        onTouchEnd={cancelPress}
+                        onTouchMove={cancelPress}
+                        className={`group relative px-3 py-2 rounded-[18px] text-sm text-slate-800 border select-none md:select-text ${
                           isMe
-                            ? 'bg-[rgba(var(--g-accent-rgb,127,0,255),0.10)] border-[rgba(var(--g-accent-rgb,127,0,255),0.10)] rounded-br-[4px]'
-                            : 'bg-white/75 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
+                            ? 'border-[rgba(var(--g-accent-rgb,127,0,255),0.12)] rounded-br-[4px] shadow-[0_2px_8px_-5px_rgba(31,38,135,0.2)]'
+                            : 'bg-white/90 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
+                        // Own bubbles: the accent tint over white, so a patterned wallpaper doesn't show through.
+                        style={isMe ? { background: 'linear-gradient(rgba(var(--g-accent-rgb,127,0,255),0.11), rgba(var(--g-accent-rgb,127,0,255),0.11)), rgba(255,255,255,0.94)' } : undefined}
                       >
-                        {msg.reply_to_id && (
-                          <div className="mb-1.5 pl-2 border-l-2 border-slate-300 text-xs text-slate-500">
-                            <div className="font-semibold">{msg.reply_to_sender_name}</div>
-                            <div className="truncate">{msg.reply_to_content}</div>
-                          </div>
+                        <button
+                          type="button"
+                          onClick={openMenu}
+                          className="hidden md:flex absolute top-1 right-1 w-6 h-6 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          aria-label="Message menu"
+                          title="React, reply, delete"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                        {unsent ? (
+                          <p className="italic text-slate-400 flex items-center gap-1.5 pr-2">
+                            <Ban className="w-3.5 h-3.5" /> {isMe ? 'You deleted this message' : 'This message was deleted'}
+                          </p>
+                        ) : (
+                          <>
+                            {!!msg.is_forwarded && (
+                              <div className="flex items-center gap-1 text-[11px] italic text-slate-400 mb-0.5">
+                                <Forward className="w-3 h-3" /> Forwarded
+                              </div>
+                            )}
+                            {msg.reply_to_id && (
+                              <button
+                                type="button"
+                                onClick={() => jumpToMessage(msg.reply_to_id!)}
+                                className="block w-full text-left mb-1.5 pl-2 pr-1 py-1 border-l-[3px] border-[rgba(var(--g-accent-rgb,127,0,255),0.55)] rounded-md bg-black/[0.04] text-xs text-slate-500"
+                              >
+                                <div className="font-semibold text-[rgb(var(--g-accent-rgb,127,0,255))]">{msg.reply_to_sender_name}</div>
+                                <div className="truncate">{msg.reply_to_content}</div>
+                              </button>
+                            )}
+                            {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
+                            {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
+                            {msg.message_type === 'file' && msg.has_attachment && (
+                              <a
+                                href="#"
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  await openAttachment(msg.id);
+                                }}
+                                className="flex items-center gap-2 text-blue-700 underline"
+                              >
+                                <Paperclip className="w-4 h-4" /> {msg.attachment_filename || 'Attachment'}
+                              </a>
+                            )}
+                            {msg.content && <p className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content, members)}</p>}
+                          </>
                         )}
-                        {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
-                        {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
-                        {msg.message_type === 'file' && msg.has_attachment && (
-                          <a
-                            href="#"
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              const res = await fetch(apiUrl(`/api/chat/messages/${msg.id}/attachment`), {
-                                headers: { Authorization: `Bearer ${token}` }
-                              });
-                              if (!res.ok) return;
-                              const blob = await res.blob();
-                              window.open(URL.createObjectURL(blob), '_blank');
-                            }}
-                            className="flex items-center gap-2 text-blue-700 underline"
-                          >
-                            <Paperclip className="w-4 h-4" /> {msg.attachment_filename || 'Attachment'}
-                          </a>
-                        )}
-                        {msg.content && <p className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content, members)}</p>}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
-                          <button
-                            type="button"
-                            onClick={() => setReplyTo(msg)}
-                            className="opacity-0 hover:opacity-100 focus:opacity-100 mr-1 text-slate-400 hover:text-slate-600"
-                            title="Reply"
-                          >
-                            Reply
-                          </button>
+                          {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
+                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
                         </div>
                       </div>
+                      <ReactionChips reactions={msg.reactions} meId={user.id} mine={isMe} onOpen={() => setWhoMsg(msg)} />
                       {isMe && activeRoom.type !== 'direct' && msg.id === lastOwnMessageId && seenByLastOwnMessage.length > 0 && (
                         <div className="text-[10px] text-slate-400 text-right mr-1 mt-0.5 truncate">
                           Seen by {seenByLastOwnMessage.slice(0, 3).map((r) => r.name.split(' ')[0]).join(', ')}
@@ -1240,10 +1393,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               })}
             </div>
 
-            {replyTo && (
+            {editing && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-600 min-w-0">
+                  <span className="font-semibold text-amber-800">Editing message</span>
+                  <span className="block truncate">{editing.content}</span>
+                  {editError && <span className="block text-rose-700">{editError}</span>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(null);
+                    setEditError('');
+                    setMessageInput('');
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-700"
+                  aria-label="Cancel editing"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {replyTo && !editing && (
               <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
                 <div className="text-xs text-slate-600 truncate">
-                  Replying to <span className="font-semibold">{replyTo.sender_name}</span>: {replyTo.content || 'attachment'}
+                  Replying to <span className="font-semibold">{replyTo.sender_id === user.id ? 'yourself' : replyTo.sender_name}</span>:{' '}
+                  {replyTo.content || (replyTo.message_type === 'image' ? '📷 Photo' : replyTo.message_type === 'audio' ? '🎤 Voice message' : `📎 ${replyTo.attachment_filename || 'File'}`)}
                 </div>
                 <button type="button" onClick={() => setReplyTo(null)} className="p-1 text-slate-400 hover:text-slate-700">
                   <X className="w-4 h-4" />
@@ -1332,8 +1507,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       onClick={sendTextMessage}
                       disabled={sending}
                       className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 disabled:opacity-40 shrink-0"
+                      aria-label={editing ? 'Save edit' : 'Send'}
                     >
-                      <Send className="w-4 h-4" />
+                      {editing ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </button>
                   ) : (
                     <button
@@ -1352,104 +1528,217 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         )}
       </div>
 
-      {/* Group/Community info panel */}
+      {/* Contact info (a direct chat) / Group & Community info */}
       {showInfoPanel && activeRoom && (
-        <div className="w-full md:w-[320px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-0 md:inset-auto z-10">
+        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-0 md:inset-auto z-10">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2">
             <button type="button" onClick={() => setShowInfoPanel(false)} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h3 className="font-bold text-slate-900">{activeRoom.type === 'community' ? 'Community Info' : 'Group Info'}</h3>
+            <h3 className="font-bold text-slate-900">{activeRoom.type === 'direct' ? 'Contact info' : activeRoom.type === 'community' ? 'Community Info' : 'Group Info'}</h3>
           </div>
-          <div className="p-4 border-b border-slate-100 text-center">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-lg mx-auto mb-2"
-              style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
-            >
-              {activeRoom.type === 'community' ? <Shield className="w-7 h-7" /> : <Users className="w-7 h-7" />}
-            </div>
-            <div className="font-semibold text-slate-900">{roomDisplayName(activeRoom, user.id)}</div>
-            <div className="text-xs text-slate-400">{members.length} members</div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase text-slate-400">Members</span>
-              {isRoomAdmin && (
-                <button type="button" onClick={() => setShowAddMembers(true)} className="text-xs font-semibold text-blue-600 flex items-center gap-1">
-                  <UserPlus className="w-3.5 h-3.5" /> Add
-                </button>
+          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+            <div className="p-5 text-center">
+              {activeRoom.type === 'direct' ? (
+                <UserAvatar userId={activeRoom.other_participant?.id} name={roomDisplayName(activeRoom, user.id)} token={token} className="w-24 h-24 text-2xl mx-auto mb-3" />
+              ) : (
+                <div
+                  className="w-20 h-20 rounded-full flex items-center justify-center text-white font-bold text-lg mx-auto mb-3"
+                  style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
+                >
+                  {activeRoom.type === 'community' ? <Shield className="w-8 h-8" /> : <Users className="w-8 h-8" />}
+                </div>
+              )}
+              <div className="font-semibold text-lg text-slate-900">{roomDisplayName(activeRoom, user.id)}</div>
+              {activeRoom.type === 'direct' ? (
+                <div className="text-xs text-slate-500">
+                  {activeRoom.other_participant && onlineUserIds.has(activeRoom.other_participant.id) ? 'Online' : profile?.person?.username ? `@${profile.person.username}` : 'Offline'}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400">{activeRoom.type === 'community' ? 'Community' : 'Group'} · {members.length} members</div>
+              )}
+              {activeRoom.type === 'direct' && activeRoom.other_participant && canCall && (
+                <div className="mt-3 flex justify-center gap-3">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => startCall(activeRoom, k)}
+                      className="flex flex-col items-center gap-1 px-4 py-2 rounded-2xl border border-slate-200 text-violet-600 hover:bg-violet-50 text-xs font-medium"
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />} {k === 'audio' ? 'Audio' : 'Video'}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-            {members.map((m) => (
-              <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
-                <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-9 h-9 text-xs" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
-                  {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
+            {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
+            {profile && <SharedMedia media={profile.media} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {activeRoom.type === 'direct' && profile && (
+              <CommonGroups
+                groups={profile.commonGroups}
+                onOpen={(id) => {
+                  setShowInfoPanel(false);
+                  void openRoom(id);
+                }}
+              />
+            )}
+            <WallpaperPicker token={token} roomId={activeRoom.id} current={activeRoom.wallpaper} onChanged={fetchRooms} />
+            {activeRoom.type !== 'direct' && (
+              <div>
+                <div className="px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400">Members</span>
+                  {isRoomAdmin && (
+                    <button type="button" onClick={() => setShowAddMembers(true)} className="text-xs font-semibold text-blue-600 flex items-center gap-1">
+                      <UserPlus className="w-3.5 h-3.5" /> Add
+                    </button>
+                  )}
                 </div>
-                {isRoomAdmin && m.user_id !== user.id && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      title={m.role === 'admin' ? 'Demote to member' : 'Make admin'}
-                      onClick={async () => {
-                        await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ role: m.role === 'admin' ? 'member' : 'admin' })
-                        });
-                        fetchMembers(activeRoom.id);
-                      }}
-                      className="p-1 text-slate-400 hover:text-blue-600"
-                    >
-                      <Shield className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      title="Remove"
-                      onClick={async () => {
-                        await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
-                          method: 'DELETE',
-                          headers: { Authorization: `Bearer ${token}` }
-                        });
-                        fetchMembers(activeRoom.id);
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                {members.map((m) => (
+                  <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
+                    <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-9 h-9 text-xs" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
+                      {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
+                    </div>
+                    {isRoomAdmin && m.user_id !== user.id && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title={m.role === 'admin' ? 'Demote to member' : 'Make admin'}
+                          onClick={async () => {
+                            await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ role: m.role === 'admin' ? 'member' : 'admin' })
+                            });
+                            fetchMembers(activeRoom.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-blue-600"
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Remove"
+                          onClick={async () => {
+                            if (!(await confirmDialog(`Remove ${m.name} from this ${activeRoom.type === 'community' ? 'community' : 'group'}?`, { tone: 'danger' }))) return;
+                            await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            fetchMembers(activeRoom.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
+                ))}
+                {activeRoom.type === 'community' && isRoomAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLinkGroup(true)}
+                    className="w-full mt-2 px-4 py-2.5 flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    <LinkIcon className="w-4 h-4" /> Link an existing group
+                  </button>
                 )}
               </div>
-            ))}
-            {activeRoom.type === 'community' && isRoomAdmin && (
-              <button
-                type="button"
-                onClick={() => setShowLinkGroup(true)}
-                className="w-full mt-2 px-4 py-2.5 flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
-              >
-                <LinkIcon className="w-4 h-4" /> Link an existing group
-              </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={async () => {
-              if (!(await confirmDialog('Leave this chat?'))) return;
-              await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` }
-              });
-              setShowInfoPanel(false);
-              setActiveRoomId(null);
-              fetchRooms();
-            }}
-            className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
-          >
-            <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
-          </button>
+          {activeRoom.type !== 'direct' && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!(await confirmDialog('Leave this chat?', { tone: 'danger' }))) return;
+                await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
+                  method: 'DELETE',
+                  headers: { Authorization: `Bearer ${token}` }
+                });
+                setShowInfoPanel(false);
+                setActiveRoomId(null);
+                fetchRooms();
+              }}
+              className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+            >
+              <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
+            </button>
+          )}
         </div>
       )}
+
+      {/* Message menu: react, reply, copy, delete for me / for everyone. */}
+      {menuMsg && activeRoom && (
+        <MessageMenu
+          token={token}
+          msg={menuMsg}
+          meId={user.id}
+          isRoomAdmin={activeRoom.type !== 'direct' && isRoomAdmin}
+          confirm={(m) => confirmDialog(m, { tone: 'danger' })}
+          onClose={() => setMenuMsg(null)}
+          onReply={() => {
+            setEditing(null);
+            setReplyTo(menuMsg);
+            messageInputRef.current?.focus();
+          }}
+          onForward={() => setForwardMsg(menuMsg)}
+          isPinned={pins.some((p) => p.message.id === menuMsg.id)}
+          onPin={() => setPinMsg(menuMsg)}
+          onUnpin={() => activeRoom && void fetchPins(activeRoom.id)}
+          onEdit={() => {
+            setReplyTo(null);
+            setEditError('');
+            setEditing(menuMsg);
+            setMessageInput(menuMsg.content || '');
+            setTimeout(() => messageInputRef.current?.focus(), 50);
+          }}
+          onReacted={(reactions) => patchMessage(menuMsg.id, { reactions })}
+          onHidden={() => setMessages((prev) => prev.filter((m) => m.id !== menuMsg.id))}
+          onUnsent={() => patchMessage(menuMsg.id, unsentPatch)}
+        />
+      )}
+      {whoMsg && (
+        <ReactionsWho token={token} msg={whoMsg} meId={user.id} onClose={() => setWhoMsg(null)} onReacted={(reactions) => patchMessage(whoMsg.id, { reactions })} />
+      )}
+      {pinMsg && activeRoom && (
+        <PinPopup
+          token={token}
+          msg={pinMsg}
+          pinnedCount={pins.length}
+          onClose={() => setPinMsg(null)}
+          onDone={(text) => {
+            setPinMsg(null);
+            setPinIndex(0);
+            void fetchPins(activeRoom.id);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+          }}
+        />
+      )}
+      {forwardMsg && (
+        <ForwardPopup
+          token={token}
+          msg={forwardMsg}
+          meId={user.id}
+          rooms={rooms}
+          directory={directory}
+          roomName={(r) => roomDisplayName(r, user.id)}
+          onClose={() => setForwardMsg(null)}
+          onDone={(text) => {
+            setForwardMsg(null);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+            fetchRooms();
+          }}
+        />
+      )}
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-[80] px-4 py-2 rounded-full bg-slate-900/85 text-white text-xs shadow-lg">{toast}</div>
+      )}
+      {showMyAbout && <MyAboutPopup token={token} onClose={() => setShowMyAbout(false)} />}
 
       {/* New Chat / Group / Community modal */}
       {showNewChatModal && (
@@ -1512,7 +1801,8 @@ const MemberPickerModal: React.FC<{
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
 
-  const filtered = directory.filter((d) => d.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const q = search.trim().toLowerCase();
+  const filtered = directory.filter((d) => `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q));
 
   return (
     <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
@@ -1530,7 +1820,7 @@ const MemberPickerModal: React.FC<{
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search people..."
+              placeholder="Search name or department..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
@@ -1553,7 +1843,12 @@ const MemberPickerModal: React.FC<{
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
               >
                 <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
-                <span className="flex-1 text-left text-sm text-slate-900 truncate">{d.name}</span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-sm text-slate-900 truncate">{d.name}</span>
+                  {(d.designation || d.department) && (
+                    <span className="block text-[11px] text-slate-500 truncate">{[d.designation, d.department].filter(Boolean).join(' · ')}</span>
+                  )}
+                </span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                   {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
                 </div>

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { RefreshCw, ArrowLeft, X } from 'lucide-react';
-import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest, chatAllowed } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
@@ -149,6 +149,8 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // Module Access -> Chat (on unless turned off for this account).
+  const chatOn = chatAllowed(user);
   // Docked FloatingChatButton's own popup — a New-Leave-Application-sized
   // centered modal card (see the render block near FloatingChatButton below),
   // kept fully separate from showChat above so Navbar's ChatBell (which still
@@ -617,6 +619,7 @@ export default function App() {
   // new tab" — it's one WebView — so native keeps the original in-app panel
   // behavior.
   const openChat = () => {
+    if (!chatOn) return;
     if (Capacitor.isNativePlatform()) {
       setSelfServiceView(null);
       setShowProfilePage(false);
@@ -631,6 +634,7 @@ export default function App() {
   // like the New Leave Application modal, rather than a full-screen takeover
   // or a new browser tab. See showChatPopup's render block below.
   const openChatPopup = () => {
+    if (!chatOn) return;
     setShowChatPopup(true);
   };
 
@@ -927,7 +931,7 @@ export default function App() {
         <div className="flex-1 min-w-0 flex flex-col">
       <main className="flex-1">
         <Suspense fallback={<AppLoader />}>
-        {showChat ? (
+        {showChat && chatOn ? (
           <ChatPanel
             user={user}
             token={token || ''}
@@ -1040,7 +1044,7 @@ export default function App() {
           opens the same place; this is just a second, always-visible way in.
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
-      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+      {chatOn && <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />}
 
       {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
           off in Module Access; its buttons open the page an answer is about. */}
@@ -1066,7 +1070,7 @@ export default function App() {
           instead of taking over the whole screen the way showChat above
           does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
           this needs its own close button + backdrop-click-to-close. */}
-      {showChatPopup && user && (
+      {showChatPopup && chatOn && user && (
         <div
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}

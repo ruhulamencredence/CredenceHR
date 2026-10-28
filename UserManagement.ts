@@ -163,7 +163,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_return_dispatch, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_return_dispatch, can_use_chat, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -229,6 +229,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_return_dispatch: u.role === "superadmin" ? true : !!Number(u.can_return_dispatch || 0),
         is_blocked: !!Number(u.is_blocked || 0),
         can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
+        can_use_chat: u.role === "superadmin" ? true : Number(u.can_use_chat ?? 1) !== 0,
         can_export_assistant_reports: u.role === "superadmin" ? true : !!Number(u.can_export_assistant_reports || 0),
         can_handle_assistant_support: u.role === "superadmin" ? true : !!Number(u.can_handle_assistant_support || 0),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -776,6 +777,24 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       await queryDB("UPDATE users SET can_view_budget_module = ? WHERE id = ?", [canView ? 1 : 0, id]);
       res.json({ success: true, can_view_budget_module: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Chat (ChatRoutes.ts) — ON by default for everyone; this turns it off (or
+  // back on) for one account.
+  app.put("/api/users/:id/chat-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_chat;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Chat access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_chat = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_use_chat: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

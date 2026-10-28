@@ -8,7 +8,7 @@ import {
   Target, UserPlus, Gavel, FolderLock, Sparkles, Activity, PackageCheck, Smartphone,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { User, AdminModuleKey } from '../types';
+import { User, AdminModuleKey, chatAllowed } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { ServerSwitcherModal } from './ServerSwitcherModal';
@@ -294,7 +294,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   }
   // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — NOT gated,
   // every signed-in account gets it, same as Employee Directory just below.
-  selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
+  if (chatAllowed(user)) selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
   // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
   // signed-in account, not gated behind any module grant.
   selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });

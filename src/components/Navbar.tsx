@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { User } from '../types';
+import { User, chatAllowed } from '../types';
 import { Shield, LogOut, Smartphone, Search, X } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { AlertsBell } from './AlertsBell';
@@ -379,7 +379,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}
-          {!isChatOpen && <ChatBell token={token} onOpenChat={onOpenChat} />}
+          {!isChatOpen && chatAllowed(user) && <ChatBell token={token} onOpenChat={onOpenChat} />}
 
           <div className="hidden lg:block text-right mr-1">
             <div className="text-sm font-medium leading-tight" style={{ color: 'var(--g-text)' }}>{user.name}</div>
