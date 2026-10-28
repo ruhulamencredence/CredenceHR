@@ -934,6 +934,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Job Edit Approvals: several pending requests ticked and approved /
+  // rejected together. Each one goes through the same POST /:id/act as a
+  // single request (same "editlog" gate, same checks); one that can't be
+  // approved any more is reported and the rest still go through.
+  const [selectedJobEditIds, setSelectedJobEditIds] = useState<Set<number>>(new Set());
+  const [bulkJobEditBusy, setBulkJobEditBusy] = useState(false);
+  const toggleJobEditSelected = (id: number) =>
+    setSelectedJobEditIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const actOnSelectedJobEdits = async (action: 'approve' | 'reject') => {
+    const ids = jobEditRequests.filter((r) => r.status === 'pending' && selectedJobEditIds.has(r.id)).map((r) => r.id);
+    if (ids.length === 0) return;
+    const ok = await confirmDialog(
+      `${action === 'approve' ? 'Approve' : 'Reject'} ${ids.length} Job Edit request${ids.length === 1 ? '' : 's'}?`,
+      action === 'reject' ? { tone: 'danger' } : undefined
+    );
+    if (!ok) return;
+    setBulkJobEditBusy(true);
+    setJobEditActionError('');
+    const failed: string[] = [];
+    for (const id of ids) {
+      try {
+        const res = await fetch(apiUrl(`/api/job-edits/${id}/act`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed');
+      } catch (err: any) {
+        const r = jobEditRequests.find((x) => x.id === id);
+        failed.push(`${r ? describeJobEditRequest(r) : `#${id}`}: ${err.message || 'Failed'}`);
+      }
+    }
+    setSelectedJobEditIds(new Set());
+    await Promise.all([fetchJobEditRequests(), fetchMprEditLog()]);
+    if (failed.length) setJobEditActionError(`${ids.length - failed.length} of ${ids.length} done. Not done — ${failed.join(' · ')}`);
+    setBulkJobEditBusy(false);
+  };
+
   // One line describing what a Job Edit request is actually proposing — used by
   // both the pending list and the recently-reviewed list below.
   const describeJobEditRequest = (r: PendingJobEdit) => {
@@ -4978,8 +5022,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             <p className="text-xs text-slate-400 text-center py-10">No Job Edit requests are pending review.</p>
           ) : (
             <div className="divide-y divide-slate-100">
+              {/* Tick several and approve / reject them together. */}
+              <div className="px-6 py-2.5 flex flex-wrap items-center gap-3 bg-slate-50/70">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 rounded accent-[color:var(--g-accent,#7f00ff)]"
+                    checked={pendingJobEditRequests.length > 0 && pendingJobEditRequests.every((r) => selectedJobEditIds.has(r.id))}
+                    onChange={(e) => setSelectedJobEditIds(e.target.checked ? new Set(pendingJobEditRequests.map((r) => r.id)) : new Set())}
+                    disabled={bulkJobEditBusy}
+                  />
+                  Select all ({pendingJobEditRequests.length})
+                </label>
+                {selectedJobEditIds.size > 0 && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className="text-xs text-slate-500">{pendingJobEditRequests.filter((r) => selectedJobEditIds.has(r.id)).length} selected</span>
+                    <button
+                      type="button"
+                      disabled={bulkJobEditBusy}
+                      onClick={() => actOnSelectedJobEdits('approve')}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
+                    >
+                      {bulkJobEditBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve selected
+                    </button>
+                    <button
+                      type="button"
+                      disabled={bulkJobEditBusy}
+                      onClick={() => actOnSelectedJobEdits('reject')}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 disabled:opacity-50 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Reject selected
+                    </button>
+                  </div>
+                )}
+              </div>
               {pendingJobEditRequests.map((r) => (
-                <div key={r.id} className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div key={r.id} className={`px-6 py-3.5 flex items-start gap-3 ${selectedJobEditIds.has(r.id) ? 'bg-violet-50/60' : ''}`}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select this request"
+                    className="mt-1 w-4 h-4 rounded shrink-0 accent-[color:var(--g-accent,#7f00ff)]"
+                    checked={selectedJobEditIds.has(r.id)}
+                    onChange={() => toggleJobEditSelected(r.id)}
+                    disabled={bulkJobEditBusy}
+                  />
+                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-blue-600">
@@ -5029,6 +5116,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     >
                       <XCircle className="w-3.5 h-3.5" /> Reject
                     </button>
+                  </div>
                   </div>
                 </div>
               ))}
