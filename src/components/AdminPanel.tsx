@@ -5064,6 +5064,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         {jobEditDetails && (
           <JobEditDetailsPopup
             r={jobEditDetails}
+            token={token}
             acting={actingJobEditId === jobEditDetails.id}
             onClose={() => setJobEditDetails(null)}
             onAct={(action) => void actOnJobEditRequest(jobEditDetails.id, action)}
