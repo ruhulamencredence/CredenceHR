@@ -171,6 +171,16 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
     }
   });
 
+  // DELETE /api/alerts — "Clear all": empties THIS account's own inbox only.
+  app.delete("/api/alerts", authenticateToken, async (req: any, res) => {
+    try {
+      await queryDB("DELETE FROM alerts WHERE user_id = ?", [req.user.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // DELETE /api/alerts/:id — clear a single alert out of THIS account's own
   // inbox.
   app.delete("/api/alerts/:id", authenticateToken, async (req: any, res) => {

@@ -16,6 +16,7 @@
 // "6. User <-> Project Permissions (Admin-only)" sections — no logic
 // changed, only moved.
 
+import { clearLoginLock } from "./LoginGuard";
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
 
@@ -119,6 +120,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       const password_hash = await bcrypt.hash(String(new_password), 10);
       await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, id]);
+      // A reset lifts a sign-in lock (LoginGuard.ts).
+      await clearLoginLock(queryDB, Number(id));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to reset password" });

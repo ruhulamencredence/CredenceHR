@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { BellRing, Check, Trash2 } from 'lucide-react';
+import { confirmDialog } from '../lib/confirmDialog';
 import { Alert } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -112,6 +113,17 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     }
   };
 
+  const clearAll = async () => {
+    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
+    setAlerts([]);
+    setUnreadCount(0);
+    try {
+      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // Best-effort, same as markRead above.
+    }
+  };
+
   const removeAlert = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     const wasUnread = alerts.find((a) => a.id === id)?.is_read === false;
@@ -181,17 +193,25 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             <span className="text-sm font-semibold" style={{ color: 'var(--g-text)' }}>
               Alerts
             </span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={markAllRead}
-                className="text-xs font-medium flex items-center gap-1 hover:opacity-70"
-                style={{ color: 'var(--g-accent)' }}
-              >
-                <Check className="w-3.5 h-3.5" />
-                Mark all read
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  className="text-xs font-medium flex items-center gap-1 hover:opacity-70"
+                  style={{ color: 'var(--g-accent)' }}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark all read
+                </button>
+              )}
+              {alerts.length > 0 && (
+                <button type="button" onClick={clearAll} className="text-xs font-medium flex items-center gap-1 text-rose-600 hover:opacity-70">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto">

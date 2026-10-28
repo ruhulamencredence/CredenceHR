@@ -15,6 +15,10 @@ import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } fro
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { ensureBudgetNoticeSchema, draftBudgetNotice } from "./BudgetNoticeDraft";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
+import { ensureLoginGuardSchema, loginBlocked, recordLogin } from "./LoginGuard";
+import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
+import { resolveJwtSecret } from "./JwtSecret";
+import { clientIp } from "./ActiveUsersRoutes";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
@@ -49,7 +53,9 @@ import { ensureEmployeeRecordsGuard, keptRecordsOf } from "./EmployeeRecordsGuar
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || "mpr_tracker_secret_key_2026";
+// Never a key written in the code: a weak or missing JWT_SECRET is replaced
+// by a random one kept in .jwt-secret (JwtSecret.ts).
+const JWT_SECRET = resolveJwtSecret();
 const PORT = Number(process.env.PORT) || 3000;
 
 // Normalizes a MySQL DATE value (which mysql2 may return as a JS Date object or as a
@@ -270,6 +276,8 @@ async function ensureSchemaMigrations() {
   await ensureBudgetNoticeSchema(dbPool);
   // PEPM -> Reports -> P.O Import (PoImportRoutes.ts).
   await ensurePoImportSchema(dbPool);
+  // Sign-in attempts, for stopping password guessing (LoginGuard.ts).
+  await ensureLoginGuardSchema(dbPool);
   // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
   await ensureUserAccessSchema(dbPool);
 
@@ -3058,6 +3066,10 @@ async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<n
 async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: number): Promise<void> {
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    // One UPDATE that adds to what is stored, so two moves at once (two
+    // submissions, a refund during a submission) never overwrite each other.
+    const r: any = await queryDB(`UPDATE leave_balances SET ${balanceColumn} = ${balanceColumn} + ? WHERE user_id = ?`, [delta, userId]);
+    if (typeof r?.affectedRows === "number" && r.affectedRows > 0) return;
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
     const casual = Number(rows[0]?.casual_leave || 0) + (balanceColumn === "casual_leave" ? delta : 0);
     const sick = Number(rows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? delta : 0);
@@ -3082,6 +3094,8 @@ async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: 
   const catRows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
   if (catRows.length === 0) return; // Shouldn't happen — isValidLeaveType already checked at submission time.
   const categoryId = Number(catRows[0].id);
+  const r: any = await queryDB("UPDATE leave_category_balances SET balance = balance + ? WHERE user_id = ? AND category_id = ?", [delta, userId, categoryId]);
+  if (typeof r?.affectedRows === "number" && r.affectedRows > 0) return;
   const balRows = await queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [userId]);
   const existing = balRows.find((b: any) => Number(b.category_id) === categoryId);
   const next = Number(existing?.balance || 0) + delta;
@@ -3089,6 +3103,31 @@ async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: 
     "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
     [userId, categoryId, next]
   );
+}
+
+// Takes `days` off a Leave Type balance only if at least that much is left —
+// checked and taken in one UPDATE, so several applications sent at once can
+// never take the balance below zero. False when there isn't enough.
+async function deductLeaveTypeBalance(userId: number, leaveType: string, days: number): Promise<boolean> {
+  let r: any;
+  if (isFixedLeaveType(leaveType)) {
+    const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    r = await queryDB(`UPDATE leave_balances SET ${balanceColumn} = ${balanceColumn} - ? WHERE user_id = ? AND ${balanceColumn} >= ?`, [days, userId, days]);
+  } else {
+    const catRows = await queryDB("SELECT id FROM leave_categories WHERE category_key = ?", [leaveType]);
+    if (catRows.length === 0) return false;
+    r = await queryDB("UPDATE leave_category_balances SET balance = balance - ? WHERE user_id = ? AND category_id = ? AND balance >= ?", [
+      days,
+      userId,
+      Number(catRows[0].id),
+      days
+    ]);
+  }
+  if (typeof r?.affectedRows === "number") return r.affectedRows > 0;
+  // The in-memory preview database.
+  if ((await getLeaveTypeBalance(userId, leaveType)) < days) return false;
+  await adjustLeaveTypeBalance(userId, leaveType, -days);
+  return true;
 }
 
 async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: number | null, remarks: string | null) {
@@ -3341,6 +3380,8 @@ async function startServer() {
   // Raised from Express's 100kb default so a Budget Excel file (sent as base64 in the
   // import request) doesn't get rejected before it reaches the route handler.
   app.use(express.json({ limit: "25mb" }));
+  // No database error text in API answers (ApiErrors.ts).
+  maskDatabaseErrors(app);
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -3719,15 +3760,25 @@ async function startServer() {
         "SELECT * FROM users WHERE email = ? OR username = ?",
         [identifier, usernameCandidate]
       );
+      // Password guessing is stopped (LoginGuard.ts): 5 wrong tries lock the
+      // account for 15 minutes, 30 from one address make it wait. Unknown
+      // login IDs are counted the same way, so nothing tells them apart.
+      const ip = clientIp(req);
+      const knownId = users.length ? Number(users[0].id) : null;
+      const blocked = await loginBlocked(queryDB, ip, identifier, knownId);
+      if (blocked) return res.status(429).json({ error: blocked, code: "LOGIN_LOCKED" });
       if (users.length === 0) {
+        await recordLogin(queryDB, ip, identifier, null, false);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
 
       const user = users[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
+        await recordLogin(queryDB, ip, identifier, knownId, false);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
+      await recordLogin(queryDB, ip, identifier, knownId, true);
 
       // Admin Panel -> Users -> Block login.
       if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
@@ -6795,6 +6846,7 @@ async function startServer() {
     getLeaveTypeLabel,
     getLeaveTypeBalance,
     adjustLeaveTypeBalance,
+    deductLeaveTypeBalance,
     createTemplateApprovalRequest,
     finalizeLeaveApplicationApproval
   });
@@ -6864,6 +6916,10 @@ async function startServer() {
   registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerAssistantSupportRoutes(app, { authenticateToken, queryDB, io });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
+
+  // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
+  // JSON too (ApiErrors.ts). After every route, before the web app.
+  apiNotFoundAndErrors(app);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
