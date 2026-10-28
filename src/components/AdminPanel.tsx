@@ -33,6 +33,7 @@ import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
+import { MprPoImport } from './MprPoImport';
 import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
@@ -332,6 +333,12 @@ const ReportRow = React.memo(function ReportRow({
             </div>
           )}
         </button>
+        {/* Purchase orders from Reports -> P.O Import. */}
+        {ent.po_numbers && (
+          <div className="text-[10px] font-semibold text-indigo-700 mt-0.5 break-words" title="P.O No (from P.O Import)">
+            P.O {ent.po_numbers}
+          </div>
+        )}
       </td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right tabular-nums whitespace-nowrap">
         {ent.matched_rate != null ? (
@@ -2908,7 +2915,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // Budget Submission Status — its own tick in Module Access -> Reports.
       submission: reportLayer('submission_status'),
       // Dispatch Material (Purchase) — its own tick too.
-      dispatch: reportLayer('dispatch_material')
+      dispatch: reportLayer('dispatch_material'),
+      // P.O Import — its own tick too (MprPoImport.tsx).
+      poImport: reportLayer('po_import')
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
@@ -2954,13 +2963,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // blank when there's no match, which is accurate (that import data doesn't exist).
   // Reports tab: the MPR Entries report or the per-Project Budget
   // Submission Status (BudgetSubmissionReport).
-  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch'>('entries');
+  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import'>('entries');
   // The reports this account may open, in page order; a view it can't open
   // falls back to the first one it can.
   const reportViews = ([
     ['entries', 'MPR Entries Report', reportCan.read],
     ['submission', 'Budget Submission Status', reportCan.submission],
-    ['dispatch', 'Dispatch Material', reportCan.dispatch]
+    ['dispatch', 'Dispatch Material', reportCan.dispatch],
+    ['po_import', 'P.O Import', reportCan.poImport]
   ] as const).filter(([, , ok]) => ok);
   const reportView = reportViews.some(([k]) => k === reportViewPicked) ? reportViewPicked : reportViews[0]?.[0] || 'entries';
 
@@ -3030,6 +3040,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       Qty: reportQty(ent),
       'Delivery Date': formatDate(ent.delivery_date),
       'Delivery Status': mdStatusLabel(ent.md_status),
+      'P.O No': ent.po_numbers || '',
       'Qty Sent': Number(ent.md_dispatched_qty || 0),
       'Qty Received': Number(ent.md_received_qty || 0),
       'Received On': ent.md_received_date ? formatDate(ent.md_received_date) : '',
@@ -3165,6 +3176,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
+      {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => fetchAllData()} />}
 
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
         <div className="space-y-6">

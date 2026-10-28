@@ -89,6 +89,8 @@ export interface MdRow {
   newDeliveryMin?: string;
   newDeliveryMax?: string | null;
   dispatches: MdDispatch[];
+  // Purchase orders put on the row by Reports -> P.O Import (Dispatch Material only).
+  pos?: { poNo: string; poDate: string | null; supplier: string; orderQty: number | null; rate: number | null }[];
 }
 
 export const MD_STATUS: Record<MdStatus, { label: string; cls: string }> = {

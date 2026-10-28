@@ -49,7 +49,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'live' | 'block_account' | 'employee_delete';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'live' | 'block_account' | 'employee_delete';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -77,7 +77,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'permanent_delete', label: 'Permanent Delete' },
     { key: 'submission_status', label: 'Budget Submission Status' },
     { key: 'dispatch_material', label: 'Dispatch Material (own)' },
-    { key: 'dispatch_all', label: 'Dispatch Material: see all' }
+    { key: 'dispatch_all', label: 'Dispatch Material: see all' },
+    { key: 'po_import', label: 'P.O Import' }
   ],
   // Users: the usual layers plus Block login (explicit only).
   users: [
@@ -104,7 +105,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'live', 'block_account', 'employee_delete'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'live', 'block_account', 'employee_delete'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -861,6 +862,8 @@ export interface Entry {
   // File. matched_rate/computed_amount null with rate_calculated_at set means it WAS
   // attempted but genuinely found no match (vs. null rate_calculated_at = never run yet).
   matched_rate?: number | null;
+  // P.O numbers put on the row by Reports -> P.O Import (comma-separated).
+  po_numbers?: string | null;
   computed_amount?: number | null;
   category_head?: string | null;
   category_sub1?: string | null;

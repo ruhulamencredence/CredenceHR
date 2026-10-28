@@ -14,6 +14,7 @@ import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { ensureBudgetNoticeSchema, draftBudgetNotice } from "./BudgetNoticeDraft";
+import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
@@ -267,6 +268,8 @@ async function ensureSchemaMigrations() {
   await ensureMprDispatchSchema(dbPool);
   // Budget import -> draft notice (BudgetNoticeDraft.ts).
   await ensureBudgetNoticeSchema(dbPool);
+  // PEPM -> Reports -> P.O Import (PoImportRoutes.ts).
+  await ensurePoImportSchema(dbPool);
   // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
   await ensureUserAccessSchema(dbPool);
 
@@ -2153,7 +2156,8 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "dispatch_material" (Purchase sending material against MPR rows,
 // MprDispatchRoutes.ts) sees only the rows it sent there or dispatched;
 // "dispatch_all" sees everyone's. Both explicit-only, like submission_status.
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all"] as const;
+// "po_import" (explicit-only): Reports -> P.O Import (PoImportRoutes.ts).
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
@@ -3481,7 +3485,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "dispatch_material" | "dispatch_all" | "block_account" | "employee_delete") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "dispatch_material" | "dispatch_all" | "po_import" | "block_account" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3538,6 +3542,7 @@ async function startServer() {
   // PEPM -> Dispatch Material (Purchase) and Material Receive (the project)
   // close the MPR cycle (MprDispatchRoutes.ts).
   registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
+  registerPoImportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/

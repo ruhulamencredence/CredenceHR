@@ -159,6 +159,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           bi.specification, bi.req_qty, bi.unit, bi.po_qty, bi.received_qty, bi.balance_qty,
           bi.entry_user AS bi_entry_user, bi.approved_date AS bi_approved_date,
           bi.app_user AS bi_app_user, bi.site_sup_date,
+          -- Purchase orders put on this row by Reports -> P.O Import.
+          (SELECT GROUP_CONCAT(DISTINCT pl.po_no ORDER BY pl.po_date, pl.id SEPARATOR ', ') FROM mpr_po_lines pl WHERE pl.entry_id = e.id) AS po_numbers,
           -- Whether the creating user has already submitted (locked) the Budget this
           -- entry belongs to — the client uses this to decide if editing is allowed.
           (SELECT COUNT(*) FROM budget_submissions bs
