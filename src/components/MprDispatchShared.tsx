@@ -8,7 +8,7 @@
 // of MprDispatchRoutes.ts, the status chip and an MPR row's timeline popup.
 
 import React, { useEffect, useState } from 'react';
-import { History, Loader2, Truck, PackageCheck, XCircle, FileText, ListPlus, ListMinus } from 'lucide-react';
+import { History, Loader2, Truck, PackageCheck, XCircle, FileText, ListPlus, ListMinus, BadgeCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { MailPopup as Popup } from './mail/MailPopup';
@@ -81,6 +81,13 @@ export interface MdRow {
   // When Purchase sent it to Dispatch Material (MPR Entries report).
   queuedAt: string | null;
   queuedBy: string;
+  // The project confirmed it still needs the row (My MPR in Dispatch).
+  confirmedAt: string | null;
+  confirmedBy: string;
+  // My MPR in Dispatch only: where a take-back's new Delivery Date may fall
+  // (the Budget's delivery range, today / entry date, the notice days).
+  newDeliveryMin?: string;
+  newDeliveryMax?: string | null;
   dispatches: MdDispatch[];
 }
 
@@ -118,7 +125,7 @@ export async function mdFetch<T>(token: string, path: string, method = 'GET', bo
 }
 
 interface TimelineEvent {
-  action: 'request' | 'queue' | 'unqueue' | 'dispatch' | 'receive' | 'cancel';
+  action: 'request' | 'queue' | 'unqueue' | 'confirm' | 'dispatch' | 'receive' | 'cancel';
   qty: number | null;
   detail: string;
   at: string | null;
@@ -128,6 +135,7 @@ const EVENT: Record<TimelineEvent['action'], { label: string; icon: React.Compon
   request: { label: 'Asked for', icon: FileText, cls: 'bg-slate-100 text-slate-600' },
   queue: { label: 'Sent to Dispatch Material', icon: ListPlus, cls: 'bg-indigo-100 text-indigo-700' },
   unqueue: { label: 'Taken out of Dispatch Material', icon: ListMinus, cls: 'bg-slate-100 text-slate-600' },
+  confirm: { label: 'Confirmed by the project', icon: BadgeCheck, cls: 'bg-teal-100 text-teal-700' },
   dispatch: { label: 'Dispatched', icon: Truck, cls: 'bg-sky-100 text-sky-700' },
   receive: { label: 'Received', icon: PackageCheck, cls: 'bg-emerald-100 text-emerald-700' },
   cancel: { label: 'Dispatch cancelled', icon: XCircle, cls: 'bg-rose-100 text-rose-700' }
@@ -164,7 +172,7 @@ export const MdTimelinePopup: React.FC<{
               <div><div className="text-slate-500">Project</div><div className="font-semibold text-slate-800">{r.projectName}</div></div>
               <div><div className="text-slate-500">Asked for</div><div className="font-semibold text-slate-800">{qtyText(r.qty, r.unit)}</div></div>
               <div><div className="text-slate-500">Delivery date</div><div className="font-semibold text-slate-800">{r.deliveryDate ? formatDate(r.deliveryDate) : '—'}</div></div>
-              <div><div className="text-slate-500">Status</div><MdStatusChip status={r.status} queued={r.queuedAt} /></div>
+              <div><div className="text-slate-500">Status</div><MdStatusChip status={r.status} queued={r.queuedAt} />{r.confirmedAt && <div className="text-[10px] font-semibold text-teal-700 mt-0.5">✓ Confirmed by {r.confirmedBy || 'the project'}</div>}</div>
               <div><div className="text-slate-500">Sent</div><div className="font-semibold text-slate-800">{qtyText(r.dispatchedQty, r.unit)}</div></div>
               <div><div className="text-slate-500">Received</div><div className="font-semibold text-slate-800">{qtyText(r.receivedQty, r.unit)}</div></div>
               <div><div className="text-slate-500">Left to send</div><div className="font-semibold text-slate-800">{qtyText(r.remaining, r.unit)}</div></div>

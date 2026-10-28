@@ -2102,9 +2102,84 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
          WHERE r.status = 'pending' OR r.reviewed_at >= NOW() - INTERVAL 30 DAY
          ORDER BY (r.status = 'pending') DESC, r.created_at DESC`
       );
-      res.json(rows.map(parseJobEditRequestRow));
+      // The Budget row behind each proposed MPR row (Specification, Unit, the
+      // Budget's Req. Qty) for the reviewer's Details view.
+      const parsed = rows.map(parseJobEditRequestRow);
+      const lines = (r: any): any[] => (r.action === "add_job" ? (Array.isArray(r.payload?.items) ? r.payload.items : []) : r.action === "add_item" && r.payload ? [r.payload] : []);
+      const itemIds = [...new Set(parsed.flatMap((r: any) => lines(r).map((it: any) => Number(it.budget_item_id)).filter((n: number) => n > 0)))];
+      if (itemIds.length) {
+        const bi: any[] = await queryDB(`SELECT id, specification, unit, req_qty FROM budget_items WHERE id IN (${itemIds.map(() => "?").join(",")})`, itemIds);
+        const byId = new Map(bi.map((b) => [Number(b.id), b]));
+        for (const r of parsed)
+          for (const it of lines(r)) {
+            const b = byId.get(Number(it.budget_item_id));
+            if (b) Object.assign(it, { specification: b.specification || "", unit: b.unit || "", budget_qty: b.req_qty ?? null });
+          }
+      }
+      res.json(parsed);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load Job Edit requests" });
+    }
+  });
+
+  // Job Edit Approvals -> Details: what the change does to the Job. Returns the
+  // Job's current MPR rows (plus, for a delete, the row being deleted with its
+  // dispatch / receive state) and, for an Add MPR, how much of that Budget item
+  // is already requisitioned — so the reviewer sees the Job before and after.
+  // Same "editlog" gate as the list above.
+  app.get("/api/job-edits/:id/context", authenticateToken, requireAdmin, requireModule("editlog"), async (req: any, res) => {
+    try {
+      const reqRows = await queryDB("SELECT * FROM job_edit_requests WHERE id = ?", [req.params.id]);
+      if (reqRows.length === 0) return res.status(404).json({ error: "Job Edit request not found" });
+      const request = reqRows[0];
+      const payload = request.payload ? JSON.parse(request.payload) : {};
+      if (!request.job_id) return res.json({ job: null, rows: [], item: null });
+
+      const jobRows = await queryDB(
+        `SELECT j.id, j.job_no, j.job_duration, j.created_by, b.budget_name,
+                (SELECT e.job_name FROM entries e WHERE e.job_id = j.id ORDER BY e.id LIMIT 1) AS job_name,
+                (SELECT p.project_name FROM entries e JOIN projects p ON e.project_id = p.id WHERE e.job_id = j.id ORDER BY e.id LIMIT 1) AS project_name
+           FROM jobs j LEFT JOIN budgets b ON j.budget_id = b.id
+          WHERE j.id = ?`,
+        [request.job_id]
+      );
+      const job = jobRows[0] || null;
+      const rows = await queryDB(
+        `SELECT e.id, m.mpr_no, e.item_name, bi.specification, bi.unit, bi.req_qty AS budget_qty,
+                e.budget_item_id, e.requisitioned_qty, e.delivery_date, e.entry_date, e.deleted_at,
+                e.md_status, e.md_dispatched_qty, e.md_received_qty, u.name AS created_by_name
+           FROM entries e
+           LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+           LEFT JOIN budget_items bi ON e.budget_item_id = bi.id
+           LEFT JOIN users u ON e.created_by = u.id
+          WHERE e.job_id = ? AND (e.deleted_at IS NULL OR e.id = ?)
+          ORDER BY m.mpr_no, e.id`,
+        [request.job_id, request.entry_id || 0]
+      );
+
+      // Add MPR: the Budget item's Req. Qty and what this Job's owner has
+      // already requisitioned against it.
+      let item: any = null;
+      if (request.action === "add_item" && payload.budget_item_id && job) {
+        const bi = await queryDB("SELECT req_qty, specification, unit FROM budget_items WHERE id = ?", [payload.budget_item_id]);
+        const used = await queryDB(
+          "SELECT COALESCE(SUM(requisitioned_qty), 0) AS used FROM entries WHERE budget_item_id = ? AND created_by = ? AND deleted_at IS NULL",
+          [payload.budget_item_id, job.created_by]
+        );
+        item = {
+          budget_qty: bi[0] ? parseQtyNumber(bi[0].req_qty) : null,
+          specification: bi[0]?.specification || "",
+          unit: bi[0]?.unit || "",
+          used: Number(used[0]?.used || 0)
+        };
+      }
+      res.json({
+        job: job && { job_no: job.job_no, job_name: job.job_name, project_name: job.project_name, budget_name: job.budget_name, job_duration: job.job_duration },
+        rows,
+        item
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the Job for this request" });
     }
   });
 

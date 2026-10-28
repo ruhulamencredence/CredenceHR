@@ -959,6 +959,8 @@ export interface PendingJobEdit {
   // job_duration, reason, items: [{ mpr_no, mpr_id, budget_item_id, item_name,
   // requisitioned_qty, delivery_date }] } — the proposed brand-new Job, with every
   // MPR row it would be created with, plus the Edit Reason.
+  // GET /api/job-edits adds specification / unit / budget_qty (from the Budget
+  // row) to each add_item / add_job row for the Details view.
   // delete_entry: { reason } — the row to delete is entry_id above; entry/mpr_no/
   // item_name/requisitioned_qty/delivery_date below carry its current values for
   // display, joined server-side.

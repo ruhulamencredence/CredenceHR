@@ -31,6 +31,7 @@
 // (while not yet received), with a reason.
 
 import type { Express } from "express";
+import { resolveMinLeadDays, addDaysToDateStr } from "./deliveryDateConditions";
 
 interface Deps {
   authenticateToken: any;
@@ -106,7 +107,11 @@ export async function ensureMprDispatchSchema(dbPool: any): Promise<void> {
     ["md_received_date", "DATE NULL"],
     // Sent to Dispatch Material from the MPR Entries report (when, by whom).
     ["md_queued_at", "TIMESTAMP NULL DEFAULT NULL"],
-    ["md_queued_by", "INT NULL"]
+    ["md_queued_by", "INT NULL"],
+    // The project confirmed it still needs the row (My MPR in Dispatch ->
+    // Confirm). Cleared whenever the row leaves Dispatch Material.
+    ["md_confirmed_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["md_confirmed_by", "INT NULL"]
   ];
   // What the project fills in on receiving (Material Receive form).
   const recvCols: [string, string][] = [
@@ -248,9 +253,9 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
 
   // One MPR row as the Dispatch page shows it.
   const ROW_SQL = `
-    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.created_by,
-      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at, e.md_queued_by,
-      qu.name AS queued_by_name,
+    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.budget_id, e.created_by,
+      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at, e.md_queued_by, e.md_confirmed_at,
+      qu.name AS queued_by_name, cu.name AS confirmed_by_name,
       p.project_name, m.mpr_no, j.job_no, b.budget_name, u.name AS user_name,
       bi.specification, bi.unit, bi.req_qty
     FROM entries e
@@ -259,6 +264,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     JOIN mpr_numbers m ON e.mpr_id = m.id
     LEFT JOIN users u ON e.created_by = u.id
     LEFT JOIN users qu ON e.md_queued_by = qu.id
+    LEFT JOIN users cu ON e.md_confirmed_by = cu.id
     LEFT JOIN budgets b ON e.budget_id = b.id
     LEFT JOIN budget_items bi ON bi.id = e.budget_item_id
     WHERE e.deleted_at IS NULL`;
@@ -288,6 +294,8 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       receivedDate: toDateOnlyString(r.md_received_date),
       queuedAt: r.md_queued_at || null,
       queuedBy: r.queued_by_name || "",
+      confirmedAt: r.md_confirmed_at || null,
+      confirmedBy: r.confirmed_by_name || "",
       dispatches
     };
   };
@@ -540,7 +548,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           kept.push(id);
           continue;
         }
-        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
+        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL, md_confirmed_at = NULL, md_confirmed_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
         if (Number(r?.affectedRows)) {
           await log(id, null, "unqueue", null, "Taken out of Dispatch Material", Number(req.user.id));
           removed++;
@@ -603,8 +611,14 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           Number(req.user.id)
         ])) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
+      // Where a take-back's new Delivery Date may fall (the date picker's limits).
+      const out = [];
+      for (const r of rows) {
+        const w = await deliveryWindow(r, req.user.role);
+        out.push({ ...rowOut(r, ds.get(Number(r.id)) || []), newDeliveryMin: w.min, newDeliveryMax: w.max });
+      }
       res.setHeader("Cache-Control", "no-store");
-      res.json({ rows: rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])) });
+      res.json({ rows: out });
     })
   );
 
@@ -635,10 +649,86 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     })
   );
 
+  // "My MPR in Dispatch" -> Confirm: the project tells Purchase it does need
+  // the row as it is (no take back) — while nothing has been sent on it.
+  // Same switch as Take back; Purchase hears about it.
+  app.post(
+    "/api/material-receive/confirm",
+    authenticateToken,
+    handler(async (req, res) => {
+      await receiveGate(req);
+      const me = Number(req.user.id);
+      if (req.user.role !== "superadmin") {
+        const rows: any[] = (await queryDB("SELECT can_return_dispatch FROM users WHERE id = ?", [me])) || [];
+        if (!Number(rows[0]?.can_return_dispatch)) throw bad("Confirming rows in Dispatch isn't turned on for your account.", 403);
+      }
+      const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 500);
+      if (!ids.length) throw bad("Pick at least one MPR row.");
+      let confirmed = 0;
+      const byQueuer = new Map<number, string[]>();
+      for (const id of ids) {
+        const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
+        if (!entry || Number(entry.created_by) !== me || !entry.md_queued_at || entry.md_confirmed_at) continue;
+        const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
+        if (Number(sent[0]?.n || 0) > 0) continue;
+        const r: any = await queryDB("UPDATE entries SET md_confirmed_at = NOW(), md_confirmed_by = ? WHERE id = ? AND md_queued_at IS NOT NULL AND md_confirmed_at IS NULL", [me, id]);
+        if (!Number(r?.affectedRows)) continue;
+        await log(id, null, "confirm", null, "Confirmed by the project — still needed", me);
+        confirmed++;
+        const queuer = Number(entry.md_queued_by);
+        if (queuer && queuer !== me) {
+          const list = byQueuer.get(queuer) || [];
+          list.push(`${entry.project_name} · ${entry.mpr_no} ${entry.item_name}`);
+          byQueuer.set(queuer, list);
+        }
+      }
+      for (const [userId, lines] of byQueuer) {
+        await createAlert(queryDB, {
+          userId,
+          type: "mpr_dispatch",
+          title: "MPR confirmed by the project",
+          message: `${req.user.name || "The project"} confirmed: ${lines.slice(0, 4).join("; ")}${lines.length > 4 ? ` and ${lines.length - 4} more` : ""}`,
+          relatedType: "mpr_dispatch"
+        }).catch(() => {});
+      }
+      res.json({ confirmed });
+    })
+  );
+
   // "My MPR in Dispatch" -> Take back: the project takes rows it entered back
   // out of Dispatch Material, like Purchase's unqueue — only while nothing has
-  // been sent on the row. Needs Material Receive and its own switch
-  // (users.can_return_dispatch, off by default). Purchase hears about it.
+  // been sent on the row — and picks the row's new Delivery Date. Needs
+  // Material Receive and its own switch (users.can_return_dispatch, off by
+  // default). Purchase hears about it.
+  // The new date follows the same rules as editing a Delivery Date
+  // (EntriesRoutes.ts): not before today / the entry date, inside the
+  // Budget's delivery range, and the Condition Set's "job_edit" notice.
+  // The window a new Delivery Date must fall in: from the latest of today,
+  // the entry date, the Budget's "from" and today + the notice days, up to
+  // the Budget's "to" (null = open). The take-back date picker uses it too.
+  async function deliveryWindow(entry: any, role: string) {
+    const today = todayInDhaka();
+    const entryDate = toDateOnlyString(entry.entry_date) || "";
+    let from: string | null = null,
+      to: string | null = null;
+    if (entry.budget_id) {
+      const b: any = ((await queryDB("SELECT delivery_date_from, delivery_date_to FROM budgets WHERE id = ?", [entry.budget_id])) || [])[0];
+      from = toDateOnlyString(b?.delivery_date_from);
+      to = toDateOnlyString(b?.delivery_date_to);
+    }
+    const lead = await resolveMinLeadDays(queryDB, "job_edit", { projectId: entry.project_id, budgetId: entry.budget_id, userRole: role });
+    const earliest = lead !== null ? addDaysToDateStr(today, lead) : null;
+    const min = [today, entryDate, from, earliest].filter(Boolean).sort().pop() as string;
+    return { min, max: to, from, to, lead, earliest, floor: entryDate > today ? entryDate : today };
+  }
+  async function newDeliveryProblem(entry: any, date: string, role: string): Promise<string | null> {
+    const w = await deliveryWindow(entry, role);
+    if (date < w.floor) return `The new Delivery Date can't be earlier than ${w.floor}.`;
+    if ((w.from && date < w.from) || (w.to && date > w.to)) return `Delivery Date must be between ${w.from || "—"} and ${w.to || "—"} for this Budget.`;
+    if (w.earliest && date < w.earliest) return `Delivery Date needs at least ${w.lead} day(s) notice — the earliest allowed date is ${w.earliest}.`;
+    if (w.max && w.min > w.max) return "No Delivery Date is possible inside this Budget's range any more — ask Purchase / the Admin.";
+    return null;
+  }
   app.post(
     "/api/material-receive/take-back",
     authenticateToken,
@@ -652,6 +742,8 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 500);
       if (!ids.length) throw bad("Pick at least one MPR row.");
       const reason = str(req.body?.reason, 1000);
+      const newDate = dateOf(req.body?.deliveryDate);
+      if (!newDate) throw bad("Pick the new Delivery Date.");
       let removed = 0,
         kept = 0,
         notYours = 0;
@@ -667,14 +759,22 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           kept++;
           continue;
         }
-        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
+        const problem = await newDeliveryProblem(entry, newDate, req.user.role);
+        if (problem) throw bad(problem);
+        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL, md_confirmed_at = NULL, md_confirmed_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
         if (!Number(r?.affectedRows)) continue;
-        await log(id, null, "unqueue", null, `Taken back by the project${reason ? ` — ${reason}` : ""}`, me);
+        // The new Delivery Date, kept in the row's edit history (MPR Edit Log).
+        const oldDate = toDateOnlyString(entry.delivery_date);
+        if (oldDate !== newDate) {
+          await queryDB("UPDATE entries SET delivery_date = ? WHERE id = ?", [newDate, id]);
+          await queryDB("INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, 'delivery_date', ?, ?)", [id, me, oldDate, newDate]);
+        }
+        await log(id, null, "unqueue", null, `Taken back by the project · new Delivery Date ${newDate}${reason ? ` — ${reason}` : ""}`, me);
         removed++;
         const queuer = Number(entry.md_queued_by);
         if (queuer && queuer !== me) {
           const list = byQueuer.get(queuer) || [];
-          list.push(`${entry.project_name} · ${entry.mpr_no} ${entry.item_name}`);
+          list.push(`${entry.project_name} · ${entry.mpr_no} ${entry.item_name} (new delivery ${newDate})`);
           byQueuer.set(queuer, list);
         }
       }

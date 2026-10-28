@@ -52,7 +52,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_my_leave', label: 'My Leave', selfService: true },
   { key: 'can_receive_material', label: 'Material Receive', selfService: true },
-  { key: 'can_return_dispatch', label: 'Take back from Dispatch', selfService: true }
+  { key: 'can_return_dispatch', label: 'Take back / Confirm in Dispatch', selfService: true }
 ];
 
 export interface AccessTemplate {

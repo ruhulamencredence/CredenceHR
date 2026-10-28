@@ -7,9 +7,11 @@
 // MprDispatchRoutes.ts).
 //   My MPR in Dispatch  the rows this account entered itself (its Job
 //                       entries) that Purchase took into Dispatch Material —
-//                       where each stands. With users.can_return_dispatch
-//                       a row can be taken back out of Dispatch Material
-//                       while nothing has been sent on it (Purchase is told).
+//                       where each stands. With users.can_return_dispatch,
+//                       while nothing has been sent on a row, it can be
+//                       taken back out of Dispatch Material (with a new
+//                       Delivery Date) or confirmed as needed. Purchase is
+//                       told either way.
 //   On the way          material Purchase sent to this account's projects
 //                       (user_project_permissions): confirm each dispatch when
 //                       it arrives — all of it, or less with a reason.
@@ -18,7 +20,8 @@
 // When an MPR row's whole Qty has arrived, its cycle is complete.
 
 import React, { useEffect, useState } from 'react';
-import { PackageCheck, Truck, History, Loader2, RefreshCw, AlertTriangle, Undo2 } from 'lucide-react';
+import { PackageCheck, Truck, History, Loader2, RefreshCw, AlertTriangle, Undo2, BadgeCheck } from 'lucide-react';
+import { confirmDialog } from '../lib/confirmDialog';
 import { formatDate } from '../lib/formatDate';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { LoadingBlock } from './LoadingBlock';
@@ -298,18 +301,26 @@ const BulkReceivePopup: React.FC<{ token: string; group: DeliveryGroup; onClose:
   );
 };
 
-// Takes one MPR row back out of Dispatch Material, with an optional reason.
+// Takes one MPR row back out of Dispatch Material: a new Delivery Date
+// (needed) and an optional reason.
 const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; onDone: (text: string) => void }> = ({ token, row, onClose, onDone }) => {
   const [reason, setReason] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const today = todayDhaka();
+  // The server's window (Budget range, today / entry date, notice days).
+  const minDate = row.newDeliveryMin || (row.entryDate && row.entryDate > today ? row.entryDate : today);
+  const maxDate = row.newDeliveryMax || undefined;
+  const noDate = !!maxDate && minDate > maxDate;
+  const outside = !!deliveryDate && (deliveryDate < minDate || (!!maxDate && deliveryDate > maxDate));
   const go = async () => {
     setBusy(true);
     setError('');
     try {
-      const r = await mdFetch<{ removed: number; kept: number }>(token, '/api/material-receive/take-back', 'POST', { entryIds: [row.id], reason });
+      const r = await mdFetch<{ removed: number; kept: number }>(token, '/api/material-receive/take-back', 'POST', { entryIds: [row.id], reason, deliveryDate });
       if (!r.removed) throw new Error(r.kept ? 'Purchase has already sent material on this row — it can no longer be taken back.' : 'This row is no longer in Dispatch Material.');
-      onDone(`${row.mprNo} ${row.item}: taken back from Dispatch — it is back in the MPR list.`);
+      onDone(`${row.mprNo} ${row.item}: taken back from Dispatch — it is back in the MPR list with Delivery Date ${formatDate(deliveryDate)}.`);
     } catch (e: any) {
       setError(e.message);
       setBusy(false);
@@ -324,7 +335,7 @@ const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; 
       footer={
         <>
           <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy}>
+          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy || !deliveryDate || outside || noDate}>
             {busy && <Loader2 className="w-4 h-4 animate-spin" />} Take back
           </button>
         </>
@@ -338,8 +349,18 @@ const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; 
         </div>
         <p className="text-xs text-slate-600">The row leaves Purchase's dispatch list and goes back to the MPR list. Purchase is told.</p>
         <div>
+          <label className={labelCls}>New Delivery Date (needed)</label>
+          <input type="date" className={fieldCls} value={deliveryDate} min={minDate} max={maxDate} disabled={noDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+          <p className={`mt-1 text-[11px] ${outside || noDate ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+            {noDate
+              ? "No date is possible inside this Budget's delivery range any more — ask Purchase / the Admin."
+              : `Pick between ${formatDate(minDate)} and ${maxDate ? formatDate(maxDate) : 'any later date'}${maxDate ? " (the Budget's delivery range)" : ''}.`}
+            {!noDate && ` Now ${row.deliveryDate ? formatDate(row.deliveryDate) : '—'}.`}
+          </p>
+        </div>
+        <div>
           <label className={labelCls}>Reason (optional)</label>
-          <input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. not needed now, will ask again later" autoFocus />
+          <input className={fieldCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. not needed now, will ask again later" />
         </div>
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       </div>
@@ -356,6 +377,22 @@ export const MaterialReceive: React.FC<{ token: string; canTakeBack?: boolean }>
   const [timeline, setTimeline] = useState<number | null>(null);
   const [takingBack, setTakingBack] = useState<MdRow | null>(null);
   const [bulk, setBulk] = useState<DeliveryGroup | null>(null);
+  const [confirming, setConfirming] = useState<number | null>(null);
+  // Tells Purchase the row is needed as it is (no take back).
+  const confirmRow = async (r: MdRow) => {
+    if (!(await confirmDialog(`Confirm you need ${r.item} (MPR ${r.mprNo}) as asked? Purchase is told.`))) return;
+    setConfirming(r.id);
+    setError('');
+    try {
+      await mdFetch(token, '/api/material-receive/confirm', 'POST', { entryIds: [r.id] });
+      setNotice(`${r.mprNo} ${r.item}: confirmed — Purchase is told.`);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConfirming(null);
+    }
+  };
   const today = todayDhaka();
   const load = () => {
     setError('');
@@ -466,12 +503,31 @@ export const MaterialReceive: React.FC<{ token: string; canTakeBack?: boolean }>
                   </div>
                 )}
                 {!list.length && view === 'mine' && (
-                  <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs text-indigo-700">In Purchase's dispatch list — nothing sent yet.</span>
+                  <div className="mt-2 space-y-2">
+                    <div className="text-xs text-indigo-700">
+                      In Purchase's dispatch list — nothing sent yet.
+                      {r.confirmedAt && (
+                        <span className="ml-1 inline-flex items-center gap-1 font-semibold text-teal-700">
+                          <BadgeCheck className="w-3.5 h-3.5" /> Confirmed{r.confirmedBy ? ` by ${r.confirmedBy}` : ''}
+                        </span>
+                      )}
+                    </div>
                     {canTakeBack && (
-                      <button type="button" onClick={() => setTakingBack(r)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50">
-                        <Undo2 className="w-4 h-4" /> Take back
-                      </button>
+                      <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
+                        {!r.confirmedAt && (
+                          <button
+                            type="button"
+                            disabled={confirming === r.id}
+                            onClick={() => void confirmRow(r)}
+                            className="inline-flex justify-center items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-xl text-sm sm:text-xs font-semibold bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+                          >
+                            {confirming === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />} Confirm
+                          </button>
+                        )}
+                        <button type="button" onClick={() => setTakingBack(r)} className={`${r.confirmedAt ? 'col-span-2 ' : ''}inline-flex justify-center items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-xl text-sm sm:text-xs font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50`}>
+                          <Undo2 className="w-4 h-4" /> Take back
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
