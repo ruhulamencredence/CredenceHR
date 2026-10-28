@@ -223,10 +223,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="on" hre
 <p><strong>নিজে থেকে যা হয়:</strong> <code>main</code> বা <code>claude/nice-fermi-0tale9</code>-এ কোড, <code>schema.sql</code>, <code>package.json</code> বা এই ফোল্ডারে কিছু push হলেই GitHub-এর <strong>Docs sync</strong> কাজটি (<code>.github/workflows/docs-sync.yml</code>) চলে। এটি:</p>
 <ol>
 <li>খালি MariaDB-তে সার্ভার একবার চালিয়ে সব টেবিল বানায়, তারপর <code>information_schema</code> পড়ে।</li>
-<li>নতুন করে বানায়: <code>database/README.md</code>-এর সংখ্যা ও মডিউল অংশ, <code>data-dictionary.md</code>, সব মডিউল ডায়াগ্রাম (<code>.mmd/.svg/.png</code>), পুরো ডাটাবেসের ছবি (SVG/PNG/PDF ও <code>full-diagram.html</code>), <code>credencehr-database.drawio</code>।</li>
+<li>নতুন করে বানায়: <code>database/README.md</code>-এর সংখ্যা ও মডিউল অংশ, <code>data-dictionary.md</code>, সব মডিউল ডায়াগ্রাম (<code>.mmd/.svg/.png</code>), পুরো ডাটাবেসের ছবি (SVG ও <code>full-diagram.html</code>; বড় PNG/PDF শুধু artifact-এ), <code>credencehr-database.drawio</code>।</li>
 <li><code>security/access-control-matrix.md</code> (<code>src/types.ts</code> থেকে) আর <code>dependency-sbom.csv</code> (<code>package-lock.json</code> থেকে) বানায়।</li>
-<li>সব HTML বানায়, এক-ফাইলের <code>CredenceHR-Documentation.html</code>-সহ।</li>
+<li>সব HTML বানায়, এক-ফাইলের <code>CredenceHR-Documentation.html</code> ও <code>CredenceHR-Full-Workflow.html</code>-সহ।</li>
 <li>বদল থাকলে একই ব্রাঞ্চে <code>docs: auto-sync ...</code> নামে কমিট করে।</li>
+<li>এক-ফাইলের দুটো HTML আর পুরো ডাটাবেসের PNG/PDF <strong>repo-তে commit করে না</strong> (প্রতিবার ~১৩MB করে repo বাড়াত)। এগুলো রানের <strong>Artifacts → <code>CredenceHR-documentation</code></strong>-এ থাকে (৯০ দিন), আর নিজের কম্পিউটারে <code>npm run docs:sync</code> / <code>docs:db</code> চালালে <code>docs/architecture</code>-তেই তৈরি হয়। ব্রাউজারে পড়তে repo-র <code>docs/architecture/index.html</code> খুলুন (ইন্টারনেট লাগে না)।</li>
 </ol>
 <p>একই push-এ <strong>QA tests</strong> কাজটিও (<code>.github/workflows/qa-tests.yml</code>) চলে: unit টেস্ট, একসাথে দুবার চাপ, কোম্পানি আলাদা রাখা, তারিখের কিনারা, approval chain, আসল ব্রাউজারে ফর্ম পূরণ, বাংলা PDF/Excel ও ২০০০ কর্মীর গতি — প্রতিটা নতুন খালি ডাটাবেসে (<code>tests/qa/run-all.sh</code>)। কোনো টেস্ট ফেল করলে রান লাল হয়; ফল, PDF ও ফেল করা ধাপের ছবি Actions-এর "qa-results"-এ থাকে। নিজের কম্পিউটারে: <code>bash tests/qa/run-all.sh</code> (ডাটাবেস <code>mpr_tracker_db</code> মুছে নতুন বানায় — আসল ডাটার সার্ভারে চালাবেন না)।</p>
 <p>নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (<code>tools/db/groups.json</code>)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।</p>

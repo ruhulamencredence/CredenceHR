@@ -67,10 +67,11 @@
 **নিজে থেকে যা হয়:** `main` বা `claude/nice-fermi-0tale9`-এ কোড, `schema.sql`, `package.json` বা এই ফোল্ডারে কিছু push হলেই GitHub-এর **Docs sync** কাজটি (`.github/workflows/docs-sync.yml`) চলে। এটি:
 
 1. খালি MariaDB-তে সার্ভার একবার চালিয়ে সব টেবিল বানায়, তারপর `information_schema` পড়ে।
-2. নতুন করে বানায়: `database/README.md`-এর সংখ্যা ও মডিউল অংশ, `data-dictionary.md`, সব মডিউল ডায়াগ্রাম (`.mmd/.svg/.png`), পুরো ডাটাবেসের ছবি (SVG/PNG/PDF ও `full-diagram.html`), `credencehr-database.drawio`।
+2. নতুন করে বানায়: `database/README.md`-এর সংখ্যা ও মডিউল অংশ, `data-dictionary.md`, সব মডিউল ডায়াগ্রাম (`.mmd/.svg/.png`), পুরো ডাটাবেসের ছবি (SVG ও `full-diagram.html`; বড় PNG/PDF শুধু artifact-এ), `credencehr-database.drawio`।
 3. `security/access-control-matrix.md` (`src/types.ts` থেকে) আর `dependency-sbom.csv` (`package-lock.json` থেকে) বানায়।
-4. সব HTML বানায়, এক-ফাইলের `CredenceHR-Documentation.html`-সহ।
+4. সব HTML বানায়, এক-ফাইলের `CredenceHR-Documentation.html` ও `CredenceHR-Full-Workflow.html`-সহ।
 5. বদল থাকলে একই ব্রাঞ্চে `docs: auto-sync ...` নামে কমিট করে।
+6. এক-ফাইলের দুটো HTML আর পুরো ডাটাবেসের PNG/PDF **repo-তে commit করে না** (প্রতিবার ~১৩MB করে repo বাড়াত)। এগুলো রানের **Artifacts → `CredenceHR-documentation`**-এ থাকে (৯০ দিন), আর নিজের কম্পিউটারে `npm run docs:sync` / `docs:db` চালালে `docs/architecture`-তেই তৈরি হয়। ব্রাউজারে পড়তে repo-র `docs/architecture/index.html` খুলুন (ইন্টারনেট লাগে না)।
 
 একই push-এ **QA tests** কাজটিও (`.github/workflows/qa-tests.yml`) চলে: unit টেস্ট, একসাথে দুবার চাপ, কোম্পানি আলাদা রাখা, তারিখের কিনারা, approval chain, আসল ব্রাউজারে ফর্ম পূরণ, বাংলা PDF/Excel ও ২০০০ কর্মীর গতি — প্রতিটা নতুন খালি ডাটাবেসে (`tests/qa/run-all.sh`)। কোনো টেস্ট ফেল করলে রান লাল হয়; ফল, PDF ও ফেল করা ধাপের ছবি Actions-এর "qa-results"-এ থাকে। নিজের কম্পিউটারে: `bash tests/qa/run-all.sh` (ডাটাবেস `mpr_tracker_db` মুছে নতুন বানায় — আসল ডাটার সার্ভারে চালাবেন না)।
 

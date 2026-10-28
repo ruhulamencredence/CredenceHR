@@ -54,13 +54,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 <h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৬<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
-<a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
+<a href="diagrams/full-application-er.svg">SVG (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a> · PNG/PDF: GitHub → Actions → সবশেষ <strong>Docs sync</strong> রান → Artifacts → <code>CredenceHR-documentation</code> (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)</p>
 <ul>
 <li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
 <li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
 <li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৪৯<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
 </ul>
-<p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.png" /></p>
+<p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.svg" /></p>
 <h2 id="_4">২. মডিউল মানচিত্র</h2>
 <p><img alt="মডিউল মানচিত্র" src="diagrams/00-module-map.png" /></p>
 <p>তীরের পাশের সংখ্যা = ওই দুই মডিউলের মধ্যে কয়টি foreign key। <a href="diagrams/00-module-map.svg">বড় SVG</a></p>

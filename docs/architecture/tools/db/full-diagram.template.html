@@ -5,7 +5,7 @@
 #bar span{opacity:.8;font-size:13px}#view{position:absolute;top:48px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab;background:#fff}
 #view.drag{cursor:grabbing}#stage{transform-origin:0 0;position:absolute;left:0;top:0}
 .hit polygon{stroke:#e11d48 !important;stroke-width:6 !important}</style></head><body>
-<div id="bar"><b>CredenceHR: পুরো ডাটাবেস ({{TABLES}} টেবিল)</b><input id="q" placeholder="টেবিলের নাম খুঁজুন, যেমন payrolls"><button id="fit">সব দেখুন</button><button id="in">+</button><button id="out">−</button><a href="diagrams/full-application-er.svg" download>SVG</a><a href="diagrams/full-application-er.png" download>PNG</a><a href="diagrams/full-application-er.pdf" download>PDF</a><span>মাউস চাকায় zoom, টেনে সরান। ধূসর ডটেড রেখা = যুক্তিগত সম্পর্ক। PK লাল, FK নীল।</span></div>
+<div id="bar"><b>CredenceHR: পুরো ডাটাবেস ({{TABLES}} টেবিল)</b><input id="q" placeholder="টেবিলের নাম খুঁজুন, যেমন payrolls"><button id="fit">সব দেখুন</button><button id="in">+</button><button id="out">−</button><a href="diagrams/full-application-er.svg" download>SVG</a><span>মাউস চাকায় zoom, টেনে সরান। ধূসর ডটেড রেখা = যুক্তিগত সম্পর্ক। PK লাল, FK নীল।</span></div>
 <div id="view"><div id="stage">{{SVG}}</div></div>
 <script>
 const v=document.getElementById('view'),s=document.getElementById('stage'),el=document.getElementById('er');

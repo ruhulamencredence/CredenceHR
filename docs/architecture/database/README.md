@@ -19,13 +19,13 @@
 ## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৬<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
-[PDF (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.pdf) · [SVG](diagrams/full-application-er.svg) · [PNG](diagrams/full-application-er.png) · [Graphviz সোর্স](diagrams/full-application-er.dot)
+[SVG (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.svg) · [Graphviz সোর্স](diagrams/full-application-er.dot) · PNG/PDF: GitHub → Actions → সবশেষ **Docs sync** রান → Artifacts → `CredenceHR-documentation` (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)
 
 - ১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে **`users`** (সব মডিউল এর সাথে জোড়া)।
 - প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা `data-dictionary.md`-তে।
 - সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৪৯<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
 
-![পুরো ডাটাবেস](diagrams/full-application-er.png)
+![পুরো ডাটাবেস](diagrams/full-application-er.svg)
 
 ## ২. মডিউল মানচিত্র
 

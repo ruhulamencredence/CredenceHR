@@ -3,7 +3,9 @@
 # the server once (schema.sql + every ensure*Schema), regenerates the database
 # README / data dictionary / all ER images / draw.io file, the Access Matrix
 # (src/types.ts), the SBOM (package-lock.json) and every HTML page, then
-# commits the result back to the same branch. Things only a person can write
+# commits the result back to the same branch — except the one-file HTML
+# bundles and the full-database PNG / PDF, which go to the run's artifact
+# "CredenceHR-documentation" (they grew the repo ~13 MB a push). Things only a person can write
 # (a new library's purpose, a changed workflow) show up as warnings in the
 # run summary. Run it by hand from Actions -> "Docs sync" -> Run workflow.
 
@@ -75,6 +77,20 @@ jobs:
 
       - name: Regenerate documentation
         run: node docs/architecture/tools/sync_docs.mjs --db
+
+      # The one-file HTML bundles and the full-database PNG / PDF are not
+      # committed (.gitignore): each run's copy is kept here instead.
+      - name: Keep the big generated files as this run's artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CredenceHR-documentation
+          retention-days: 90
+          if-no-files-found: warn
+          path: |
+            docs/architecture/CredenceHR-Documentation.html
+            docs/architecture/CredenceHR-Full-Workflow.html
+            docs/architecture/database/diagrams/full-application-er.png
+            docs/architecture/database/diagrams/full-application-er.pdf
 
       - name: Commit the updated documentation
         run: |

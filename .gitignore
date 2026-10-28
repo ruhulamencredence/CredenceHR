@@ -24,3 +24,11 @@ android/app/release/
 # file belongs in public/ either, or every build ships it.
 public/**/*.apk
 public/**/*.aab
+
+# Docs sync's biggest outputs: built every run, kept as the run's artifact
+# (CredenceHR-documentation) and by `npm run docs:sync` locally, not in git —
+# committed they grew the repo by ~13 MB on every push.
+docs/architecture/CredenceHR-Documentation.html
+docs/architecture/CredenceHR-Full-Workflow.html
+docs/architecture/database/diagrams/full-application-er.png
+docs/architecture/database/diagrams/full-application-er.pdf
