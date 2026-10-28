@@ -27,14 +27,16 @@ export type SelfServiceFeature =
   | 'can_view_timesheet'
   | 'can_view_leave_application'
   | 'can_view_my_leave'
-  | 'can_receive_material';
+  | 'can_receive_material'
+  | 'can_return_dispatch';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
   can_view_conveyance_claims: 'conveyance-claim-access',
   can_view_timesheet: 'timesheet-access',
   can_view_leave_application: 'leave-application-access',
   can_view_my_leave: 'my-leave-access',
-  can_receive_material: 'material-receive-access'
+  can_receive_material: 'material-receive-access',
+  can_return_dispatch: 'return-dispatch-access'
 };
 export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
 
@@ -49,7 +51,8 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_my_leave', label: 'My Leave', selfService: true },
-  { key: 'can_receive_material', label: 'Material Receive', selfService: true }
+  { key: 'can_receive_material', label: 'Material Receive', selfService: true },
+  { key: 'can_return_dispatch', label: 'Take back from Dispatch', selfService: true }
 ];
 
 export interface AccessTemplate {

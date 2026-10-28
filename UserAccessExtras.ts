@@ -28,7 +28,8 @@ export const TEMPLATE_FEATURES = [
   "can_view_timesheet",
   "can_view_leave_application",
   "can_view_my_leave",
-  "can_receive_material"
+  "can_receive_material",
+  "can_return_dispatch"
 ];
 
 export async function ensureUserAccessSchema(dbPool: any) {

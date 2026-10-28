@@ -534,6 +534,8 @@ export interface User {
   can_view_my_leave?: boolean;
   // PEPM -> Material Receive (MprDispatchRoutes.ts) — off by default.
   can_receive_material?: boolean;
+  // Material Receive -> take an MPR row back out of Dispatch Material — off by default.
+  can_return_dispatch?: boolean;
   // Credence Assistant (AiAssistantRoutes.ts): on unless switched off; its
   // report download and live support are off by default.
   can_use_ai_assistant?: boolean;

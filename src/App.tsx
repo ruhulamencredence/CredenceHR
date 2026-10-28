@@ -981,7 +981,7 @@ export default function App() {
         ) : selfServiceView === 'payroll' ? (
           <PayrollModule token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'materialReceive' && (user.role === 'superadmin' || !!user.can_receive_material) ? (
-          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} /></div>
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
         ) : selfServiceView === 'employeeDirectory' ? (
           <EmployeeDirectory token={token} user={user} onBack={() => setSelfServiceView(null)} isActive />
         ) : isAdminView ? (

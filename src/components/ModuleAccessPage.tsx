@@ -63,6 +63,7 @@ type FlagKey =
   | 'can_view_leave_application'
   | 'can_view_my_leave'
   | 'can_receive_material'
+  | 'can_return_dispatch'
   | 'can_use_ai_assistant'
   | 'can_export_assistant_reports'
   | 'can_handle_assistant_support';
@@ -91,6 +92,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_job_edit', label: 'Job Edit', desc: 'Change MPRs after Final Submit.', section: 'pepm', endpoint: null },
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date', desc: 'Change an MPR row’s delivery date.', section: 'pepm', endpoint: null, defaultOn: true },
   { key: 'can_receive_material', label: 'Material Receive', desc: 'Confirm material Purchase sent to their projects.', section: 'pepm', endpoint: 'material-receive-access' },
+  { key: 'can_return_dispatch', label: 'Take back from Dispatch', desc: 'Take their own MPR rows back out of Dispatch Material while nothing is sent.', section: 'pepm', endpoint: 'return-dispatch-access' },
 
   { key: 'can_use_attendance', label: 'Remote Attendance', desc: 'Mark attendance from their phone.', section: 'attendance', endpoint: null },
   { key: 'can_view_timesheet', label: 'Timesheet', desc: 'Own attendance history and Correct Attendance.', section: 'attendance', endpoint: 'timesheet-access' },

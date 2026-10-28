@@ -163,7 +163,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_return_dispatch, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -226,6 +226,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
+        can_return_dispatch: u.role === "superadmin" ? true : !!Number(u.can_return_dispatch || 0),
         is_blocked: !!Number(u.is_blocked || 0),
         can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
         can_export_assistant_reports: u.role === "superadmin" ? true : !!Number(u.can_export_assistant_reports || 0),
@@ -844,6 +845,24 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       }
       await queryDB("UPDATE users SET can_receive_material = ? WHERE id = ?", [enabled ? 1 : 0, id]);
       res.json({ success: true, can_receive_material: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: Material Receive -> take an MPR row back out of
+  // Dispatch Material (MprDispatchRoutes.ts) — OFF by default.
+  app.put("/api/users/:id/return-dispatch-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_return_dispatch;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Take back from Dispatch only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_return_dispatch = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_return_dispatch: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

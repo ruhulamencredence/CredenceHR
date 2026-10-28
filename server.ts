@@ -3825,6 +3825,7 @@ async function startServer() {
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // PEPM Operation -> Material Receive (MprDispatchRoutes.ts), off by default.
           can_receive_material: user.role === "superadmin" ? true : !!Number(user.can_receive_material || 0),
+          can_return_dispatch: user.role === "superadmin" ? true : !!Number(user.can_return_dispatch || 0),
           // Credence Assistant: on unless switched off; report download and
           // live support off by default.
           can_use_ai_assistant: user.role === "superadmin" ? true : Number(user.can_use_ai_assistant ?? 1) !== 0,
@@ -3851,7 +3852,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_return_dispatch, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -3874,6 +3875,7 @@ async function startServer() {
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
+        can_return_dispatch: u.role === "superadmin" ? true : !!Number(u.can_return_dispatch || 0),
         can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
         can_export_assistant_reports: u.role === "superadmin" ? true : !!Number(u.can_export_assistant_reports || 0),
         can_handle_assistant_support: u.role === "superadmin" ? true : !!Number(u.can_handle_assistant_support || 0),
