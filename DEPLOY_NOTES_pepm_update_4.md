@@ -62,6 +62,10 @@ behind the same address: put the same long `JWT_SECRET` in every `.env`
   being deleted (with a warning when material was already sent or received
   against it); for Add MPR, the Budget item's qty before -> after and
   what's left; and the Job's MPR rows with the change marked in place.
+- Tick several pending requests (or Select all) and **Approve selected** /
+  **Reject selected** together. Each goes through the same checks as a
+  single one; any that can't be approved any more is listed, the rest go
+  through.
 
 ## Chat
 - Reactions, delete for me / unsend for everyone, wallpapers, contact
