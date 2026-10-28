@@ -49,7 +49,7 @@ async function signIn(identifier, password) {
     await ws.fill('credence');
     await page.getByRole('button', { name: 'Next' }).click();
   }
-  await page.getByPlaceholder('you@company.com or Project Name').fill(identifier);
+  await page.getByPlaceholder(/Project Name/).fill(identifier);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
