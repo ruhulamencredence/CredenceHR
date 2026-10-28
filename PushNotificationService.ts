@@ -27,11 +27,13 @@
 // so every push sender (Chat, Alerts, ...) reuses the same table/registration
 // rather than each needing its own.
 
-import admin from "firebase-admin";
+import { initializeApp, cert, type App } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
+import { sendWebPushToUserIds } from "./WebPushService";
 
-let firebaseApp: admin.app.App | null | undefined;
+let firebaseApp: App | null | undefined;
 
-export function getFirebaseApp(): admin.app.App | null {
+export function getFirebaseApp(): App | null {
   if (firebaseApp !== undefined) return firebaseApp;
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!json) {
@@ -40,12 +42,42 @@ export function getFirebaseApp(): admin.app.App | null {
     return null;
   }
   try {
-    firebaseApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) });
+    firebaseApp = initializeApp({ credential: cert(JSON.parse(json)) });
   } catch (err: any) {
     console.warn("⚠️ Could not initialize Firebase (check FIREBASE_SERVICE_ACCOUNT_JSON) — push notifications disabled: " + err.message);
     firebaseApp = null;
   }
   return firebaseApp;
+}
+
+// A data-only, high-priority push: nothing is shown on the phone; it only
+// wakes the app (out of Doze, with its socket asleep) so it can act on
+// `data` — e.g. Live Follow telling a phone to start reporting. Expires
+// after ttlMs if the phone can't be reached by then. Never throws.
+export async function sendSilentPushToUserIds(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  userIds: number[],
+  data: Record<string, string>,
+  ttlMs = 60_000
+): Promise<number> {
+  const app = getFirebaseApp();
+  if (!app || userIds.length === 0) return 0;
+  try {
+    const rows = await queryDB(
+      `/*unscoped*/ SELECT token FROM chat_push_tokens WHERE platform = 'android' AND user_id IN (${userIds.map(() => "?").join(",")})`,
+      userIds
+    );
+    if (rows.length === 0) return 0;
+    const result = await getMessaging(app).sendEachForMulticast({
+      tokens: rows.map((r: any) => r.token),
+      data,
+      android: { priority: "high", ttl: ttlMs }
+    });
+    return result.successCount;
+  } catch (err: any) {
+    console.warn("⚠️ Silent push failed: " + err.message);
+    return 0;
+  }
 }
 
 // Sends to every registered device of the given user ids (minus excludeUserId,
@@ -60,6 +92,8 @@ export async function sendPushToUserIds(
   data: Record<string, string>,
   excludeUserId?: number
 ): Promise<void> {
+  // Browsers too (desktop notifications) — with or without Firebase.
+  void sendWebPushToUserIds(queryDB, userIds, title, body, data, excludeUserId);
   const app = getFirebaseApp();
   if (!app || userIds.length === 0) return;
   try {
@@ -70,7 +104,7 @@ export async function sendPushToUserIds(
       targetIds
     );
     if (rows.length === 0) return;
-    const result = await admin.messaging(app).sendEachForMulticast({
+    const result = await getMessaging(app).sendEachForMulticast({
       tokens: rows.map((r: any) => r.token),
       notification: { title, body },
       data,
@@ -98,6 +132,23 @@ export async function sendPushToRoomMembers(
   body: string,
   data: Record<string, string>
 ): Promise<void> {
+  // Browsers too (desktop notifications) — with or without Firebase.
+  // Only members who still have Chat (users.can_use_chat).
+  void queryDB(
+    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)",
+    [roomId]
+  )
+    .then((members: any[]) =>
+      sendWebPushToUserIds(
+        queryDB,
+        (members || []).map((m: any) => Number(m.user_id)),
+        title,
+        body,
+        data,
+        excludeUserId
+      )
+    )
+    .catch(() => {});
   const app = getFirebaseApp();
   if (!app) return;
   try {
@@ -109,7 +160,7 @@ export async function sendPushToRoomMembers(
       [roomId, excludeUserId]
     );
     if (rows.length === 0) return;
-    const result = await admin.messaging(app).sendEachForMulticast({
+    const result = await getMessaging(app).sendEachForMulticast({
       tokens: rows.map((r: any) => r.token),
       notification: { title, body },
       data,

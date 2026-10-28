@@ -14,8 +14,9 @@ import { Search, Download, CheckCircle2, Clock3, XCircle, ChevronDown, ChevronRi
 import { Budget } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 type Status = 'not_submitted' | 'job_submitted' | 'final_submitted';
 
 interface Submitter {
@@ -163,7 +164,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[220px]">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Budget</label>
-            <select
+            <SearchSelect
               value={budgetId}
               onChange={(e) => setBudgetId(e.target.value)}
               className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -175,7 +176,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
                   {b.is_published ? '' : ' (not published)'}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div className="relative flex-1 min-w-[200px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -210,9 +211,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12">
-          <Spinner size={20} className="text-slate-400" />
-        </div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-12">{error}</p>
       ) : visible.length === 0 ? (

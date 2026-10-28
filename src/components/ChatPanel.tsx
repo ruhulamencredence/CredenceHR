@@ -19,9 +19,6 @@ import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, Pin
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
-// The app's own microphone recorder, when this app build has it; an older
-// app (and the website) records through the WebView's MediaRecorder.
-const nativeMic = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('VoiceRecorder');
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
   Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward
@@ -31,6 +28,9 @@ import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
+// The app's own microphone recorder, when this app build has it; an older
+// app (and the website) records through the WebView's MediaRecorder.
+const nativeMic = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('VoiceRecorder');
 
 interface ChatPanelProps {
   token: string;

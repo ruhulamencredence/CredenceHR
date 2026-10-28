@@ -12,9 +12,7 @@
 
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
-// One company on this server.
-const activeCompanyId = () => 1;
-const activeGroupId = () => 1;
+import { activeCompanyId, activeGroupId } from "./companyContext";
 import { createAlert } from "./Alerts";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;

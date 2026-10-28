@@ -21,7 +21,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Clock, LogOut, MapPin, ShieldCheck, Users } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from '../components/LazyLottie';
 import trackingAnimation from '../assets/gps-navigation.json';
 import { PrivacyPolicy } from '../components/PrivacyPolicy';
 

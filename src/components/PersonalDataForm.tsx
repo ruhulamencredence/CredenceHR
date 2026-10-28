@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Camera, User as UserIcon, Briefcase, Building2, MapPin, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PersonalDataFormProps {
   token: string;
@@ -83,7 +84,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
   const loadPhoto = async () => {
     try {
       const res = await fetch(apiUrl('/api/profile/photo'), { headers: authHeaders });
-      if (!res.ok) return;
+      if (!res.ok || res.status === 204) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -221,9 +222,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Spinner size={28} />
-          </div>
+          <LoadingBlock />
         ) : (
           /* One column on a phone; the two sections sit side by side from md
              up, where stacking them left the right half of the page empty.
@@ -293,7 +292,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                     placeholder="First Name"
                   />
                 </Field>
-                <Field label="Last Name" icon={<UserIcon className="w-4 h-4" />}>
+                <Field label="Last Name (optional)" icon={<UserIcon className="w-4 h-4" />}>
                   <input
                     type="text"
                     value={data.last_name}

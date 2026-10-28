@@ -20,8 +20,12 @@
 //     with fixed Bangla answers. Needs no key, sends nothing outside.
 //   - gemini (when GEMINI_API_KEY is set): free-form questions; Gemini picks
 //     which of the same read-only tools to call. Falls back to local on any
-//     error. Note: in this mode the question and the tool results are sent to
-//     Google.
+//     error, and when its quota is used up it is left alone for a while
+//     (pauseGemini) so local answers straight away. Note: in this mode the
+//     question and the tool results are sent to Google.
+//   The local engine also learns from Gemini (assistant_learned) and has
+//   built-in example questions (TRAINING), corrects misspellings and reads a
+//   short follow-up with the previous question — see "Learning" below.
 
 import type { Express } from "express";
 import { GoogleGenAI, type Content, type FunctionDeclaration } from "@google/genai";
@@ -87,28 +91,20 @@ export interface AssistantReport {
   rows: (string | number | null)[][];
 }
 
-interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft; report?: AssistantReport }
+interface Answer {
+  reply: string;
+  actions: AssistantAction[];
+  draft?: LeaveDraft;
+  report?: AssistantReport;
+  // Gemini only: which tool / how-to entry answered, kept so the local engine
+  // can answer the same question itself later (see "Learning" below).
+  learn?: { tool?: string; help?: string; args?: Record<string, any> };
+}
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
-  "can_view_my_leave", "can_manage_leave", "can_receive_material"
+  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book"
 ] as const;
-
-// Pages and tools of features this server doesn't have yet: their buttons,
-// help entries and tools are left out (a question about them gets a plain
-// "not here yet").
-const NAV_NOT_HERE = new Set([
-  "self:myTargets", "self:myLetters", "self:vehicleManagement", "self:resignation", "self:myTasks", "self:myMobileSim", "self:myCases",
-  "self:myLoans", "self:assetManagement", "self:teamAttendance",
-  "admin:vehicle_management", "admin:task_management", "admin:target_reports", "admin:reports_insights", "admin:data_import", "admin:companies", "admin:mobile_bill"
-]);
-const notHere = (nav?: string | null) => !!nav && (nav.startsWith("hrops:") || NAV_NOT_HERE.has(nav));
-const TOOLS_NOT_HERE = new Set([
-  "my_late_days", "my_loans", "my_tasks", "my_rides", "my_letters", "my_targets_progress", "my_mobile_sim", "my_cases", "my_team_attendance",
-  "admin_pending_work", "hr_dashboard", "stuck_applications", "exits_overview", "payroll_status", "target_progress", "task_overview",
-  "vehicle_overview", "late_on_date", "employee_attendance", "onboarding_overview"
-]);
-const NOT_HERE_TEXT = "এই সুবিধাটা এখনো এই সার্ভারে চালু হয়নি।";
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
 const bn = (v: any) => String(v ?? "").replace(/[0-9]/g, (d) => BN_DIGITS[Number(d)]);
@@ -168,10 +164,6 @@ interface HelpEntry {
 }
 
 const HELP: HelpEntry[] = [
-  { id: "material_receive", title: "Material Receive", keys: ["material receive", "material", "মাল", "মালামাল", "receive", "রিসিভ", "dispatch", "ডিসপ্যাচ"],
-    steps: "মেনু → Job Entry → **Material Receive**। আপনার MPR কোথায় আছে (My MPR in Dispatch), কোন মাল প্রজেক্টে আসছে (On the way) — মাল পৌঁছালে কত এলো লিখে Receive করুন। কম এলে কারণ লিখতে হয়।", nav: "self:materialReceive", can: (c) => isSuper(c) || !!c.flags.can_receive_material },
-  { id: "dispatch_material", title: "Dispatch Material", keys: ["dispatch material", "dispatch", "ডিসপ্যাচ", "purchase", "send to dispatch", "challan"],
-    steps: "Admin Panel → PEPM Manage → **Reports** → MPR Entries Report-এ সারি tick দিয়ে **Send to Dispatch**; তারপর **Dispatch Material** ট্যাবে পাঠান (স্ক্রিনে বা Daily Site Requirement sheet upload করে)।", nav: "admin:reports", can: (c) => hasMod(c, "reports") },
   { id: "leave_apply", title: "ছুটির আবেদন", keys: ["leave apply", "apply leave", "chuti apply", "ছুটি apply", "ছুটির আবেদন কীভাবে", "chutir abedon", "leave application kivabe", "chuti nibo", "chuti nite", "leave nibo", "ছুটি নেব", "ছুটি নিতে", "ছুটির আবেদন", "leave application", "ছুটি চাই", "chuti chai"],
     steps: "মেনু → Leave & Attendance → **Leave Application** → \"New Leave Application\"। ছুটির ধরন, তারিখ আর কারণ দিন, দরকার হলে Reliever বেছে Submit করুন। আবেদন আপনার supervisor / approval chain-এ যাবে।",
     nav: "self:leaveApplication", can: (c) => isSuper(c) || c.flags.can_view_leave_application || c.flags.can_view_my_leave },
@@ -267,6 +259,15 @@ const HELP: HelpEntry[] = [
       "Self Service → HRM → Leave Manage → **Leave Manage** পাতার নিচের অংশে:\n" +
       "• **Year Settings:** HR-এর ছুটির বছর কবে শেষ আর কবে শুরু (যেমন ১ জানুয়ারি – ৩১ ডিসেম্বর) ঠিক করুন; নতুন বছর শুরু হলে workflow আপনা থেকে চলে।\n" +
       "• **Leave Balance Workflows:** \"General\" সবার জন্য, আর দরকার হলে পদবি (Designation) অনুযায়ী আলাদা workflow (যেমন Manager, GM) — প্রতিটা ছুটির ধরনে বছরে কত দিন। পদবির workflow সেই পদবির কর্মীদের জন্য General-এর বদলে খাটে। **\"Apply Now\"** দিয়ে সাথে সাথে ব্যালেন্স বসানো যায়।",
+    nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
+  { id: "leave_rules", title: "ছুটির নিয়ম — মাসে জমা, পরের বছরে টানা, কে আবেদন করতে পারবে (মাতৃত্বকালীন সহ)",
+    keys: ["leave accrual", "accrual", "earn leave", "earned leave", "আর্ন লিভ", "মাসে ছুটি জমা", "ছুটি জমা", "carry forward", "carry-forward", "পরের বছরে টানা", "ছুটি টানা", "maternity", "মাতৃত্বকালীন", "paternity", "পিতৃত্বকালীন", "leave eligibility", "মাতৃত্ব ছুটি", "matrittho", "leave rules", "ছুটির নিয়ম"],
+    steps:
+      "মেনু → Self Service → HRM → Leave Manage → **Leave Policies** → প্রতিটা ছুটির ধরনের নিচে **Leave Rules**:\n" +
+      "• **কে আবেদন করতে পারবে:** Everyone / Female only / Male only, আর কত মাসের চাকরি লাগবে (joining date থেকে)। শর্ত না মিললে আবেদনই নেওয়া হয় না। **Maternity preset** বোতামে নারী + ৬ মাস বসে; একই কার্ডের **Max Consecutive Days**-এ সর্বোচ্চ দিন (১৬ সপ্তাহ = ১১২) দিন।\n" +
+      "• **মাসে কত দিন জমা:** Days earned per month (যেমন ১.৭ ≈ ১৮ দিনে ১); **Balance cap** দিলে এর বেশি জমে না। প্রতিটা পূর্ণ মাসের জন্য একবার করে নিজে থেকে জমা হয় (যিনি মাসের আগে যোগ দিয়েছেন তিনি); চালু করার **পরের মাস** থেকে শুরু, পেছনের মাস পরিশোধ হয় না।\n" +
+      "• **পরের বছরে টানা:** Carry forward-এ সর্বোচ্চ কত দিন যাবে; ০ দিলে সব বাতিল, ফাঁকা রাখলে এই নিয়ম নেই। বছর শেষের rollover-এ কাজ করে (Year Settings-এ \"Start next year automatically\" চালু থাকতে হবে)।\n" +
+      "• এই অংশের জন্য Module Access-এর Leave Manage layer-এ **Leave Rules** টিক লাগে (শুরুতে বন্ধ)।",
     nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
   { id: "leave_manage_access", title: "কাউকে Leave Manage-এর অনুমতি দেওয়া",
     keys: ["leave manage access", "leave manage permission", "balance edit access", "ব্যালেন্স এডিটের অনুমতি", "leave balance access", "allow editing leave"],
@@ -366,7 +367,6 @@ function canNav(c: Ctx, nav: string): boolean {
     switch (target) {
       case "leaveApplication": return f.can_view_leave_application || f.can_view_my_leave;
       case "leaveManagement": return f.can_manage_leave;
-      case "materialReceive": return f.can_receive_material;
       case "timesheet": return f.can_view_timesheet;
       case "myTasks": return f.can_view_tasks || c.modules.includes("task_management");
       case "myMobileSim": return f.can_view_mobile_bill || c.modules.includes("mobile_bill");
@@ -381,9 +381,9 @@ function canNav(c: Ctx, nav: string): boolean {
   if (kind === "hrops") return c.modules.includes("hr_operations");
   return true; // home, profile, support:request
 }
-const allowedActions = (c: Ctx, actions: AssistantAction[]) => actions.filter((a) => !notHere(a.nav) && canNav(c, a.nav));
+const allowedActions = (c: Ctx, actions: AssistantAction[]) => actions.filter((a) => canNav(c, a.nav));
 
-const helpAction = (h: HelpEntry): AssistantAction[] => (h.nav && !notHere(h.nav) ? [{ label: `${h.title} খুলুন`, nav: h.nav }] : []);
+const helpAction = (h: HelpEntry): AssistantAction[] => (h.nav ? [{ label: `${h.title} খুলুন`, nav: h.nav }] : []);
 
 // ---------------------------------------------------------------------------
 // The account's own API, called with the account's own token.
@@ -537,7 +537,8 @@ export function parseLeaveRequest(text: string, today: string) {
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
 const nameBefore = (t: string) => {
   const m = /([a-z.]{2,}(?:\s+[a-z.]{2,})?)\s+er\s/.exec(t) || /([\u0980-\u09ff]{2,}(?:\s+[\u0980-\u09ff]{2,})?)(?:-এর|\s+এর)\s/.exec(t);
-  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w));
+  // "attendance er obostha": a word the assistant knows as a topic isn't a name.
+  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w) && !topicWords().has(w));
   return words.slice(-1)[0] || "";
 };
 
@@ -1774,6 +1775,52 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "employee_breakdown",
+    description:
+      "HR: active employees counted by religion, gender, blood group or marital status (from their Employee records). " +
+      "field = religion | gender | blood_group | marital_status. value = count only that one (e.g. Hindu, Muslim, Female, B+, Married); " +
+      "leave it out for the whole breakdown. Optional department name filter.",
+    params: {
+      field: { type: "string", description: "religion | gender | blood_group | marital_status" },
+      value: { type: "string", description: "Optional: the one value to count, e.g. Hindu, Female, B+, Married." },
+      department: { type: "string", description: "Optional department name to filter by." }
+    },
+    available: (c) => hasMod(c, "employees"),
+    run: async (c, args) => {
+      const f = BREAKDOWN_FIELDS.find((x) => x.key === String(args?.field || "").toLowerCase()) || BREAKDOWN_FIELDS[0];
+      const dept = String(args?.department || "").trim().toLowerCase();
+      const r = await callApi(c.req, "/api/employees");
+      if (!r.ok) return fail(r.status);
+      const all: any[] = (Array.isArray(r.body) ? r.body : []).filter((e: any) => e.is_active);
+      const scoped = dept ? all.filter((e) => String(e.department || "").toLowerCase().includes(dept)) : all;
+      // Free-text values are folded into one name each ("Hinduism" / "hindu" / "হিন্দু").
+      const groups = new Map<string, number>();
+      let blank = 0;
+      for (const e of scoped) {
+        const k = breakdownKey(f, e[f.key]);
+        if (!k) blank++;
+        else groups.set(k, (groups.get(k) || 0) + 1);
+      }
+      const list = [...groups.entries()].sort((a, b) => b[1] - a[1]);
+      const want = args?.value ? breakdownKey(f, args.value) : null;
+      const where = dept ? ` (${args.department} বিভাগে)` : "";
+      const lines = list.map(([k, n]) => `• ${breakdownLabel(f, k)}: ${bn(n)} জন`).join("\n");
+      const blankNote = blank ? `\n${f.bn} লেখা নেই: ${bn(blank)} জন — তাঁদের এখানে গোনা হয়নি।` : "";
+      const text = want
+        ? `${breakdownLabel(f, want)} কর্মী${where}: **${bn(groups.get(want) || 0)} জন** — মোট ${bn(scoped.length)} জন active কর্মীর মধ্যে।` +
+          (list.length ? `\n\n${f.bn} অনুযায়ী সবাই:\n${lines}` : "") + blankNote
+        : `${f.bn} অনুযায়ী active কর্মী${where} (মোট ${bn(scoped.length)} জন):\n${lines || "• কারো রেকর্ডে লেখা নেই"}${blankNote}`;
+      return {
+        ok: true,
+        text,
+        data: { field: f.key, value: want, count: want ? groups.get(want) || 0 : undefined, total: scoped.length, blank, groups: Object.fromEntries(list) },
+        actions: [{ label: "Employees খুলুন", nav: "admin:employees" }],
+        report: report(`Employees by ${f.en}`, `Employees-by-${f.key}-${c.today}`, [f.en, "Employees"], [...list.map(([k, n]) => [k, n]), ...(blank ? [["(not recorded)", blank]] : [])],
+          [["As of", enDate(c.today)], ["Active employees", String(scoped.length)], ...(dept ? [["Department", String(args.department)]] as [string, string][] : [])])
+      };
+    }
+  },
+  {
     name: "service_length",
     description:
       "HR: active employees by length of service, from their joining date. years = the number of years (default 10). " +
@@ -1863,7 +1910,7 @@ const TOOLS: Tool[] = [
   }
 ];
 
-const toolAvailable = (t: Tool, c: Ctx) => !TOOLS_NOT_HERE.has(t.name) && (!t.available || t.available(c));
+const toolAvailable = (t: Tool, c: Ctx) => !t.available || t.available(c);
 
 // The parts of the daily HR report (daily_hr_report), in order. Parts that
 // only matter when something is there are left out when empty.
@@ -1887,6 +1934,59 @@ const DAILY_PARTS: { tool: string; title: string; en: string; args: (date: strin
 const norm = (s: string) => ` ${String(s || "").toLowerCase().replace(/[?!.,।]+/g, " ").replace(/\s+/g, " ").trim()} `;
 const hasAny = (t: string, keys: string[]) => keys.some((k) => t.includes(k));
 
+// Employee fields the Assistant counts by (employee_breakdown). Each is free
+// text on the Employee record, so the usual spellings fold into one name.
+interface BreakdownField { key: string; bn: string; en: string; values: { name: string; bn: string; words: string[] }[] }
+const BREAKDOWN_FIELDS: BreakdownField[] = [
+  { key: "religion", bn: "ধর্ম", en: "Religion", values: [
+    { name: "Islam", bn: "মুসলিম", words: ["islam", "muslim", "মুসলিম", "মুসলমান", "ইসলাম"] },
+    { name: "Hinduism", bn: "হিন্দু", words: ["hindu", "hinduism", "sanatan", "sanatan dharma", "হিন্দু", "সনাতন"] },
+    { name: "Buddhism", bn: "বৌদ্ধ", words: ["buddhist", "buddhism", "buddha", "বৌদ্ধ"] },
+    { name: "Christianity", bn: "খ্রিস্টান", words: ["christian", "christianity", "খ্রিস্টান", "খ্রিষ্টান"] }
+  ] },
+  { key: "gender", bn: "লিঙ্গ", en: "Gender", values: [
+    { name: "Male", bn: "পুরুষ", words: ["male", "man", "m", "পুরুষ"] },
+    { name: "Female", bn: "নারী", words: ["female", "woman", "f", "মহিলা", "নারী"] }
+  ] },
+  { key: "blood_group", bn: "রক্তের গ্রুপ", en: "Blood Group", values: [] },
+  { key: "marital_status", bn: "বৈবাহিক অবস্থা", en: "Marital Status", values: [
+    { name: "Married", bn: "বিবাহিত", words: ["married", "বিবাহিত"] },
+    { name: "Unmarried", bn: "অবিবাহিত", words: ["unmarried", "single", "অবিবাহিত"] }
+  ] }
+];
+// "b positive" / "B (+ve)" / "b+" -> "B+".
+const bloodKey = (v: string) => {
+  const m = /^(ab|a|b|o)\s*\(?\s*(\+|-|pos\w*|neg\w*|\+ve|-ve)?/i.exec(v.trim());
+  if (!m) return null;
+  const sign = !m[2] ? "" : /^(\+|pos)/i.test(m[2]) ? "+" : "-";
+  return m[1].toUpperCase() + sign;
+};
+function breakdownKey(f: BreakdownField, raw: unknown): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  if (f.key === "blood_group") return bloodKey(v) || v.toUpperCase();
+  const low = v.toLowerCase();
+  const hit = f.values.find((x) => x.words.includes(low) || x.name.toLowerCase() === low);
+  return hit ? hit.name : v.replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+const breakdownLabel = (f: BreakdownField, key: string) => {
+  const hit = f.values.find((x) => x.name === key);
+  return hit ? `${hit.bn} (${key})` : key;
+};
+// Which field and value a question is about ("hindu employee koto jon").
+function breakdownArgs(t: string) {
+  for (const f of BREAKDOWN_FIELDS) {
+    for (const v of f.values) if (v.words.some((w) => w.length > 2 && new RegExp(`(^|[^a-zঀ-৿])${w}`).test(t))) return { field: f.key, value: v.name };
+  }
+  if (hasAny(t, ["blood", "রক্ত"])) {
+    const b = /\b(ab|a|b|o)\s*(\+|-|positive|negative|pos|neg)/i.exec(t);
+    return { field: "blood_group", value: b ? bloodKey(b[0]) : undefined };
+  }
+  if (hasAny(t, ["gender", "লিঙ্গ"])) return { field: "gender" };
+  if (hasAny(t, ["marital", "বৈবাহিক", "বিয়ে"])) return { field: "marital_status" };
+  return { field: "religion" };
+}
+
 // How well a how-to entry matches: a key found as written counts in full; a
 // key of several words that are all there with other words between them
 // ("department kivabe add korbo" for "department add") counts a little less.
@@ -1900,7 +2000,7 @@ const helpKeyScore = (h: HelpEntry, t: string) =>
 // blocked = true finds only the pages this account can NOT open (to say so).
 function matchHelp(c: Ctx, text: string, limit: number, blocked = false): HelpEntry[] {
   const t = norm(text);
-  return HELP.filter((h) => !notHere(h.nav) && (!h.can || h.can(c)) !== blocked)
+  return HELP.filter((h) => (!h.can || h.can(c)) !== blocked)
     .map((h) => ({ h, score: helpKeyScore(h, t) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -1948,7 +2048,7 @@ const INTENTS: Intent[] = [
     args: (t, c) => (hasAny(t, LAST_MONTH) ? { month_year: monthShift(c.today.slice(0, 7), -1) } : {}) },
   { tool: "asset_lookup", keys: ["kar kache", "কার কাছে", "asset koyta", "কয়টা asset", "asset khali", "খালি asset", "laptop koyta", "কয়টা laptop", "asset list", "who has", "কার নামে"],
     args: (t) => { const m = /(\S{2,30})\s+(?:kar kache|কার কাছে|কার নামে)/.exec(t) || /(?:who has|kar kache|কার কাছে)\s+(?!ache|আছে)(\S{2,30})/.exec(t); return { query: m ? m[1].replace(/[?]/g, "").trim() : "" }; } },
-  { tool: "my_pending_approvals", keys: ["amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
+  { tool: "my_pending_approvals", keys: ["approve korar jonno", "approve er jonno", "amar kache approve", "অনুমোদনের জন্য কিছু", "অনুমোদন করার জন্য", "approve korte hobe ki", "amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
   { tool: "my_profile", keys: ["amar supervisor", "আমার supervisor", "আমার সুপারভাইজার", "amar boss", "my supervisor", "amar joining", "আমার যোগদান", "joining date", "যোগদানের তারিখ", "amar designation", "আমার পদবি", "amar podobi", "amar employee id", "আমার employee id", "আমার আইডি", "amar department", "আমার department", "my profile", "আমার প্রোফাইল", "amar profile", "koto bochor chakri", "কত বছর চাকরি", "amar confirmation", "probation kobe sesh"] },
   { tool: "my_assets", keys: ["amar asset", "আমার asset", "আমার অ্যাসেট", "amar kache ki asset", "আমার কাছে কী", "my asset", "laptop amar", "acknowledge asset", "asset acknowledge", "asset requisition status", "requisition koi", "asset er obostha"] },
   { tool: "my_rides", keys: ["amar ride", "আমার ride", "amar gari", "আমার গাড়ি", "gari booking", "গাড়ির বুকিং", "ride status", "my ride", "vehicle requisition status", "gari kobe", "গাড়ি কবে", "driver ke", "ড্রাইভার কে"] },
@@ -2007,18 +2107,24 @@ const INTENTS: Intent[] = [
   { tool: "vehicle_overview", keys: ["vehicle", "ভেহিকেল", "gari koyta", "কয়টা গাড়ি", "gari khali", "খালি গাড়ি", "kon gari", "কোন গাড়ি", "ride request", "ajker ride", "আজকের ride", "fleet", "driver koi", "গাড়ি কোথায়", "gari kothay", "sobar ride", "ride pending"] },
   { tool: "daily_hr_report", keys: ["hr report", "hr রিপোর্ট", "এইচআর রিপোর্ট", "hr-এর রিপোর্ট", "daily report", "daily hr", "dainik report", "দৈনিক রিপোর্ট", "ajker report", "আজকের রিপোর্ট", "ajker hr", "আজকের hr", "আজকের এইচআর", "today's report", "todays report", "today report", "today's hr", "din er report", "দিনের রিপোর্ট", "ajker summary", "আজকের সারসংক্ষেপ", "ajker update", "আজকের আপডেট"],
     args: (t, c) => { const d = /(\d{4}-\d{2}-\d{2})/.exec(t)?.[1]; return d ? { date: d } : hasAny(t, ["gotokal", "গতকাল", "yesterday", "kalker", "কালকের"]) ? { date: addDays(c.today, -1) } : {}; } },
+  { tool: "employee_breakdown", keys: ["religion", "ধর্ম", "dhormo", "hindu", "হিন্দু", "muslim", "মুসলিম", "মুসলমান", "buddhist", "বৌদ্ধ", "christian", "খ্রিস্টান", "খ্রিষ্টান",
+      "hindu employee", "muslim employee", "হিন্দু কর্মী", "মুসলিম কর্মী", "female employee", "male employee", "মহিলা কর্মী", "নারী কর্মী", "পুরুষ কর্মী", "gender wise", "লিঙ্গ",
+      "blood group", "রক্তের গ্রুপ", "married employee", "unmarried employee", "বিবাহিত", "অবিবাহিত", "marital"],
+    args: (t) => breakdownArgs(t) },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
 const OWN_TOOL: Record<string, string> = { late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
 
-const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "কেমন আছ", "good morning", "শুভ সকাল"];
+const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "kemon achen", "কেমন আছ", "good morning", "শুভ সকাল",
+  "ki khobor", "কী খবর", "কি খবর", "ki obostha apnar", "valo achen", "ভালো আছেন", "how are you"];
 const THANKS = ["thanks", "thank you", "ধন্যবাদ", "dhonnobad", "thx", "অনেক ধন্যবাদ"];
 
 function suggestionsFor(c: Ctx): string[] {
-  const s = ["আমার ছুটি কত বাকি?", ...(canNav(c, "self:leaveApplication") ? ["ছুটির আবেদন কীভাবে করব?"] : ["Password কীভাবে বদলাব?"]), "সামনের ছুটির দিন কবে?"];
+  const s = ["আমার ছুটি কত বাকি?", "এই মাসে কয়দিন দেরি করেছি?", ...(canNav(c, "self:leaveApplication") ? ["ছুটির আবেদন কীভাবে করব?"] : ["Password কীভাবে বদলাব?"]), "সামনের ছুটির দিন কবে?"];
+  if (canDash(c)) s.unshift("HR Dashboard-এর সারসংক্ষেপ দাও", "কী কী অপেক্ষায় আছে?");
   if (hasMod(c, "attendance_reports")) s.unshift("আজ কে কে অনুপস্থিত?");
-  if (canNav(c, "self:materialReceive")) s.push("Material Receive কোথায়?");
+  if (hasMod(c, "hr_operations")) s.push("Onboarding-এ কার কী বাকি?");
   return s.slice(0, 7);
 }
 
@@ -2031,7 +2137,8 @@ const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটি�
 const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
 const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
 
-async function localAnswer(c: Ctx, message: string): Promise<Answer> {
+// The keyword engine: an answer when the question matches something, else null.
+async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   const t = norm(message);
   const asksHow = hasAny(t, HOW);
 
@@ -2070,7 +2177,7 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
       : hasAny(t, ["chuti", "ছুটি", "leave", "balance", "ব্যালেন্স"]) ? "employee_leave_balance" : null;
     if (kind) {
       const tool = TOOLS.find((x) => x.name === kind)!;
-      if (!toolAvailable(tool, c)) return { reply: TOOLS_NOT_HERE.has(tool.name) ? NOT_HERE_TEXT : NO_ACCESS.text, actions: [] };
+      if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
       const r = await tool.run(c, { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined });
       return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
     }
@@ -2100,24 +2207,308 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
       ? INTENTS.find((i) => i.tool === own)!
       : scored[0].i;
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
-    if (!toolAvailable(tool, c)) return { reply: TOOLS_NOT_HERE.has(tool.name) ? NOT_HERE_TEXT : NO_ACCESS.text, actions: [] };
+    if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
     const r = await tool.run(c, intent.args ? intent.args(t, c) : {});
     return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
   }
   if (help.length) {
     return { reply: help.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions: help.flatMap(helpAction) };
   }
-  if (blockedHelp.length) {
-    return { reply: `"${blockedHelp[0].title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।`, actions: [] };
+  if (blockedHelp.length) return blockedHelpAnswer(blockedHelp[0]);
+  return null;
+}
+
+const blockedHelpAnswer = (h: HelpEntry): Answer => ({
+  reply: `"${h.title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।`,
+  actions: []
+});
+
+// Keyword match, then the same with misspelt words corrected.
+async function matchWithSpelling(c: Ctx, message: string): Promise<Answer | null> {
+  const fixed = fixSpelling(message);
+  if (fixed !== norm(message)) {
+    const r = await matchLocal(c, fixed);
+    if (r) return r;
   }
+  return matchLocal(c, message);
+}
+
+// Runs what a learned / similar question was answered with — through the
+// same access checks as everything else: a tool this account can't use is
+// "no access", a page it can't open is "not turned on for your account".
+const learnedUsable = (c: Ctx, l: LearnedRow) => {
+  if (l.help_id) {
+    const h = HELP.find((x) => x.id === l.help_id);
+    return !!h && (!h.can || h.can(c));
+  }
+  const tool = TOOLS.find((x) => x.name === l.tool);
+  return !!tool && toolAvailable(tool, c);
+};
+
+async function answerLearned(c: Ctx, message: string, hit: LearnedRow): Promise<Answer> {
+  const t = norm(message);
+  if (hit.help_id) {
+    const h = HELP.find((x) => x.id === hit.help_id);
+    if (!h) return { reply: "", actions: [] };
+    if (h.can && !h.can(c)) return blockedHelpAnswer(h);
+    return { reply: `**${h.title}:** ${h.steps}`, actions: helpAction(h) };
+  }
+  const tool = TOOLS.find((x) => x.name === hit.tool);
+  if (!tool) return { reply: "", actions: [] };
+  if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
+  const intent = INTENTS.find((i) => i.tool === tool.name);
+  const r = await tool.run(c, { ...(intent?.args ? intent.args(t, c) : {}), ...(hit.args || {}) });
+  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+}
+
+async function localAnswer(c: Ctx, message: string, history: { role: string; text: string }[] = []): Promise<Answer> {
+  const t = norm(message);
+  // A question that is (nearly) one Gemini answered, or a built-in example,
+  // goes the way it went then — when this account may use that answer.
+  const strong = closestLearned(message, 0.7) || closestLearned(fixSpelling(message), 0.7);
+  if (strong && learnedUsable(c, strong)) {
+    const r = await answerLearned(c, message, strong);
+    if (r.reply) return r;
+  }
+  const matched = await matchWithSpelling(c, message);
+  if (matched) return matched;
   if (hasAny(t, THANKS)) return { reply: "আপনাকেও ধন্যবাদ! আর কিছু লাগলে জিজ্ঞেস করুন। 🙂", actions: [] };
+  if (hasAny(t, GREET) && t.trim().split(" ").length <= 4) {
+    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
+  }
+  // A question Gemini answered before (this or a close wording of it).
+  const hit = closestLearned(message) || closestLearned(fixSpelling(message));
+  if (hit) {
+    const r = await answerLearned(c, message, hit);
+    if (r.reply) return r;
+  }
+  // A short follow-up ("ar gotomaser?", "rahim er?") read together with the
+  // previous question.
+  const prev = [...history].reverse().find((m) => m.role !== "assistant")?.text;
+  const known = fixSpelling(message).trim().split(" ").some((w) => knownWords().has(w)) || /\s(er|এর)\s|-এর/.test(t);
+  if (prev && known && t.trim().split(" ").length <= 4) {
+    // The new words first, so a new name ("ar karim er?") wins over the old one.
+    const both = await matchWithSpelling(c, `${message} ${prev}`);
+    if (both) return both;
+  }
   if (hasAny(t, GREET)) {
-    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
+    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
   }
   return {
     reply: "দুঃখিত, প্রশ্নটা বুঝতে পারিনি। এভাবে জিজ্ঞেস করে দেখুন:\n" + suggestionsFor(c).map((s) => `• ${s}`).join("\n") + "\n\nঅথবা একজন মানুষের সাথে সরাসরি কথা বলুন।",
     actions: [{ label: "মানুষের সাথে কথা বলুন", nav: "support:request" }]
   };
+}
+
+// ---------------------------------------------------------------------------
+// Learning — so the local engine keeps answering when Gemini can't (its free
+// quota used up, no key, Google unreachable).
+//   - Every question Gemini answers with ONE tool or ONE how-to entry is kept
+//     (assistant_learned: the question and which tool / entry — never the
+//     answer itself, which belongs to the asker). Later the local engine runs
+//     that same tool for whoever asks a similar question, with that person's
+//     own access — so nothing is ever shown that the asker couldn't open.
+//   - Misspellings ("atendance", "balence", "hajra") are corrected against
+//     every word the engine knows before giving up.
+// ---------------------------------------------------------------------------
+const LEARNABLE = new Set(INTENTS.map((i) => i.tool));
+const LEARN_ARG_KEYS = new Set(["section", "field", "mode"]);
+interface LearnedRow { question: string; tool: string | null; help_id: string | null; args: Record<string, any> | null; grams: Set<string> }
+// Built-in examples: questions worded the way people actually ask, each
+// with what answers it ("help:<id>" = a how-to entry). Known from the start,
+// before Gemini has taught anything; what Gemini teaches is added on top.
+const TRAINING: [string, string, Record<string, any>?][] = [
+  ["amar koydin chuti ache", "my_leave_balance"], ["ar koto din leave nite parbo", "my_leave_balance"], ["আমি আর কয়দিন ছুটি নিতে পারব", "my_leave_balance"],
+  ["casual leave koyta ache", "my_leave_balance"], ["sick leave baki ache koto", "my_leave_balance"], ["how many days off do i have", "my_leave_balance"],
+  ["amar dorkhaster ki obostha", "my_leave_applications"], ["chutir abedon approve hoyeche ki", "my_leave_applications"], ["আমার ছুটি মঞ্জুর হয়েছে কি", "my_leave_applications"],
+  ["is my leave approved", "my_leave_applications"], ["leave reject hoise keno", "my_leave_applications"],
+  ["ei mase koydin office e aschi", "my_attendance_summary"], ["এই মাসে কয়দিন অফিসে এসেছি", "my_attendance_summary"], ["amar in time out time", "my_attendance_summary"],
+  ["koydin deri te aschi", "my_attendance_summary"], ["how many days was i late this month", "my_attendance_summary"], ["amar absent koto din", "my_attendance_summary"],
+  ["kon kon din late hoyeche", "my_late_days"], ["কোন দিনগুলোতে দেরি হয়েছে", "my_late_days"], ["which dates was i late", "my_late_days"],
+  ["amar taka kobe pabo bill er", "my_claims"], ["আমার বিলের টাকা কবে পাব", "my_claims"], ["claim er taka paid hoise", "my_claims"], ["my claim status", "my_claims"],
+  ["amar loan koto baki", "my_loans"], ["আমার লোনের কিস্তি কত", "my_loans"], ["advance er taka koto kete nibe", "my_loans"], ["how much loan is left", "my_loans"],
+  ["amar kaj ki ki baki ache", "my_tasks"], ["আমাকে কী কী কাজ দেওয়া হয়েছে", "my_tasks"], ["what tasks are assigned to me", "my_tasks"],
+  ["samne kobe chuti", "upcoming_holidays"], ["eid er chuti kobe theke", "upcoming_holidays"], ["সামনে সরকারি ছুটি কবে", "upcoming_holidays"], ["next public holiday", "upcoming_holidays"],
+  ["amar kache koyta file approve er jonno ache", "my_pending_approvals"], ["আমাকে কী কী অনুমোদন করতে হবে", "my_pending_approvals"], ["what is waiting for my approval", "my_pending_approvals"],
+  ["amar boss ke", "my_profile"], ["আমার রিপোর্টিং কে", "my_profile"], ["ami kobe join korechi", "my_profile"], ["who is my reporting manager", "my_profile"], ["amar id number koto", "my_profile"],
+  ["amar nam e ki ki jinish ache", "my_assets"], ["আমার নামে কী কী জিনিস আছে", "my_assets"], ["what assets do i have", "my_assets"],
+  ["gari booking dewa ache ki", "my_rides"], ["আমার গাড়ির রিকুইজিশন", "my_rides"], ["is my car booked", "my_rides"],
+  ["salary certificate er request ki holo", "my_letters"], ["আমার চিঠি এসেছে কি", "my_letters"],
+  ["amar target koto hoise", "my_targets_progress"], ["আমার লক্ষ্য কতদূর", "my_targets_progress"], ["how far is my target", "my_targets_progress"],
+  ["amar sim er limit koto", "my_mobile_sim"], ["এই মাসের ফোন বিল কত", "my_mobile_sim"],
+  ["amar chakri chharar abedon er ki obostha", "my_resignation"], ["আমার পদত্যাগের অবস্থা", "my_resignation"],
+  ["amar dewa obhijog er ki holo", "my_cases"], ["আমার অভিযোগের কী হলো", "my_cases"],
+  ["ajke office e ke ke ase nai", "attendance_on_date"], ["আজ কারা আসেনি", "attendance_on_date"], ["who did not come today", "attendance_on_date"], ["ajke kotojon present", "attendance_on_date"],
+  ["ajke kara deri kore aise", "late_on_date"], ["আজ কারা দেরি করে এসেছে", "late_on_date"], ["who came late today", "late_on_date"],
+  ["ajke ke ke chutite", "on_leave"], ["আজ কে কে ছুটিতে আছে", "on_leave"], ["who is on leave today", "on_leave"],
+  ["samne kar kar chuti ache", "upcoming_leaves"], ["সামনে কার কার ছুটি", "upcoming_leaves"], ["upcoming leave list", "upcoming_leaves"],
+  ["kon leave kar kache atke ache", "leave_pending_layers"], ["ছুটির আবেদন কার কাছে আটকে আছে", "leave_pending_layers"],
+  ["onek din dhore pending ache ki ki", "stuck_applications"], ["অনেকদিন ধরে কী কী পড়ে আছে", "stuck_applications"],
+  ["mot koto jon kaj kore", "headcount"], ["কোম্পানিতে মোট কতজন কাজ করে", "headcount"], ["total staff koto", "headcount"], ["how many people work here", "headcount"],
+  ["meye staff koto jon", "employee_breakdown", { field: "gender" }], ["কতজন মহিলা কর্মী", "employee_breakdown", { field: "gender" }],
+  ["kar kar blood group o positive", "employee_breakdown", { field: "blood_group" }],
+  ["ajker hr er update dao", "daily_hr_report"], ["আজকের এইচআর আপডেট", "daily_hr_report"], ["give me today's hr summary", "daily_hr_report"],
+  ["ei mase kar jonmodin", "hr_dashboard", { section: "birthdays" }], ["এই মাসে কার জন্মদিন", "hr_dashboard", { section: "birthdays" }], ["whose birthday is this month", "hr_dashboard", { section: "birthdays" }],
+  ["kar probation sesh hocche", "hr_dashboard", { section: "probation" }], ["কার প্রবেশন শেষ হচ্ছে", "hr_dashboard", { section: "probation" }],
+  ["kar contract er meyad sesh", "hr_dashboard", { section: "contract" }], ["কার চুক্তির মেয়াদ শেষ", "hr_dashboard", { section: "contract" }],
+  ["kon kon document er meyad sesh hobe", "hr_dashboard", { section: "documents_expiry" }],
+  ["salary ki deya hoise ei mase", "payroll_status"], ["এই মাসের বেতন দেওয়া হয়েছে কি", "payroll_status"], ["is this month's salary paid", "payroll_status"],
+  ["ke ke chakri chere dicche", "exits_overview"], ["কারা চাকরি ছেড়ে যাচ্ছে", "exits_overview"],
+  ["koyta pod khali ache", "recruitment_overview"], ["কয়টা পদে লোক নেওয়া হচ্ছে", "recruitment_overview"], ["how many open positions", "recruitment_overview"],
+  ["notun joiner der ki baki", "onboarding_overview"], ["নতুন যোগদানকারীদের কী বাকি", "onboarding_overview"],
+  ["ki ki notice ache", "active_notices"], ["নতুন কোনো নোটিশ আছে", "active_notices"], ["any new announcement", "active_notices"],
+  ["10 bochor dhore ke ke kaj korche", "service_length"], ["কে কে ৫ বছর পূর্ণ করেছে", "service_length"],
+  ["kon gari khali ache", "vehicle_overview"], ["কোন গাড়ি ফাঁকা", "vehicle_overview"],
+  ["sobar target er obostha", "target_progress"], ["department er target koto hoise", "target_progress"],
+  ["kar kaj deadline par hoye geche", "task_overview"], ["কার কাজ সময় পেরিয়ে গেছে", "task_overview"],
+  ["appraisal er obostha", "performance_overview"], ["মূল্যায়ন কতদূর", "performance_overview"],
+  ["ki ki kaj pending ache admin er", "admin_pending_work"], ["আমার টেবিলে কী কী বাকি", "admin_pending_work"],
+  ["chuti nite chaile ki korte hobe", "help:leave_apply"], ["ছুটি নিতে হলে কী করব", "help:leave_apply"], ["how can i take leave", "help:leave_apply"],
+  ["bill kemne jomadibo", "help:conveyance"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:conveyance"], ["how to claim travel cost", "help:conveyance"],
+  ["field e jaoar somoy ki korbo", "help:movement_claim"], ["বাইরে কাজে গেলে চেক ইন কীভাবে", "help:movement_claim"],
+  ["laptop lagbe ki korbo", "help:asset"], ["নতুন ল্যাপটপ চাইব কীভাবে", "help:asset"], ["how do i request a laptop", "help:asset"],
+  ["gari lagbe kivabe chaibo", "help:vehicle"], ["অফিসের গাড়ি কীভাবে নেব", "help:vehicle"],
+  ["chakri charte chai ki korte hobe", "help:resignation"], ["চাকরি ছাড়তে চাইলে কী করব", "help:resignation"], ["how do i resign", "help:resignation"],
+  ["experience certificate kivabe pabo", "help:letters"], ["অভিজ্ঞতার সনদ কীভাবে পাব", "help:letters"],
+  ["taka dhar nite chai", "help:loan"], ["অগ্রিম টাকা নিতে চাই", "help:loan"], ["how to apply for salary advance", "help:loan"],
+  ["password bhule gechi ki korbo", "help:password"], ["পাসওয়ার্ড বদলাব কীভাবে", "help:password"], ["how to change my photo", "help:password"],
+  ["kono somossa nalish dibo kivabe", "help:grievance"], ["অভিযোগ জানাব কীভাবে", "help:grievance"],
+  ["karo number kivabe pabo", "help:directory"], ["সহকর্মীর ফোন নম্বর কোথায় পাব", "help:directory"],
+  ["onnoder abedon approve kothay kori", "help:approve"], ["অন্যের আবেদন কোথায় অনুমোদন করব", "help:approve"],
+  ["payslip kothay pabo", "help:payslip"], ["বেতনের স্লিপ কোথায়", "help:payslip"],
+  ["notun staff kivabe add korbo", "help:add_employee"], ["নতুন কর্মী যোগ করব কীভাবে", "help:add_employee"], ["how to add a new employee", "help:add_employee"],
+  ["kauke permission dibo kivabe", "help:module_access"], ["কাউকে অনুমতি দেব কীভাবে", "help:module_access"],
+  ["notun login khulbo kivabe", "help:users_admin"], ["নতুন লগইন কীভাবে খুলব", "help:users_admin"],
+  ["salary toiri kivabe kori", "help:payroll"], ["বেতন শিট কীভাবে বানাব", "help:payroll"],
+  ["chutir din add korbo kivabe", "help:holidays"], ["নতুন ছুটির দিন কীভাবে যোগ করব", "help:holidays"],
+  ["notice kivabe dibo", "help:notice"], ["নোটিশ কীভাবে দেব", "help:notice"],
+  ["promotion kivabe dibo", "help:hr_actions"], ["পদোন্নতি কীভাবে দেব", "help:hr_actions"], ["how to transfer an employee", "help:hr_actions"],
+  ["manush er sathe kotha bolbo", "request_human_support"]
+];
+let learned: LearnedRow[] = [];
+let learnedLoadedAt = 0;
+let learnedQuery: QueryDB | null = null;
+
+const gramsOf = (s: string) => {
+  const x = norm(s).replace(/\s+/g, "");
+  const g = new Set<string>();
+  for (let i = 0; i + 3 <= x.length; i++) g.add(x.slice(i, i + 3));
+  return g;
+};
+const similarity = (a: Set<string>, b: Set<string>) => {
+  if (!a.size || !b.size) return 0;
+  let both = 0;
+  for (const g of a) if (b.has(g)) both++;
+  return both / (a.size + b.size - both);
+};
+
+async function loadLearned(force = false) {
+  if (!learnedQuery || (!force && Date.now() - learnedLoadedAt < 10 * 60_000)) return;
+  learnedLoadedAt = Date.now();
+  const rows: any[] = (await learnedQuery("/*unscoped*/ SELECT question, tool, help_id, args FROM assistant_learned ORDER BY hits DESC, id DESC LIMIT 5000").catch(() => [])) || [];
+  learned = [
+    ...rows.map((r) => {
+      let args: any = null;
+      try { args = r.args ? JSON.parse(r.args) : null; } catch { args = null; }
+      return { question: String(r.question), tool: r.tool || null, help_id: r.help_id || null, args, grams: gramsOf(String(r.question)) };
+    }),
+    ...TRAINED
+  ];
+}
+const TRAINED: LearnedRow[] = TRAINING.map(([q, to, args]) => ({
+  question: norm(q).trim(),
+  tool: to.startsWith("help:") ? null : to,
+  help_id: to.startsWith("help:") ? to.slice(5) : null,
+  args: args || null,
+  grams: gramsOf(q)
+}));
+
+function closestLearned(message: string, min = 0.55): LearnedRow | null {
+  const q = norm(message).trim();
+  if (q.length < 4) return null;
+  const exact = learned.find((l) => l.question === q);
+  if (exact) return exact;
+  const g = gramsOf(message);
+  let best: LearnedRow | null = null;
+  let score = 0;
+  for (const l of learned) {
+    const s = similarity(g, l.grams);
+    if (s > score) [best, score] = [l, s];
+  }
+  return score >= min ? best : null;
+}
+
+async function remember(message: string, learn: NonNullable<Answer["learn"]>) {
+  const q = norm(message).trim();
+  if (!learnedQuery || q.length < 4 || q.length > 300) return;
+  await learnedQuery(
+    `/*unscoped*/ INSERT INTO assistant_learned (question, tool, help_id, args) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE tool = VALUES(tool), help_id = VALUES(help_id), args = VALUES(args), hits = hits + 1`,
+    [q, learn.tool || null, learn.help || null, learn.args ? JSON.stringify(learn.args) : null]
+  ).catch(() => {});
+  const known = learned.find((l) => l.question === q);
+  const row = { question: q, tool: learn.tool || null, help_id: learn.help || null, args: learn.args || null, grams: gramsOf(q) };
+  if (known) Object.assign(known, row);
+  else learned.unshift(row);
+}
+
+// Spelling: each unknown word (4+ letters) becomes the closest known word,
+// one letter off for short words, two for long ones.
+let vocab: Set<string> | null = null;
+let topics: Set<string> | null = null;
+const wordsOf = (keys: string[], into: Set<string>) => keys.forEach((k) => norm(k).trim().split(" ").forEach((w) => w.length >= 4 && !/^[a-z]{1,3}$/.test(w) && into.add(w)));
+// Words of the topics themselves (attendance, balance, হাজিরা…) — never a person's name.
+function topicWords() {
+  if (topics) return topics;
+  topics = new Set<string>();
+  for (const i of INTENTS) wordsOf(i.keys, topics);
+  for (const h of HELP) wordsOf(h.keys, topics);
+  for (const w of ["kaj", "koto", "kobe", "dibo", "korbo", "pabo", "chuti", "leave", "ache", "nai"]) topics.delete(w);
+  for (const w of [...NOT_NAMES, ...ORG_WORDS]) topics.add(w);
+  return topics;
+}
+function knownWords() {
+  if (vocab) return vocab;
+  vocab = new Set<string>();
+  for (const i of INTENTS) wordsOf(i.keys, vocab);
+  for (const h of HELP) wordsOf(h.keys, vocab);
+  for (const [q] of TRAINING) wordsOf([q], vocab);
+  wordsOf([...HOW, ...LAST_MONTH, ...LEAVE_WORDS, ...APPLY_WORDS, ...HOLIDAY_WORDS, ...HUMAN_WORDS, ...THANKS, ...GREET], vocab);
+  // The words the leave-request reader looks for (kalke, porshu, months, sick…)
+  // stay as written: "correcting" them would lose the dates.
+  for (const w of String(parseLeaveRequest).toLowerCase().match(/[a-z]{3,}|[\u0980-\u09ff]{2,}/g) || []) vocab.add(w);
+  return vocab;
+}
+function editDistance(a: string, b: string, max: number) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function fixSpelling(message: string): string {
+  const words = knownWords();
+  const out = norm(message).trim().split(" ").map((w) => {
+    if (w.length < 4 || words.has(w) || /\d/.test(w)) return w;
+    const max = w.length >= 7 ? 2 : 1;
+    let best = w;
+    let bestD = max + 1;
+    for (const k of words) {
+      if (Math.abs(k.length - w.length) > max) continue;
+      const d = editDistance(w, k, max);
+      if (d < bestD) [best, bestD] = [k, d];
+    }
+    return best;
+  });
+  return norm(out.join(" "));
 }
 
 // ---------------------------------------------------------------------------
@@ -2138,8 +2529,27 @@ const geminiClient = () => {
   return gemini;
 };
 
+// Every model said "quota used up" (429 / RESOURCE_EXHAUSTED): Gemini is not
+// asked again for a while and the local engine answers on its own (no 20 s
+// wait per question). 15 minutes at first, doubling up to 6 hours while it
+// stays used up; one good answer resets it.
+const QUOTA = /\b429\b|RESOURCE_EXHAUSTED|quota|rate limit/i;
+let geminiPausedUntil = 0;
+let geminiPauseMs = 0;
+const geminiPaused = () => Date.now() < geminiPausedUntil;
+function pauseGemini() {
+  geminiPauseMs = Math.min(6 * 60 * 60_000, geminiPauseMs ? geminiPauseMs * 2 : 15 * 60_000);
+  geminiPausedUntil = Date.now() + geminiPauseMs;
+  console.warn(`AI Assistant: Gemini quota used up — answering locally for ${Math.round(geminiPauseMs / 60_000)} min`);
+}
+function geminiWorked() {
+  geminiPauseMs = 0;
+  geminiPausedUntil = 0;
+}
+
 async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
   let lastErr: any = null;
+  let allQuota = true;
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
     const idx = (preferredModel + i) % GEMINI_MODELS.length;
     try {
@@ -2153,12 +2563,15 @@ async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[];
     } catch (err: any) {
       lastErr = err;
       const msg = String(err?.message || err);
+      if (!QUOTA.test(msg)) allQuota = false;
       // A bad key or a malformed request won't get better on another model.
       if (/API_KEY|PERMISSION_DENIED|INVALID_ARGUMENT|\b40[013]\b/.test(msg) && !/\b(404|429|503)\b/.test(msg)) throw err;
       console.warn(`AI Assistant: ${GEMINI_MODELS[idx]} unavailable (${msg.slice(0, 120)}), trying the next model`);
     }
   }
-  throw lastErr || new Error("no Gemini model available");
+  const e: any = lastErr || new Error("no Gemini model available");
+  if (allQuota && lastErr) e.quotaExhausted = true;
+  throw e;
 }
 
 async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], message: string): Promise<Answer> {
@@ -2198,6 +2611,20 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   // used, its best entries are the reply.
   let helpOnly = true;
   let helpSteps: { title: string; steps: string }[] = [];
+  const usedTools = new Set<string>();
+  const toolArgs: Record<string, any> = {};
+  let toolFailed = false;
+  const learnOf = (): Answer["learn"] => {
+    if (helpOnly && helpSteps.length) {
+      const h = HELP.find((x) => x.title === helpSteps[0].title);
+      return h ? { help: h.id } : undefined;
+    }
+    const names = [...usedTools].filter((n) => n !== "app_help");
+    if (names.length !== 1 || toolFailed || !LEARNABLE.has(names[0])) return undefined;
+    // Only the kind of answer is kept (a section, a field), never a name or a date.
+    const args = Object.fromEntries(Object.entries(toolArgs[names[0]] || {}).filter(([k, v]) => LEARN_ARG_KEYS.has(k) && typeof v === "string" && v.length <= 40));
+    return { tool: names[0], ...(Object.keys(args).length ? { args } : {}) };
+  };
   for (let round = 0; round < 4; round++) {
     const resp = await generateWithFallback(ai, {
       contents,
@@ -2206,15 +2633,18 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     const calls = resp.functionCalls || [];
     if (!calls.length) {
       const text = (resp.text || "").trim();
-      if (helpOnly && helpSteps.length) return { reply: helpSteps.slice(0, 3).map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions, draft, report: rep };
+      if (helpOnly && helpSteps.length) return { reply: helpSteps.slice(0, 3).map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions, draft, report: rep, learn: learnOf() };
       if (!text) throw new Error("empty reply");
-      return { reply: text, actions, draft, report: rep };
+      return { reply: text, actions, draft, report: rep, learn: learnOf() };
     }
     contents.push(resp.candidates?.[0]?.content || { role: "model", parts: calls.map((fc) => ({ functionCall: fc })) });
     const parts = [];
     for (const fc of calls) {
       const tool = tools.find((t) => t.name === fc.name);
       const out: ToolResult = tool ? await tool.run(c, fc.args || {}) : { ok: false, text: "", data: { error: "unknown_tool" } };
+      usedTools.add(String(fc.name));
+      toolArgs[String(fc.name)] = fc.args || {};
+      if (!out.ok) toolFailed = true;
       for (const a of out.actions || []) actions.push(a);
       if (out.draft) draft = out.draft;
       if (out.report) rep = out.report;
@@ -2234,6 +2664,20 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
 // ---------------------------------------------------------------------------
 export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const { authenticateToken, queryDB, getAdminModules, todayInDhaka } = deps;
+  learnedQuery = queryDB;
+  void queryDB(`/*unscoped*/ CREATE TABLE IF NOT EXISTS assistant_learned (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      question VARCHAR(300) NOT NULL,
+      tool VARCHAR(64) NULL,
+      help_id VARCHAR(64) NULL,
+      args VARCHAR(255) NULL,
+      hits INT NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_assistant_learned_q (question(190))
+    )`)
+    .then(() => loadLearned(true))
+    .catch((err: any) => console.warn("⚠️ assistant_learned: " + (err?.message || err)));
 
   // Per-account switch (Module Access -> "AI Assistant"), ON by default.
   const loadCtx = async (req: any): Promise<Ctx | null> => {
@@ -2264,7 +2708,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   app.get("/api/assistant/status", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
-    res.json({ enabled: true, engine: geminiClient() ? "gemini" : "local", suggestions: suggestionsFor(c) });
+    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c) });
   });
 
   app.post("/api/assistant/chat", authenticateToken, async (req: any, res: any) => {
@@ -2276,19 +2720,23 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const history = Array.isArray(req.body?.history) ? req.body.history.filter((m: any) => m && typeof m.text === "string") : [];
     let engine: "gemini" | "local" = "local";
     let out: Answer;
+    void loadLearned();
     try {
-      if (geminiClient()) {
+      if (geminiClient() && !geminiPaused()) {
         out = await Promise.race([
           geminiAnswer(c, history, message),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000))
         ]);
         engine = "gemini";
+        geminiWorked();
+        if (out.learn) void remember(message, out.learn);
       } else {
-        out = await localAnswer(c, message);
+        out = await localAnswer(c, message, history);
       }
     } catch (err: any) {
-      console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
-      out = await localAnswer(c, message);
+      if (err?.quotaExhausted) pauseGemini();
+      else console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
+      out = await localAnswer(c, message, history);
     }
     const seen = new Set<string>();
     const actions = allowedActions(c, out.actions).filter((a) => (seen.has(a.nav) ? false : (seen.add(a.nav), true))).slice(0, 3);

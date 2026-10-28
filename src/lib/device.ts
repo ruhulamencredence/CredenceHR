@@ -50,17 +50,3 @@ export const ACCOUNT_BLOCKED_EVENT = 'credence:account-blocked';
 // The sign-in itself ended (SessionSecurity.ts): its detail says why —
 // expired / idle / signed_out / password.
 export const SESSION_ENDED_EVENT = 'credence:session-ended';
-
-// Watches every API answer: a phone the Superadmin removed from the account
-// gets a 401 with X-Device-Revoked (App.tsx signs out on this event).
-let watching = false;
-export function installDeviceWatch() {
-  if (watching || typeof window === 'undefined' || !window.fetch) return;
-  watching = true;
-  const original = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
-    original(input, init).then((res) => {
-      if (res.status === 401 && res.headers.get('X-Device-Revoked')) window.dispatchEvent(new Event(DEVICE_REVOKED_EVENT));
-      return res;
-    });
-}

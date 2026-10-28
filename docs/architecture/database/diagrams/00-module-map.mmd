@@ -1,0 +1,35 @@
+flowchart LR
+  K["K. Communication: Notices, Chat, Mail, Assistant, Feedback<br/>(36 টেবিল)"]
+  H["H. HR Operations, Onboarding & Recruitment<br/>(19 টেবিল)"]
+  D["D. Attendance, Roster, Breaks & Tracking<br/>(21 টেবিল)"]
+  A["A. Accounts, Access & Security<br/>(23 টেবিল)"]
+  M["M. PEPM: MPR, Jobs, Budget & Materials<br/>(18 টেবিল)"]
+  F["F. Claims, Conveyance & Mobile Bill<br/>(17 টেবিল)"]
+  B["B. Company, Organisation & Employees<br/>(21 টেবিল)"]
+  C["C. Leave<br/>(10 টেবিল)"]
+  L["L. Assets & Vehicles<br/>(9 টেবিল)"]
+  J["J. Documents & E-Signature<br/>(6 টেবিল)"]
+  E["E. Payroll & Salary<br/>(14 টেবিল)"]
+  I["I. Performance, Grievance, Exit, Targets & Tasks<br/>(16 টেবিল)"]
+  G["G. Approvals & Alerts<br/>(6 টেবিল)"]
+  A -->|12 FK| B
+  A -->|9 FK| C
+  A -->|11 FK| D
+  A -->|13 FK| E
+  A -->|9 FK| F
+  A -->|6 FK| G
+  A -->|8 FK| H
+  A -->|22 FK| I
+  A -->|2 FK| J
+  A -->|13 FK| K
+  A -->|13 FK| L
+  A -->|11 FK| M
+  B -->|3 FK| A
+  B -->|5 FK| D
+  B -->|6 FK| E
+  B -->|5 FK| H
+  B -->|4 FK| J
+  B -->|1 FK| M
+  G -->|1 FK| A
+  I -->|1 FK| E
+  K -->|1 FK| D

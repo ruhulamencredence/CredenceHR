@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, MapPin, X } from 'lucide-react';
@@ -21,7 +21,8 @@ import { formatDate } from '../lib/formatDate';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 
 interface Stay {
   place_id: number;
@@ -86,6 +87,7 @@ export const TrackingStayReport: React.FC<{
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const canEmailReports = useCanEmailReports();
   const [addresses, setAddresses] = useState<Record<number, string | null>>({});
 
   const run = async () => {
@@ -136,7 +138,7 @@ export const TrackingStayReport: React.FC<{
   const period = report ? (report.settings.from === report.settings.to ? formatDate(report.settings.from) : `${formatDate(report.settings.from)} – ${formatDate(report.settings.to)}`) : '';
   const seenDays = report ? report.days.filter((d) => d.pings > 0) : [];
 
-  const pdf = async () => {
+  const pdf = async (mode: 'save' | 'email' = 'save') => {
     if (!report) return;
     setBusy(true);
     try {
@@ -200,6 +202,10 @@ export const TrackingStayReport: React.FC<{
       });
       finalizePdfPageNumbers(doc);
       const safe = report.user.name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Employee';
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Stay-Report-${safe}-${report.settings.from}.pdf`, title: 'Employee Stay Report' });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Stay-Report-${safe}-${report.settings.from}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -265,9 +271,12 @@ export const TrackingStayReport: React.FC<{
             <p className="text-[11px] text-slate-500">How long at each place, day by day, inside the time range.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={pdf} disabled={!report || busy} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+            <button type="button" onClick={() => pdf()} disabled={!report || busy} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40">
               <FileDown className="w-3.5 h-3.5" /> {busy ? 'Making PDF…' : 'PDF'}
             </button>
+            {canEmailReports && (
+              <EmailReportButton onClick={() => pdf('email')} disabled={!report || busy} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40" />
+            )}
             <button type="button" onClick={excel} disabled={!report} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40">
               <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
             </button>
@@ -322,9 +331,7 @@ export const TrackingStayReport: React.FC<{
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {error && <p className="text-sm text-rose-600">{error}</p>}
           {loading && !report && (
-            <div className="py-10 flex justify-center">
-              <Spinner size={24} />
-            </div>
+            <LoadingBlock />
           )}
           {report && (
             <>

@@ -1,3 +1,4 @@
+import { seedHROperationsMemory } from "./HROperationsRoutes";
 // Boolean-typed extended employee fields (see EMPLOYEE_EXT_FIELDS in server.ts), needed
 // here to coerce all_employees insert/update params to 0/1 in the memory-DB simulation.
 export const EMPLOYEE_BOOL_FIELDS = ["is_foreigner"] as const;
@@ -26,9 +27,20 @@ export const memoryDb = {
   noticeDismissals: [] as any[],
   employees: [] as any[],
   employeeSupervisors: [] as any[],
+  employeePaymentAccounts: [] as any[],
+  payrollPaymentSplits: [] as any[],
+  assets: [] as any[],
+  assetRequisitions: [] as any[],
+  assetRequisitionItems: [] as any[],
+  assetAssignments: [] as any[],
+  assetAssignmentClaims: [] as any[],
   claims: [] as any[],
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
+  approvalTemplates: [] as any[],
+  approvalTemplateSteps: [] as any[],
+  approvalTemplateStepApprovers: [] as any[],
+  employeeTemplateAssignments: [] as any[],
   leaveBalances: [] as any[],
   leaveApplications: [] as any[],
   leaveCategories: [] as any[],
@@ -58,6 +70,26 @@ export const memoryDb = {
   // than bespoke per-query handlers (see that function's own comment).
   exitRequests: [] as any[],
   exitClearanceItems: [] as any[],
+  // Branches (Admin Panel -> Branches) — never had ANY memory-fallback
+  // support before (the table itself had no self-healing migration either,
+  // until now — see the branches CREATE TABLE comment in server.ts).
+  branches: [] as any[],
+  // Holiday Calendar (Admin Panel -> Holidays) — head_office/project_site
+  // split, see holidayRoutes.ts. All routes there fetch the whole table and
+  // filter in JS rather than relying on WHERE/BETWEEN in SQL, so the plain
+  // generic-table handlers below (full SELECT *, id-based UPDATE/DELETE,
+  // fully-parameterized INSERT) are enough — no bespoke handler needed.
+  holidayCalendar: [] as any[],
+  // Pre-seeded the same way ensureExitOffboardingSchema's INSERT IGNORE does
+  // against real MySQL — the 4 fixed clearance departments, all starting
+  // unassigned, so ExitOffboardingPanel's "Clearance Approvers" dropdowns
+  // have something to render in dev/in-memory mode too.
+  exitClearanceApprovers: [
+    { id: 1, department: "IT", approver_user_id: null },
+    { id: 2, department: "Finance", approver_user_id: null },
+    { id: 3, department: "Admin", approver_user_id: null },
+    { id: 4, department: "HR", approver_user_id: null }
+  ] as any[],
   finalSettlements: [] as any[],
   performanceCycles: [] as any[],
   performanceGoals: [] as any[],
@@ -69,6 +101,46 @@ export const memoryDb = {
   disciplinaryActions: [] as any[],
   employeeDocuments: [] as any[],
   documentSignatures: [] as any[],
+  // Vehicle Requisition & Management (VehicleManagementRoutes.ts) — same
+  // "simple CRUD, generic table" convention as the block above: every query
+  // there is either a full-table SELECT (filtered/joined in JS) or an
+  // id-scoped INSERT/UPDATE, so simulateGenericTable() below covers it with
+  // zero bespoke handlers.
+  vehicles: [] as any[],
+  vehicleRequisitions: [] as any[],
+  // Admin Panel -> Users: access change log + Access Templates
+  // (UserManagement.ts) — plain generic tables.
+  userAccessAudit: [] as any[],
+  assetRequisitionEvents: [] as any[],
+  caseFeedback: [] as any[],
+  // HR Operations (HROperationsRoutes.ts)
+  hrOpsSettings: [] as any[],
+  hrEmployeeService: [] as any[],
+  hrActionApprovalSteps: [] as any[],
+  hrActions: [] as any[],
+  hrLetterTemplates: [] as any[],
+  hrLetters: [] as any[],
+  hrLetterRequests: [] as any[],
+  hrOnboardingTasks: [] as any[],
+  hrOnboardingItems: [] as any[],
+  hrIncrementPolicies: [] as any[],
+  hrEmpExperience: [] as any[],
+  hrEmpEducation: [] as any[],
+  hrEmpFamily: [] as any[],
+  hrEmpTraining: [] as any[],
+  hrSavedReports: [] as any[],
+  hrReportRuns: [] as any[],
+  hrInfoRequests: [] as any[],
+  siteAttendanceTeams: [] as any[],
+  siteAttendanceMembers: [] as any[],
+  siteAttendanceSheets: [] as any[],
+  siteAttendanceEntries: [] as any[],
+  siteAttendanceSettings: [] as any[],
+  companyGroups: [{ id: 1, name: 'Credence Group', short_name: 'Credence' }] as any[],
+  companies: [{ id: 1, group_id: 1, name: 'Credence Housing Limited', short_code: 'CHL', is_mother: 1, is_active: 1 }] as any[],
+  userCompanyAccess: [] as any[],
+  employeeCompanyAssignments: [] as any[],
+  accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
   // sendPushToRoomMembers) — was missing a handler entirely, so in
@@ -78,7 +150,19 @@ export const memoryDb = {
   // explicit handlers below (not simulateGenericTable — this table's INSERT
   // is an upsert with ON DUPLICATE KEY UPDATE, and its SELECTs use IN(...)/
   // a JOIN, neither of which the generic simulator understands).
-  chatPushTokens: [] as any[]
+  chatPushTokens: [] as any[],
+  // Alerts inbox (Alerts.ts's createAlert + GET/POST/DELETE /api/alerts*) —
+  // same "was missing a handler entirely" gap as chatPushTokens above: every
+  // createAlert() INSERT silently no-opped (no bespoke handler AND not in
+  // GENERIC_TABLES), so every notification this whole app sends — Approval
+  // Workflow step advances, Asset/Vehicle Requisition's HR-layer CC, Leave
+  // decisions, everything — read back as an empty inbox under memory
+  // fallback, with no error anywhere to reveal it. Not GENERIC_TABLES:
+  // its UPDATE/DELETE both filter on id AND user_id together (the generic
+  // simulator only ever matches a trailing `id`), and its SELECTs filter on
+  // user_id (never id) plus ORDER BY/LIMIT or a second is_read condition —
+  // see the explicit handlers below instead.
+  alerts: [] as any[]
 };
 
 // Generic simple-table CRUD simulator, used by every module below that has
@@ -110,8 +194,17 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
     // zero columns instead of throwing, which is much harder to notice.
     const setMatch = sql.match(/set\s+(.+?)\s+where/is);
     const cols = setMatch ? setMatch[1].split(",").map((c) => c.trim().split("=")[0].trim()) : [];
-    const id = Number(params[params.length - 1]);
-    const row = store.find((r: any) => Number(r.id) === id);
+    // Compare-and-set support: "WHERE id = ? AND status = ?" must only match
+    // when every condition holds, so atomic claims report affectedRows 0.
+    const whereMatch = sql.match(/where\s+(.+)$/is);
+    const whereCols = whereMatch
+      ? whereMatch[1].split(/\s+and\s+/i).map((c) => c.trim().match(/^(\w+)\s*=\s*\?$/)?.[1])
+      : [];
+    const row = whereCols.length > 1 && whereCols.every(Boolean)
+      ? store.find((r: any) =>
+          whereCols.every((col, i) => String(r[col as string]) === String(params[cols.length + i]))
+        )
+      : store.find((r: any) => Number(r.id) === Number(params[params.length - 1]));
     if (row) {
       cols.forEach((col, i) => {
         row[col] = params[i] !== undefined ? params[i] : null;
@@ -135,6 +228,11 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
   if (lowerSql.startsWith(`select * from ${table}`)) {
     return [...store];
   }
+  // A plain column list ("SELECT id, name, ... FROM companies" — used where
+  // a big column such as a logo must not be read): every row, like above.
+  if (new RegExp(`^select\\s+[a-z0-9_,\\s]+\\s+from\\s+${table}(\\s|$)`).test(lowerSql) && !lowerSql.includes(" join ")) {
+    return [...store];
+  }
   return undefined;
 }
 
@@ -145,7 +243,10 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
 // point) always takes priority.
 const GENERIC_TABLES: [string, any[]][] = [
   ["exit_clearance_items", memoryDb.exitClearanceItems],
+  ["exit_clearance_approvers", memoryDb.exitClearanceApprovers],
   ["exit_requests", memoryDb.exitRequests],
+  ["branches", memoryDb.branches],
+  ["holiday_calendar", memoryDb.holidayCalendar],
   ["final_settlements", memoryDb.finalSettlements],
   ["performance_cycles", memoryDb.performanceCycles],
   ["performance_goals", memoryDb.performanceGoals],
@@ -156,8 +257,44 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["grievances", memoryDb.grievances],
   ["disciplinary_actions", memoryDb.disciplinaryActions],
   ["employee_documents", memoryDb.employeeDocuments],
-  ["document_signatures", memoryDb.documentSignatures]
+  ["document_signatures", memoryDb.documentSignatures],
+  ["approval_templates", memoryDb.approvalTemplates],
+  ["approval_template_step_approvers", memoryDb.approvalTemplateStepApprovers],
+  ["approval_template_steps", memoryDb.approvalTemplateSteps],
+  ["vehicles", memoryDb.vehicles],
+  ["vehicle_requisitions", memoryDb.vehicleRequisitions],
+  ["user_access_audit", memoryDb.userAccessAudit],
+  ["access_templates", memoryDb.accessTemplates],
+  ["asset_requisition_events", memoryDb.assetRequisitionEvents],
+  ["case_feedback", memoryDb.caseFeedback],
+  ["hr_ops_settings", memoryDb.hrOpsSettings],
+  ["hr_employee_service", memoryDb.hrEmployeeService],
+  ["hr_action_approval_steps", memoryDb.hrActionApprovalSteps],
+  ["hr_actions", memoryDb.hrActions],
+  ["hr_letter_templates", memoryDb.hrLetterTemplates],
+  ["hr_letters", memoryDb.hrLetters],
+  ["hr_letter_requests", memoryDb.hrLetterRequests],
+  ["hr_onboarding_tasks", memoryDb.hrOnboardingTasks],
+  ["hr_onboarding_items", memoryDb.hrOnboardingItems],
+  ["hr_increment_policies", memoryDb.hrIncrementPolicies],
+  ["hr_emp_experience", memoryDb.hrEmpExperience],
+  ["hr_emp_education", memoryDb.hrEmpEducation],
+  ["hr_emp_family", memoryDb.hrEmpFamily],
+  ["hr_emp_training", memoryDb.hrEmpTraining],
+  ["hr_saved_reports", memoryDb.hrSavedReports],
+  ["hr_report_runs", memoryDb.hrReportRuns],
+  ["hr_info_requests", memoryDb.hrInfoRequests],
+  ["site_attendance_teams", memoryDb.siteAttendanceTeams],
+  ["site_attendance_members", memoryDb.siteAttendanceMembers],
+  ["site_attendance_sheets", memoryDb.siteAttendanceSheets],
+  ["site_attendance_entries", memoryDb.siteAttendanceEntries],
+  ["site_attendance_settings", memoryDb.siteAttendanceSettings],
+  ["company_groups", memoryDb.companyGroups],
+  ["companies", memoryDb.companies],
+  ["user_company_access", memoryDb.userCompanyAccess],
+  ["employee_company_assignments", memoryDb.employeeCompanyAssignments]
 ];
+seedHROperationsMemory(memoryDb.hrLetterTemplates, memoryDb.hrOnboardingTasks);
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()
@@ -174,6 +311,14 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("select * from users where email")) {
     const email = params[0];
     return memoryDb.users.filter(u => u.email === email);
+  }
+  // GET /api/debug/supervisor-resolution (server.ts) — case-insensitive
+  // email lookup.
+  if (lowerSql.startsWith("select id, name, email, role from users where lower(email)")) {
+    const email = String(params[0] || "").toLowerCase();
+    return memoryDb.users
+      .filter((u: any) => String(u.email || "").toLowerCase() === email)
+      .map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
   }
   if (lowerSql.startsWith("select * from users where id")) {
     const id = params[0];
@@ -301,9 +446,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return memoryDb.users.map(({ password_hash, ...u }) => u);
   }
   if (lowerSql.startsWith("insert into users (name, email, username, password_hash, role)")) {
-    const [name, username, password_hash] = params;
+    // POST /api/employees' create_login path (server.ts) — 4 params, in this
+    // order. This previously destructured as [name, username, password_hash]
+    // (missing `email` entirely), which silently shifted every field one
+    // slot left: `username` got the real email, `password_hash` got the real
+    // username, and the real password_hash was dropped — corrupting the
+    // account so it could never log in (bcrypt.compare throws on the
+    // resulting garbage). Fixed to match the actual param order.
+    const [name, email, username, password_hash] = params;
     const newId = memoryDb.users.length + 1;
-    const newUser = { id: newId, name, email: null, username, password_hash, role: 'user', created_at: new Date(), can_edit_delivery_date: true, can_job_edit: false, can_view_login_location: false, can_access_user_panel: false, can_view_budget_module: true };
+    const newUser = { id: newId, name, email: email || null, username, password_hash, role: 'user', created_at: new Date(), can_edit_delivery_date: true, can_job_edit: false, can_view_login_location: false, can_access_user_panel: false, can_view_budget_module: true };
     memoryDb.users.push(newUser);
     return { insertId: newId };
   }
@@ -1449,6 +1601,12 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const id = Number(params[0]);
     return memoryDb.employees.filter((e: any) => e.id === id);
   }
+  // GET /api/debug/supervisor-resolution (server.ts) — the one place this
+  // needs a user_id-scoped lookup instead of the id-scoped one above.
+  if (lowerSql.startsWith("select * from all_employees where user_id")) {
+    const userId = Number(params[0]);
+    return memoryDb.employees.filter((e: any) => Number(e.user_id) === userId);
+  }
   if (lowerSql.startsWith("select * from all_employees")) {
     return [...memoryDb.employees];
   }
@@ -1527,6 +1685,29 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
+  // resolveEmployeeDirectSupervisor (server.ts) — the Dynamic Approval
+  // Engine's Layer 1 auto-Supervisor gate (createTemplateApprovalRequest,
+  // used by Conveyance/Leave/Timesheet/Asset alike): resolves a submitting
+  // Employee's own Direct Supervisor to a login user_id. This JOIN query had
+  // NO handler at all before, so it silently fell through to the generic
+  // fallback's `[]` — meaning the auto-Supervisor layer never actually
+  // gated anything under the in-memory DB (the request skipped straight to
+  // the Template's own steps), for every module, not just Asset.
+  if (lowerSql.startsWith("select sup.user_id as supervisor_user_id")) {
+    const employeeUserId = Number(params[0]);
+    const emp = memoryDb.employees.find((e: any) => Number(e.user_id) === employeeUserId);
+    if (!emp) return [];
+    const links = memoryDb.employeeSupervisors
+      .filter((es: any) => Number(es.employee_id) === Number(emp.id) && Number(es.is_direct) === 1)
+      .sort((a: any, b: any) => b.id - a.id);
+    for (const link of links) {
+      const sup = memoryDb.employees.find((e: any) => Number(e.id) === Number(link.supervisor_id));
+      if (sup && sup.user_id !== null && sup.user_id !== undefined) {
+        return [{ supervisor_user_id: sup.user_id }];
+      }
+    }
+    return [];
+  }
   if (lowerSql.startsWith("select id from employee_supervisors")) {
     const rowId = Number(params[0]);
     const employeeId = Number(params[1]);
@@ -1546,6 +1727,116 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const rowId = Number(params[0]);
     memoryDb.employeeSupervisors = memoryDb.employeeSupervisors.filter((s: any) => s.id !== rowId);
     return { affectedRows: 1 };
+  }
+
+  // EMPLOYEE PAYMENT ACCOUNTS (Admin Panel -> Employees -> Edit -> Payment
+  // tab) — Bank/MFS disbursement split, read by Run Payroll's
+  // buildPaymentSplit (PayrollRoutes.ts) via the same "WHERE employee_id"
+  // shape with an extra "AND is_active = 1" it adds itself, distinguished
+  // below by lowerSql.includes rather than a second handler.
+  if (lowerSql.startsWith("select * from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    let rows = memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.employee_id) === employeeId);
+    if (lowerSql.includes("is_active = 1")) rows = rows.filter((r: any) => Number(r.is_active) === 1);
+    return [...rows].sort((a: any, b: any) => Number(a.sort_order) - Number(b.sort_order) || a.id - b.id);
+  }
+  if (lowerSql.startsWith("select percentage from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.employee_id) === employeeId && Number(r.is_active) === 1)
+      .map((r: any) => ({ percentage: r.percentage }));
+  }
+  if (lowerSql.startsWith("select id, percentage from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    const excludeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.employee_id) === employeeId && Number(r.is_active) === 1 && Number(r.id) !== excludeId)
+      .map((r: any) => ({ id: r.id, percentage: r.percentage }));
+  }
+  if (lowerSql.startsWith("select * from employee_payment_accounts where id")) {
+    const rowId = Number(params[0]);
+    const employeeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.id) === rowId && Number(r.employee_id) === employeeId);
+  }
+  if (lowerSql.startsWith("select id from employee_payment_accounts where id")) {
+    const rowId = Number(params[0]);
+    const employeeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.id) === rowId && Number(r.employee_id) === employeeId)
+      .map((r: any) => ({ id: r.id }));
+  }
+  if (lowerSql.startsWith("insert into employee_payment_accounts")) {
+    // is_active is a literal `1` in this INSERT's SQL text (not a `?`
+    // placeholder — see the route comment), so it's deliberately NOT among
+    // the destructured params below; sort_order is the 9th and last one.
+    const [employeeId, accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, sortOrder] = params;
+    const newId = memoryDb.employeePaymentAccounts.length ? Math.max(...memoryDb.employeePaymentAccounts.map((r: any) => r.id)) + 1 : 1;
+    memoryDb.employeePaymentAccounts.push({
+      id: newId,
+      employee_id: Number(employeeId),
+      account_type: accountType,
+      account_label: accountLabel,
+      bank_name: bankName ?? null,
+      branch_name: branchName ?? null,
+      provider: provider ?? null,
+      account_number: accountNumber,
+      percentage: Number(percentage),
+      is_active: 1,
+      sort_order: Number(sortOrder),
+      created_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  // NOT "...accounts set" — the route's UPDATE is a multi-line template
+  // literal with a newline between the table name and SET, so lowerSql
+  // never actually contains that exact substring (see memoryDbFallback.ts's
+  // approval_template_step_approvers handler for this same pitfall).
+  if (lowerSql.startsWith("update employee_payment_accounts")) {
+    const [accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, isActive, rowId] = params;
+    const row = memoryDb.employeePaymentAccounts.find((r: any) => Number(r.id) === Number(rowId));
+    if (row) {
+      row.account_type = accountType;
+      row.account_label = accountLabel;
+      row.bank_name = bankName ?? null;
+      row.branch_name = branchName ?? null;
+      row.provider = provider ?? null;
+      row.account_number = accountNumber;
+      row.percentage = Number(percentage);
+      row.is_active = isActive ? 1 : 0;
+      row.updated_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("delete from employee_payment_accounts")) {
+    const rowId = Number(params[0]);
+    const before = memoryDb.employeePaymentAccounts.length;
+    memoryDb.employeePaymentAccounts = memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.id) !== rowId);
+    return { affectedRows: before - memoryDb.employeePaymentAccounts.length };
+  }
+
+  // PAYROLL PAYMENT SPLITS — the per-payroll-row snapshot of the accounts
+  // above, taken at generation time (see PayrollRoutes.ts's generate-bulk).
+  if (lowerSql.startsWith("insert into payroll_payment_splits")) {
+    const [payrollId, accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, amount] = params;
+    const newId = memoryDb.payrollPaymentSplits.length ? Math.max(...memoryDb.payrollPaymentSplits.map((r: any) => r.id)) + 1 : 1;
+    memoryDb.payrollPaymentSplits.push({
+      id: newId,
+      payroll_id: Number(payrollId),
+      account_type: accountType,
+      account_label: accountLabel,
+      bank_name: bankName ?? null,
+      branch_name: branchName ?? null,
+      provider: provider ?? null,
+      account_number: accountNumber,
+      percentage: Number(percentage),
+      amount: Number(amount),
+      created_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  if (lowerSql.startsWith("select * from payroll_payment_splits where payroll_id")) {
+    const payrollId = Number(params[0]);
+    return memoryDb.payrollPaymentSplits.filter((r: any) => Number(r.payroll_id) === payrollId);
   }
 
   // NOTICE TARGETS ("specific" users a notice is aimed at)
@@ -1571,6 +1862,9 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("select * from notice_dismissals where user_id")) {
     const userId = Number(params[0]);
     return memoryDb.noticeDismissals.filter((d: any) => d.user_id === userId);
+  }
+  if (lowerSql === "select * from notice_dismissals") {
+    return memoryDb.noticeDismissals;
   }
   if (lowerSql.startsWith("insert into notice_dismissals")) {
     const [notice_id, user_id] = params;
@@ -1737,11 +2031,36 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const source_type = params[0];
     return memoryDb.approvalRequests.filter((r: any) => r.source_type === source_type);
   }
+  // GET /api/my-approvals' own pending-requests fetch (ApprovalRoutes.ts) —
+  // this had NO handler at all before, so it silently fell through to the
+  // generic fallback's `[]`, meaning the personal "waiting on me" queue
+  // (the only approval surface a non-Admin approver — a Supervisor, or any
+  // Template step approver who isn't otherwise an Admin — actually sees)
+  // was permanently empty under the in-memory DB, for every module.
+  if (lowerSql.startsWith("select * from approval_requests where status = 'pending' order by id asc")) {
+    return memoryDb.approvalRequests.filter((r: any) => r.status === "pending").sort((a: any, b: any) => a.id - b.id);
+  }
   if (lowerSql.startsWith("select id from approval_requests where source_type = 'user_claim' and source_id = ?")) {
     const sourceId = Number(params[0]);
     return memoryDb.approvalRequests
       .filter((r: any) => r.source_type === "user_claim" && Number(r.source_id) === sourceId)
       .map((r: any) => ({ id: r.id }));
+  }
+  // VehicleManagementRoutes.ts's POST .../cancel — clears a still-pending
+  // approval_requests row when the requester cancels their own requisition
+  // before anyone acts on it. A 2-param variant of the 4-param handler right
+  // below (same "update approval_requests set status" prefix), so this MUST
+  // be checked first or it silently falls into that handler instead and
+  // destructures [status, current_step, actions_json, id] from a 2-element
+  // params array (current_step/actions_json end up undefined, id too).
+  if (lowerSql === "update approval_requests set status = ? where id = ?") {
+    const [status, id] = params;
+    const row = memoryDb.approvalRequests.find((r: any) => r.id === Number(id));
+    if (row) {
+      row.status = status;
+      row.updated_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
   }
   if (lowerSql.startsWith("update approval_requests set status")) {
     const [status, current_step, actions_json, id] = params;
@@ -1753,6 +2072,188 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       row.updated_at = new Date();
     }
     return { affectedRows: row ? 1 : 0 };
+  }
+
+  // Dynamic Approval Engine TEMPLATES (ApprovalRoutes.ts's Template CRUD +
+  // Employee<->Template Assignment, and server.ts's resolveApprovalTemplate/
+  // createTemplateApprovalRequest) — every JOIN/GROUP BY/non-id-WHERE query
+  // these use, handled by hand here; plain id-keyed SELECT/UPDATE/DELETE and
+  // fully-parameterized INSERTs on approval_templates/approval_template_steps/
+  // approval_template_step_approvers fall through to simulateGenericTable via
+  // GENERIC_TABLES below instead (those three are registered there).
+  if (lowerSql.startsWith("select * from approval_template_steps where template_id")) {
+    const templateId = Number(params[0]);
+    return memoryDb.approvalTemplateSteps
+      .filter((s: any) => Number(s.template_id) === templateId)
+      .sort((a: any, b: any) => a.step_order - b.step_order);
+  }
+  if (lowerSql.startsWith("select sa.*, u.name as user_name")) {
+    const templateId = Number(params[0]);
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) === templateId).map((s: any) => Number(s.id))
+    );
+    return memoryDb.approvalTemplateStepApprovers
+      .filter((a: any) => stepIds.has(Number(a.step_id)))
+      .sort((a: any, b: any) => a.id - b.id)
+      .map((a: any) => {
+        const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+        return { id: a.id, step_id: a.step_id, user_id: a.user_id, user_name: u ? u.name : null };
+      });
+  }
+  // GET /api/approvals' own templateStepApproversMap fetch (ApprovalRoutes.ts)
+  // — every step-approver row, system-wide, joined up to its template_id/
+  // step_order (no WHERE at all, unlike the two handlers above/below it that
+  // scope to one template or one step).
+  if (lowerSql.startsWith("select s.template_id, s.step_order, sa.user_id, u.name as user_name")) {
+    return memoryDb.approvalTemplateStepApprovers.map((a: any) => {
+      const s = memoryDb.approvalTemplateSteps.find((x: any) => Number(x.id) === Number(a.step_id));
+      const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+      return {
+        template_id: s ? s.template_id : null,
+        step_order: s ? s.step_order : null,
+        user_id: a.user_id,
+        user_name: u ? u.name : null
+      };
+    });
+  }
+  // GET /api/my-approvals' own version of the fetch above — no u.name column
+  // (a newline sits right after sa.user_id in this one, so it never matches
+  // the ", u.name as user_name" check above — this must stay AFTER that
+  // check since its prefix is otherwise a literal substring of it).
+  if (lowerSql.startsWith("select s.template_id, s.step_order, sa.user_id")) {
+    return memoryDb.approvalTemplateStepApprovers.map((a: any) => {
+      const s = memoryDb.approvalTemplateSteps.find((x: any) => Number(x.id) === Number(a.step_id));
+      return { template_id: s ? s.template_id : null, step_order: s ? s.step_order : null, user_id: a.user_id };
+    });
+  }
+  // getCurrentStepApprovers (server.ts) — the authorization-critical lookup
+  // performApprovalAction uses to decide who may act on a Template-driven
+  // request's CURRENT step. WHERE-scoped to one (template_id, step_order),
+  // unlike the two handlers above.
+  if (lowerSql.startsWith("select sa.user_id, u.name as user_name")) {
+    const [templateId, stepOrder] = params.map((p: any) => Number(p));
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps
+        .filter((s: any) => Number(s.template_id) === templateId && Number(s.step_order) === stepOrder)
+        .map((s: any) => Number(s.id))
+    );
+    return memoryDb.approvalTemplateStepApprovers
+      .filter((a: any) => stepIds.has(Number(a.step_id)))
+      .map((a: any) => {
+        const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+        return { user_id: a.user_id, user_name: u ? u.name : null };
+      });
+  }
+  if (lowerSql.startsWith("select * from approval_templates where request_type")) {
+    const requestType = params[0];
+    return [...memoryDb.approvalTemplates]
+      .filter((t: any) => t.request_type === requestType)
+      .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+  }
+  if (lowerSql.startsWith("select template_id, count(*) as cnt from approval_template_steps group by template_id")) {
+    const counts = new Map<number, number>();
+    for (const s of memoryDb.approvalTemplateSteps) {
+      const tid = Number(s.template_id);
+      counts.set(tid, (counts.get(tid) || 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([template_id, cnt]) => ({ template_id, cnt }));
+  }
+  if (lowerSql.startsWith("update approval_templates set is_default = 0 where request_type")) {
+    const requestType = params[0];
+    // Two callers share this prefix: POST/`/default` (just request_type) and
+    // PUT (request_type + "AND id <> ?" to exclude the template being saved).
+    const excludeId = lowerSql.includes("id <>") ? Number(params[1]) : null;
+    for (const t of memoryDb.approvalTemplates) {
+      if (t.request_type === requestType && (excludeId === null || Number(t.id) !== excludeId)) {
+        t.is_default = 0;
+      }
+    }
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("delete from approval_template_steps where template_id")) {
+    const templateId = Number(params[0]);
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) === templateId).map((s: any) => Number(s.id))
+    );
+    // Mutate the arrays in place (length = 0 + push back the survivors)
+    // rather than reassigning memoryDb.approvalTemplateSteps/
+    // approvalTemplateStepApprovers to a new array — GENERIC_TABLES captured
+    // the ORIGINAL array objects by reference at module load, so a plain `=`
+    // here would silently orphan them: later INSERTs via simulateGenericTable
+    // would keep pushing into the abandoned array while every SELECT reads
+    // the (now permanently empty-of-new-rows) property instead.
+    const keptApprovers = memoryDb.approvalTemplateStepApprovers.filter((a: any) => !stepIds.has(Number(a.step_id)));
+    memoryDb.approvalTemplateStepApprovers.length = 0;
+    memoryDb.approvalTemplateStepApprovers.push(...keptApprovers);
+    const before = memoryDb.approvalTemplateSteps.length;
+    const keptSteps = memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) !== templateId);
+    memoryDb.approvalTemplateSteps.length = 0;
+    memoryDb.approvalTemplateSteps.push(...keptSteps);
+    return { affectedRows: before - memoryDb.approvalTemplateSteps.length };
+  }
+  if (lowerSql.startsWith("select count(*) as cnt from employee_template_assignments where template_id")) {
+    const templateId = Number(params[0]);
+    const cnt = memoryDb.employeeTemplateAssignments.filter((a: any) => Number(a.template_id) === templateId).length;
+    return [{ cnt }];
+  }
+  if (lowerSql.startsWith("select eta.employee_user_id, eta.template_id, t.name as template_name")) {
+    const requestType = params[0];
+    return memoryDb.employeeTemplateAssignments
+      .filter((a: any) => a.request_type === requestType)
+      .map((a: any) => {
+        const t = memoryDb.approvalTemplates.find((x: any) => Number(x.id) === Number(a.template_id));
+        return { employee_user_id: a.employee_user_id, template_id: a.template_id, template_name: t ? t.name : null };
+      });
+  }
+  if (lowerSql.startsWith("select id, name from approval_templates where request_type")) {
+    const requestType = params[0];
+    const def = memoryDb.approvalTemplates.find((t: any) => t.request_type === requestType && Number(t.is_default) === 1);
+    return def ? [{ id: def.id, name: def.name }] : [];
+  }
+  if (lowerSql.startsWith("delete from employee_template_assignments where employee_user_id")) {
+    const [employeeUserId, requestType] = params;
+    const before = memoryDb.employeeTemplateAssignments.length;
+    memoryDb.employeeTemplateAssignments = memoryDb.employeeTemplateAssignments.filter(
+      (a: any) => !(Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType)
+    );
+    return { affectedRows: before - memoryDb.employeeTemplateAssignments.length };
+  }
+  if (lowerSql.startsWith("insert into employee_template_assignments")) {
+    const [employeeUserId, requestType, templateId, assignedBy] = params;
+    const existing = memoryDb.employeeTemplateAssignments.find(
+      (a: any) => Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType
+    );
+    if (existing) {
+      existing.template_id = Number(templateId);
+      existing.assigned_by = assignedBy === null || assignedBy === undefined ? null : Number(assignedBy);
+      existing.updated_at = new Date();
+      return { insertId: existing.id };
+    }
+    const newId = memoryDb.employeeTemplateAssignments.length
+      ? Math.max(...memoryDb.employeeTemplateAssignments.map((a: any) => Number(a.id))) + 1
+      : 1;
+    memoryDb.employeeTemplateAssignments.push({
+      id: newId,
+      employee_user_id: Number(employeeUserId),
+      request_type: requestType,
+      template_id: Number(templateId),
+      assigned_by: assignedBy === null || assignedBy === undefined ? null : Number(assignedBy),
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  // resolveApprovalTemplate's employee-assignment lookup (server.ts) —
+  // employee_template_assignments JOIN approval_templates, filtered down to
+  // this employee/request_type's currently-active template, if any.
+  if (lowerSql.startsWith("select t.* from employee_template_assignments eta")) {
+    const [employeeUserId, requestType] = params;
+    const assignment = memoryDb.employeeTemplateAssignments.find(
+      (a: any) => Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType
+    );
+    if (!assignment) return [];
+    const t = memoryDb.approvalTemplates.find((x: any) => Number(x.id) === Number(assignment.template_id) && Number(x.is_active) === 1);
+    return t ? [t] : [];
   }
 
   // LEAVE BALANCES (Self Service -> Leave Management)
@@ -2037,6 +2538,11 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   // Reliever existence check in POST /api/leave-applications ("SELECT id,
   // name FROM users WHERE id = ?") — checked before the "!=" variant below
   // since both share the same prefix up to "where id ".
+  if (lowerSql.startsWith("select id, name from users where id in")) {
+    // fetchByIds("users", ids, "id, name") — GET /api/my-approvals' requester names.
+    const ids = params.map((p: any) => Number(p));
+    return memoryDb.users.filter((u: any) => ids.includes(Number(u.id))).map((u: any) => ({ id: u.id, name: u.name }));
+  }
   if (lowerSql.startsWith("select id, name from users where id = ?")) {
     const id = Number(params[0]);
     return memoryDb.users.filter((u: any) => u.id === id).map((u: any) => ({ id: u.id, name: u.name }));
@@ -2105,6 +2611,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   }
+  if (lowerSql.startsWith("select * from leave_applications where reliever_id = ?")) {
+    // GET /api/my-approvals — Leave Applications still waiting on this Reliever.
+    const relieverId = Number(params[0]);
+    return memoryDb.leaveApplications.filter(
+      (a: any) => Number(a.reliever_id) === relieverId && a.reliever_status === "pending" && a.status === "pending"
+    );
+  }
+  if (lowerSql.startsWith("select * from leave_applications where id in")) {
+    const ids = params.map((p: any) => Number(p));
+    return memoryDb.leaveApplications.filter((a: any) => ids.includes(Number(a.id)));
+  }
   if (lowerSql.startsWith("select * from leave_applications where id")) {
     const id = Number(params[0]);
     return memoryDb.leaveApplications.filter((a: any) => a.id === id);
@@ -2114,6 +2631,34 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   }
   if (lowerSql.startsWith("select id, name, role from users") && !lowerSql.includes("where")) {
     return memoryDb.users.map((u: any) => ({ id: u.id, name: u.name, role: u.role }));
+  }
+  // finalizeLeaveApplicationApproval / rejectLeaveApplicationRecord in
+  // server.ts hardcode the target status as a literal ('approved'/'rejected')
+  // rather than a `?` placeholder, so they only ever pass 3 params (remarks,
+  // decided_by, id) — checked before the older 4-param "status = ?" decision
+  // route below (same startsWith prefix otherwise, so the more specific
+  // literal match must win first).
+  if (lowerSql.startsWith("update leave_applications set status = 'approved'")) {
+    const [remarks, decidedBy, id] = params;
+    const row = memoryDb.leaveApplications.find((a: any) => a.id === Number(id));
+    if (row) {
+      row.status = "approved";
+      row.remarks = remarks;
+      row.decided_by = decidedBy != null ? Number(decidedBy) : null;
+      row.decided_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("update leave_applications set status = 'rejected'")) {
+    const [remarks, decidedBy, id] = params;
+    const row = memoryDb.leaveApplications.find((a: any) => a.id === Number(id));
+    if (row) {
+      row.status = "rejected";
+      row.remarks = remarks;
+      row.decided_by = decidedBy != null ? Number(decidedBy) : null;
+      row.decided_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
   }
   if (lowerSql.startsWith("update leave_applications set status")) {
     const [status, remarks, decidedBy, id] = params;
@@ -2168,6 +2713,12 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   ) {
     return [...memoryDb.users];
   }
+  // Template Assignment screen's employee list (GET /api/template-assignments) —
+  // same "every user, filtered/joined in JS afterwards" shape as the fallback
+  // just above, just with its own exact column list + ORDER BY.
+  if (lowerSql === "select id, name, email, username, role from users order by name asc") {
+    return [...memoryDb.users].sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+  }
 
   // Chat/Alerts push notification device tokens (see memoryDb.chatPushTokens
   // above for why this needs its own handler instead of the generic one).
@@ -2206,6 +2757,469 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       // for chat_rooms/chat_room_members yet, so this always reads back
       // empty (pre-existing gap, unrelated to Alerts push).
       return [];
+    }
+  }
+
+  // Alerts inbox (see memoryDb.alerts above for why this needs its own
+  // handler instead of the generic one) — the exact 6 queries Alerts.ts
+  // issues, nothing else.
+  if (lowerSql.includes("from alerts") || lowerSql.includes("into alerts") || lowerSql.startsWith("update alerts")) {
+    if (lowerSql.startsWith("insert into alerts")) {
+      const [userId, type, title, message, relatedType, relatedId] = params;
+      const newId = memoryDb.alerts.length ? Math.max(...memoryDb.alerts.map((a: any) => Number(a.id))) + 1 : 1;
+      memoryDb.alerts.push({
+        id: newId,
+        user_id: Number(userId),
+        type,
+        title,
+        message,
+        related_type: relatedType,
+        related_id: relatedId,
+        is_read: 0,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("select * from alerts where user_id")) {
+      const userId = Number(params[0]);
+      return memoryDb.alerts
+        .filter((a: any) => Number(a.user_id) === userId)
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 50);
+    }
+    if (lowerSql.startsWith("select count(*) as cnt from alerts")) {
+      const userId = Number(params[0]);
+      const cnt = memoryDb.alerts.filter((a: any) => Number(a.user_id) === userId && !a.is_read).length;
+      return [{ cnt }];
+    }
+    if (lowerSql.startsWith("update alerts set is_read = 1 where id")) {
+      const [id, userId] = params;
+      const row = memoryDb.alerts.find((a: any) => Number(a.id) === Number(id) && Number(a.user_id) === Number(userId));
+      if (row) row.is_read = 1;
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update alerts set is_read = 1 where user_id")) {
+      const userId = Number(params[0]);
+      let affected = 0;
+      for (const a of memoryDb.alerts) {
+        if (Number(a.user_id) === userId && !a.is_read) {
+          a.is_read = 1;
+          affected++;
+        }
+      }
+      return { affectedRows: affected };
+    }
+    if (lowerSql.startsWith("delete from alerts where id")) {
+      const [id, userId] = params;
+      const before = memoryDb.alerts.length;
+      memoryDb.alerts = memoryDb.alerts.filter((a: any) => !(Number(a.id) === Number(id) && Number(a.user_id) === Number(userId)));
+      return { affectedRows: before - memoryDb.alerts.length };
+    }
+  }
+
+  // Asset Management (AssetManagementRoutes.ts) — bespoke, not GENERIC_TABLES,
+  // since almost every query here filters on a non-id column, JOINs, or uses
+  // a literal (not `?`) value inside SET/WHERE (e.g. "status = 'assigned'"),
+  // none of which simulateGenericTable's 4 shapes understand. Matched on a
+  // short prefix that stays on the SQL's own first line (never a substring
+  // that could cross the newline before SET/WHERE in these multi-line
+  // template literals — see employee_payment_accounts above for why that
+  // matters).
+  if (lowerSql.includes("asset")) {
+    const buildRequisitionRow = (r: any) => {
+      const employee = memoryDb.users.find((u: any) => u.id === r.employee_user_id);
+      const manager = r.manager_id ? memoryDb.users.find((u: any) => u.id === r.manager_id) : null;
+      const asset = r.assigned_asset_id ? memoryDb.assets.find((a: any) => a.id === r.assigned_asset_id) : null;
+      return {
+        ...r,
+        employee_name: employee ? employee.name : null,
+        manager_name: manager ? manager.name : null,
+        asset_name: asset ? asset.name : null,
+        asset_tag: asset ? asset.asset_tag : null
+      };
+    };
+
+    if (lowerSql.startsWith("select asg.id as assignment_id")) {
+      const employeeUserId = Number(params[0]);
+      return memoryDb.assetAssignments
+        .filter((asg: any) => Number(asg.employee_user_id) === employeeUserId && !asg.returned_date)
+        .sort((a: any, b: any) => (a.assigned_date < b.assigned_date ? 1 : -1))
+        .map((asg: any) => {
+          const asset = memoryDb.assets.find((a: any) => a.id === asg.asset_id);
+          return {
+            assignment_id: asg.id,
+            assigned_date: asg.assigned_date,
+            condition_on_assign: asg.condition_on_assign,
+            acknowledged_at: asg.acknowledged_at,
+            return_requested_at: asg.return_requested_at,
+            quantity: asg.quantity ?? null,
+            unit: asg.unit ?? null,
+            handover_note: asg.handover_note ?? null,
+            requisition_id: asg.requisition_id ?? null,
+            asset_id: asset ? asset.id : null,
+            asset_tag: asset ? asset.asset_tag : null,
+            name: asset ? asset.name : null,
+            category: asset ? asset.category : null,
+            serial_number: asset ? asset.serial_number : null
+          };
+        });
+    }
+    if (lowerSql.startsWith("select asg.*, u.name as employee_name")) {
+      const assetId = Number(params[0]);
+      return memoryDb.assetAssignments
+        .filter((asg: any) => Number(asg.asset_id) === assetId)
+        .sort((a: any, b: any) => (a.assigned_date < b.assigned_date ? 1 : -1))
+        .map((asg: any) => {
+          const u = memoryDb.users.find((x: any) => x.id === asg.employee_user_id);
+          return { ...asg, employee_name: u ? u.name : null };
+        });
+    }
+    if (lowerSql.startsWith("select * from asset_assignments where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetAssignments.filter((asg: any) => asg.id === id);
+    }
+    if (lowerSql.startsWith("update asset_assignments set acknowledged_at")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === id);
+      if (row) row.acknowledged_at = new Date();
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_assignments set return_requested_at")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === id);
+      if (row) row.return_requested_at = new Date();
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_assignments set returned_date")) {
+      const [condition_on_return, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) {
+        row.returned_date = new Date();
+        row.condition_on_return = condition_on_return;
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("insert into asset_assignments")) {
+      const [asset_id, employee_user_id, requisition_id, condition_on_assign, assigned_by] = params;
+      const newId = memoryDb.assetAssignments.length > 0 ? Math.max(...memoryDb.assetAssignments.map((a: any) => a.id)) + 1 : 1;
+      memoryDb.assetAssignments.push({
+        id: newId,
+        asset_id: Number(asset_id),
+        employee_user_id: Number(employee_user_id),
+        requisition_id: requisition_id === null || requisition_id === undefined ? null : Number(requisition_id),
+        assigned_date: new Date(),
+        returned_date: null,
+        condition_on_assign,
+        condition_on_return: null,
+        assigned_by: Number(assigned_by),
+        acknowledged_at: null,
+        return_requested_at: null,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("update asset_assignments set quantity")) {
+      const [quantity, unit, handover_note, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) Object.assign(row, { quantity: Number(quantity), unit, handover_note });
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("select * from asset_assignments where requisition_id")) {
+      const requisitionId = Number(params[0]);
+      return memoryDb.assetAssignments.filter((asg: any) => Number(asg.requisition_id) === requisitionId);
+    }
+    if (lowerSql.startsWith("update asset_assignments set asset_id")) {
+      const [asset_id, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) row.asset_id = Number(asset_id);
+      return { affectedRows: row ? 1 : 0 };
+    }
+
+    // Flowchart's "গরমিল/ড্যামেজ -> অ্যাডজাস্টমেন্ট/ক্লেইম রিকোয়েস্ট -> ইনভেন্টরি
+    // কর্তৃক সমস্যার সমাধান" branch — see AssetManagementRoutes.ts's
+    // report-issue/resolve routes.
+    if (lowerSql.startsWith("select id from asset_assignment_claims where assignment_id")) {
+      const assignmentId = Number(params[0]);
+      return memoryDb.assetAssignmentClaims
+        .filter((c: any) => Number(c.assignment_id) === assignmentId && c.status === "pending")
+        .map((c: any) => ({ id: c.id }));
+    }
+    if (lowerSql.startsWith("select * from asset_assignment_claims where assignment_id in")) {
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetAssignmentClaims.filter((c: any) => ids.includes(Number(c.assignment_id)) && c.status === "pending");
+    }
+    if (lowerSql.startsWith("select * from asset_assignment_claims where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetAssignmentClaims.filter((c: any) => c.id === id);
+    }
+    if (lowerSql.startsWith("select ac.*, u.name as employee_name")) {
+      let rows = [...memoryDb.assetAssignmentClaims];
+      if (lowerSql.includes("where ac.status")) {
+        const status = params[0];
+        rows = rows.filter((c: any) => c.status === status);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows.map((c: any) => {
+        const u = memoryDb.users.find((x: any) => x.id === c.employee_user_id);
+        const asg = memoryDb.assetAssignments.find((a: any) => a.id === c.assignment_id);
+        const asset = asg ? memoryDb.assets.find((a: any) => a.id === asg.asset_id) : null;
+        return {
+          ...c,
+          employee_name: u ? u.name : null,
+          asset_id: asg ? asg.asset_id : null,
+          asset_name: asset ? asset.name : null,
+          asset_tag: asset ? asset.asset_tag : null
+        };
+      });
+    }
+    if (lowerSql.startsWith("insert into asset_assignment_claims")) {
+      const [assignment_id, employee_user_id, issue_type, description] = params;
+      const newId = memoryDb.assetAssignmentClaims.length > 0 ? Math.max(...memoryDb.assetAssignmentClaims.map((c: any) => c.id)) + 1 : 1;
+      memoryDb.assetAssignmentClaims.push({
+        id: newId,
+        assignment_id: Number(assignment_id),
+        employee_user_id: Number(employee_user_id),
+        issue_type,
+        description,
+        status: "pending",
+        resolution_note: null,
+        resolved_by: null,
+        resolved_at: null,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    // "UPDATE asset_assignment_claims\n    SET status = 'resolved', ..." — a
+    // newline sits between the table name and SET here too (see the
+    // "update assets ... coalesce" note above for why .startsWith() stops at
+    // the table name instead of crossing it).
+    if (lowerSql.startsWith("update asset_assignment_claims")) {
+      const [resolution_note, resolved_by, id] = params;
+      const row = memoryDb.assetAssignmentClaims.find((c: any) => c.id === Number(id));
+      if (row) {
+        row.status = "resolved";
+        row.resolution_note = resolution_note;
+        row.resolved_by = Number(resolved_by);
+        row.resolved_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+
+    if (lowerSql.startsWith("insert into asset_requisitions")) {
+      const [employee_user_id, asset_category, reason, urgency, target_date, attachment_filename, attachment_mimetype, attachment_data] = params;
+      const newId = memoryDb.assetRequisitions.length > 0 ? Math.max(...memoryDb.assetRequisitions.map((r: any) => r.id)) + 1 : 1;
+      memoryDb.assetRequisitions.push({
+        id: newId,
+        employee_user_id: Number(employee_user_id),
+        asset_category,
+        reason,
+        urgency,
+        target_date: target_date || null,
+        attachment_filename: attachment_filename || null,
+        attachment_mimetype: attachment_mimetype || null,
+        attachment_data: attachment_data || null,
+        status: "pending",
+        manager_id: null,
+        manager_decided_at: null,
+        manager_remarks: null,
+        admin_decided_by: null,
+        admin_decided_at: null,
+        rejection_reason: null,
+        assigned_asset_id: null,
+        created_at: new Date(),
+        updated_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("insert into asset_requisition_items")) {
+      const [requisition_id, item_name, purpose, unit, quantity] = params;
+      const newId = memoryDb.assetRequisitionItems.length > 0 ? Math.max(...memoryDb.assetRequisitionItems.map((it: any) => it.id)) + 1 : 1;
+      memoryDb.assetRequisitionItems.push({
+        id: newId,
+        requisition_id: Number(requisition_id),
+        item_name,
+        purpose,
+        unit,
+        quantity: Number(quantity),
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("select * from asset_requisition_items where requisition_id in")) {
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetRequisitionItems
+        .filter((it: any) => ids.includes(Number(it.requisition_id)))
+        .sort((a: any, b: any) => a.id - b.id);
+    }
+    if (lowerSql.startsWith("select r.*, u.name as employee_name, m.name as manager_name")) {
+      let rows = [...memoryDb.assetRequisitions];
+      if (lowerSql.includes("where r.employee_user_id")) {
+        const employeeUserId = Number(params[0]);
+        rows = rows.filter((r: any) => Number(r.employee_user_id) === employeeUserId);
+      } else if (lowerSql.includes("where r.status")) {
+        const status = params[0];
+        rows = rows.filter((r: any) => r.status === status);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows.map(buildRequisitionRow);
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions where id in")) {
+      // fetchByIds("asset_requisitions", ids) — GET /api/my-approvals's
+      // narrowed-by-ids lookup, distinct from the single "= ?" case below
+      // (both start with "where id", so this has to be checked first).
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetRequisitions.filter((r: any) => ids.includes(Number(r.id)));
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetRequisitions.filter((r: any) => r.id === id);
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions")) {
+      // Plain, unfiltered fetch — GET /api/approvals (ApprovalRoutes.ts)
+      // pulls every requisition once to build its source_label map.
+      return [...memoryDb.assetRequisitions];
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'dispatched'")) {
+      const [assigned_asset_id, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "dispatched";
+        row.assigned_asset_id = Number(assigned_asset_id);
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'fulfilled'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === id && r.status === "dispatched");
+      if (row) {
+        row.status = "fulfilled";
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'approved'")) {
+      const [admin_decided_by, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "approved";
+        row.admin_decided_by = Number(admin_decided_by);
+        row.admin_decided_at = new Date();
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'rejected'")) {
+      const [admin_decided_by, rejection_reason, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "rejected";
+        row.admin_decided_by = Number(admin_decided_by);
+        row.admin_decided_at = new Date();
+        row.rejection_reason = rejection_reason;
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+
+    if (lowerSql.startsWith("select id from assets where asset_tag")) {
+      const tag = params[0];
+      return memoryDb.assets.filter((a: any) => a.asset_tag === tag).map((a: any) => ({ id: a.id }));
+    }
+    if (lowerSql.startsWith("select id from assets where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assets.filter((a: any) => a.id === id).map((a: any) => ({ id: a.id }));
+    }
+    if (lowerSql.startsWith("select * from assets where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assets.filter((a: any) => a.id === id);
+    }
+    if (lowerSql.startsWith("select * from assets")) {
+      let rows = [...memoryDb.assets];
+      let paramIdx = 0;
+      if (lowerSql.includes("status = ?")) {
+        const status = params[paramIdx++];
+        rows = rows.filter((a: any) => a.status === status);
+      }
+      if (lowerSql.includes("category = ?")) {
+        const category = params[paramIdx++];
+        rows = rows.filter((a: any) => a.category === category);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows;
+    }
+    if (lowerSql.startsWith("insert into assets")) {
+      const [asset_tag, name, category, serial_number, purchase_date, condition_note, created_by] = params;
+      const newId = memoryDb.assets.length > 0 ? Math.max(...memoryDb.assets.map((a: any) => a.id)) + 1 : 1;
+      memoryDb.assets.push({
+        id: newId,
+        asset_tag,
+        name,
+        category,
+        serial_number: serial_number || null,
+        purchase_date: purchase_date || null,
+        status: "available",
+        condition_note: condition_note || null,
+        created_by: created_by === null || created_by === undefined ? null : Number(created_by),
+        created_at: new Date(),
+        updated_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    // "UPDATE assets\n    SET name = COALESCE(?, name), ..." — a newline sits
+    // between the table name and SET in this one (a multi-line template
+    // literal), so this is matched by .includes("coalesce") rather than a
+    // .startsWith() that would need to cross that newline (see the design
+    // note at the top of this Asset Management block).
+    if (lowerSql.startsWith("update assets") && lowerSql.includes("coalesce")) {
+      const [name, category, serial_number, purchase_date, status, condition_note, id] = params;
+      const row = memoryDb.assets.find((a: any) => a.id === Number(id));
+      if (row) {
+        if (name !== null && name !== undefined) row.name = name;
+        if (category !== null && category !== undefined) row.category = category;
+        row.serial_number = serial_number || null;
+        row.purchase_date = purchase_date || null;
+        if (status !== null && status !== undefined) row.status = status;
+        row.condition_note = condition_note || null;
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = 'assigned'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assets.find((a: any) => a.id === id);
+      if (row) row.status = "assigned";
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = 'maintenance'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assets.find((a: any) => a.id === id);
+      if (row) row.status = "maintenance";
+      return { affectedRows: row ? 1 : 0 };
+    }
+    // Supervisor item edits (AssetManagementRoutes.ts PUT .../items) — plain
+    // "SET a = ?, b = ? WHERE id = ?" updates, same shape the generic
+    // simulator handles.
+    if (lowerSql.startsWith("update asset_requisition_items set")) {
+      return simulateGenericTable("asset_requisition_items", memoryDb.assetRequisitionItems, sql, lowerSql, params);
+    }
+    if (lowerSql.startsWith("update asset_requisitions set asset_category")) {
+      return simulateGenericTable("asset_requisitions", memoryDb.assetRequisitions, sql, lowerSql, params);
+    }
+    if (lowerSql.startsWith("update asset_requisitions set assigned_asset_id")) {
+      const [assigned_asset_id, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.assigned_asset_id = Number(assigned_asset_id);
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = ? where id")) {
+      const [status, id] = params;
+      const row = memoryDb.assets.find((a: any) => a.id === Number(id));
+      if (row) row.status = status;
+      return { affectedRows: row ? 1 : 0 };
     }
   }
 

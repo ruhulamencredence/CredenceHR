@@ -1,13 +1,23 @@
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { apiUrl } from '../lib/api';
+import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { AssetFulfillModal } from './AssetFulfillModal';
+import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
+import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
+import ClaimLocationMap from './ClaimLocationMap';
+import { ClaimBillLines } from './ClaimBillLines';
+import { formatDate } from '../lib/formatDate';
+import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
+import { SearchSelect } from './Combobox';
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
-interface MyApprovalItem {
+interface MyApprovalItem extends ClaimReviewFields {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -16,7 +26,76 @@ interface MyApprovalItem {
   current_step: number;
   total_steps: number;
   created_at: string;
+  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
+  // this Conveyance Bill Claim's Amount was built from, so the approver can
+  // open the full check-in/check-out details (including location) before
+  // deciding. See ApproveApplications.tsx for the original of this pattern.
+  claim_refs?: UserClaimReference[];
+  // Only on a 'user_claim' item — the claim's bills (category / date / amount).
+  claim_items?: UserClaimItem[];
+  source_approved_amount?: number | null;
+  // Only present on an 'asset_requisition' item — see
+  // ApproveApplications.tsx's identical field for the full shape.
+  asset_requisition_details?: {
+    asset_category: string;
+    reason: string;
+    urgency: 'low' | 'medium' | 'high';
+    target_date: string | null;
+    has_attachment: boolean;
+    attachment_filename: string | null;
+    items: { id?: number; item_name: string; purpose: string; unit: string; quantity: number; source?: string; original_quantity?: number | null }[];
+  } | null;
+  // See ApproveApplications.tsx's identical field — true only for a
+  // vehicle_requisition item on its Template's FINAL Layer, when that
+  // Layer's Approver Type is 'vehicle_maintainer'.
+  vehicle_maintainer_bypass?: boolean;
+  // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
+  // approver gets Fulfill & Hand Over instead of Approve/Reject.
+  asset_fulfiller_bypass?: boolean;
+  // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
+  // here also pays it out (own Bill + voucher no).
+  conveyance_disburser_bypass?: boolean;
+  // Requester's Supervisor Layer — may edit the items before approving.
+  can_edit_asset_items?: boolean;
 }
+
+interface AvailableVehicle {
+  id: number;
+  vehicle_no: string;
+  model: string;
+}
+
+interface DriverCandidate {
+  id: number;
+  name: string;
+}
+
+const sourceTitle = (t: MyApprovalItem['source_type']) =>
+  t === 'user_claim'
+    ? 'Conveyance Bill Claim'
+    : t === 'attendance_correction'
+    ? 'Timesheet Correction'
+    : t === 'leave_application'
+    ? 'Leave Application'
+    : t === 'leave_reliever'
+    ? 'Leave Application — Reliever Review'
+    : t === 'leave_direct'
+    ? 'Leave Application'
+    : t === 'attendance'
+    ? 'Remote Attendance'
+    : t === 'exit_clearance'
+    ? 'Exit Clearance'
+    : t === 'asset_requisition'
+    ? 'Asset Requisition'
+    : t === 'vehicle_requisition'
+    ? 'Vehicle Requisition'
+    : t === 'mobile_limit_request'
+    ? 'Mobile Limit Request'
+    : t === 'advance_request'
+    ? 'Loan / Advance Request'
+    : t === 'hr_action'
+    ? 'HR Action'
+    : 'Movement Claim';
 
 interface PendingApprovalsCardProps {
   token: string;
@@ -28,40 +107,86 @@ interface PendingApprovalsCardProps {
   className?: string;
 }
 
-const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
-    ? 'Conveyance Bill Claim'
-    : t === 'attendance_correction'
-    ? 'Timesheet Correction'
-    : t === 'leave_application'
-    ? 'Leave Application'
-    : t === 'leave_reliever'
-    ? 'Leave Application \u2014 Reliever Review'
-    : t === 'attendance'
-    ? 'Remote Attendance'
-    : 'Movement Claim';
-
 // Dashboard "Pending Approvals" card (Part 4 — Role Permissiveness) — shown to
 // EVERY logged-in account, regardless of Admin Panel access, whenever they've
 // been named an approver on a Template step (see Part 2) and something is
 // currently sitting on their step. Renders nothing at all if there's nothing
 // waiting on this account, so it never clutters the Dashboard for the vast
-// majority of accounts that are never an approver. Deliberately simpler than
-// the full Admin Panel -> Approvals queue: no Bill-picker on a Conveyance
-// Bill Claim's last step — Approving here always auto-creates a fresh Bill
-// (open the Admin Panel queue instead if you need to attach it to an
-// existing one).
+// majority of accounts that are never an approver.
+//
+// Grouped by category (source_type) instead of one flat list of individual
+// request cards: a category card shows just the type + how many are waiting,
+// and tapping it opens that category's own list right here (no navigation
+// away from the Dashboard) — the same per-item Approve/Reject UI, including
+// the Conveyance Bill Claim's Movement Claim (check-in/out) location viewer,
+// as the full "Approve Application" page (ApproveApplications.tsx).
 export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token, className = '' }) => {
   const [items, setItems] = useState<MyApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<number | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
+  const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<number, string>>({});
+  const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [openCategory, setOpenCategory] = useState<MyApprovalItem['source_type'] | null>(null);
+  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
+  // Same "tap the card for full details" modal as ApproveApplications.tsx's
+  // full-page version of this list — the Dashboard card is often the first
+  // (and for many approvers, only) place an Asset Requisition is seen, so it
+  // needs the same way to see every requested item before deciding.
+  const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
+  // asset_fulfiller_bypass item whose Fulfill & Hand Over form is open.
+  const [fulfilling, setFulfilling] = useState<MyApprovalItem | null>(null);
+  // Supervisor editing a requisition's items (AssetRequisitionEditItemsModal).
+  const [editingItems, setEditingItems] = useState<MyApprovalItem | null>(null);
 
+  // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
+  // "Assign Vehicle & Driver" form below — see ApproveApplications.tsx's
+  // identical fetch (driver candidates come from every login account, not
+  // the Employee Directory).
+  const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
+  const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
+  const [assignForm, setAssignForm] = useState<Record<number, { vehicle_id: string; driver_user_id: string }>>({});
+
+  useEffect(() => {
+    const authHeaders = { Authorization: `Bearer ${token}` };
+    fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
+    id: ref.claim_id,
+    user_id: item.requested_by,
+    user_name: item.requested_by_name,
+    purpose: ref.purpose,
+    status: ref.check_out_at ? 'completed' : 'open',
+    check_in_at: ref.check_in_at,
+    check_in_lat: Number(ref.check_in_lat),
+    check_in_lng: Number(ref.check_in_lng),
+    check_out_at: ref.check_out_at,
+    check_out_lat: ref.check_out_lat != null ? Number(ref.check_out_lat) : null,
+    check_out_lng: ref.check_out_lng != null ? Number(ref.check_out_lng) : null,
+    distance_km: ref.distance_km,
+    check_in_approval: ref.check_in_approval,
+    check_out_approval: ref.check_out_approval
+  });
+
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = async () => {
     try {
-      const res = await fetch(apiUrl('/api/my-approvals'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setItems(await res.json());
+      // This card mounts twice on every Dashboard load (mobile + desktop
+      // copies, see UserPanel.tsx) — dedupedFetchJson means only one of the
+      // two actually hits the network.
+      const rows = await dedupedFetchJson(apiUrl('/api/my-approvals'), token);
+      if (rows) setItems(rows);
     } catch {
       // Offline/unreachable — card just stays with whatever it already had.
     } finally {
@@ -74,33 +199,141 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected') => {
+  // Auto-close back to the category grid once the open category's last item
+  // has been approved/rejected, rather than leaving an empty list open.
+  useEffect(() => {
+    if (openCategory && !items.some((i) => i.source_type === openCategory)) {
+      setOpenCategory(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  // Reject with "Allow re-claim" ticked, per item.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<number, boolean>>({});
+
+  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const id = item.id;
+    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
-      // Reliever-review items aren't rows in approval_requests yet (see
-      // GET /api/my-approvals) — they're decided via their own dedicated
-      // route on the Leave Application itself, not the generic
-      // /api/my-approvals/:id/act used by every other source_type here.
+      // Reliever-review and Exit Clearance items aren't rows in
+      // approval_requests — they're decided via their own dedicated routes,
+      // not the generic /api/my-approvals/:id/act every other source_type
+      // here uses (see GET /api/my-approvals server-side).
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${id}/reliever-decision`)
+          : item.source_type === 'leave_direct'
+          ? apiUrl(`/api/leave-applications/${id}/decision`)
+          : item.source_type === 'exit_clearance'
+          ? apiUrl(`/api/exit-clearance-items/${id}/decision`)
+          : item.source_type === 'hr_action'
+          ? apiUrl(`/api/hr-ops/actions/${id}/decision`)
           : apiUrl(`/api/my-approvals/${id}/act`);
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action, remarks: remarksDraft[id] || undefined })
+        body: JSON.stringify({
+          action,
+          remarks: remarksDraft[id] || undefined,
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[id] || undefined : undefined,
+          claim_version: item.source_type === 'user_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
+      setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
       setItems((prev) => prev.filter((i) => !(i.id === id && i.source_type === item.source_type)));
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
     } finally {
       setActingId(null);
+    }
+  };
+
+  // See ApproveApplications.tsx's identical handler — the vehicle+driver
+  // form's own submit doubles as this Layer's Approve for a
+  // vehicle_maintainer_bypass item, via PUT .../approve-and-assign instead
+  // of the generic POST /api/my-approvals/:id/act.
+  const handleAssignAndApprove = async (item: MyApprovalItem) => {
+    const form = assignForm[item.id];
+    if (!form?.vehicle_id || !form?.driver_user_id) {
+      setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
+      return;
+    }
+    setActingId(item.id);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${item.source_id}/approve-and-assign`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          vehicle_id: Number(form.vehicle_id),
+          driver_user_id: Number(form.driver_user_id),
+          remarks: remarksDraft[item.id] || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this ride.');
+      setMessage({ type: 'success', text: 'Assigned — ride confirmed.' });
+      setRemarksDraft((prev) => ({ ...prev, [item.id]: '' }));
+      setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: '', driver_user_id: '' } }));
+      setItems((prev) => prev.filter((i) => !(i.id === item.id && i.source_type === item.source_type)));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // Same Approved Amount validation the full Approve Application page uses —
+  // relevant for a 'user_claim' item on ANY Layer; every other item type just
+  // approves as-is.
+  const handleApprove = async (item: MyApprovalItem) => {
+    if (item.source_type === 'user_claim') {
+      const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
+      const draft = approvedAmountDraft[item.id];
+      const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
+      const approvedAmount = Number(draft != null && draft !== '' ? draft : fallback);
+      if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) {
+        setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
+        return;
+      }
+      // A Layer may cut the amount but never raise it above what the previous Layer approved.
+      const cap = fallback != null ? Number(fallback) : null;
+      if (cap != null && approvedAmount > cap) {
+        setMessage({
+          type: 'error',
+          text:
+            item.source_approved_amount != null
+              ? `Approved Amount can't be more than ৳${cap.toLocaleString('en-BD')} — the amount the previous Layer approved.`
+              : "Approved Amount can't be more than the Claim Amount."
+        });
+        return;
+      }
+      if (
+        item.conveyance_disburser_bypass &&
+        !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${item.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+          title: 'Disburse conveyance',
+          confirmLabel: 'Disburse'
+        }))
+      )
+        return;
+      handleAct(item, 'approved', approvedAmount);
+    } else {
+      handleAct(item, 'approved');
     }
   };
 
@@ -111,6 +344,34 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   // every page load flashed a "Pending Approvals" card that vanished a moment
   // later. Waiting costs nothing: there's no card to hold a place for.
   if (loading || items.length === 0) return null;
+
+  // Group into categories (by source_type) — a category card per workflow
+  // type, showing just the count, instead of every individual request as its
+  // own card.
+  const categoryOrder: MyApprovalItem['source_type'][] = [
+    'user_claim',
+    'leave_application',
+    'leave_reliever',
+    'leave_direct',
+    'attendance',
+    'attendance_correction',
+    'asset_requisition',
+    'vehicle_requisition',
+    'mobile_limit_request',
+    'advance_request',
+    'exit_clearance',
+    'hr_action',
+    'claim'
+  ];
+  const byCategory = new Map<MyApprovalItem['source_type'], MyApprovalItem[]>();
+  for (const item of items) {
+    const list = byCategory.get(item.source_type) || [];
+    list.push(item);
+    byCategory.set(item.source_type, list);
+  }
+  const categories = categoryOrder.filter((c) => byCategory.has(c));
+
+  const openItems = openCategory ? byCategory.get(openCategory) || [] : [];
 
   return (
     <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${className}`}>
@@ -137,48 +398,402 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
         </div>
       )}
 
-      <div className="divide-y divide-slate-100">
-        {items.map((item) => (
-          <div key={`${item.source_type}-${item.id}`} className="p-5 sm:px-6 flex flex-col gap-2.5">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">{sourceTitle(item.source_type)}</div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {item.source_label}
-                {item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
+      {!openCategory ? (
+        <div className="p-5 sm:px-6 flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {categories.map((cat) => {
+            const list = byCategory.get(cat) || [];
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setOpenCategory(cat)}
+                className="flex flex-col items-start gap-1.5 text-left p-3.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 transition-colors"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-blue-600 text-white text-xs font-bold">
+                    {list.length}
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-400" />
+                </div>
+                <span className="text-xs font-semibold text-slate-800 leading-tight">
+                  {cat === 'vehicle_requisition' && list.every((i) => i.vehicle_maintainer_bypass)
+                    ? 'Ride Request — Assign Vehicle'
+                    : cat === 'asset_requisition' && list.every((i) => i.asset_fulfiller_bypass)
+                      ? 'Asset Requisition — Fulfill'
+                      : cat === 'user_claim' && list.every((i) => i.conveyance_disburser_bypass)
+                        ? 'Conveyance — Disburse'
+                        : sourceTitle(cat)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div>
+          <button
+            type="button"
+            onClick={() => setOpenCategory(null)}
+            className="w-full flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-blue-600 px-5 sm:px-6 pt-4 pb-2 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> All categories &middot; {sourceTitle(openCategory)}
+          </button>
+          <div className="divide-y divide-slate-100">
+            {openItems.map((item) => {
+              const editable = item.source_type === 'user_claim';
+              const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
+              const runningAmount = item.source_approved_amount != null ? Number(item.source_approved_amount) : claimAmount;
+              const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
+              const draft = approvedAmountDraft[item.id];
+              const approvedAmount =
+                editable && runningAmount != null
+                  ? (() => {
+                      const parsed = Number(draft != null && draft !== '' ? draft : runningAmount);
+                      return Number.isFinite(parsed) ? parsed : null;
+                    })()
+                  : null;
+              const remainingAmount = claimAmount != null && approvedAmount != null ? claimAmount - approvedAmount : null;
+              const isAssetRequisition = item.source_type === 'asset_requisition' && !!item.asset_requisition_details;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-5 sm:px-6 flex flex-col gap-2.5 ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
+                  onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
+                >
+                  <div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {item.source_label}
+                      {!editable && item.source_amount != null && (
+                        <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      From {item.requested_by_name || `User #${item.requested_by}`}
+                      {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
+                      {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
+                    </div>
+
+                    {item.source_type === 'user_claim' && <ClaimBillLines items={item.claim_items} compact />}
+                    {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {item.claim_refs.map((r) => (
+                          <button
+                            key={r.claim_id}
+                            type="button"
+                            onClick={() => setViewingRef({ ref: r, item })}
+                            title="View check-in/out location"
+                            className="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg transition-colors text-left"
+                          >
+                            <span className="flex items-center gap-1 text-slate-600 min-w-0">
+                              <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
+                              <span className="truncate">
+                                    Check In/Out &middot; {r.purpose}
+                                    <span className="block text-[10px] text-slate-400 truncate">
+                                      {formatDate(r.check_in_at)} &middot; {new Date(r.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {r.check_out_at ? ` \u2192 ${new Date(r.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' \u2192 not checked out'}
+                                      {r.distance_km != null ? ` \u00b7 ${r.distance_km} km` : ''}
+                                    </span>
+                                  </span>
+                            </span>
+                            <span className="shrink-0 font-semibold text-slate-800">
+                              ৳{Number(r.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {editable && (
+                    <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-400 mb-0.5">Claim Amount</div>
+                        <div className="font-semibold text-slate-800">{claimAmount != null ? fmt(claimAmount) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-400 mb-0.5">Approved Amount</div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          max={runningAmount ?? undefined}
+                          value={draft ?? (runningAmount != null ? String(runningAmount) : '')}
+                          onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          className="w-full text-xs px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-400 mb-0.5">Remaining Amount</div>
+                        <div className="font-semibold text-slate-800">{remainingAmount != null ? fmt(remainingAmount) : '—'}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {item.asset_fulfiller_bypass ? (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                        <Package className="w-3 h-3 text-emerald-600" /> You hand over this requisition — open the form, type what you're giving, and the employee confirms it.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setFulfilling(item)}
+                        className="w-full text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-1"
+                      >
+                        <Package className="w-3.5 h-3.5" /> Fulfill & Hand Over
+                      </button>
+                    </div>
+                  ) : item.vehicle_maintainer_bypass ? (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                        <Car className="w-3 h-3 text-blue-500" /> Pick a vehicle to approve and confirm this ride in one step.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SearchSelect
+                          value={assignForm[item.id]?.vehicle_id || ''}
+                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: e.target.value, driver_user_id: prev[item.id]?.driver_user_id || '' } }))}
+                          className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Pick a vehicle…</option>
+                          {availableVehicles.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.model} ({v.vehicle_no})
+                            </option>
+                          ))}
+                        </SearchSelect>
+                        <SearchSelect
+                          value={assignForm[item.id]?.driver_user_id || ''}
+                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: prev[item.id]?.vehicle_id || '', driver_user_id: e.target.value } }))}
+                          className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Pick a driver…</option>
+                          {driverCandidates.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </SearchSelect>
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleAssignAndApprove(item)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Assign & Confirm
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      {item.can_edit_asset_items && item.asset_requisition_details && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingItems(item)}
+                          className="w-full mb-2 text-xs font-semibold px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          <Package className="w-3.5 h-3.5" /> Edit items (qty / add / delete)
+                        </button>
+                      )}
+                      {item.conveyance_disburser_bypass && (
+                        <>
+                          <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                            <Wallet className="w-3 h-3 text-emerald-600" /> You pay this claim out — Disburse approves it, puts it on its own Bill and records the voucher.
+                          </p>
+                          <input
+                            type="text"
+                            placeholder="Voucher no (blank = automatic)"
+                            value={voucherDraft[item.id] || ''}
+                            onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            className="w-full mb-2 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </>
+                      )}
+                      {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mb-2" />}
+                      <input
+                        type="text"
+                        aria-label="Remarks"
+                        placeholder={item.source_type === 'user_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
+                        value={remarksDraft[item.id] || ''}
+                        onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                        className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                      {item.source_type === 'user_claim' && (
+                        <ReclaimTick item={item} checked={!!reclaimDraft[item.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [item.id]: v }))} />
+                      )}
+                      <div className="flex gap-2 mt-2.5">
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleAct(item, 'rejected')}
+                          className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Reject
+                        </button>
+                        {item.source_type === 'user_claim' && (
+                          <ReturnButton item={item} disabled={actingId === item.id} onClick={() => handleAct(item, 'returned')} />
+                        )}
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleApprove(item)}
+                          className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          {actingId === item.id ? (
+                            <Spinner size={12} />
+                          ) : item.conveyance_disburser_bypass ? (
+                            <Wallet className="w-3.5 h-3.5" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}{' '}
+                          {item.conveyance_disburser_bypass ? 'Disburse' : 'Approve'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {editingItems && (
+        <AssetRequisitionEditItemsModal
+          token={token}
+          requisitionId={Number(editingItems.source_id)}
+          requesterName={editingItems.requested_by_name}
+          items={editingItems.asset_requisition_details?.items || []}
+          onClose={() => setEditingItems(null)}
+          onSaved={() => {
+            setEditingItems(null);
+            setViewingAssetRequisition(null);
+            load();
+          }}
+        />
+      )}
+
+      {fulfilling && (
+        <AssetFulfillModal
+          token={token}
+          requisitionId={Number(fulfilling.source_id)}
+          mode="approve"
+          requesterName={fulfilling.requested_by_name}
+          items={fulfilling.asset_requisition_details?.items || []}
+          onClose={() => setFulfilling(null)}
+          onDone={() => {
+            const f = fulfilling;
+            setFulfilling(null);
+            setItems((prev) => prev.filter((i) => !(i.id === f.id && i.source_type === f.source_type)));
+          }}
+        />
+      )}
+
+      {viewingRef && (
+        <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
+      )}
+
+      {viewingAssetRequisition && viewingAssetRequisition.asset_requisition_details && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setViewingAssetRequisition(null); }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                  <Package className="w-4.5 h-4.5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Asset Requisition Details</h2>
+                  <p className="text-xs text-slate-500">
+                    From {viewingAssetRequisition.requested_by_name || `User #${viewingAssetRequisition.requested_by}`}
+                  </p>
+                </div>
               </div>
-              <div className="text-[11px] text-slate-400 mt-1">
-                From {item.requested_by_name || `User #${item.requested_by}`}
-                {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
-              </div>
+              {viewingAssetRequisition.can_edit_asset_items && (
+                <button
+                  type="button"
+                  onClick={() => setEditingItems(viewingAssetRequisition)}
+                  className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 shrink-0"
+                >
+                  Edit items
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setViewingAssetRequisition(null)}
+                aria-label="Close"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <input
-              type="text"
-              placeholder="Remarks (optional)"
-              value={remarksDraft[item.id] || ''}
-              onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
-              className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={actingId === item.id}
-                onClick={() => handleAct(item, 'rejected')}
-                className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-              >
-                <XCircle className="w-3.5 h-3.5" /> Reject
-              </button>
-              <button
-                type="button"
-                disabled={actingId === item.id}
-                onClick={() => handleAct(item, 'approved')}
-                className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-              >
-                {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
-              </button>
+
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Category</div>
+                  <div className="text-slate-800">{viewingAssetRequisition.asset_requisition_details.asset_category}</div>
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Urgency</div>
+                  <div
+                    className={`inline-flex px-2 py-0.5 rounded-full font-semibold capitalize ${
+                      viewingAssetRequisition.asset_requisition_details.urgency === 'high'
+                        ? 'bg-rose-50 text-rose-700'
+                        : viewingAssetRequisition.asset_requisition_details.urgency === 'medium'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {viewingAssetRequisition.asset_requisition_details.urgency}
+                  </div>
+                </div>
+                {viewingAssetRequisition.asset_requisition_details.target_date && (
+                  <div>
+                    <div className="font-semibold text-slate-400 mb-0.5">Needed By</div>
+                    <div className="text-slate-800">{viewingAssetRequisition.asset_requisition_details.target_date}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Layer</div>
+                  <div className="text-slate-800">
+                    {viewingAssetRequisition.current_step} of {viewingAssetRequisition.total_steps}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1">Reason</div>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">{viewingAssetRequisition.asset_requisition_details.reason}</p>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1.5">
+                  Requested Items ({viewingAssetRequisition.asset_requisition_details.items.length})
+                </div>
+                <div className="space-y-1.5">
+                  {viewingAssetRequisition.asset_requisition_details.items.map((it, idx) => (
+                    <div key={idx} className="flex items-baseline justify-between gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      <div>
+                        <span className="font-medium text-slate-800">{it.item_name}</span>
+                        <span className="text-slate-500"> — {it.purpose}</span>
+                      </div>
+                      <span className="shrink-0 font-semibold text-slate-700">{Number(it.quantity)} {it.unit}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {viewingAssetRequisition.asset_requisition_details.has_attachment && (
+                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{viewingAssetRequisition.asset_requisition_details.attachment_filename}</span>
+                </div>
+              )}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

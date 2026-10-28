@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing } from 'lucide-react';
+import { FingerprintSettings } from './FingerprintSettings';
+import { NotificationSettings } from './NotificationSettings';
+import { Capacitor } from '@capacitor/core';
+import { canUseFingerprint } from '../lib/fingerprint';
+import { FeedbackPopup, canGiveFeedback } from './feedback/FeedbackPopup';
 import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
+import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
-import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme } from '../lib/backgroundTheme';
+import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent } from '../lib/backgroundTheme';
 
 interface ProfilePageProps {
   user: User;
@@ -48,11 +54,20 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showChangeUsername, setShowChangeUsername] = useState(false);
   const [showAssetManagement, setShowAssetManagement] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [showFingerprint, setShowFingerprint] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const appVersion = `web ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : ''}`.trim();
   const [username, setUsername] = useState(user.username || '');
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
     applyBackgroundTheme(id, true);
     setBgTheme(id);
+  };
+  const [monoAccent, setMonoAccent] = useState<MonoAccentId>(getSavedMonoAccent());
+  const handlePickMonoAccent = (id: MonoAccentId) => {
+    applyMonoAccent(id, true);
+    setMonoAccent(id);
   };
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
@@ -88,29 +103,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   }
 
   if (showAssetManagement) {
-    return (
-      <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
-        <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
-          <div className="flex items-center gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setShowAssetManagement(false)}
-              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
-              style={{ color: 'var(--g-text-muted)' }}
-              aria-label="Back"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <h1 className="text-base font-bold">Asset Management</h1>
-          </div>
-          <AssetManagement />
-        </div>
-      </div>
-    );
+    // AssetManagement.tsx now carries its own Leave-Application-style
+    // header/back link (see AssetManagement.tsx's return) — same component
+    // App.tsx's Asset Management sidebar entry renders, so both entry
+    // points land on an identical page.
+    return <AssetManagement onBack={() => setShowAssetManagement(false)} />;
   }
 
   return (
     <div className="w-full">
+      {showFeedback && <FeedbackPopup token={token} onClose={() => setShowFeedback(false)} />}
+      {showNotifications && <NotificationSettings token={token} onClose={() => setShowNotifications(false)} />}
+      {showFingerprint && <FingerprintSettings token={token} user={user} onClose={() => setShowFingerprint(false)} />}
 
       {/* ---------------- Mobile layout ---------------- */}
       <div className="md:hidden">
@@ -189,7 +193,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               />
               <ProfileRow
                 icon={<Package className="w-4 h-4" />}
-                label="Asset Management"
+                label="My Asset"
                 onClick={() => setShowAssetManagement(true)}
               />
               <ProfileRow icon={<Building2 className="w-4 h-4" />} label="Organization" value="Credence Housing Limited" last />
@@ -201,7 +205,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               Appearance
             </p>
             <section className="gemini-card overflow-hidden">
-              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} />
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} />
             </section>
           </div>
 
@@ -211,10 +215,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             </p>
             <section className="gemini-card overflow-hidden">
               <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} />
+              {canUseFingerprint(user) && (
+                <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />
+              )}
+              {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} />}
               {!!username && (
                 <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} />
               )}
-              <ProfileRow icon={<Info className="w-4 h-4" />} label="Version Info" muted />
+              {canGiveFeedback(user) && (
+                <ProfileRow icon={<MessageSquareHeart className="w-4 h-4" />} label="Give feedback" onClick={() => setShowFeedback(true)} />
+              )}
+              <ProfileRow icon={<Info className="w-4 h-4" />} label="Version Info" value={appVersion} muted />
               <ProfileRow
                 icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
                 label="Logout"
@@ -232,6 +243,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           the middle of the content area beside the sidebar, which read as the
           phone layout blown up rather than a desktop page. */}
       <div className="hidden md:block max-w-5xl mx-auto px-6 py-8">
+        <ModulePath path={['Profile']} />
         <button
           type="button"
           onClick={onBack}
@@ -314,15 +326,22 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               Appearance
             </p>
             <div className="border-b" style={{ borderColor: 'var(--g-border)' }}>
-              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} padded />
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} padded />
             </div>
             <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
               Settings
             </p>
-            <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
+            <ProfileRow icon={<Package className="w-4 h-4" />} label="My Asset" onClick={() => setShowAssetManagement(true)} padded />
             <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
+            {canUseFingerprint(user) && (
+              <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} padded />
+            )}
+            {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} padded />}
             {!!username && (
               <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
+            )}
+            {canGiveFeedback(user) && (
+              <ProfileRow icon={<MessageSquareHeart className="w-4 h-4" />} label="Give feedback" onClick={() => setShowFeedback(true)} padded />
             )}
             <ProfileRow
               icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
@@ -394,8 +413,11 @@ const ProfileRow: React.FC<{
 const BackgroundThemePicker: React.FC<{
   selected: BackgroundThemeId;
   onPick: (id: BackgroundThemeId) => void;
+  // Minimal Mono's colour touch, shown under the swatches while it's picked.
+  accent: MonoAccentId;
+  onPickAccent: (id: MonoAccentId) => void;
   padded?: boolean;
-}> = ({ selected, onPick, padded }) => (
+}> = ({ selected, onPick, accent, onPickAccent, padded }) => (
   <div className={`${padded ? 'px-5' : 'px-4'} py-3.5`}>
     <div className="flex items-center gap-3">
       {BACKGROUND_THEMES.map((theme) => {
@@ -425,5 +447,31 @@ const BackgroundThemePicker: React.FC<{
         );
       })}
     </div>
+    {selected === 'mono' && (
+      <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--g-border)' }}>
+        <p className="text-[11px] mb-2" style={{ color: 'var(--g-text-muted)' }}>
+          Colour touch — a light colour on the pale parts; text and main buttons stay black.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          {MONO_ACCENTS.map((a) => {
+            const on = a.id === accent;
+            return (
+              <button key={a.id} type="button" onClick={() => onPickAccent(a.id)} aria-label={`${a.label} colour touch`} className="flex flex-col items-center gap-1">
+                <span
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{
+                    background: a.id === 'none' ? 'repeating-linear-gradient(45deg, #f4f4f5 0 4px, #e4e4e7 4px 8px)' : a.swatch,
+                    boxShadow: on ? `0 0 0 2px var(--g-surface), 0 0 0 3.5px #18181b` : 'inset 0 0 0 1px rgba(0,0,0,0.06)'
+                  }}
+                >
+                  {on && <BadgeCheck className="w-3.5 h-3.5 text-zinc-900" />}
+                </span>
+                <span className="text-[10px]" style={{ color: on ? 'var(--g-text)' : 'var(--g-text-muted)' }}>{a.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    )}
   </div>
 );

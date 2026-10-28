@@ -1,0 +1,923 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Admin Panel -> HR Data Import (DataImportRoutes.ts): bring Employee Details,
+// Leave history, Movement / Conveyance Bill Claim history, Check In / Check
+// Out and office Attendance in from an Excel or CSV sheet.
+//
+// 1. Pick what to import and download its template (headers on the Data
+//    sheet; what each column takes, with an example, on Instructions).
+// 2. Upload the filled sheet — columns are matched by their header, in any
+//    order; unknown columns are ignored.
+// 3. Check: the server says, row by row, what would happen (New / Update /
+//    Skip / Error, with the reason) without saving anything.
+// 4. Import: the same rows are saved; the result can be downloaded as Excel.
+// Which kinds show depends on the modules this account holds.
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/readWorkbook';
+import {
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
+  Download,
+  FileSpreadsheet,
+  Fingerprint,
+  Navigation,
+  Receipt,
+  RotateCcw,
+  Upload,
+  UserPlus,
+  Wallet,
+  X,
+} from 'lucide-react';
+import { Spinner } from './Spinner';
+import { ProgressOverlay, useLongTask } from './ProgressOverlay';
+import { useHrApi } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
+
+type FieldType = 'text' | 'date' | 'time' | 'number' | 'yesno';
+interface Field {
+  key: string;
+  label: string;
+  type: FieldType;
+  required?: boolean;
+  aliases?: string[];
+  example?: string | number;
+  note?: string;
+}
+interface Kind {
+  key: string;
+  title: string;
+  description: string;
+  module: string;
+  fields: Field[];
+}
+interface RowResult {
+  row: number;
+  status: 'create' | 'update' | 'skip' | 'error';
+  message: string;
+  employee?: string;
+}
+interface RunResponse {
+  dry_run: boolean;
+  summary: { total: number; create: number; update: number; skip: number; error: number };
+  results: RowResult[];
+}
+
+const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  employees: UserPlus,
+  leave: CalendarClock,
+  movement_claims: Navigation,
+  bill_claims: Receipt,
+  remote_attendance: Clock,
+  office_attendance: Fingerprint,
+  salary: Wallet,
+};
+const STATUS: Record<RowResult['status'], { label: string; tone: string }> = {
+  create: { label: 'New', tone: 'bg-emerald-50 text-emerald-700' },
+  update: { label: 'Update', tone: 'bg-blue-50 text-blue-700' },
+  skip: { label: 'Skip', tone: 'bg-slate-100 text-slate-600' },
+  error: { label: 'Error', tone: 'bg-rose-50 text-rose-700' },
+};
+
+const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const pad = (n: number) => String(n).padStart(2, '0');
+
+// A cell as text the server can read. Excel keeps dates/times as serial
+// numbers; those are turned into YYYY-MM-DD / HH:MM here, timezone-free.
+function cellText(v: any, type: FieldType): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number' && (type === 'date' || type === 'time')) {
+    const d = XLSX.SSF.parse_date_code(v);
+    if (d) {
+      if (type === 'time') return `${pad(d.H)}:${pad(d.M)}`;
+      return `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+    }
+  }
+  if (v instanceof Date) return type === 'time' ? `${pad(v.getHours())}:${pad(v.getMinutes())}` : `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  return String(v).trim();
+}
+
+// Leave History can also come as HR's "Leave Summary Report" sheet: one block
+// per employee ("Employee Id" in column A, the value in E), then a "Leave Year
+// | Leave Type | Is Paid Leave | Leave From | Leave To | Leave Availed |
+// Remarks" table where Leave Type is written only on its first row, and
+// "Total Leave Availed" lines in between. This turns such a sheet into the
+// plain rows the Leave History import reads (every leave Approved). Returns
+// null when the sheet isn't laid out that way.
+function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
+  const cell = (line: any[], c: number) => String(line?.[c] ?? '').trim();
+  const isBlockSheet =
+    grid.some((l) => norm(cell(l, 0)) === 'employeeid') && grid.some((l) => norm(cell(l, 6)) === 'leavefrom' && norm(cell(l, 2)) === 'leavetype');
+  if (!isBlockSheet) return null;
+  const out: Record<string, any>[] = [];
+  let employeeId = '';
+  let leaveType = '';
+  for (let i = 0; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const a = norm(cell(line, 0));
+    if (a === 'employeeid') {
+      employeeId = cell(line, 4);
+      leaveType = '';
+      continue;
+    }
+    if (a === 'leaveyear' || a.startsWith('total')) continue;
+    // A leave line has dates under Leave From / Leave To. (Merged cells come
+    // back with the value repeated in every cell, so the employee detail
+    // lines also have text there — they're not dates.)
+    const from = line[6];
+    const to = line[8];
+    const isDate = (v: any) => typeof v === 'number' || v instanceof Date || /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(String(v ?? '').trim());
+    if (!isDate(from) || !isDate(to)) continue;
+    if (cell(line, 2)) leaveType = cell(line, 2);
+    out.push({
+      __row: i + 1,
+      employee_id: employeeId,
+      leave_type: leaveType,
+      from_date: cellText(from, 'date'),
+      to_date: cellText(to, 'date'),
+      days: cell(line, 10),
+      status: 'Approved',
+      purpose: cell(line, 12)
+    });
+  }
+  return out;
+}
+
+// Movement Claim History can also come as the "Multiple Check In/Out Details
+// Report": a few title lines, then "SL | Employee Code | Employee Name | Type |
+// Check In/Out Time | Visited Company | Address | Remarks", one line per Check
+// In or Check Out ("01-10-2026 08:44 AM"). Each person's lines are put in time
+// order and every Check In is paired with that person's next line when it is a
+// Check Out; a Check In with no Check Out after it, or a Check Out with no
+// Check In before it, stays on its own (the import says so for that row).
+// Returns null when the sheet isn't laid out that way.
+function checkInOutSheetRows(grid: any[][]): Record<string, any>[] | null {
+  const cell = (line: any[], c: number) => String(line?.[c] ?? '').trim();
+  const headerAt = grid.findIndex(
+    (l) => (l || []).some((v: any) => norm(String(v ?? '')) === 'checkinouttime') && (l || []).some((v: any) => norm(String(v ?? '')) === 'type')
+  );
+  if (headerAt < 0) return null;
+  const header = (grid[headerAt] || []).map((h: any) => norm(String(h ?? '')));
+  const col = (...names: string[]) => header.findIndex((h: string) => names.includes(h));
+  const cCode = col('employeecode', 'employeeid', 'empid');
+  const cType = col('type');
+  const cTime = col('checkinouttime');
+  const cCompany = col('visitedcompany');
+  const cAddress = col('address');
+  const cRemarks = col('remarks');
+  if (cCode < 0 || cType < 0 || cTime < 0) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  // "01-10-2026 08:44 AM" (day first), or an Excel date number.
+  const when = (v: any): { date: string; time: string; key: string } | null => {
+    if (typeof v === 'number') {
+      const d = XLSX.SSF.parse_date_code(v);
+      if (!d) return null;
+      const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+      const time = `${pad(d.H)}:${pad(d.M)}`;
+      return { date, time, key: `${date} ${time}` };
+    }
+    const m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/.exec(String(v ?? '').trim());
+    if (!m) return null;
+    let h = Number(m[4]);
+    if (m[6]) h = (h % 12) + (/p/i.test(m[6]) ? 12 : 0);
+    const date = `${m[3]}-${pad(Number(m[2]))}-${pad(Number(m[1]))}`;
+    const time = `${pad(h)}:${m[5]}`;
+    return { date, time, key: `${date} ${time}` };
+  };
+  type Ev = { row: number; code: string; isIn: boolean; at: { date: string; time: string; key: string } | null; raw: string; company: string; address: string; remarks: string };
+  const byPerson = new Map<string, Ev[]>();
+  const out: Record<string, any>[] = [];
+  for (let i = headerAt + 1; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const code = cell(line, cCode);
+    const type = norm(cell(line, cType));
+    if (!code || (type !== 'checkin' && type !== 'checkout')) continue;
+    const ev: Ev = {
+      row: i + 1,
+      code,
+      isIn: type === 'checkin',
+      at: when(line[cTime]),
+      raw: cell(line, cTime),
+      company: cCompany >= 0 ? cell(line, cCompany) : '',
+      address: cAddress >= 0 ? cell(line, cAddress) : '',
+      remarks: cRemarks >= 0 ? cell(line, cRemarks) : ''
+    };
+    if (!ev.at) {
+      // Left for the import to report: "Date ... isn't a date".
+      out.push({ __row: ev.row, employee_id: code, date: ev.raw, check_in: ev.isIn ? ev.raw : '', purpose: ev.company || ev.remarks });
+      continue;
+    }
+    if (!byPerson.has(code)) byPerson.set(code, []);
+    byPerson.get(code)!.push(ev);
+  }
+  for (const evs of byPerson.values()) {
+    evs.sort((a, b) => (a.at!.key < b.at!.key ? -1 : a.at!.key > b.at!.key ? 1 : a.row - b.row));
+    for (let k = 0; k < evs.length; k++) {
+      const e = evs[k];
+      if (e.isIn) {
+        const next = evs[k + 1];
+        const outEv = next && !next.isIn ? next : null;
+        out.push({
+          __row: e.row,
+          employee_id: e.code,
+          date: e.at!.date,
+          check_in: e.at!.time,
+          check_out: outEv ? outEv.at!.time : '',
+          check_out_date: outEv && outEv.at!.date !== e.at!.date ? outEv.at!.date : '',
+          purpose: e.company || e.remarks || 'Movement',
+          remarks: e.remarks,
+          check_in_place: e.address,
+          check_out_remarks: outEv ? outEv.remarks : '',
+          check_out_place: outEv ? outEv.address : ''
+        });
+        if (outEv) k++;
+      } else {
+        out.push({ __row: e.row, employee_id: e.code, date: e.at!.date, check_in: '', check_out: e.at!.time, purpose: e.company || e.remarks || 'Movement' });
+      }
+    }
+  }
+  return out.sort((a, b) => a.__row - b.__row);
+}
+
+// Conveyance Bill Claim History can also come as the "Claim Report": title
+// lines, then "Serial | Employee | Designation | Department | Claim No. |
+// Created Date | Categories | Description | Claim Date | Status | ... | Claim
+// Amount | Approved Amount | Sanctioned / Disbursed Amount | ...", one line per
+// claim. The employee ("Md. Rasel [241210176]") is written only on their
+// first claim, so it carries down to the lines under it. Returns null when the
+// sheet isn't laid out that way.
+function claimReportSheetRows(grid: any[][]): Record<string, any>[] | null {
+  const headerAt = grid.findIndex(
+    (l) => (l || []).some((v: any) => norm(String(v ?? '')) === 'claimno') && (l || []).some((v: any) => norm(String(v ?? '')) === 'categories')
+  );
+  if (headerAt < 0) return null;
+  const header = (grid[headerAt] || []).map((h: any) => norm(String(h ?? '')));
+  const col = (...names: string[]) => header.findIndex((h: string) => names.includes(h));
+  const c = {
+    employee: col('employee', 'employeename'),
+    claimNo: col('claimno'),
+    created: col('createddate'),
+    category: col('categories'),
+    description: col('description'),
+    claimDate: col('claimdate'),
+    status: col('status'),
+    amount: col('claimamount'),
+    approved: col('approvedamount'),
+    disbursed: col('sanctioneddisbursedamount', 'disbursedamount')
+  };
+  if (c.employee < 0 || c.claimNo < 0 || c.claimDate < 0 || c.amount < 0) return null;
+  const at = (line: any[], i: number, type: FieldType = 'text') => (i < 0 ? '' : cellText(line?.[i], type));
+  const out: Record<string, any>[] = [];
+  let employee = '';
+  for (let i = headerAt + 1; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const who = at(line, c.employee);
+    if (who) employee = /\[([^\]]+)\]\s*$/.exec(who)?.[1].trim() || who;
+    const claimNo = at(line, c.claimNo);
+    if (!claimNo || norm(String(line[0] ?? '')).startsWith('total')) continue;
+    out.push({
+      __row: i + 1,
+      employee_id: employee,
+      claim_no: claimNo,
+      created_date: at(line, c.created, 'date'),
+      category: at(line, c.category),
+      description: at(line, c.description),
+      claim_date: at(line, c.claimDate, 'date'),
+      status: at(line, c.status),
+      amount: at(line, c.amount),
+      approved_amount: at(line, c.approved),
+      disbursed_amount: at(line, c.disbursed)
+    });
+  }
+  return out;
+}
+
+// First load: the same layout as the page — title card and the import tiles.
+const DataImportSkeleton: React.FC = () => (
+  <div className="space-y-4 animate-pulse" aria-busy="true" aria-label="Loading HR Data Import">
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
+      <div className="flex items-center gap-2">
+        <div className="w-5 h-5 rounded bg-slate-200" />
+        <div className="h-5 w-40 rounded bg-slate-200" />
+      </div>
+      <div className="h-3 w-full max-w-xl rounded bg-slate-100 mt-2" />
+      <div className="h-3 w-2/3 max-w-md rounded bg-slate-100 mt-1.5" />
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 p-3.5 flex gap-3">
+            <div className="w-9 h-9 rounded-lg bg-slate-100 shrink-0" />
+            <div className="flex-1 space-y-1.5 pt-0.5">
+              <div className={`h-3.5 rounded bg-slate-200 ${i % 2 ? 'w-28' : 'w-36'}`} />
+              <div className="h-2.5 w-full rounded bg-slate-100" />
+              <div className="h-2.5 w-3/4 rounded bg-slate-100" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+// onlyKind: just that one import, without the picker — e.g. Payroll -> Salary
+// Setup -> Bulk Upload (kind "salary").
+export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ token, onlyKind }) => {
+  const api = useHrApi(token);
+  const [kinds, setKinds] = useState<Kind[] | null>(null);
+  const [maxRows, setMaxRows] = useState(5000);
+  const [kindKey, setKindKey] = useState<string>('');
+  const [fileName, setFileName] = useState('');
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [matched, setMatched] = useState<{ header: string; field: Field }[]>([]);
+  const [ignored, setIgnored] = useState<string[]>([]);
+  const [check, setCheck] = useState<RunResponse | null>(null);
+  const [done, setDone] = useState<RunResponse | null>(null);
+  const [busy, setBusy] = useState<'' | 'read' | 'check' | 'import'>('');
+  // The "% done" loader while a sheet is read, checked or imported.
+  const longTask = useLongTask();
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState<'all' | RowResult['status']>('all');
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Several sheets picked together: checked / imported one after another.
+  type BatchItem = { file: File; state: 'wait' | 'run' | 'ok' | 'fail'; message: string; total: number; create: number; update: number; skip: number; error: number };
+  const [batch, setBatch] = useState<BatchItem[]>([]);
+  const [batchRun, setBatchRun] = useState<'' | 'check' | 'import'>('');
+  const [batchStop, setBatchStop] = useState(false);
+
+  useEffect(() => {
+    api
+      .get('/api/data-import/kinds')
+      .then((d) => {
+        setKinds(onlyKind ? d.kinds.filter((k: Kind) => k.key === onlyKind) : d.kinds);
+        setMaxRows(d.max_rows || 5000);
+        if (onlyKind) setKindKey(onlyKind);
+      })
+      .catch((e) => {
+        setKinds([]);
+        setError(e.message);
+      });
+  }, [api]);
+
+  const kind = kinds?.find((k) => k.key === kindKey) || null;
+  const missingRequired = kind ? kind.fields.filter((f) => f.required && !matched.some((m) => m.field.key === f.key)) : [];
+
+  const reset = () => {
+    setFileName('');
+    setRows([]);
+    setMatched([]);
+    setIgnored([]);
+    setCheck(null);
+    setDone(null);
+    setError('');
+    setFilter('all');
+    setBatch([]);
+    setBatchRun('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const pickKind = (key: string) => {
+    setKindKey(key);
+    reset();
+  };
+
+  const downloadTemplate = () => {
+    if (!kind) return;
+    const wb = XLSX.utils.book_new();
+    const data = XLSX.utils.aoa_to_sheet([kind.fields.map((f) => f.label)]);
+    data['!cols'] = kind.fields.map((f) => ({ wch: Math.max(12, f.label.length + 4) }));
+    XLSX.utils.book_append_sheet(wb, data, 'Data');
+    const info = XLSX.utils.aoa_to_sheet([
+      ['Column', 'Required', 'Format', 'Example', 'Note'],
+      ...kind.fields.map((f) => [
+        f.label,
+        f.required ? 'Yes' : '',
+        f.type === 'date' ? 'Date (YYYY-MM-DD or DD/MM/YYYY)' : f.type === 'time' ? 'Time (HH:MM, e.g. 09:05 or 6:10 PM)' : f.type === 'number' ? 'Number' : f.type === 'yesno' ? 'Yes / No' : 'Text',
+        f.example ?? '',
+        f.note || (f.key === 'employee_id' ? 'Must match the Employee ID saved in Admin Panel -> Employees' : ''),
+      ]),
+      [],
+      ['Fill the Data sheet, one row per record. Columns can be in any order; extra columns are ignored.'],
+      [`At most ${maxRows} rows per upload. Rows already in the system are skipped, so the same sheet can be uploaded again safely.`],
+    ]);
+    info['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 36 }, { wch: 22 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, info, 'Instructions');
+    XLSX.writeFile(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+  };
+
+  // Reads one sheet into import rows + the column mapping (throws a readable error).
+  const parseFile = async (file: File, kind: Kind): Promise<{ rows: Record<string, string>[]; matched: { header: string; field: Field }[]; ignored: string[] }> => {
+    {
+      // A CSV is read as written (raw), so a phone number keeps its leading 0.
+      const wb = readWorkbook(await file.arrayBuffer(), { raw: /\.csv$/i.test(file.name) });
+      // The first sheet that has a header row (skips an Instructions sheet put first).
+      const sheetName = wb.SheetNames.find((n) => n.toLowerCase() === 'data') || wb.SheetNames[0];
+      const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: '' });
+      if (!grid.length) throw new Error('The sheet is empty.');
+      const blockRows = kind.key === 'leave' ? leaveSummarySheetRows(grid) : null;
+      if (blockRows) {
+        if (!blockRows.length) throw new Error('No leave rows found in this Leave Summary Report.');
+        if (blockRows.length > maxRows) throw new Error(`${blockRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        return { rows: blockRows, matched: (
+          [
+            from('employee_id', 'Employee Id'),
+            from('leave_type', 'Leave Type'),
+            from('from_date', 'Leave From'),
+            from('to_date', 'Leave To'),
+            from('days', 'Leave Availed'),
+            from('purpose', 'Remarks'),
+            from('status', 'Approved (Leave Summary Report)')
+          ].filter((m) => m.field)
+        ), ignored: ['Leave Year', 'Is Paid Leave', 'Total Leave Availed'] };
+      }
+      const visitRows = kind.key === 'movement_claims' ? checkInOutSheetRows(grid) : null;
+      if (visitRows) {
+        if (!visitRows.length) throw new Error('No Check In / Check Out lines found in this report.');
+        if (visitRows.length > maxRows) throw new Error(`${visitRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        return { rows: visitRows, matched: (
+          [
+            from('employee_id', 'Employee Code'),
+            from('date', 'Check In/Out Time (date)'),
+            from('check_in', 'Check In (time)'),
+            from('check_out', 'Next Check Out (time)'),
+            from('check_out_date', 'Check Out date, when a later day'),
+            from('purpose', 'Visited Company'),
+            from('remarks', 'Remarks (Check In)'),
+            from('check_in_place', 'Address (Check In)'),
+            from('check_out_remarks', 'Remarks (Check Out)'),
+            from('check_out_place', 'Address (Check Out)')
+          ].filter((m) => m.field)
+        ), ignored: ['SL', 'Employee Name'] };
+      }
+      const claimRows = kind.key === 'bill_claims' ? claimReportSheetRows(grid) : null;
+      if (claimRows) {
+        if (!claimRows.length) throw new Error('No claims found in this Claim Report.');
+        if (claimRows.length > maxRows) throw new Error(`${claimRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        return { rows: claimRows, matched: (
+          [
+            from('employee_id', 'Employee [code]'),
+            from('claim_no', 'Claim No.'),
+            from('created_date', 'Created Date'),
+            from('category', 'Categories'),
+            from('description', 'Description'),
+            from('claim_date', 'Claim Date'),
+            from('status', 'Status'),
+            from('amount', 'Claim Amount'),
+            from('approved_amount', 'Approved Amount'),
+            from('disbursed_amount', 'Sanctioned / Disbursed Amount')
+          ].filter((m) => m.field)
+        ), ignored: ['Serial', 'Designation', 'Department', 'Adv. Date', 'Adv. Amount', 'Remaining Amount', 'Total Disbursed Amount'] };
+      }
+      const headers = (grid[0] || []).map((h) => String(h || '').trim());
+      const fieldFor = (h: string) =>
+        kind.fields.find((f) => [f.label, f.key, ...(f.aliases || [])].some((name) => norm(name) === norm(h)));
+      const map: { col: number; header: string; field: Field }[] = [];
+      const extra: string[] = [];
+      headers.forEach((h, col) => {
+        if (!h) return;
+        const f = fieldFor(h);
+        if (f && !map.some((m) => m.field.key === f.key)) map.push({ col, header: h, field: f });
+        else extra.push(h);
+      });
+      const out: Record<string, string>[] = [];
+      for (let i = 1; i < grid.length; i++) {
+        const line = grid[i] || [];
+        const rec: Record<string, any> = { __row: i + 1 };
+        let any = false;
+        for (const m of map) {
+          const t = cellText(line[m.col], m.field.type);
+          if (t) any = true;
+          rec[m.field.key] = t;
+        }
+        if (any) out.push(rec);
+      }
+      if (!out.length) throw new Error('No filled rows under the header row.');
+      if (out.length > maxRows) throw new Error(`${out.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+      return { rows: out, matched: map.map(({ header, field }) => ({ header, field })), ignored: extra };
+    }
+  };
+
+  const readFile = async (file: File) => {
+    if (!kind) return;
+    reset();
+    setBusy('read');
+    setFileName(file.name);
+    longTask.start(`Reading ${kind.title}`, `Reading ${file.name}…`);
+    longTask.creep(90, undefined, Math.max(1500, file.size / 200));
+    try {
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
+      const p = await parseFile(file, kind);
+      setMatched(p.matched);
+      setIgnored(p.ignored);
+      setRows(p.rows);
+      await longTask.finish();
+    } catch (e: any) {
+      longTask.close();
+      setError(e.message || "Couldn't read that file.");
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const pickFiles = (list: FileList | File[] | null | undefined) => {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    if (files.length === 1) return readFile(files[0]);
+    reset();
+    const nat = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    setBatch(
+      files
+        .sort((a, b) => nat(a.name, b.name))
+        .map((file) => ({ file, state: 'wait' as const, message: '', total: 0, create: 0, update: 0, skip: 0, error: 0 }))
+    );
+  };
+
+  // Runs every picked sheet in order. A sheet that can't be read is marked and
+  // the next one carries on; a failed request stops the run (safe to start again —
+  // rows already in the system are skipped).
+  const runBatch = async (dry: boolean) => {
+    if (!kind || !batch.length) return;
+    setBatchRun(dry ? 'check' : 'import');
+    setBatchStop(false);
+    setError('');
+    const set = (i: number, patch: Partial<BatchItem>) => setBatch((b) => b.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+    for (let i = 0; i < batch.length; i++) {
+      set(i, { state: 'run', message: '' });
+      try {
+        const p = await parseFile(batch[i].file, kind);
+        const missing = kind.fields.filter((f) => f.required && !p.matched.some((m) => m.field.key === f.key));
+        if (missing.length) throw new Error(`Missing column: ${missing.map((f) => f.label).join(', ')}`);
+        const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows: p.rows, dry_run: dry });
+        const firstError = d.results.find((r) => r.status === 'error');
+        set(i, { state: 'ok', ...d.summary, message: firstError ? `Row ${firstError.row}: ${firstError.message}` : '' });
+      } catch (e: any) {
+        set(i, { state: 'fail', message: e.message || 'Failed' });
+        if (!/at most|empty|No filled|Missing column|No .* found/.test(e.message || '')) {
+          setError(`Stopped at ${batch[i].file.name}: ${e.message}. Run again — rows already imported are skipped.`);
+          break;
+        }
+      }
+      if (stopRef.current) break;
+    }
+    setBatchRun('');
+  };
+  const stopRef = useRef(false);
+  useEffect(() => {
+    stopRef.current = batchStop;
+  }, [batchStop]);
+
+  const run = async (dry: boolean) => {
+    if (!kind) return;
+    setBusy(dry ? 'check' : 'import');
+    setError('');
+    const n = `${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'}`;
+    longTask.start(dry ? `Checking ${kind.title}` : `Importing ${kind.title}`, dry ? `Checking ${n} — nothing is saved yet…` : `Saving ${n}…`);
+    longTask.creep(95, undefined, rows.length * (dry ? 6 : 15));
+    try {
+      const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows, dry_run: dry });
+      if (dry) setCheck(d);
+      else setDone(d);
+      setFilter(d.summary.error > 0 ? 'error' : 'all');
+      await longTask.finish();
+    } catch (e: any) {
+      longTask.close();
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const shown = done || check;
+  const listed = useMemo(() => (shown ? shown.results.filter((r) => filter === 'all' || r.status === filter) : []), [shown, filter]);
+
+  const downloadResult = () => {
+    if (!shown || !kind) return;
+    const byRow = new Map(rows.map((r) => [Number(r.__row), r]));
+    const sheet = XLSX.utils.json_to_sheet(
+      shown.results.map((r) => {
+        const src = byRow.get(r.row) || {};
+        const rec: Record<string, any> = { 'Sheet Row': r.row, Result: STATUS[r.status].label, Message: r.message };
+        for (const f of kind.fields) rec[f.label] = src[f.key] ?? '';
+        return rec;
+      })
+    );
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, 'Result');
+    XLSX.writeFile(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+  };
+
+  if (!kinds)
+    return onlyKind ? (
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-3 animate-pulse" aria-busy="true" aria-label="Loading upload">
+        <div className="h-4 w-40 rounded bg-slate-200" />
+        <div className="h-3 w-full max-w-lg rounded bg-slate-100" />
+        <div className="h-24 rounded-xl bg-slate-100" />
+      </div>
+    ) : (
+      <DataImportSkeleton />
+    );
+
+  const willWrite = check ? check.summary.create + check.summary.update : 0;
+
+  if (onlyKind && kinds.length === 0)
+    return <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-2xl p-5">You don't have access to this upload. {error}</p>;
+
+  return (
+    <div className="space-y-4">
+      <ProgressOverlay state={longTask.state} />
+      {!onlyKind && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-blue-600" /> HR Data Import
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+            Bring existing records in from Excel or CSV — download the template, fill it, upload it, check what each row will do, then import. Rows already in
+            the system are skipped, so a sheet can be uploaded again safely.
+          </p>
+          {kinds.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">You don't have access to any import. {error}</p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+              {kinds.map((k) => {
+                const Icon = ICONS[k.key] || FileSpreadsheet;
+                const on = k.key === kindKey;
+                return (
+                  <button
+                    key={k.key}
+                    type="button"
+                    onClick={() => pickKind(k.key)}
+                    className={`text-left rounded-xl border p-3.5 flex gap-3 transition-colors ${
+                      on ? 'border-blue-400 bg-blue-50/60 ring-2 ring-blue-200' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${on ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
+                      <Icon className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-slate-800">{k.title}</span>
+                      <span className="block text-[11px] text-slate-500 mt-0.5">{k.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+      )}
+      {kind && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">{kind.title}</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Columns: {kind.fields.map((f) => (f.required ? `${f.label}*` : f.label)).join(', ')} — * required
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+            >
+              <Download className="w-3.5 h-3.5" /> Download template
+            </button>
+          </div>
+
+          <label
+            className="block rounded-xl border-2 border-dashed border-slate-200 hover:border-blue-300 bg-slate-50/50 px-4 py-6 text-center cursor-pointer"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              pickFiles(e.dataTransfer.files);
+            }}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              multiple
+              className="hidden"
+              onChange={(e) => pickFiles(e.target.files)}
+            />
+            {busy === 'read' ? (
+              <Spinner />
+            ) : (
+              <>
+                <Upload className="w-6 h-6 text-blue-600 mx-auto" />
+                <div className="text-sm font-semibold text-slate-700 mt-1.5">
+                  {batch.length ? `${batch.length} files selected` : fileName || 'Choose or drop the filled sheet(s)'}
+                </div>
+                <div className="text-[11px] text-slate-500">Excel (.xlsx, .xls) or CSV · up to {maxRows} rows per file · pick several files to import them one after another</div>
+              </>
+            )}
+          </label>
+
+          {error && (
+            <div className="text-xs rounded-lg px-3 py-2 bg-rose-50 text-rose-700 border border-rose-200 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+            </div>
+          )}
+
+          {batch.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-slate-600">
+                  <span className="font-semibold text-slate-800">{batch.length}</span> files ·{' '}
+                  {batch.filter((b) => b.state === 'ok').length} done · {batch.reduce((n, b) => n + b.create + b.update, 0).toLocaleString()} rows to write/written ·{' '}
+                  {batch.reduce((n, b) => n + b.skip, 0).toLocaleString()} skipped · {batch.reduce((n, b) => n + b.error, 0).toLocaleString()} errors
+                </div>
+                <div className="flex gap-2">
+                  {batchRun ? (
+                    <button type="button" onClick={() => setBatchStop(true)} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50">
+                      {batchStop ? 'Stopping after this file…' : 'Stop after this file'}
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" onClick={reset} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50">
+                        Clear
+                      </button>
+                      <button type="button" onClick={() => runBatch(true)} className="text-xs font-semibold px-3 py-2 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">
+                        Check all files
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (await confirmDialog(`Import all ${batch.length} files now, one after another? Rows already in the system are skipped.`)) runBatch(false);
+                        }}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Import all files
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {batch.map((b) => (
+                  <div key={b.file.name} className="px-3 py-2 text-xs flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <span className="font-medium text-slate-800 truncate max-w-[22rem]">{b.file.name}</span>
+                    <span className={b.state === 'ok' ? 'text-emerald-600' : b.state === 'fail' ? 'text-rose-600' : b.state === 'run' ? 'text-blue-600' : 'text-slate-400'}>
+                      {b.state === 'wait' ? 'Waiting' : b.state === 'run' ? 'Working…' : b.state === 'fail' ? 'Failed' : 'Done'}
+                    </span>
+                    {b.state === 'ok' && (
+                      <span className="text-slate-500">
+                        {b.create} new · {b.update} updated · {b.skip} skipped · {b.error} errors
+                      </span>
+                    )}
+                    {b.message && <span className="text-rose-600 basis-full">{b.message}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-600">
+                <span className="font-semibold text-slate-800">{rows.length}</span> filled row{rows.length === 1 ? '' : 's'} in {fileName}.
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {matched.map((m) => (
+                  <span key={m.field.key} className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700" title={`Column "${m.header}"`}>
+                    ✓ {m.field.label}
+                  </span>
+                ))}
+                {missingRequired.map((f) => (
+                  <span key={f.key} className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700">
+                    Missing column: {f.label}
+                  </span>
+                ))}
+                {ignored.map((h) => (
+                  <span key={h} className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-500" title="Not a column of this import — ignored">
+                    Ignored: {h}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {!done && (
+                  <button
+                    type="button"
+                    disabled={missingRequired.length > 0 || !!busy}
+                    onClick={() => run(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white disabled:opacity-50"
+                  >
+                    {busy === 'check' ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Check rows
+                  </button>
+                )}
+                {check && !done && (
+                  <button
+                    type="button"
+                    disabled={willWrite === 0 || !!busy}
+                    onClick={async () => {
+                      if ((await confirmDialog(`Import ${willWrite} row(s) into ${kind.title}? Rows marked Skip or Error are left out.`))) run(false);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                  >
+                    {busy === 'import' ? <Spinner size={14} /> : <Upload className="w-3.5 h-3.5" />} Import {willWrite} row{willWrite === 1 ? '' : 's'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Start over
+                </button>
+              </div>
+            </div>
+          )}
+
+          {shown && (
+            <div className="space-y-2.5">
+              <div
+                className={`rounded-xl px-3.5 py-2.5 text-xs border ${
+                  done ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-blue-50 border-blue-200 text-blue-900'
+                }`}
+              >
+                {done ? (
+                  <>
+                    <span className="font-semibold">Imported.</span> {done.summary.create} added, {done.summary.update} updated, {done.summary.skip} skipped,{' '}
+                    {done.summary.error} with errors.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold">Check only — nothing saved yet.</span> {check!.summary.create} will be added, {check!.summary.update} updated,{' '}
+                    {check!.summary.skip} skipped (already there), {check!.summary.error} have errors and will be left out. Fix them in the sheet and upload again,
+                    or import the rest now.
+                  </>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(['all', 'create', 'update', 'skip', 'error'] as const).map((s) => {
+                  const n = s === 'all' ? shown.summary.total : shown.summary[s];
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setFilter(s)}
+                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+                        filter === s ? 'border-blue-300 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : STATUS[s].label} {n}
+                    </button>
+                  );
+                })}
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={downloadResult}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download {done ? 'result' : 'check'} (Excel)
+                </button>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 max-h-[520px] overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold whitespace-nowrap">Sheet row</th>
+                      <th className="px-3 py-2 font-semibold">Employee</th>
+                      <th className="px-3 py-2 font-semibold">Result</th>
+                      <th className="px-3 py-2 font-semibold">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listed.slice(0, 500).map((r) => (
+                      <tr key={r.row} className="border-t border-slate-100 align-top">
+                        <td className="px-3 py-2 text-slate-500">{r.row}</td>
+                        <td className="px-3 py-2 text-slate-800 whitespace-nowrap">{r.employee || '—'}</td>
+                        <td className="px-3 py-2">
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${STATUS[r.status].tone}`}>{STATUS[r.status].label}</span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{r.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {listed.length > 500 && <p className="px-3 py-2 text-[11px] text-slate-500">Showing 500 of {listed.length} — download the Excel for all.</p>}
+                {listed.length === 0 && <p className="px-3 py-4 text-center text-[11px] text-slate-500">Nothing here.</p>}
+              </div>
+              {done && (
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+                >
+                  <X className="w-3.5 h-3.5" /> Done — import another sheet
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};

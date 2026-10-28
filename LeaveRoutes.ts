@@ -21,6 +21,16 @@
 // duplicated or re-imported directly.
 
 import type { Express } from "express";
+import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
+import { runsBackgroundJobs } from "./jobRunner";
+import { leaveDayCount } from "./leaveDayCount";
+
+// Carry-forward at the year rollover: category (balance key) -> most days that
+// carry over, and each account's balance from just before the rollover.
+interface LeaveCarry {
+  max: Record<string, number>;
+  prev: Map<number, Record<string, number>>;
+}
 
 interface LeaveRouteDeps {
   authenticateToken: any;
@@ -31,7 +41,7 @@ interface LeaveRouteDeps {
   // separate from requireLeaveManager below (that's the can_manage_leave
   // toggle, a different feature).
   requireAdmin: (req: any, res: any, next: any) => Promise<any>;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   // Department-wise scope for the 'leave_applications' module — see
   // leave_application_department_access table comment in server.ts's initDB().
   getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
@@ -41,7 +51,7 @@ interface LeaveRouteDeps {
   // "year_settings"/"workflow_manage" (see LEAVE_MANAGE_LAYER_KEYS in
   // server.ts). Applied to each of Leave Manage's write routes below, one
   // layer per route.
-  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage") => any;
+  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage" | "leave_rules") => any;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   createAlert: (...args: any[]) => Promise<any>;
@@ -70,6 +80,7 @@ interface LeaveRouteDeps {
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   finalizeLeaveApplicationApproval: (leaveId: number, approvedBy: number | null, remarks: string | null) => Promise<void>;
+  notifyLeaveFirstApprovers: (leaveId: number) => Promise<void>;
 }
 
 export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
@@ -92,7 +103,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     adjustLeaveTypeBalance,
     deductLeaveTypeBalance,
     createTemplateApprovalRequest,
-    finalizeLeaveApplicationApproval
+    finalizeLeaveApplicationApproval,
+    notifyLeaveFirstApprovers
   } = deps;
 
   // Every custom Leave Category defined so far, as a category_key -> label
@@ -197,12 +209,20 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     targetIds: number[],
     fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>>,
     customValues: Record<string, number>,
-    actingUserId: number
+    actingUserId: number,
+    carry?: LeaveCarry
   ): Promise<void> {
     const categoryIdByKey = new Map<string, number>();
     for (const key of Object.keys(customValues)) {
       categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, actingUserId));
     }
+
+    // Days carried into the new Leave Year: what the account had left before
+    // this rollover (the snapshot), up to the category's carry-forward limit.
+    const carried = (userId: number, key: string) => {
+      if (!carry || carry.max[key] === undefined) return 0;
+      return Math.max(0, Math.min(carry.prev.get(userId)?.[key] || 0, carry.max[key]));
+    };
 
     for (const userId of targetIds) {
       const used = await getUsedThisYear(userId);
@@ -211,12 +231,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
         const existing = existingRows[0];
         const nextCasual =
-          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) : Number(existing?.casual_leave || 0);
+          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) + carried(userId, "casual_leave") : Number(existing?.casual_leave || 0);
         const nextSick =
-          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) : Number(existing?.sick_leave || 0);
+          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) + carried(userId, "sick_leave") : Number(existing?.sick_leave || 0);
         const nextLwp =
           fixedValues.leave_without_pay !== undefined
-            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay)
+            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay) + carried(userId, "leave_without_pay")
             : Number(existing?.leave_without_pay || 0);
 
         if (existing) {
@@ -233,7 +253,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
 
       for (const key of Object.keys(customValues)) {
-        const nextBalance = Math.max(0, customValues[key] - (used.custom[key] || 0));
+        const nextBalance = Math.max(0, customValues[key] - (used.custom[key] || 0)) + carried(userId, key);
         await queryDB(
           "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) " +
             "ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
@@ -254,7 +274,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // year-end auto-rollover (checkAndRunLeaveYearRollover below). Returns how
   // many (workflow, account) balance writes actually happened, so callers can
   // tell "nothing to apply" apart from a real 0-account workflow.
-  async function applyAllActiveWorkflows(actingUserId: number, onlyWorkflowId?: number): Promise<number> {
+  async function applyAllActiveWorkflows(actingUserId: number | null, onlyWorkflowId?: number, onlyUserIds?: number[], carry?: LeaveCarry): Promise<number> {
     const workflows: any = onlyWorkflowId
       ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
       : await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1");
@@ -262,7 +282,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     workflows.sort((a: any, b: any) => (a.scope_type === "general" ? 0 : 1) - (b.scope_type === "general" ? 0 : 1));
 
     const [users, employees, items] = await Promise.all([
-      queryDB("SELECT id FROM users WHERE role IN ('admin', 'user')"),
+      // People still here only (see the bulk balance set below).
+      queryDB(
+        "SELECT id FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+      ),
       queryDB("SELECT * FROM all_employees WHERE user_id IS NOT NULL"),
       queryDB("SELECT * FROM leave_balance_workflow_items")
     ]);
@@ -276,7 +299,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (!itemsByWorkflow.has(wid)) itemsByWorkflow.set(wid, []);
       itemsByWorkflow.get(wid)!.push(it);
     }
-    const allUserIds = users.map((u: any) => Number(u.id));
+    const only = onlyUserIds ? new Set(onlyUserIds.map(Number)) : null;
+    const allUserIds = users.map((u: any) => Number(u.id)).filter((id: number) => !only || only.has(id));
 
     let appliedCount = 0;
     for (const wf of workflows) {
@@ -299,7 +323,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
       if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
 
-      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId);
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number, carry);
       appliedCount += targetIds.length;
     }
     return appliedCount;
@@ -333,9 +357,144 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // today has reached this year's start_month_day AND this calendar year
   // hasn't already been rolled over (last_rollover_year), so it's safe to
   // call this often; it only ever actually applies workflows once per year.
-  async function checkAndRunLeaveYearRollover(): Promise<void> {
+  // ---- Leave rules: carry-forward at the year rollover, monthly accrual --------
+  // A Leave Type's policy key ("casual" …) as the balance key the workflows use.
+  const BALANCE_KEY: Record<string, string> = { casual: "casual_leave", sick: "sick_leave", without_pay: "leave_without_pay" };
+  const balanceKeyOf = (policyKey: string) => BALANCE_KEY[policyKey] || policyKey;
+
+  // The carry-forward rules (category -> most days carried) with every
+  // account's balance as it stands now, taken BEFORE the rollover rewrites
+  // balances. null = no category has a carry-forward rule.
+  async function loadCarry(): Promise<LeaveCarry | null> {
+    const rules: any[] = (await queryDB("SELECT category_key, carry_forward_max FROM leave_category_policies WHERE carry_forward_max IS NOT NULL")) || [];
+    if (!rules.length) return null;
+    const max: Record<string, number> = {};
+    for (const r of rules) max[balanceKeyOf(String(r.category_key))] = Math.max(0, Number(r.carry_forward_max) || 0);
+    const prev = new Map<number, Record<string, number>>();
+    const put = (userId: number, key: string, v: number) => {
+      const o = prev.get(userId) || {};
+      o[key] = v;
+      prev.set(userId, o);
+    };
+    for (const b of ((await queryDB("SELECT * FROM leave_balances")) as any[]) || []) {
+      for (const k of ["casual_leave", "sick_leave", "leave_without_pay"]) if (max[k] !== undefined) put(Number(b.user_id), k, Number(b[k]) || 0);
+    }
+    const customKeys = Object.keys(max).filter((k) => !["casual_leave", "sick_leave", "leave_without_pay"].includes(k));
+    if (customKeys.length) {
+      const rows: any[] = (await queryDB("SELECT b.user_id, c.category_key, b.balance FROM leave_category_balances b JOIN leave_categories c ON c.id = b.category_id")) || [];
+      for (const r of rows) if (max[r.category_key] !== undefined) put(Number(r.user_id), String(r.category_key), Number(r.balance) || 0);
+    }
+    return { max, prev };
+  }
+
+  // A category with a carry-forward rule that no active Balance Workflow
+  // sets (e.g. an accrual-only Earn Leave) isn't rewritten by the rollover:
+  // its balance just loses what is above the carry-forward limit.
+  async function capUntouchedCarryCategories(carry: LeaveCarry): Promise<void> {
+    const touched = new Set<string>(
+      (((await queryDB(
+        "SELECT DISTINCT i.category_key FROM leave_balance_workflow_items i JOIN leave_balance_workflows w ON w.id = i.workflow_id WHERE w.is_active = 1"
+      )) as any[]) || []).map((r: any) => String(r.category_key))
+    );
+    for (const [key, cap] of Object.entries(carry.max)) {
+      if (touched.has(key)) continue;
+      if (["casual_leave", "sick_leave", "leave_without_pay"].includes(key)) {
+        await queryDB(`UPDATE leave_balances SET ${key} = LEAST(${key}, ?)`, [cap]);
+      } else {
+        const cat: any[] = (await queryDB("SELECT id FROM leave_categories WHERE category_key = ?", [key])) || [];
+        if (cat[0]) await queryDB("UPDATE leave_category_balances SET balance = LEAST(balance, ?) WHERE category_id = ?", [cap, Number(cat[0].id)]);
+      }
+    }
+  }
+
+  // Monthly accrual: for every Leave Type with "days earned per month", each
+  // eligible account (employee record active, joined before the month began,
+  // gender / months-of-service rule met) is credited once per COMPLETED month
+  // from the month the rule was turned on. Each credit is logged
+  // (leave_accrual_log, one row per account + type + month), so running it
+  // again — or on two servers at once — never credits a month twice.
+  async function runLeaveAccrual(): Promise<{ months: number; credited: number; days: number }> {
+    const out = { months: 0, credited: 0, days: 0 };
+    const rules: any[] = (await queryDB("SELECT * FROM leave_category_policies WHERE accrual_per_month > 0 AND accrual_from IS NOT NULL")) || [];
+    if (!rules.length) return out;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+    const thisMonth = today.slice(0, 7);
+    const emps: any[] =
+      (await queryDB(
+        `SELECT e.user_id, e.gender, e.joining_date FROM all_employees e
+           JOIN users u ON u.id = e.user_id
+          WHERE e.user_id IS NOT NULL AND COALESCE(e.is_active, 1) = 1 AND e.joining_date IS NOT NULL
+            AND u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0`
+      )) || [];
+    for (const r of rules) {
+      const key = String(r.category_key);
+      const rules1 = await getLeavePolicy(key);
+      let ym = String(r.accrual_from);
+      // At most the last 36 months, in case the server was off for long.
+      const floor = (() => {
+        const d = new Date(`${thisMonth}-01T00:00:00Z`);
+        d.setUTCMonth(d.getUTCMonth() - 36);
+        return d.toISOString().slice(0, 7);
+      })();
+      if (ym < floor) ym = floor;
+      while (ym < thisMonth) {
+        const first = `${ym}-01`;
+        const done = new Set<number>(
+          (((await queryDB("SELECT user_id FROM leave_accrual_log WHERE category_key = ? AND month_year = ?", [key, ym])) as any[]) || []).map((x: any) => Number(x.user_id))
+        );
+        for (const e of emps) {
+          const uid = Number(e.user_id);
+          if (done.has(uid)) continue;
+          const joined = ymd(e.joining_date);
+          if (!joined || joined > first) continue;
+          if (eligibilityProblem(rules1, key, e, first)) continue;
+          let delta = rules1.accrual_per_month;
+          if (rules1.balance_cap !== null) delta = Math.max(0, Math.min(delta, rules1.balance_cap - (await getLeaveTypeBalance(uid, key))));
+          const ins: any = await queryDB("INSERT IGNORE INTO leave_accrual_log (user_id, category_key, month_year, days) VALUES (?, ?, ?, ?)", [uid, key, ym, delta]);
+          if (typeof ins?.affectedRows === "number" && ins.affectedRows === 0) continue; // another run got there first
+          if (delta > 0) {
+            await adjustLeaveTypeBalance(uid, key, delta);
+            out.credited++;
+            out.days += delta;
+          }
+        }
+        out.months++;
+        const d = new Date(`${ym}-01T00:00:00Z`);
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        ym = d.toISOString().slice(0, 7);
+      }
+    }
+    return out;
+  }
+  async function checkAndRunLeaveAccrual(): Promise<void> {
     try {
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g").catch(() => []);
+      if (!groups.length) {
+        await runLeaveAccrual();
+        return;
+      }
+      for (const g of groups) {
+        const r = await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => runLeaveAccrual());
+        if (r.credited) console.log(`✅ Leave accrual: ${r.days} day(s) credited to ${r.credited} account(s) (group ${g.id}).`);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Leave accrual failed: " + err.message);
+    }
+  }
+
+  async function checkAndRunLeaveYearRollover(): Promise<void> {
+    // Multi-company: each group keeps its own Year Settings (row id = group
+    // id) and rolls over only its own people.
+    const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g").catch(() => []);
+    if (!groups.length) return rolloverGroup(DEFAULT_GROUP_ID);
+    for (const g of groups) {
+      await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => rolloverGroup(Number(g.id)));
+    }
+  }
+
+  async function rolloverGroup(groupId: number): Promise<void> {
+    try {
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [groupId]);
       const settings = rows[0];
       if (!settings || !Number(settings.auto_rollover)) return;
 
@@ -353,11 +512,54 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const actingUserId = superadmins[0] ? Number(superadmins[0].id) : settings.updated_by ? Number(settings.updated_by) : null;
       if (!actingUserId) return;
 
-      await applyAllActiveWorkflows(actingUserId);
-      await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = 1", [currentYear]);
-      console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}).`);
+      const carry = await loadCarry();
+      await applyAllActiveWorkflows(actingUserId, undefined, undefined, carry || undefined);
+      if (carry) await capUntouchedCarryCategories(carry);
+      await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = ?", [currentYear, groupId]);
+      console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}, group ${groupId}).`);
     } catch (err: any) {
       console.warn("⚠️ Leave Year auto-rollover check failed: " + err.message);
+    }
+  }
+
+  // Default balance for an account that has never had one (a new employee's
+  // login, an imported login, …): the active Balance Workflows (General, then
+  // its Designation's) are applied to it the first time a balance is needed —
+  // same values and the same "minus leave already taken this year" as
+  // Apply Now. An account with any balance row is never touched. Returns the
+  // accounts that got their default balance just now.
+  // Accounts the default balance was just tried for. When no active
+  // workflow gives an account a row, "missing" stays true — without this,
+  // every Dashboard open of that account re-ran every workflow (reading
+  // every account and Employee), the heaviest part of the Dashboard at
+  // ~1,500 staff. Tried again after an hour (or on the next restart).
+  const defaultTriedAt = new Map<number, number>();
+  const DEFAULT_RETRY_MS = 60 * 60 * 1000;
+
+  async function ensureDefaultLeaveBalances(userIds: number[]): Promise<Set<number>> {
+    const now = Date.now();
+    const ids = [...new Set(userIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))].filter(
+      (id) => now - (defaultTriedAt.get(id) || 0) > DEFAULT_RETRY_MS
+    );
+    if (!ids.length) return new Set();
+    try {
+      const ph = ids.map(() => "?").join(",");
+      const [users, withFixed, withCustom] = await Promise.all([
+        queryDB(`SELECT id FROM users WHERE role IN ('admin', 'user') AND id IN (${ph})`, ids),
+        queryDB(`SELECT user_id FROM leave_balances WHERE user_id IN (${ph})`, ids),
+        queryDB(`SELECT user_id FROM leave_category_balances WHERE user_id IN (${ph})`, ids)
+      ]);
+      const has = new Set<number>([...(withFixed || []), ...(withCustom || [])].map((r: any) => Number(r.user_id)));
+      const missing = (users || []).map((u: any) => Number(u.id)).filter((id: number) => !has.has(id));
+      if (!missing.length) return new Set();
+      if (defaultTriedAt.size > 20000) defaultTriedAt.clear();
+      for (const id of missing) defaultTriedAt.set(id, now);
+      const sa: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) || [];
+      await applyAllActiveWorkflows(sa[0] ? Number(sa[0].id) : null, undefined, missing);
+      return new Set(missing);
+    } catch (err: any) {
+      console.warn("⚠️ Could not set the default leave balance: " + err.message);
+      return new Set();
     }
   }
 
@@ -370,6 +572,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // leave_balances row just reads as 0/0/0.
   app.get("/api/leave-balances/mine", authenticateToken, async (req: any, res) => {
     try {
+      await ensureDefaultLeaveBalances([Number(req.user.id)]);
       const [rows, categories, myCategoryBalances] = await Promise.all([
         queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]),
         queryDB("SELECT id, category_key, label FROM leave_categories"),
@@ -409,8 +612,69 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     try {
       const canManageAll = await hasLeaveManageAccess(req.user.id, req.user.role);
 
+      if (canManageAll && req.query.limit !== undefined) {
+        // Paged for the Leave Manage screen: ?page=&limit=&q= (name search). Only the
+        // rows on the requested page get their balances read (and their default
+        // balances ensured), so the screen no longer waits on every account at once.
+        const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const q = String(req.query.q || "").trim().toLowerCase();
+        const [allUsers, empRows]: any[] = await Promise.all([
+          queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')"),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const departmentByUserId = new Map<number, string>();
+        for (const e of empRows) if (e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        const departments = Array.from(new Set<string>(departmentByUserId.values())).sort((a, b) => a.localeCompare(b));
+        const matched = q ? allUsers.filter((u: any) => String(u.name || "").toLowerCase().includes(q)) : allUsers;
+        const pageUsers = matched.slice((page - 1) * limit, page * limit);
+        const ids: number[] = pageUsers.map((u: any) => Number(u.id));
+        await ensureDefaultLeaveBalances(ids);
+        const marks = ids.map(() => "?").join(",");
+        const [balances, categories, categoryBalances]: any[] = ids.length
+          ? await Promise.all([
+              queryDB(`SELECT * FROM leave_balances WHERE user_id IN (${marks})`, ids),
+              queryDB("SELECT id, category_key, label FROM leave_categories"),
+              queryDB(`SELECT * FROM leave_category_balances WHERE user_id IN (${marks})`, ids)
+            ])
+          : [[], [], []];
+        const byUser = new Map<number, any>();
+        for (const b of balances) byUser.set(Number(b.user_id), b);
+        const categoryById = new Map<number, any>();
+        for (const c of categories) categoryById.set(Number(c.id), c);
+        const customLeavesByUser = new Map<number, { key: string; label: string; balance: number }[]>();
+        for (const cb of categoryBalances) {
+          const cat = categoryById.get(Number(cb.category_id));
+          if (!cat) continue;
+          const uid = Number(cb.user_id);
+          if (!customLeavesByUser.has(uid)) customLeavesByUser.set(uid, []);
+          customLeavesByUser.get(uid)!.push({ key: cat.category_key, label: cat.label, balance: Number(cb.balance) });
+        }
+        return res.json({
+          total: matched.length,
+          page,
+          limit,
+          departments,
+          rows: pageUsers.map((u: any) => {
+            const b = byUser.get(Number(u.id));
+            return {
+              user_id: u.id,
+              user_name: u.name,
+              user_role: u.role,
+              department: departmentByUserId.get(Number(u.id)) || null,
+              casual_leave: b ? Number(b.casual_leave) : 0,
+              sick_leave: b ? Number(b.sick_leave) : 0,
+              leave_without_pay: b ? Number(b.leave_without_pay) : 0,
+              updated_at: b ? b.updated_at : null,
+              custom_leaves: customLeavesByUser.get(Number(u.id)) || []
+            };
+          })
+        });
+      }
+
       if (canManageAll) {
         const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
+        await ensureDefaultLeaveBalances(users.map((u: any) => Number(u.id)));
         const [balances, employees, categories, categoryBalances] = await Promise.all([
           queryDB("SELECT * FROM leave_balances"),
           // Department comes from the Employee Directory row linked to this
@@ -536,7 +800,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // category defined before this feature existed) is filled in with the same
   // "no restriction, Reliever required" defaults leave_category_policies is
   // seeded with, so callers never have to special-case a missing row.
-  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false };
+  // Leave rules (Leave Manage layer "leave_rules"): all off by default.
+  const DEFAULT_LEAVE_RULES = { min_service_months: 0, gender: "any" as string, accrual_per_month: 0, balance_cap: null as number | null, carry_forward_max: null as number | null, accrual_from: null as string | null };
+  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, count_off_days: true, ...DEFAULT_LEAVE_RULES };
+  const numOrNull = (v: any) => (v === null || v === undefined ? null : Number(v));
   async function getLeavePolicy(categoryKey: string) {
     const rows: any = await queryDB("SELECT * FROM leave_category_policies WHERE category_key = ?", [categoryKey]);
     if (rows.length === 0) return { category_key: categoryKey, ...DEFAULT_LEAVE_POLICY };
@@ -546,8 +813,46 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       min_advance_notice_days: Number(r.min_advance_notice_days) || 0,
       reliever_required: !!Number(r.reliever_required),
       max_consecutive_days: r.max_consecutive_days === null ? null : Number(r.max_consecutive_days),
-      require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted)
+      require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted),
+      // Weekends/holidays inside a leave come off the balance (default) or not.
+      count_off_days: r.count_off_days === undefined || r.count_off_days === null ? true : !!Number(r.count_off_days),
+      min_service_months: Number(r.min_service_months) || 0,
+      gender: ["female", "male"].includes(String(r.gender)) ? String(r.gender) : "any",
+      accrual_per_month: Number(r.accrual_per_month) || 0,
+      balance_cap: numOrNull(r.balance_cap),
+      carry_forward_max: numOrNull(r.carry_forward_max),
+      accrual_from: r.accrual_from ? String(r.accrual_from) : null
     };
+  }
+  type LeaveRules = typeof DEFAULT_LEAVE_RULES;
+
+  // Whole months between two YYYY-MM-DD dates (joining -> asOf).
+  const monthsBetween = (from: string, asOf: string) => {
+    const [fy, fm, fd] = from.split("-").map(Number);
+    const [ty, tm, td] = asOf.split("-").map(Number);
+    return (ty - fy) * 12 + (tm - fm) - (td < fd ? 1 : 0);
+  };
+  const ymd = (v: any): string | null => {
+    if (!v) return null;
+    if (v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+    const s = String(v).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+  // Who may use a Leave Type (gender, months of service), from the employee
+  // record linked to the account. null = allowed, else the reason to show.
+  function eligibilityProblem(rules: LeaveRules, label: string, emp: any, onDate: string): string | null {
+    if (rules.gender !== "any") {
+      const g = String(emp?.gender || "").trim().toLowerCase();
+      if (!g) return `${label} depends on gender, and yours isn't on your employee record. Ask HR to fill it in.`;
+      if (g !== rules.gender) return `${label} is only for ${rules.gender} employees.`;
+    }
+    if (rules.min_service_months > 0) {
+      const joined = ymd(emp?.joining_date);
+      if (!joined) return `${label} needs ${rules.min_service_months} months of service, and your joining date isn't on your employee record. Ask HR to fill it in.`;
+      const served = monthsBetween(joined, onDate);
+      if (served < rules.min_service_months) return `${label} needs ${rules.min_service_months} months of service (you have ${Math.max(0, served)}).`;
+    }
+    return null;
   }
 
   app.get("/api/leave-policies", authenticateToken, async (req: any, res) => {
@@ -582,15 +887,73 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           ? null
           : Math.max(1, Math.trunc(Number(maxConsecutiveDaysRaw)) || 1);
       const requirePaidLeaveExhausted = !!req.body?.require_paid_leave_exhausted;
+      // Left out of the request (an older screen) = keep what is saved.
+      const countOffDays = req.body?.count_off_days === undefined ? (await getLeavePolicy(categoryKey)).count_off_days : !!req.body.count_off_days;
 
       await queryDB(
-        `INSERT INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted, count_off_days, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE min_advance_notice_days = VALUES(min_advance_notice_days), reliever_required = VALUES(reliever_required),
-           max_consecutive_days = VALUES(max_consecutive_days), require_paid_leave_exhausted = VALUES(require_paid_leave_exhausted), updated_by = VALUES(updated_by)`,
-        [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, req.user.id]
+           max_consecutive_days = VALUES(max_consecutive_days), require_paid_leave_exhausted = VALUES(require_paid_leave_exhausted),
+           count_off_days = VALUES(count_off_days), updated_by = VALUES(updated_by)`,
+        [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, countOffDays ? 1 : 0, req.user.id]
       );
       res.json(await getLeavePolicy(categoryKey));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: the Leave Rules of one Leave Type (layer "leave_rules"): who may apply
+  // (gender, months of service), days earned per month and the cap on the
+  // balance, and how many days carry into the next Leave Year. Turning
+  // accrual on starts it with the NEXT month — nothing is back-paid.
+  app.put("/api/leave-policies/:categoryKey/rules", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("leave_rules"), async (req: any, res) => {
+    try {
+      const categoryKey = String(req.params.categoryKey || "").trim();
+      if (!categoryKey || !(await isValidLeaveType(categoryKey))) return res.status(400).json({ error: "Unknown Leave Type." });
+      const b = req.body || {};
+      const gender = ["any", "female", "male"].includes(String(b.gender)) ? String(b.gender) : null;
+      if (!gender) return res.status(400).json({ error: "Who may apply must be Everyone, Female or Male." });
+      const minService = Math.trunc(Number(b.min_service_months) || 0);
+      if (minService < 0 || minService > 600) return res.status(400).json({ error: "Months of service must be between 0 and 600." });
+      const accrual = Math.round((Number(b.accrual_per_month) || 0) * 10) / 10;
+      if (accrual < 0 || accrual > 31) return res.status(400).json({ error: "Days earned per month must be between 0 and 31." });
+      const opt = (v: any, label: string): number | null | "bad" => {
+        if (v === null || v === undefined || v === "") return null;
+        const n = Math.round(Number(v) * 10) / 10;
+        return Number.isFinite(n) && n >= 0 && n <= 9999 ? n : "bad";
+      };
+      const cap = opt(b.balance_cap, "Balance cap");
+      const carry = opt(b.carry_forward_max, "Carry-forward limit");
+      if (cap === "bad" || carry === "bad") return res.status(400).json({ error: "Balance cap and carry-forward limit must be numbers (0 or more), or blank." });
+
+      const before = await getLeavePolicy(categoryKey);
+      // Accrual starts next month, whenever it is switched on (or back on).
+      let accrualFrom: string | null = before.accrual_from;
+      if (accrual > 0 && (before.accrual_per_month <= 0 || !accrualFrom)) {
+        const d = new Date(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }).slice(0, 7) + "-01T00:00:00Z");
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        accrualFrom = d.toISOString().slice(0, 7);
+      }
+      if (accrual <= 0) accrualFrom = null;
+      await queryDB(
+        `INSERT INTO leave_category_policies (category_key, min_service_months, gender, accrual_per_month, balance_cap, carry_forward_max, accrual_from, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE min_service_months = VALUES(min_service_months), gender = VALUES(gender), accrual_per_month = VALUES(accrual_per_month),
+           balance_cap = VALUES(balance_cap), carry_forward_max = VALUES(carry_forward_max), accrual_from = VALUES(accrual_from), updated_by = VALUES(updated_by)`,
+        [categoryKey, minService, gender, accrual, cap, carry, accrualFrom, req.user.id]
+      );
+      res.json(await getLeavePolicy(categoryKey));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: credit any completed month that is still owed (also runs by itself).
+  app.post("/api/leave-accrual/run", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("leave_rules"), async (_req: any, res) => {
+    try {
+      res.json(await runLeaveAccrual());
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -648,7 +1011,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         ? body.departments.map((d: any) => String(d).trim()).filter(Boolean)
         : [];
 
-      const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
+      // People still here only — blocked logins and inactive Employee records are left out.
+      const users: any = await queryDB(
+        "SELECT id, name, role FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+      );
 
       let targetIds: number[];
       if (departments.length === 0) {
@@ -746,7 +1112,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.role === "superadmin") return next();
     try {
-      const rows: any = await queryDB("SELECT can_view_leave_application FROM users WHERE id = ?", [req.user.id]);
+      const rows: any = await queryDB("SELECT * FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_leave_application)) return next();
       return res.status(403).json({ error: "You don't have access to Leave Application. Ask your Superadmin to grant it." });
     } catch (err: any) {
@@ -782,7 +1148,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   });
 
   // GET: the current account's own submitted Leave Applications, newest first,
-  // with the Approver's name attached — see LeaveApplication.tsx. For legacy
+  // with the Approver's name attached — see LeaveReviewPage.tsx. For legacy
   // rows (approver_id set, pre-Part-5) that's the applicant's own pick, same
   // as always; for new Template-driven rows (approver_id NULL) it's instead
   // whoever the Dynamic Approval Engine currently has it waiting on (Part 3's
@@ -809,18 +1175,28 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         );
         approvalByLeaveId = new Map(approvalRequests.map((ar: any) => [Number(ar.source_id), ar]));
       }
+      // Who approved/rejected each finished one — shown as "Decided By".
+      const deciderIds: number[] = Array.from(new Set<number>(rows.map((r: any) => Number(r.decided_by)).filter((id: number) => id > 0)));
+      const deciderNames = new Map<number, string>();
+      for (const id of deciderIds) {
+        const u: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [id]);
+        if (u.length > 0) deciderNames.set(id, u[0].name);
+      }
       const enriched = await Promise.all(
         rows.map(async (r: any) => {
           const ar = approvalByLeaveId.get(Number(r.id));
           let currentApproverName = r.approver_name;
           let currentStep: number | null = null;
           let totalSteps: number | null = null;
+          let noApprover = false;
           if (ar) {
             totalSteps = Number(ar.total_steps);
             currentStep = Number(ar.current_step);
             if (ar.status === "pending") {
               const approvers = await getCurrentStepApprovers(ar);
               currentApproverName = approvers.length > 0 ? approvers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null;
+              // No Supervisor and no Template yet — the page says so.
+              noApprover = Number(ar.awaiting_approver) === 1;
             }
           }
           return {
@@ -835,7 +1211,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             approver_name: currentApproverName,
             current_step: currentStep,
             total_steps: totalSteps,
+            no_approver: noApprover,
             reliever_name: r.reliever_name || null,
+            decided_by_name: deciderNames.get(Number(r.decided_by)) || null,
             leave_type_label: leaveTypeLabelFor(r.leave_type)
           };
         })
@@ -878,6 +1256,28 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   const overlapMessage = (c: { start: string; end: string }) =>
     `You already have a leave application for ${c.start === c.end ? c.start : `${c.start} to ${c.end}`} that is waiting or approved. Choose other dates, or cancel that one first.`;
 
+  const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  // GET: what a Leave Application for these dates would take off the
+  // CALLER'S OWN balance, under the Leave Type's policy — so the form shows
+  // the same Day Count the submit below will deduct (weekends and holidays
+  // left out when the policy says so). Same gate as submitting.
+  app.get("/api/leave-applications/day-count", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
+    try {
+      const leaveType = String(req.query.leave_type || "");
+      const start = String(req.query.start_date || "");
+      const end = String(req.query.end_date || "");
+      if (!(await isValidLeaveType(leaveType))) return res.status(400).json({ error: "Select a valid Leave Type." });
+      if (!DATE_ONLY_RE.test(start) || !DATE_ONLY_RE.test(end) || end < start) return res.status(400).json({ error: "Pick a Start and End Date." });
+      const policy = await getLeavePolicy(leaveType);
+      const halfDay = String(req.query.is_half_day || "") === "1";
+      const { dayCount, offDays } = await leaveDayCount(queryDB, Number(req.user.id), start, end, halfDay, policy.count_off_days);
+      res.json({ day_count: dayCount, count_off_days: policy.count_off_days, off_days: offDays });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/leave-applications", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const {
@@ -914,8 +1314,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         }
       }
 
+      // Sick Leave, and a backdated application (Start Date before today),
+      // never need a Reliever — nothing to hand over for a day already gone
+      // or an illness that wasn't planned. Any reliever_id sent is ignored.
+      const todayRow: any = await queryDB("SELECT CURDATE() AS today");
+      const isBackdated = String(start_date) < String(todayRow[0]?.today || "").slice(0, 10);
       let relieverUserId: number | null = null;
-      if (policy.reliever_required) {
+      if (policy.reliever_required && leave_type !== "sick" && !isBackdated) {
         relieverUserId = Number(reliever_id);
         if (!relieverUserId || !Number.isFinite(relieverUserId)) {
           return res.status(400).json({ error: "Select a Reliever." });
@@ -929,15 +1334,27 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         }
       }
 
-      // Calendar days between start/end, inclusive of both ends — Half Day trims
-      // 0.5 off the total (floored at 0.5). Mirrors calcDayCount in
-      // NewLeaveApplicationModal.tsx exactly, computed here too so a tampered
-      // client-side value can never change what gets deducted.
-      const s = new Date(`${start_date}T00:00:00`);
-      const e = new Date(`${end_date}T00:00:00`);
-      const diffDays = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      const dayCount = diffDays <= 0 ? 0 : (is_half_day ? Math.max(0.5, diffDays - 0.5) : diffDays);
-      if (dayCount <= 0) return res.status(400).json({ error: "Day Count must be greater than 0." });
+      // Days between start/end, inclusive of both ends — every calendar day,
+      // or only working days when this Leave Type's policy leaves weekends
+      // and holidays out (leaveDayCount.ts). Half Day trims 0.5 off (floored
+      // at 0.5). Computed here, never taken from the client, so a tampered
+      // request can't change what gets deducted.
+      if (!DATE_ONLY_RE.test(String(start_date)) || !DATE_ONLY_RE.test(String(end_date))) {
+        return res.status(400).json({ error: "Start Date and End Date must be dates (YYYY-MM-DD)." });
+      }
+      const { dayCount } = await leaveDayCount(queryDB, Number(req.user.id), String(start_date), String(end_date), !!is_half_day, policy.count_off_days);
+      if (dayCount <= 0) {
+        return res.status(400).json({
+          error: policy.count_off_days ? "Day Count must be greater than 0." : "Every day you picked is a weekend or holiday, so no leave is needed for them."
+        });
+      }
+
+      // Leave rules: who may use this Leave Type (gender, months of service).
+      if (policy.gender !== "any" || policy.min_service_months > 0) {
+        const empRows: any = await queryDB("SELECT gender, joining_date FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+        const problem = eligibilityProblem(policy, await getLeaveTypeLabel(leave_type), empRows[0], String(start_date));
+        if (problem) return res.status(400).json({ error: problem });
+      }
 
       if (policy.max_consecutive_days !== null && dayCount > policy.max_consecutive_days) {
         return res.status(400).json({
@@ -1002,7 +1419,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         // /api/leave-applications/:id/reliever-decision below.
         await createAlert(queryDB, {
           userId: relieverUserId,
-          type: "leave_application",
+          type: "leave_approval",
           title: "You've Been Selected as Reliever",
           message: `${req.user.name} selected you as Reliever for their Leave Application (${start_date} to ${end_date}). Please review it.`,
           relatedType: "leave_application",
@@ -1015,6 +1432,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         const { autoApproved } = await createTemplateApprovalRequest("leave", "leave_application", result.insertId, req.user.id);
         if (autoApproved) {
           await finalizeLeaveApplicationApproval(result.insertId, null, "Auto-approved (no Approval Template configured for Leave, and no Reliever required for this Leave Type).");
+        } else {
+          await notifyLeaveFirstApprovers(result.insertId);
         }
       }
 
@@ -1108,6 +1527,23 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
           }
+          // Still with the Reliever (no approval request yet) — name them,
+          // so the list says who it's waiting on instead of a blank Approver.
+          if (!approverName && a.status === "pending" && a.reliever_status === "pending" && a.reliever_id) {
+            const relieverName = userMap.get(Number(a.reliever_id))?.name;
+            if (relieverName) approverName = `${relieverName} (Reliever)`;
+          }
+          // Passed its first Approval Layer (the Department Supervisor
+          // auto-layer when the applicant's Department has one configured,
+          // otherwise the Template's own first Layer) — true once current_step
+          // has moved past step 1, or the whole chain is already fully
+          // 'approved' (a superset of "passed step 1"). Used by the Admin
+          // Dashboard's On Leave Today/Tomorrow counts and Leave Calendar so
+          // an application already cleared by the first reviewer shows as a
+          // real Leave instead of staying "Pending" for however many more
+          // Layers are left above it — see AdminDashboard.tsx.
+          const supervisorLayerApproved =
+            a.status === "approved" || (!!ar && ar.status === "pending" && currentStep != null && currentStep > 1);
           return {
             ...a,
             day_count: Number(a.day_count),
@@ -1122,6 +1558,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,
             total_steps: totalSteps,
+            supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
             reliever_status: a.reliever_status || null,
             leave_type_label: leaveTypeLabelFor(a.leave_type)
@@ -1194,8 +1631,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(403).json({ error: "You don't have access to this Department's Leave Applications." });
       }
 
+      // ?since=YYYY-MM-DD: only applications still running on/after that day,
+      // plus every pending one (the Admin Dashboard reads it this way).
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
       const [applications, users, employees, approvalRequests] = await Promise.all([
-        queryDB("SELECT * FROM leave_applications ORDER BY created_at DESC"),
+        since
+          ? queryDB("SELECT * FROM leave_applications WHERE end_date >= ? OR status = 'pending' ORDER BY created_at DESC", [since])
+          : queryDB("SELECT * FROM leave_applications ORDER BY created_at DESC"),
         queryDB("SELECT id, name, role FROM users"),
         queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL"),
         queryDB("SELECT * FROM approval_requests WHERE source_type = 'leave_application'")
@@ -1215,8 +1657,46 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return !!dept && deptScope.includes(dept);
       });
 
+      // ?slim=1: only what the Admin Dashboard draws (who, which days, status, whether it
+      // cleared its first Approval Layer) — no approver look-ups or the other columns.
+      if (String(req.query.slim || "") === "1") {
+        return res.json(
+          visible.map((a: any) => {
+            const ar = approvalByLeaveId.get(Number(a.id));
+            const step = ar ? Number(ar.current_step) : null;
+            return {
+              id: a.id,
+              user_id: a.user_id,
+              user_name: userMap.get(Number(a.user_id))?.name || "(account removed)",
+              leave_type: a.leave_type,
+              leave_type_label: leaveTypeLabelFor(a.leave_type),
+              start_date: a.start_date,
+              end_date: a.end_date,
+              day_count: Number(a.day_count),
+              status: a.status,
+              supervisor_layer_approved: a.status === "approved" || (!!ar && ar.status === "pending" && step != null && step > 1)
+            };
+          })
+        );
+      }
+
+      // ?page=&limit=&q= : one page of the list (q = name search) — only that page is
+      // enriched (approver look-ups), and the answer is { rows, total, page, limit }.
+      const paged = req.query.limit !== undefined;
+      const pageLimit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+      const pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+      const nameQ = String(req.query.q || "").trim().toLowerCase();
+      const matched = paged && nameQ ? visible.filter((a: any) => String(userMap.get(Number(a.user_id))?.name || "(account removed)").toLowerCase().includes(nameQ)) : visible;
+      const source = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : visible;
+
+      // The name of the Approval Layer a pending application waits at
+      // ("Supervisor", "HR"…) — Approval Chain -> the template step's label.
+      const stepRows: any[] = await queryDB("SELECT template_id, step_order, approver_type, label FROM approval_template_steps").catch(() => []);
+      const stepLabel = new Map<string, string>(
+        stepRows.map((st: any) => [`${st.template_id}:${st.step_order}`, String(st.label || st.approver_type || "").trim()])
+      );
       const enriched = await Promise.all(
-        visible.map(async (a: any) => {
+        source.map(async (a: any) => {
           const ar = approvalByLeaveId.get(Number(a.id));
           let approverName = userMap.get(Number(a.approver_id))?.name || null;
           let currentStep: number | null = null;
@@ -1229,6 +1709,21 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
           }
+          // Still with the Reliever (no approval request yet) — name them,
+          // so the list says who it's waiting on instead of a blank Approver.
+          if (!approverName && a.status === "pending" && a.reliever_status === "pending" && a.reliever_id) {
+            const relieverName = userMap.get(Number(a.reliever_id))?.name;
+            if (relieverName) approverName = `${relieverName} (Reliever)`;
+          }
+          // Passed its first Approval Layer — same signal GET
+          // /api/leave-applications computes, see that route's comment. The
+          // Admin Dashboard (a module-gated account can see it too, unlike
+          // GET /api/leave-applications above which is real-role-only) reads
+          // this report as its data source specifically so a granted account
+          // gets the same On Leave Today/Tomorrow/Leave Calendar figures a
+          // Superadmin sees.
+          const supervisorLayerApproved =
+            a.status === "approved" || (!!ar && ar.status === "pending" && currentStep != null && currentStep > 1);
           return {
             ...a,
             day_count: Number(a.day_count),
@@ -1244,13 +1739,22 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,
             total_steps: totalSteps,
+            // An auto-supervisor step (supervisor_step_user_id) is step 1 and
+            // shifts the template's steps by one — same as getCurrentStepApprovers.
+            current_step_label:
+              ar && ar.status === "pending"
+                ? ar.supervisor_step_user_id && Number(ar.current_step) === 1
+                  ? "Supervisor"
+                  : stepLabel.get(`${ar.template_id}:${Number(ar.current_step) - (ar.supervisor_step_user_id ? 1 : 0)}`) || null
+                : null,
+            supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
             reliever_status: a.reliever_status || null,
             leave_type_label: leaveTypeLabelFor(a.leave_type)
           };
         })
       );
-      res.json(enriched);
+      res.json(paged ? { rows: enriched, total: matched.length, page: pageNo, limit: pageLimit } : enriched);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1276,7 +1780,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (req.user.role !== "admin" && req.user.role !== "superadmin") {
         return res.status(403).json({ error: "Admin access required" });
       }
-      const { action, remarks } = req.body || {};
+      const { remarks } = req.body || {};
+      // "approved"/"rejected" is what the Approve Application queue sends.
+      const action = req.body?.action === "approved" ? "approve" : req.body?.action === "rejected" ? "reject" : req.body?.action;
       if (action !== "approve" && action !== "reject") {
         return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
       }
@@ -1337,7 +1843,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // itself needs this).
   app.get("/api/leave-year-settings", authenticateToken, requireLeaveManager, async (req: any, res) => {
     try {
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [activeGroupId()]);
       const r = rows[0];
       res.json({
         close_month_day: r?.close_month_day || "12-31",
@@ -1367,13 +1873,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const autoRollover = !!body.auto_rollover;
 
       await queryDB(
-        `INSERT INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover, updated_by) VALUES (1, ?, ?, ?, ?)
+        `INSERT INTO leave_year_settings (close_month_day, start_month_day, auto_rollover, updated_by, id) VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE close_month_day = VALUES(close_month_day), start_month_day = VALUES(start_month_day),
            auto_rollover = VALUES(auto_rollover), updated_by = VALUES(updated_by)`,
-        [closeMonthDay, startMonthDay, autoRollover, req.user.id]
+        [closeMonthDay, startMonthDay, autoRollover, req.user.id, activeGroupId()]
       );
 
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [activeGroupId()]);
       const r = rows[0];
       res.json({
         close_month_day: r.close_month_day,
@@ -1568,6 +2074,14 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
   // Kick off the year-end auto-rollover check once at startup, then every 6
   // hours — see checkAndRunLeaveYearRollover's own doc comment above.
-  checkAndRunLeaveYearRollover();
-  setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+  // One process only under PM2 cluster mode (jobRunner.ts).
+  if (runsBackgroundJobs()) {
+    checkAndRunLeaveYearRollover();
+    setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+    // Monthly accrual (Leave Rules), checked at start and every 6 hours too.
+    setTimeout(checkAndRunLeaveAccrual, 30_000);
+    setInterval(checkAndRunLeaveAccrual, 6 * 60 * 60 * 1000);
+  }
+
+  return { ensureDefaultLeaveBalances };
 }

@@ -4,12 +4,18 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw, PauseCircle, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface PayrollListPanelProps {
   token: string;
+  // false = Payroll "View only": no Delete.
+  canEdit?: boolean;
 }
 
 interface PayrollListRecord {
@@ -27,9 +33,15 @@ interface PayrollListRecord {
   tax_deduction: number;
   pf_deduction: number;
   other_deduction: number;
+  // Allowance & Adjustment lines (Payroll -> Allowance & Adjustment).
+  item_earnings?: number;
+  item_deductions?: number;
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
+  // Salary Hold — can't be Approved / marked Paid until released.
+  is_held?: number | boolean;
+  hold_reason?: string | null;
 }
 
 interface Department {
@@ -66,7 +78,7 @@ const StatusBadge: React.FC<{ status: PayrollListRecord['payment_status'] }> = (
   );
 };
 
-export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => {
+export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token, canEdit = true }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [monthYear, setMonthYear] = useState(currentMonthYear());
@@ -81,6 +93,23 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
+  // Payroll -> "Salary Hold / Release" layer.
+  const [canHold, setCanHold] = useState(false);
+  const [runAccess, setRunAccess] = useState({ audit: false, pay: false });
+  const [holdFor, setHoldFor] = useState<PayrollListRecord | null>(null);
+  const [holdReason, setHoldReason] = useState('');
+  useEffect(() => {
+    fetch(apiUrl('/api/payroll/hold-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanHold(!!d?.can_hold))
+      .catch(() => {});
+    // One salary outside the month's approval (e.g. released from hold):
+    // Audit approves it, Accounts pays it (Payroll -> Approval).
+    fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setRunAccess({ audit: !!d?.audit_approve, pay: !!d?.accounts_pay }))
+      .catch(() => {});
+  }, [authHeaders]);
 
   // Debounce the free-text search box so every keystroke doesn't fire a request.
   useEffect(() => {
@@ -164,8 +193,31 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
     }
   };
 
+  const setHold = async (id: number, hold: boolean, reason = '') => {
+    setActionId(id);
+    setActionError('');
+    try {
+      const res = await fetch(apiUrl(`/api/payroll/${id}/${hold ? 'hold' : 'release'}`), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || 'Failed to change the hold.');
+        return;
+      }
+      setHoldFor(null);
+      await fetchRecords();
+    } catch {
+      setActionError('Failed to change the hold.');
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const removeRecord = async (id: number) => {
-    if (!window.confirm('Delete this payroll run? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this payroll run? This cannot be undone.'))) return;
     setActionId(id);
     setActionError('');
     try {
@@ -205,7 +257,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
           onChange={(e) => setMonthYear(e.target.value)}
           className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
-        <select
+        <SearchSelect
           value={department}
           onChange={(e) => setDepartment(e.target.value)}
           className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -214,7 +266,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
           {departments.map((d) => (
             <option key={d.id} value={d.name}>{d.name}</option>
           ))}
-        </select>
+        </SearchSelect>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
@@ -249,7 +301,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
       )}
 
       {loading ? (
-        <div className="flex justify-center py-16"><Spinner size={26} /></div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-16">{error}</p>
       ) : records.length === 0 ? (
@@ -259,50 +311,94 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-2.5 text-left">Employee</th>
-                <th className="px-4 py-2.5 text-left">Designation</th>
-                <th className="px-4 py-2.5 text-left">Department</th>
-                <th className="px-4 py-2.5 text-right">Basic</th>
-                <th className="px-4 py-2.5 text-right">House Rent</th>
-                <th className="px-4 py-2.5 text-right">Medical</th>
-                <th className="px-4 py-2.5 text-right">Other Allow.</th>
-                <th className="px-4 py-2.5 text-right">Tax</th>
-                <th className="px-4 py-2.5 text-right">PF</th>
-                <th className="px-4 py-2.5 text-right">Other Ded.</th>
-                <th className="px-4 py-2.5 text-right">Net Salary</th>
-                <th className="px-4 py-2.5 text-left">Status</th>
-                <th className="px-4 py-2.5 text-right">Actions</th>
+                <th className="px-2.5 py-2.5 text-left sticky left-0 z-10 bg-slate-50">Employee</th>
+                <th className="px-2.5 py-2.5 text-left">Designation</th>
+                <th className="px-2.5 py-2.5 text-left">Department</th>
+                <th className="px-2.5 py-2.5 text-right">Basic</th>
+                <th className="px-2.5 py-2.5 text-right">House Rent</th>
+                <th className="px-2.5 py-2.5 text-right">Medical</th>
+                <th className="px-2.5 py-2.5 text-right">Other Allow.</th>
+                <th className="px-2.5 py-2.5 text-right" title="Monthly allowances and arrears (Allowance & Adjustment)">Extra Pay</th>
+                <th className="px-2.5 py-2.5 text-right">Tax</th>
+                <th className="px-2.5 py-2.5 text-right">PF</th>
+                <th className="px-2.5 py-2.5 text-right">Other Ded.</th>
+                <th className="px-2.5 py-2.5 text-right" title="Monthly deductions and recoveries (Allowance & Adjustment)">Extra Ded.</th>
+                <th className="px-2.5 py-2.5 text-right">Net Salary</th>
+                <th className="px-2.5 py-2.5 text-left">Status</th>
+                <th className="px-2.5 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {records.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-4 py-2.5 whitespace-nowrap">
+                  {/* Sticky so the name stays in view while the wide row is scrolled to its actions. */}
+                  <td className="px-2.5 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-white">
                     <p className="font-medium text-slate-800">{r.employee_name}</p>
                     <p className="text-[10px] text-slate-400">{r.employee_code || '—'}</p>
                   </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{r.designation || '—'}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{r.department || '—'}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.basic_salary)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.house_rent)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.medical_allowance)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.other_allowance)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.tax_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.pf_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap"><StatusBadge status={r.payment_status} /></td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right">
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-slate-600">{r.designation || '—'}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-slate-600">{r.department || '—'}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.basic_salary)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.house_rent)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.medical_allowance)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.other_allowance)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-emerald-700">{money(r.item_earnings)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.tax_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.pf_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.item_deductions)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap">
+                    {r.is_held ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700"
+                        title={r.hold_reason || undefined}
+                      >
+                        <PauseCircle className="w-2.5 h-2.5" /> On Hold
+                      </span>
+                    ) : (
+                      <StatusBadge status={r.payment_status} />
+                    )}
+                  </td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {r.is_held ? (
+                        canHold ? (
+                          <button
+                            onClick={() => setHold(r.id, false)}
+                            disabled={actionId === r.id}
+                            className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg disabled:opacity-50"
+                            title={r.hold_reason || undefined}
+                          >
+                            {actionId === r.id ? <Spinner size={12} /> : 'Release'}
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )
+                      ) : (
+                      <>
+                      {canHold && r.payment_status !== 'paid' && (
+                        <button
+                          onClick={() => {
+                            setHoldReason('');
+                            setHoldFor(r);
+                          }}
+                          disabled={actionId === r.id}
+                          className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg disabled:opacity-50"
+                        >
+                          Hold
+                        </button>
+                      )}
                       {r.payment_status === 'unpaid' && (
                         <>
-                          <button
+                          {runAccess.audit && <button
                             onClick={() => approve(r.id)}
                             disabled={actionId === r.id}
                             className="px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg disabled:opacity-50"
                           >
                             {actionId === r.id ? <Spinner size={12} /> : 'Approve'}
-                          </button>
+                          </button>}
+                          {canEdit && (
                           <button
                             onClick={() => removeRecord(r.id)}
                             disabled={actionId === r.id}
@@ -311,9 +407,10 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                          )}
                         </>
                       )}
-                      {r.payment_status === 'processed' && (
+                      {r.payment_status === 'processed' && runAccess.pay && (
                         <button
                           onClick={() => markPaid(r.id)}
                           disabled={actionId === r.id}
@@ -323,6 +420,8 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                         </button>
                       )}
                       {r.payment_status === 'paid' && <span className="text-slate-300">—</span>}
+                      </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -330,14 +429,58 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
             </tbody>
             <tfoot>
               <tr className="bg-slate-50 font-semibold text-slate-700">
-                <td className="px-4 py-2.5" colSpan={10}>Total ({records.length} record{records.length === 1 ? '' : 's'})</td>
-                <td className="px-4 py-2.5 text-right">{money(totalNet)}</td>
+                <td className="px-2.5 py-2.5" colSpan={10}>Total ({records.length} record{records.length === 1 ? '' : 's'})</td>
+                <td className="px-2.5 py-2.5 text-right">{money(totalNet)}</td>
                 <td colSpan={2} />
               </tr>
             </tfoot>
           </table>
         </div>
       )}
+      {holdFor &&
+        createPortal(
+          <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={() => setHoldFor(null)}>
+            <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+              <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Hold salary</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {holdFor.employee_name} · {holdFor.month_year} · {money(holdFor.net_salary)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHoldFor(null)}
+                    className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500 shrink-0"
+                    aria-label="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="liquid-glass-inset rounded-2xl p-3 mt-4">
+                  <p className="text-xs text-slate-600 mb-2">It stays on the list but can't be approved or paid until released.</p>
+                  <input
+                    autoFocus
+                    value={holdReason}
+                    onChange={(e) => setHoldReason(e.target.value)}
+                    placeholder="Reason (e.g. Clearance pending)"
+                    className="w-full text-sm px-3 py-2 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-200 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!holdReason.trim() || actionId === holdFor.id}
+                  onClick={() => setHold(holdFor.id, true, holdReason.trim())}
+                  className="liquid-glass-button rounded-full w-full mt-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                >
+                  {actionId === holdFor.id ? 'Holding…' : 'Hold salary'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

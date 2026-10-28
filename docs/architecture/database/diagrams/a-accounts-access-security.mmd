@@ -1,0 +1,193 @@
+erDiagram
+  access_templates {
+    int id PK
+    varchar name
+    varchar description
+    text features_json
+    text modules_json
+    int company_id
+    tinyint is_default
+  }
+  admin_module_permission_layers {
+    int id PK
+    int user_id FK
+    varchar module_key
+    varchar layer_key
+    int company_id
+  }
+  admin_module_permissions {
+    int id PK
+    int user_id FK
+    varchar module_key
+    int company_id
+  }
+  employee_template_assignments {
+    int id PK
+    int employee_user_id FK
+    int template_id FK
+    enum request_type
+  }
+  fingerprint_logins {
+    int id PK
+    int user_id FK
+    varchar kind
+    varchar device_id
+    varchar label
+    varchar credential_id
+    text public_key
+  }
+  login_attempts {
+    int id PK
+    int user_id FK
+    varchar ip
+    varchar identifier
+    tinyint success
+  }
+  password_reset_codes {
+    int id PK
+    int user_id FK
+    datetime expires_at
+    int attempts
+    datetime used_at
+  }
+  password_reset_log {
+    int id PK
+    int user_id FK
+    varchar ip
+    varchar kind
+  }
+  password_reset_requests {
+    int id PK
+    int user_id FK
+    varchar note
+    varchar status
+    varchar ip
+    int handled_by
+    datetime handled_at
+  }
+  password_reset_settings {
+    int id PK
+    tinyint email_code_enabled
+    tinyint hr_request_enabled
+  }
+  payroll_access_log {
+    int id PK
+    int user_id FK
+    int company_id
+    varchar user_name
+    varchar kind
+    varchar area
+    varchar detail
+  }
+  platform_visits {
+    int id PK
+    int user_id FK
+    int group_id
+    int company_id
+    timestamp visited_at
+  }
+  session_policy {
+    int id PK
+    int web_hours
+    int web_idle_minutes
+    int app_days
+    int app_idle_days
+  }
+  user_access_audit {
+    int id PK
+    int target_user_id
+    int actor_user_id
+    varchar action
+    text detail
+  }
+  user_company_access {
+    int id PK
+    int user_id FK
+    int company_id
+    tinyint is_default
+  }
+  user_devices {
+    int id PK
+    int user_id FK
+    varchar device_id
+    varchar device_name
+    varchar platform
+    varchar status
+    timestamp requested_at
+  }
+  user_profile_details {
+    int user_id PK,FK
+    varchar first_name
+    varchar last_name
+    date date_of_birth
+    varchar country
+    varchar state
+    varchar city
+  }
+  user_project_permissions {
+    int id PK
+    int user_id FK
+    int project_id FK
+  }
+  user_sessions {
+    int id PK
+    int user_id FK
+    char session_key
+    varchar client
+    int device_row_id
+    varchar ip
+    varchar user_agent
+  }
+  user_signatures {
+    int user_id PK,FK
+    mediumblob image
+  }
+  users {
+    int id PK
+    int attendance_project_id FK
+    varchar name
+    varchar email
+    varchar username
+    enum role
+    decimal last_login_lat
+  }
+  web_push_keys {
+    int id PK
+    varchar public_key
+    varchar private_key
+  }
+  web_push_subscriptions {
+    int id PK
+    int user_id FK
+    varchar endpoint
+    varchar p256dh
+    varchar auth
+    varchar user_agent
+    timestamp last_used_at
+  }
+  approval_templates {
+    int id PK
+  }
+  projects {
+    int id PK
+  }
+  users ||--o{ admin_module_permission_layers : "user_id"
+  users ||--o{ admin_module_permissions : "user_id"
+  users ||--o{ employee_template_assignments : "employee_user_id"
+  approval_templates ||--o{ employee_template_assignments : "template_id"
+  users ||..o{ fingerprint_logins : "user_id"
+  users ||..o{ login_attempts : "user_id"
+  users ||--o{ password_reset_codes : "user_id"
+  users ||..o{ password_reset_log : "user_id"
+  users ||--o{ password_reset_requests : "user_id"
+  users ||..o{ payroll_access_log : "user_id"
+  users ||..o{ platform_visits : "user_id"
+  users ||--o{ user_company_access : "user_id"
+  users ||..o{ user_devices : "user_id"
+  users ||--o{ user_profile_details : "user_id"
+  projects ||--o{ user_project_permissions : "project_id"
+  users ||--o{ user_project_permissions : "user_id"
+  users ||..o{ user_sessions : "user_id"
+  users ||--o{ user_signatures : "user_id"
+  projects ||--o{ users : "attendance_project_id"
+  users ||..o{ web_push_subscriptions : "user_id"

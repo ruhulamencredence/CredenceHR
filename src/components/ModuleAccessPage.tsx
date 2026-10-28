@@ -22,6 +22,7 @@ import {
   Department,
   EXPLICIT_ONLY_LAYERS,
   LEAVE_MANAGE_LAYERS,
+  LEAVE_MANAGE_EXPLICIT_ONLY,
   PERMISSION_LAYER_MODULES,
   User,
   layersFor
@@ -31,10 +32,11 @@ import { AccessViewer, canEditUserModules } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 
+import { SearchSelect } from './Combobox';
 type SectionKey = 'general' | 'pepm' | 'hr' | 'attendance' | 'claims' | 'employees' | 'hrops' | 'payroll' | 'mail' | 'mis' | 'other';
 
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
-  { key: 'general', label: 'General', hint: 'Panels and the AI Assistant.' },
+  { key: 'general', label: 'General', hint: 'Panels, calls, emailing reports and the AI Assistant.' },
   { key: 'pepm', label: 'PEPM', hint: 'Budgets, MPR entries, reports and material dispatch.' },
   { key: 'hr', label: 'HR', hint: 'Dashboard, approvals, notices, departments, tasks and targets.' },
   { key: 'attendance', label: 'Attendance & Leave', hint: 'Attendance, roster, leave applications and leave balances.' },
@@ -61,13 +63,30 @@ type FlagKey =
   | 'can_view_budget_module'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
-  | 'can_view_my_leave'
+  | 'can_view_group_dashboard'
+  | 'can_view_tasks'
+  | 'can_view_mobile_bill'
+  | 'can_view_service_book'
+  | 'can_view_loan_request'
+  | 'can_view_targets'
+  | 'can_use_ai_assistant'
+  | 'can_export_assistant_reports'
+  | 'can_handle_assistant_support'
+  | 'can_use_calls'
+  | 'can_use_chat'
+  | 'can_use_mail'
+  | 'can_view_mail_directory'
+  | 'can_use_mail_groups'
   | 'can_receive_material'
   | 'can_return_dispatch'
-  | 'can_use_ai_assistant'
-  | 'can_use_chat'
-  | 'can_export_assistant_reports'
-  | 'can_handle_assistant_support';
+  | 'can_give_feedback'
+  | 'can_use_fingerprint'
+  | 'can_view_roster'
+  | 'can_take_break'
+  | 'can_sign_documents'
+  | 'can_view_payslip'
+  | 'can_request_items'
+  | 'can_email_reports';
 
 interface FlagDef {
   key: FlagKey;
@@ -86,48 +105,68 @@ interface FlagDef {
 const FLAGS: FlagDef[] = [
   { key: 'can_access_user_panel', label: 'User Panel access', desc: 'This Admin also gets the User Panel (attendance, claims, job entry).', section: 'general', endpoint: 'user-panel-access', adminOnly: true },
   { key: 'can_use_chat', label: 'Chat', desc: 'Messages with other accounts (one-to-one, groups). On by default.', section: 'general', endpoint: 'chat-access', defaultOn: true },
+  { key: 'can_use_calls', label: 'Audio / Video Calls', desc: 'Call, and be called by, other accounts from a one-to-one Chat (needs Chat).', section: 'general', endpoint: 'calls-access' },
+  { key: 'can_email_reports', label: 'Email reports', desc: 'An Email button next to PDF on the reports they can open.', section: 'general', endpoint: 'report-email-access' },
   { key: 'can_use_ai_assistant', label: 'AI Assistant', desc: 'The floating Assistant. On by default.', section: 'general', endpoint: 'ai-assistant-access', defaultOn: true },
   { key: 'can_export_assistant_reports', label: 'Assistant: PDF / Excel download', desc: 'Download the Assistant’s list answers (only figures they can see).', section: 'general', endpoint: 'assistant-report-access' },
   { key: 'can_handle_assistant_support', label: 'Assistant live support', desc: 'Answer people who ask the Assistant for a human.', section: 'general', endpoint: 'assistant-support-access' },
 
   { key: 'can_view_budget_module', label: 'Budget / Jobs / Job Entry Details', desc: 'Enter MPRs for their projects. On by default.', section: 'pepm', endpoint: 'budget-module-access', defaultOn: true },
   { key: 'can_job_edit', label: 'Job Edit', desc: 'Change MPRs after Final Submit.', section: 'pepm', endpoint: null },
-  { key: 'can_edit_delivery_date', label: 'Edit Delivery Date', desc: 'Change an MPR row’s delivery date.', section: 'pepm', endpoint: null, defaultOn: true },
+  { key: 'can_edit_delivery_date', label: 'Edit Delivery Date', desc: 'Change an MPR row’s delivery date.', section: 'pepm', endpoint: null },
   { key: 'can_receive_material', label: 'Material Receive', desc: 'Confirm material Purchase sent to their projects.', section: 'pepm', endpoint: 'material-receive-access' },
   { key: 'can_return_dispatch', label: 'Take back / Confirm in Dispatch', desc: 'Take their own MPR rows back out of Dispatch Material (with a new delivery date), or confirm them, while nothing is sent.', section: 'pepm', endpoint: 'return-dispatch-access' },
 
+  { key: 'can_view_tasks', label: 'My Tasks', desc: 'Tasks given to them, and requests to HR.', section: 'hr', endpoint: 'tasks-access' },
+  { key: 'can_view_targets', label: 'My Targets', desc: 'Monthly / yearly targets and their progress.', section: 'hr', endpoint: 'targets-access' },
+  { key: 'can_sign_documents', label: 'Documents to Sign', desc: 'Sign documents HR sends them.', section: 'hr', endpoint: 'sign-documents-access' },
+
   { key: 'can_use_attendance', label: 'Remote Attendance', desc: 'Mark attendance from their phone.', section: 'attendance', endpoint: null },
   { key: 'can_view_timesheet', label: 'Timesheet', desc: 'Own attendance history and Correct Attendance.', section: 'attendance', endpoint: 'timesheet-access' },
-  { key: 'can_view_leave_application', label: 'Leave Application', desc: 'Apply for leave.', section: 'attendance', endpoint: 'leave-application-access' },
-  { key: 'can_view_my_leave', label: 'My Leave', desc: 'Their own leave list and balance.', section: 'attendance', endpoint: 'my-leave-access' },
+  { key: 'can_view_leave_application', label: 'Leave Application', desc: 'Apply for leave and see their own balance.', section: 'attendance', endpoint: 'leave-application-access' },
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
+  { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
+  { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
+  { key: 'can_give_feedback', label: 'Give feedback', desc: 'Rate the app and send problems or ideas (and the 7-day "How do you like the app?").', section: 'general', endpoint: 'feedback-access' },
+  { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 
   { key: 'can_view_movement_claims', label: 'Movement Claim', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
+  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
+  { key: 'can_view_service_book', label: 'My Service Book', desc: 'Their own service record, read only.', section: 'employees', endpoint: 'service-book-access' },
 
-  // Shown with the module it belongs to (see renderLeaveManage).
+  { key: 'can_request_items', label: 'SIM & ID Card requests', desc: 'Ask HR for a company SIM or an ID card (new, lost, damaged).', section: 'hr', endpoint: 'request-items-access' },
+  { key: 'can_view_payslip', label: 'My Payslip', desc: 'See and download their approved payslips.', section: 'payroll', endpoint: 'payslip-access' },
+  { key: 'can_view_loan_request', label: 'Loan / Advance Request', desc: 'Apply for a loan or salary advance.', section: 'payroll', endpoint: 'loan-request-access' },
+
+  { key: 'can_use_mail', label: 'Credence Mail', desc: 'Connect their company mailbox and read / send mail.', section: 'mail', endpoint: 'mail-access' },
+  { key: 'can_view_mail_directory', label: 'Email Directory', desc: 'Find any employee’s email address.', section: 'mail', endpoint: 'mail-directory-access', parent: 'can_use_mail' },
+  { key: 'can_use_mail_groups', label: 'My groups', desc: 'Their own named lists of people for To / Cc / Bcc.', section: 'mail', endpoint: 'mail-groups-access', parent: 'can_use_mail' },
+
+  // Shown with the modules they belong to (see MODULE_EXTRA_FLAGS / LEAVE_MANAGE).
+  { key: 'can_view_group_dashboard', label: 'See all companies (group view)', desc: 'Admin Dashboard covers the mother and every sister company.', section: 'hr', endpoint: 'group-dashboard-access' },
   { key: 'can_manage_leave', label: 'Leave Manage (leave balances)', desc: 'Edit everyone’s leave balances, categories and policy.', section: 'attendance', endpoint: 'leave-management-access' }
 ];
 const FLAG = Object.fromEntries(FLAGS.map((f) => [f.key, f])) as Record<FlagKey, FlagDef>;
 // Not listed as plain switches: drawn with their module instead.
-const INLINE_FLAGS: FlagKey[] = ['can_manage_leave'];
+const INLINE_FLAGS: FlagKey[] = ['can_view_group_dashboard', 'can_manage_leave'];
 
-const MODULE_SECTION: Partial<Record<string, SectionKey>> = {
+const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
   admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
-  attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', leave_applications: 'attendance',
+  attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
   hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', document_vault: 'hrops',
   payroll: 'payroll',
   mail_admin: 'mail',
-  users: 'mis', projects: 'mis', branches: 'mis'
+  users: 'mis', projects: 'mis', branches: 'mis', user_feedback: 'mis'
 };
 const sectionOfModule = (k: AdminModuleKey): SectionKey => MODULE_SECTION[k] || 'other';
 
-const MODULE_DESC: Partial<Record<string, string>> = {
+const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   admin_dashboard: 'Quick View, attendance and leave at a glance.',
   reports: 'MPR Entries Report, Budget Submission Status, Dispatch Material.',
   mprs: 'MPR numbers of each project.',
@@ -138,6 +177,8 @@ const MODULE_DESC: Partial<Record<string, string>> = {
   attendance_reports: 'Monthly attendance by department.',
   leave_applications: 'Who applied for leave, by month.',
   duty_roster: 'Shifts and who works when.',
+  break_time: 'Who is on a break, daily totals, over-limit.',
+  user_feedback: 'Ratings, problems and ideas people send about the app.',
   conveyance: 'Review conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',
   mobile_bill: 'Company SIMs, limits and operator bills.',
@@ -147,11 +188,12 @@ const MODULE_DESC: Partial<Record<string, string>> = {
 };
 
 const LAYER_MODULES = PERMISSION_LAYER_MODULES as readonly string[];
-type DeptKind = 'attendance_reports' | 'leave_applications' | 'conveyance';
+type DeptKind = 'attendance_reports' | 'leave_applications' | 'conveyance' | 'duty_roster';
 const DEPT_KINDS: { module: DeptKind; endpoint: string; title: string; hint: string; preTick: boolean }[] = [
   { module: 'attendance_reports', endpoint: 'attendance-report-departments', title: 'Departments on the Monthly Attendance Report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'leave_applications', endpoint: 'leave-application-departments', title: 'Departments on the Monthly Leave Application report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'conveyance', endpoint: 'conveyance-claim-departments', title: 'Departments on Conveyance Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
+  { module: 'duty_roster', endpoint: 'roster-departments', title: 'Departments whose roster they set', hint: 'Nothing ticked = every Department and the shifts too (full setup, e.g. HR). Ticked = only those, shifts read only.', preTick: false }
 ];
 
 interface Access {
@@ -166,6 +208,7 @@ interface DeptState {
 
 const flagOf = (u: User, k: FlagKey): boolean => {
   const v = (u as any)[k];
+  if (k === 'can_view_leave_application') return !!u.can_view_leave_application || !!u.can_view_my_leave;
   return FLAG[k].defaultOn ? v !== false : !!v;
 };
 
@@ -181,7 +224,7 @@ function accessOf(u: User): Access {
     layers[m] = new Set(saved && saved.length > 0 ? saved : modules.has(m) ? defaultLayers(m) : []);
   }
   const savedLeave = u.module_permission_layers?.leave_manage;
-  layers.leave_manage = new Set(savedLeave && savedLeave.length > 0 ? savedLeave : u.can_manage_leave ? LEAVE_MANAGE_LAYERS.map((l) => l.key) : []);
+  layers.leave_manage = new Set(savedLeave && savedLeave.length > 0 ? savedLeave : u.can_manage_leave ? LEAVE_MANAGE_LAYERS.map((l) => l.key).filter((k) => !LEAVE_MANAGE_EXPLICIT_ONLY.includes(k)) : []);
   const flags = Object.fromEntries(FLAGS.map((f) => [f.key, flagOf(u, f.key)])) as Record<FlagKey, boolean>;
   if (u.role !== 'admin') flags.can_access_user_panel = false;
   return { modules, layers, flags };
@@ -233,7 +276,7 @@ function changesFor(token: string, u: User, base: Access, draft: Access, dept: D
   for (const f of FLAGS) {
     if (f.adminOnly && u.role !== 'admin') continue;
     const v = draft.flags[f.key];
-    const changed = v !== base.flags[f.key];
+    const changed = f.key === 'can_view_leave_application' ? v !== !!u.can_view_leave_application || v !== !!u.can_view_my_leave : v !== base.flags[f.key];
     if (!changed) continue;
     out.push({ label: f.label, run: () => put(f.endpoint ?? 'feature-permissions', { [f.key]: v }) });
   }
@@ -419,7 +462,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     edit((a, u) => {
       if (!flagEligible(f)(u)) return;
       a.flags[f.key] = on;
-      if (f.key === 'can_manage_leave' && on && a.layers.leave_manage.size === 0) a.layers.leave_manage = new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key));
+      if (f.key === 'can_manage_leave' && on && a.layers.leave_manage.size === 0) a.layers.leave_manage = new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key).filter((k) => !LEAVE_MANAGE_EXPLICIT_ONLY.includes(k)));
     });
   const setModule = (m: string, on: boolean) =>
     edit((a) => {
@@ -522,12 +565,9 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   const q = query.trim().toLowerCase();
   const matches = (...texts: (string | undefined)[]) => !q || texts.some((t) => (t || '').toLowerCase().includes(q));
   const anyAdmin = selected.some((u) => u.role === 'admin');
-  // On this server the per-account switches with their own endpoint are the
-  // Superadmin's; a delegated Admin sets modules and the Manage switches.
-  const viewerFlags = FLAGS.filter((f) => viewer.isSuperAdmin || f.endpoint === null);
 
   const flagsIn = (s: SectionKey) =>
-    viewerFlags.filter((f) => f.section === s && !INLINE_FLAGS.includes(f.key) && (!f.adminOnly || anyAdmin)).filter((f) => {
+    FLAGS.filter((f) => f.section === s && !INLINE_FLAGS.includes(f.key) && (!f.adminOnly || anyAdmin)).filter((f) => {
       if (!f.parent) return matches(f.label, f.desc);
       // A sub-switch shows only while its parent is on for someone.
       return aggregate((a) => a.flags[f.parent!]).on > 0 && matches(f.label, f.desc, FLAG[f.parent].label);
@@ -536,20 +576,18 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s).filter(
       (m) =>
         matches(m.label, MODULE_DESC[m.key]) ||
-        (q && layersFor(m.key).some((l) => LAYER_MODULES.includes(m.key) && l.label.toLowerCase().includes(q)))
+        (q && layersFor(m.key).some((l) => LAYER_MODULES.includes(m.key) && l.label.toLowerCase().includes(q))) ||
+        (m.key === 'admin_dashboard' && matches(FLAG.can_view_group_dashboard.label))
     );
-  const leaveManageIn = (s: SectionKey) => s === 'attendance' && viewer.isSuperAdmin && matches(FLAG.can_manage_leave.label, FLAG.can_manage_leave.desc, 'leave balance');
+  const leaveManageIn = (s: SectionKey) => s === 'attendance' && matches(FLAG.can_manage_leave.label, FLAG.can_manage_leave.desc, 'leave balance');
   const sectionHasItems = (s: SectionKey) => flagsIn(s).length > 0 || modulesIn(s).length > 0 || leaveManageIn(s);
   const sectionOnCount = (s: SectionKey) =>
-    viewerFlags.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => flagAgg(f).on > 0).length +
+    FLAGS.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => flagAgg(f).on > 0).length +
     ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s && moduleAgg(m.key).on > 0).length;
-  // Sections with something in them on this server.
-  const visibleSections = SECTIONS.filter(
-    (s) => viewerFlags.some((f) => f.section === s.key && (!f.adminOnly || anyAdmin)) || ADMIN_MODULES.some((m) => sectionOfModule(m.key) === s.key)
-  );
+  const visibleSections = SECTIONS.filter((s) => s.key !== 'other' || ADMIN_MODULES.some((m) => sectionOfModule(m.key) === 'other'));
 
   const summary = [
-    ...viewerFlags.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
+    ...FLAGS.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
     ...ADMIN_MODULES.map((m) => ({ label: m.label, agg: moduleAgg(m.key), layers: LAYER_MODULES.includes(m.key) ? (m.key as string) : null }))
   ].filter((x) => x.agg.on > 0);
 
@@ -619,6 +657,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
 
   const renderModule = (m: { key: AdminModuleKey; label: string }) => {
     const agg = moduleAgg(m.key);
+    const showGroupView = m.key === 'admin_dashboard' && (agg.on > 0 || anyAdmin);
     return (
       <React.Fragment key={m.key}>
         <button
@@ -635,6 +674,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         </button>
         {agg.on > 0 && LAYER_MODULES.includes(m.key) && renderLayers(m.key, layersFor(m.key))}
         {agg.on > 0 && DEPT_KINDS.some((d) => d.module === m.key) && renderDepts(m.key as DeptKind)}
+        {showGroupView && <div className="ml-6">{renderFlag(FLAG.can_view_group_dashboard)}</div>}
       </React.Fragment>
     );
   };
@@ -752,7 +792,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             </div>
             <div className="relative sm:w-[230px]">
               <Copy className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <select
+              <SearchSelect
                 value=""
                 onChange={(e) => e.target.value && copyFrom(Number(e.target.value))}
                 className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600 cursor-pointer appearance-none"
@@ -765,7 +805,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                       {u.name} ({u.role === 'admin' ? 'Admin' : 'User'})
                     </option>
                   ))}
-              </select>
+              </SearchSelect>
             </div>
           </div>
           {selected.length > 1 && (

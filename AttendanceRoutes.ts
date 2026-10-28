@@ -23,11 +23,17 @@
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
+// Imported directly rather than threaded through AttendanceRouteDeps below
+// (like every other dependency in this file is) — same as PayrollRoutes.ts
+// already does for holidayRoutes.ts's getHolidayMap, since holidayRoutes.ts
+// has no dependency back on this file.
+import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
+import { loadRoster } from "./RosterRoutes";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   haversineMeters: (lat1: number, lng1: number, lat2: number, lng2: number) => number;
   todayInDhaka: () => string;
@@ -38,7 +44,6 @@ interface AttendanceRouteDeps {
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
   attachAttendanceCorrectionApproval: (rows: any[]) => Promise<any[]>;
   getAdminModules: (userId: number) => Promise<string[]>;
-  getHolidayMap: (...args: any[]) => any;
   // Department-wise scope for the 'attendance_reports' module only — see the
   // attendance_report_department_access table comment in server.ts's
   // initDB() for the full design. null = unrestricted (every Department
@@ -63,7 +68,6 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap,
     getAttendanceReportDeptScope
   } = deps;
 
@@ -183,6 +187,21 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       res.status(500).json({ error: err.message });
     }
   };
+
+  // The Projects this account may check in at — the Dashboard's Remote
+  // Attendance card. Same rule check-in itself enforces (getAllowedProjectIds):
+  // the "Allowed project for check-in" an Admin pinned, else the account's
+  // Project access. Separate from GET /api/projects (Budget / Jobs / MPR), so
+  // a pinned check-in Project shows even with no Project access at all.
+  app.get("/api/attendance/my-projects", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
+    try {
+      const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
+      const rows: any[] = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      res.json(allowed ? rows.filter((p: any) => allowed.has(Number(p.id))) : rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
@@ -489,6 +508,32 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       if (!check_in_at && !check_out_at) return res.status(400).json({ error: "Enter an In Time or Out Time to correct." });
+      // The In Time is on the day being corrected; the Out Time that day or,
+      // for a night shift, the next morning — and never before the In Time
+      // (the one sent, or the one already on record when only Out is sent).
+      const DT = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
+      const ymd = String(attendance_date).slice(0, 10);
+      const nextYmd = new Date(Date.parse(`${ymd}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+      for (const [v, label, days] of [[check_in_at, "In Time", [ymd]], [check_out_at, "Out Time", [ymd, nextYmd]]] as [any, string, string[]][]) {
+        if (!v) continue;
+        const m = DT.exec(String(v));
+        if (!m || Number(m[2]) > 23 || Number(m[3]) > 59) return res.status(400).json({ error: `${label} is not a valid time.` });
+        if (!days.includes(m[1])) return res.status(400).json({ error: `${label} must be on ${days.join(" or ")} (the day being corrected${days.length > 1 ? ", or the next morning for a night shift" : ""}).` });
+      }
+      const norm = (v: any) => (v ? String(v).replace("T", " ").padEnd(19, ":00").slice(0, 19) : "");
+      let effIn = norm(check_in_at);
+      let effOut = norm(check_out_at);
+      if (!effIn || !effOut) {
+        const rec = await queryDB(
+          "SELECT DATE_FORMAT(check_in_at, '%Y-%m-%d %H:%i:%s') AS i, DATE_FORMAT(check_out_at, '%Y-%m-%d %H:%i:%s') AS o FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ? LIMIT 1",
+          [req.user.id, projectId, ymd]
+        );
+        effIn = effIn || rec[0]?.i || "";
+        effOut = effOut || rec[0]?.o || "";
+      }
+      if (effIn && effOut && effOut <= effIn) {
+        return res.status(400).json({ error: "Out Time must be after In Time. For a night shift, the Out Time is on the next day." });
+      }
 
       const projects = await queryDB("SELECT * FROM projects WHERE id = ?", [projectId]);
       if (projects.length === 0) return res.status(400).json({ error: "Project not found." });
@@ -638,7 +683,44 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // Attendance tab — every User, every Project, filterable by project/user/date.
   app.get("/api/attendance", authenticateToken, requireAdmin, requireModule("attendance"), async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM attendance");
+      // ?page=&limit= : one page, filtered in SQL — { rows, total, page, limit }. (The unpaged
+      // call below stops at the newest 1,000 records, so it can't show anything older.)
+      const paged = req.query.limit !== undefined;
+      let rows: any[];
+      let pagedTotal = 0;
+      let pageNo = 1;
+      let pageLimit = 50;
+      if (paged) {
+        pageLimit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const where: string[] = [];
+        const params: any[] = [];
+        if (req.query.project_id) {
+          where.push("a.project_id = ?");
+          params.push(Number(req.query.project_id));
+        }
+        if (req.query.user_id) {
+          where.push("a.user_id = ?");
+          params.push(Number(req.query.user_id));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+          where.push("a.attendance_date >= ?");
+          params.push(String(req.query.from));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+          where.push("a.attendance_date <= ?");
+          params.push(String(req.query.to));
+        }
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [totalRows, pageRows]: any[] = await Promise.all([
+          queryDB(`SELECT COUNT(*) AS n FROM attendance a ${w}`, params),
+          queryDB(`SELECT a.* FROM attendance a ${w} ORDER BY a.attendance_date DESC, a.id DESC LIMIT ? OFFSET ?`, [...params, pageLimit, (pageNo - 1) * pageLimit])
+        ]);
+        pagedTotal = Number(totalRows[0]?.n || 0);
+        rows = pageRows;
+      } else {
+        rows = await queryDB("SELECT * FROM attendance");
+      }
       const projects = await queryDB("SELECT * FROM projects");
       const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
@@ -659,19 +741,24 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       filtered.sort((a: any, b: any) => (a.attendance_date < b.attendance_date ? 1 : a.attendance_date > b.attendance_date ? -1 : b.id - a.id));
 
-      const withApprovals = await attachApprovalStatuses("attendance", filtered.slice(0, 1000));
-      res.json(
-        withApprovals.map((r: any) => {
-          const proj = projectMap.get(r.project_id);
-          const u = userMap.get(r.user_id);
-          return {
-            ...r,
-            project_name: proj?.project_name || null,
-            location_radius: proj?.location_radius ?? null,
-            user_name: u?.name || null
-          };
-        })
+      const withApprovals = await attachApprovalStatuses("attendance", paged ? filtered : filtered.slice(0, 1000));
+      // Head Office vs Project Side of the check-in site — the type of the
+      // Branch linked to that Project (branches.project_id), if any.
+      const branchTypeByProject = new Map<number, string>(
+        (await queryDB("SELECT * FROM branches")).filter((b: any) => b.project_id).map((b: any) => [Number(b.project_id), b.branch_type])
       );
+      const out = withApprovals.map((r: any) => {
+        const proj = projectMap.get(r.project_id);
+        const u = userMap.get(r.user_id);
+        return {
+          ...r,
+          project_name: proj?.project_name || null,
+          project_office_type: branchTypeByProject.get(Number(r.project_id)) || null,
+          location_radius: proj?.location_radius ?? null,
+          user_name: u?.name || null
+        };
+      });
+      res.json(paged ? { rows: out, total: pagedTotal, page: pageNo, limit: pageLimit } : out);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -727,6 +814,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const project_id = req.query.project_id ? Number(req.query.project_id) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
+      // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
+      const empStatus = String(req.query.status || "all");
 
       // Department-wise scope (see the deps comment above). null = unrestricted.
       // A department query param outside the caller's scope is rejected up
@@ -740,16 +829,18 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
       }
 
-      const rows = await queryDB("SELECT * FROM attendance");
-      const projects = await queryDB("SELECT * FROM projects");
-      const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
-      const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
-
       const monthStr = String(month).padStart(2, "0");
       const prefix = `${year}-${monthStr}`;
       const daysInMonth = new Date(year, month, 0).getDate();
       const monthStart = `${prefix}-01`;
+      const todayStr = todayInDhaka();
       const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
+
+      const [projects, users] = await Promise.all([
+        queryDB("SELECT * FROM projects"),
+        queryDB("SELECT id, name, email, role, created_at FROM users")
+      ]);
+      const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
       // Department comes from the Employee Directory row linked to this login
       // account (all_employees.user_id) — no department column of its own on
@@ -758,17 +849,22 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // Department (Admin Panel -> Departments) by resolveEmployeeDepartment,
       // so it stays correct whether that row was set via the Department
       // dropdown or (on an older row) never migrated off free text.
-      const allEmployeesForDept = await queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL");
+      const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
+      const inactiveUserIds = new Set<number>();
       for (const e of allEmployeesForDept) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
       }
+      const statusMatches = (id: number) =>
+        empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
-      const relevantUsers = users.filter(
+      const filteredUsers = users.filter(
         (u: any) =>
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
+          statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case: `department` was
           // already validated to be within deptScope above when given, so
           // this only bites when the caller left the Department filter blank
@@ -778,12 +874,43 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // filter on this", not "you must pick one".
           (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
       );
+      // ?limit=&page= : one page of employees (by name), for the on-screen
+      // grid — at ~1,500 staff the whole month was ~12 MB and every
+      // person's 31 days were worked out on each open. Without limit (the
+      // PDF export, the Admin Dashboard, the Assistant) it is everyone, as
+      // before.
+      filteredUsers.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+      const limit = req.query.limit !== undefined ? Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50)) : 0;
+      const total = filteredUsers.length;
+      const page = limit ? Math.min(Math.max(1, Math.floor(Number(req.query.page)) || 1), Math.max(1, Math.ceil(total / limit))) : 1;
+      const relevantUsers = limit ? filteredUsers.slice((page - 1) * limit, page * limit) : filteredUsers;
+      const pageUserIds = new Set<number>(relevantUsers.map((u: any) => Number(u.id)));
+
+      // Only this month's rows (idx_attendance_date) — reading the whole
+      // table every time made the report, and the Admin Dashboard that loads
+      // it, slower every day. A page reads only its own people's rows.
+      const pageIds = [...pageUserIds];
+      const rows: any[] = limit
+        ? pageIds.length
+          ? ((await queryDB(
+              `SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ? AND user_id IN (${pageIds.map(() => "?").join(",")})`,
+              [monthStart, monthEnd, ...pageIds]
+            )) || []).filter((r: any) => pageUserIds.has(Number(r.user_id)))
+          : []
+        : await queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]);
 
       // Global Calendar (Admin Panel -> Holidays) — any date the Superadmin (or
       // whoever's been granted the "holidays" module) has marked Weekend or
       // Holiday here is excluded from absent_days below entirely, whether or
       // not the person actually checked in that day.
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      // Head Office and Project-site Employees can each have their own
+      // Weekend/Holiday calendar (Admin Panel -> Holidays) — both fetched
+      // once up front, then picked per-user below via branchTypeByUserId
+      // (all_employees.branch_id -> branches.branch_type), same "resolve
+      // every user's own value once, look it up per-row" shape
+      // departmentByUserId above already uses.
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
 
       const byUser = new Map<number, Map<string, any>>();
       for (const r of rows) {
@@ -805,7 +932,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         const employees = await queryDB(
           "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
         );
-        const pinByUserId = new Map<number, string>(employees.map((e: any) => [e.user_id, e.zk_device_pin]));
+        const pinByUserId = new Map<number, string>(
+          employees.filter((e: any) => pageUserIds.has(Number(e.user_id))).map((e: any) => [e.user_id, e.zk_device_pin])
+        );
         if (pinByUserId.size > 0) {
           const officeLogs = await queryDB(
             // Same single-punch guard — a day with exactly one punch (e.g.
@@ -833,15 +962,56 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         }
       }
 
+      // Joining Date per login — a day before someone joined is blank on the
+      // report, never Absent (same as a day that hasn't happened yet).
+      const joinRows = await queryDB("SELECT id, user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
+      const joiningDateByUserId = new Map<number, string>();
+      const employeeIdByUserId = new Map<number, number>();
+      for (const j of joinRows) {
+        if (j.joining_date) joiningDateByUserId.set(Number(j.user_id), String(j.joining_date).slice(0, 10));
+        employeeIdByUserId.set(Number(j.user_id), Number(j.id));
+      }
+      // Duty Roster: an Off day counts like a Weekend, a rostered shift on a
+      // Weekend/Holiday is a working day.
+      const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
+
+      // Approved leave: a working day on leave with no check-in is Leave,
+      // not Absent.
+      const leaveByUserDate = new Map<string, string>();
+      if (relevantUsers.length) {
+        const leaveRows = await queryDB(
+          `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
+            WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${relevantUsers.map(() => "?").join(",")})`,
+          [monthEnd, monthStart, ...relevantUsers.map((u: any) => u.id)]
+        );
+        for (const l of leaveRows) {
+          const start = String(l.start_date).slice(0, 10);
+          const end = String(l.end_date).slice(0, 10);
+          for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
+            if (dateStr >= start && dateStr <= end) leaveByUserDate.set(`${l.user_id}|${dateStr}`, String(l.leave_type));
+          }
+        }
+      }
+
       const result = relevantUsers.map((u: any) => {
         const dayMap = byUser.get(u.id) || new Map<string, any>();
+        const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
+        const baseHolidays = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
+        const employeeId = employeeIdByUserId.get(Number(u.id));
+        const holidayMap = employeeId ? roster.holidaysFor(employeeId, baseHolidays) : baseHolidays;
         let presentDays = 0;
         let completeDays = 0;
         let holidayDays = 0;
         let absentDays = 0;
+        let leaveDays = 0;
         const days: any[] = [];
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
+          // A day that hasn't happened yet, or came before this person
+          // joined, is never Absent.
+          const isFuture = dateStr > todayStr;
+          const beforeJoining = !!joiningDate && dateStr < joiningDate;
           const rec: any = dayMap.get(dateStr);
           let hasIn = !!rec?.check_in_at;
           let hasOut = !!rec?.check_out_at;
@@ -871,8 +1041,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // neither presentDays nor absent_days below, even when the person
           // didn't check in; it's not a normal working day at all.
           const holiday = holidayMap.get(dateStr);
+          const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || null : null;
           if (holiday) holidayDays++;
-          else if (!hasIn) absentDays++;
+          else if (leaveType) leaveDays++;
+          else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
 
           if (hasIn) presentDays++;
           if (hasIn && hasOut) completeDays++;
@@ -886,7 +1058,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             check_in_remarks: checkInRemarks,
             check_out_remarks: checkOutRemarks,
             day_type: holiday ? holiday.day_type : null,
-            holiday_title: holiday ? holiday.title : null
+            holiday_title: holiday ? holiday.title : null,
+            future: isFuture,
+            before_joining: beforeJoining,
+            leave_type: leaveType
           });
         }
         return {
@@ -898,12 +1073,39 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           complete_days: completeDays,
           holiday_days: holidayDays,
           absent_days: absentDays,
+          leave_days: leaveDays,
           days
         };
       });
 
       result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
-      res.json({ year, month, days_in_month: daysInMonth, users: result });
+      // ?slim=dashboard : the Admin Dashboard only needs each day's Present / Absent totals
+      // (worked out here, as day_counts) and today's + yesterday's full cell per person
+      // (check-in / out times); every other day's cell is sent as null.
+      if (String(req.query.slim || "") === "dashboard") {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+        const [ty, tm, td] = todayStr.split("-").map(Number);
+        const keep = new Set<number>(ty === year && tm === month ? [td, td - 1] : []);
+        const dayCounts = Array.from({ length: daysInMonth }, (_, i) => {
+          let present = 0;
+          let absent = 0;
+          for (const u of result) {
+            const d = u.days?.[i];
+            if (!d) continue;
+            if (d.present) present++;
+            else if (!d.day_type && !d.leave_type && !d.future && !d.before_joining) absent++;
+          }
+          return { day: i + 1, present, absent };
+        });
+        return res.json({
+          year,
+          month,
+          days_in_month: daysInMonth,
+          day_counts: dayCounts,
+          users: result.map((u: any) => ({ ...u, days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : null)) }))
+        });
+      }
+      res.json({ year, month, days_in_month: daysInMonth, users: result, ...(limit ? { total, page, limit } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -921,6 +1123,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const project_id = req.query.project_id ? Number(req.query.project_id) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
+      // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
+      const empStatus = String(req.query.status || "all");
 
       // Department-wise scope (see the deps comment above / the monthly
       // report route's own copy of this check). null = unrestricted.
@@ -929,18 +1133,24 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
       }
 
-      const rows = await queryDB("SELECT * FROM attendance");
+      // Just this day's rows (idx_attendance_date), not the whole history;
+      // still filtered by date below.
+      const rows = await queryDB("SELECT * FROM attendance WHERE attendance_date = ?", [date]);
       const projects = await queryDB("SELECT * FROM projects");
       const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
       // Same Employee Directory lookup GET /api/attendance/report/monthly and
       // GET /api/leave-balances use — department has no column of its own on users.
-      const allEmployeesForDept = await queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL");
+      const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
+      const inactiveUserIds = new Set<number>();
       for (const e of allEmployeesForDept) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
       }
+      const statusMatches = (id: number) =>
+        empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
       const dayRows = rows.filter(
         (r: any) => String(r.attendance_date).slice(0, 10) === date && (!project_id || Number(r.project_id) === project_id)
@@ -953,6 +1163,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
+          statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case — see the monthly
           // report route's identical comment above.
           (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
@@ -1016,35 +1227,49 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             source: "office"
           };
         });
-      // Global Calendar (Admin Panel -> Holidays) — if this date itself is a
-      // Weekend/Holiday, nobody who didn't check in is counted Absent for it;
-      // they're just reported separately as on_holiday.
-      const holidayMap = await getHolidayMap(queryDB, date, date);
-      const holidayToday = holidayMap.get(date) || null;
+      // Global Calendar (Admin Panel -> Holidays) — if this date is a
+      // Weekend/Holiday for a given Employee's own group (Head Office vs
+      // Project site — see branchTypeByUserId), they're not counted Absent
+      // for it; they're just reported separately as on_holiday. Two
+      // Employees can get a different answer for the exact same date.
+      const holidayMapsByGroupToday = await getHolidayMapsByGroup(queryDB, date, date);
+      const branchTypeByUserIdToday = await getEmployeeBranchTypeMap(queryDB);
+      const empRowsToday: any[] = (await queryDB("SELECT id, user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const employeeIdByUserIdToday = new Map<number, number>(empRowsToday.map((e: any) => [Number(e.user_id), Number(e.id)]));
+      const rosterToday = await loadRoster(queryDB, date, date, [...employeeIdByUserIdToday.values()]);
+      const isHolidayForUser = (userId: number) => {
+        const base = holidayMapsByGroupToday[branchTypeByUserIdToday.get(userId) || "head_office"];
+        const employeeId = employeeIdByUserIdToday.get(Number(userId));
+        return !!(employeeId ? rosterToday.holidaysFor(employeeId, base) : base).get(date);
+      };
 
       const presentIds = new Set(present.map((p: any) => p.user_id));
-      const absent = holidayToday
-        ? []
-        : relevantUsers
-            .filter((u: any) => !presentIds.has(u.id))
-            .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null }));
-      const onHoliday = holidayToday
-        ? relevantUsers
-            .filter((u: any) => !presentIds.has(u.id))
-            .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null }))
-        : [];
+      const absentOrHoliday = relevantUsers
+        .filter((u: any) => !presentIds.has(u.id))
+        .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null, on_holiday: isHolidayForUser(u.id) }));
+      const absent = absentOrHoliday.filter((u: any) => !u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
+      const onHoliday = absentOrHoliday.filter((u: any) => u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
 
       present.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
       absent.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
       onHoliday.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+
+      // Top-level day_type/holiday_title — best-effort "is today special at
+      // all" summary for the UI's tab label (see AdminPanel.tsx), not a
+      // per-user truth (that's what the on_holiday array's own on_holiday
+      // flag per row is for, now that Head Office and Project-site
+      // Employees can each have a different answer for the same date).
+      // Prefers whichever group actually has an entry for today.
+      const holidayTodayEitherGroup =
+        holidayMapsByGroupToday.head_office.get(date) || holidayMapsByGroupToday.project_site.get(date) || null;
 
       res.json({
         date,
         present,
         absent,
         on_holiday: onHoliday,
-        day_type: holidayToday?.day_type || null,
-        holiday_title: holidayToday?.title || null,
+        day_type: holidayTodayEitherGroup?.day_type || null,
+        holiday_title: holidayTodayEitherGroup?.title || null,
         total_users: relevantUsers.length
       });
     } catch (err: any) {

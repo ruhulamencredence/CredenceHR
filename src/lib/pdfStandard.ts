@@ -20,14 +20,22 @@
 import type jsPDFType from 'jspdf';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from './api';
-// This workspace has a single company, so there is no active-company switch.
-const getActiveCompanyId = (): number | null => null;
+import { getActiveCompanyId } from './company';
 import { loadImageElement } from './pdfLetterhead';
 
 export interface PdfCompany {
   name: string;
   address: string | null;
   logo: HTMLImageElement | null;
+}
+
+// The last company loaded, so the synchronous drawPdfLetterhead (used by
+// most exports) can draw the same header without fetching. App.tsx warms it
+// after sign-in (preloadPdfCompany).
+let cached: PdfCompany | null = null;
+export const cachedPdfCompany = () => cached;
+export function preloadPdfCompany(token: string): void {
+  loadPdfCompany(token).catch(() => {});
 }
 
 export async function loadPdfCompany(token: string): Promise<PdfCompany> {
@@ -54,7 +62,8 @@ export async function loadPdfCompany(token: string): Promise<PdfCompany> {
     // offline / no access — the defaults below
   }
   if (!logo) logo = await loadImageElement(credenceLogo).catch(() => null);
-  return { name, address, logo };
+  cached = { name, address, logo };
+  return cached;
 }
 
 const MARGIN = 8;
@@ -123,6 +132,14 @@ export function standardTable(startY: number) {
     showFoot: 'lastPage' as const
   };
 }
+
+// The same look for a table built with its own autoTable options (column
+// widths, didParseCell…): spread STD_TABLE_LOOK in, and wrap any own
+// `styles` as { ...STD_STYLES, ... }.
+export const STD_STYLES = { font: 'helvetica', fontSize: 7, cellPadding: 1.6, textColor: [40, 40, 40] as [number, number, number], lineColor: [215, 215, 215] as [number, number, number], lineWidth: 0.1, valign: 'middle' as const };
+export const STD_HEAD = { fillColor: [246, 246, 246] as [number, number, number], textColor: [40, 40, 40] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const };
+export const STD_FOOT = { fillColor: [255, 255, 255] as [number, number, number], textColor: [20, 20, 20] as [number, number, number], fontStyle: 'bold' as const };
+export const STD_TABLE_LOOK = { theme: 'grid' as const, styles: STD_STYLES, headStyles: STD_HEAD, footStyles: STD_FOOT };
 
 // 420 -> "420.00"; empty/zero shown as "-" when asked.
 export const pdfMoney = (n: number | null | undefined, dashZero = false) =>

@@ -1,27 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X, ShieldCheck, CalendarClock, GitBranch, Trash2, PlayCircle, Power } from 'lucide-react';
 import { User, LeaveBalance, LeaveCategoryPolicy, LeaveYearSettings, LeaveBalanceWorkflow } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { Combobox } from './Combobox';
 interface LeaveManageProps {
   token: string;
   user: User;
   onBack: () => void;
 }
 
-// "Self Service" > "Leave Manage" — reachable only for a Superadmin, or any
+// Admin Panel > HRM > Leave > "Leave Manage" — reachable only for a Superadmin, or any
 // Admin/User the Superadmin has granted can_manage_leave to (Admin Panel ->
 // Users -> Module Access -> "Also allow editing Leave balances"); see
-// GlobalSidebar.tsx's canManageLeave gate on this menu item. Split out of the
-// old combined LeaveManagement.tsx — the plain "view only my own balance"
-// case that file used to also handle now lives in its own always-available
-// MyLeave.tsx page instead, so this page no longer needs (or renders) that
-// branch at all.
+// GlobalSidebar.tsx's canManageLeave gate on this menu item. An account's
+// own balance (view only) is on Self Service -> Leave Application
+// (LeaveReviewPage.tsx), so this page only ever manages everyone's.
 export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack }) => {
   const canManageAll = user.role === 'superadmin' || !!user.can_manage_leave;
+  // Leave Rules (accrual, carry-forward, who may apply) have their own layer, off until ticked.
+  const canRules = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('leave_rules');
   // Same isNativeApp split JobEditPanel.tsx already uses: the web build keeps
   // the table below untouched, the Android APK build gets a card list instead
   // (a wide multi-column table doesn't work well on a phone screen).
@@ -31,6 +34,14 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  // The list is paged by the server (and searched there), so only one page of
+  // accounts is ever loaded and drawn.
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const balancesReq = useRef(0);
   // Row currently being edited (by user_id) plus its in-progress field values —
   // only ever relevant when canManageAll is true.
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -68,13 +79,22 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   // ever shown/usable when canManageAll is true, same as the Bulk panel.
   const [showPoliciesPanel, setShowPoliciesPanel] = useState(false);
   const [policies, setPolicies] = useState<LeaveCategoryPolicy[]>([]);
-  const [policyDraft, setPolicyDraft] = useState<Record<string, { min_advance_notice_days: string; reliever_required: boolean; max_consecutive_days: string; require_paid_leave_exhausted: boolean }>>({});
+  const [policyDraft, setPolicyDraft] = useState<Record<string, { min_advance_notice_days: string; reliever_required: boolean; max_consecutive_days: string; require_paid_leave_exhausted: boolean; count_off_days: boolean }>>({});
   const [savingPolicyFor, setSavingPolicyFor] = useState<string | null>(null);
   const [policyError, setPolicyError] = useState('');
   const [policySuccess, setPolicySuccess] = useState('');
+  // Leave Rules per Leave Type (gender, months of service, days earned a month,
+  // balance cap, carry-forward limit) — kept as text while typing.
+  type RulesDraft = { gender: string; min_service_months: string; accrual_per_month: string; balance_cap: string; carry_forward_max: string };
+  const [rulesDraft, setRulesDraft] = useState<Record<string, RulesDraft>>({});
+  const [savingRulesFor, setSavingRulesFor] = useState<string | null>(null);
+  const [accrualRunning, setAccrualRunning] = useState(false);
+  const emptyRules: RulesDraft = { gender: 'any', min_service_months: '0', accrual_per_month: '0', balance_cap: '', carry_forward_max: '' };
+  const rulesFor = (key: string): RulesDraft => rulesDraft[key] || emptyRules;
+  const setRules = (key: string, patch: Partial<RulesDraft>) => setRulesDraft((prev) => ({ ...prev, [key]: { ...(prev[key] || emptyRules), ...patch } }));
 
   const draftFor = (categoryKey: string) =>
-    policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false };
+    policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false, count_off_days: true };
 
   const fetchPolicies = async () => {
     try {
@@ -83,6 +103,20 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave Policies');
       const rows: LeaveCategoryPolicy[] = Array.isArray(data) ? data : [];
       setPolicies(rows);
+      setRulesDraft(
+        Object.fromEntries(
+          rows.map((p) => [
+            p.category_key,
+            {
+              gender: p.gender || 'any',
+              min_service_months: String(p.min_service_months ?? 0),
+              accrual_per_month: String(p.accrual_per_month ?? 0),
+              balance_cap: p.balance_cap == null ? '' : String(p.balance_cap),
+              carry_forward_max: p.carry_forward_max == null ? '' : String(p.carry_forward_max)
+            }
+          ])
+        )
+      );
       setPolicyDraft((prev) => {
         const next = { ...prev };
         for (const p of rows) {
@@ -90,7 +124,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
             min_advance_notice_days: String(p.min_advance_notice_days),
             reliever_required: p.reliever_required,
             max_consecutive_days: p.max_consecutive_days === null ? '' : String(p.max_consecutive_days),
-            require_paid_leave_exhausted: p.require_paid_leave_exhausted
+            require_paid_leave_exhausted: p.require_paid_leave_exhausted,
+            count_off_days: p.count_off_days !== false
           };
         }
         return next;
@@ -129,7 +164,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
           min_advance_notice_days: minAdvanceNoticeDays,
           reliever_required: draft.reliever_required,
           max_consecutive_days: maxConsecutiveDays,
-          require_paid_leave_exhausted: draft.require_paid_leave_exhausted
+          require_paid_leave_exhausted: draft.require_paid_leave_exhausted,
+          count_off_days: draft.count_off_days
         })
       });
       const data = await res.json();
@@ -140,6 +176,58 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       setPolicyError(err.message || 'Failed to save this Leave Policy');
     } finally {
       setSavingPolicyFor(null);
+    }
+  };
+
+  const saveRules = async (categoryKey: string) => {
+    const d = rulesFor(categoryKey);
+    const num = (v: string) => (v.trim() === '' ? null : Number(v));
+    const cap = num(d.balance_cap);
+    const carry = num(d.carry_forward_max);
+    if ([Number(d.min_service_months), Number(d.accrual_per_month), cap, carry].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) {
+      setPolicySuccess('');
+      setPolicyError('Months of service, days earned, balance cap and carry-forward limit must be 0 or more (cap and carry-forward may be blank).');
+      return;
+    }
+    setSavingRulesFor(categoryKey);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-policies/${encodeURIComponent(categoryKey)}/rules`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ gender: d.gender, min_service_months: Number(d.min_service_months), accrual_per_month: Number(d.accrual_per_month), balance_cap: cap, carry_forward_max: carry })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save the Leave Rules');
+      setPolicies((prev) => [...prev.filter((p) => p.category_key !== categoryKey), data]);
+      setPolicySuccess(
+        data.accrual_per_month > 0
+          ? `Rules saved. ${data.accrual_per_month} day(s) a month are credited from ${data.accrual_from} (nothing is back-paid).`
+          : 'Rules saved.'
+      );
+    } catch (err: any) {
+      setPolicyError(err.message || 'Failed to save the Leave Rules');
+    } finally {
+      setSavingRulesFor(null);
+    }
+  };
+
+  const runAccrualNow = async () => {
+    setAccrualRunning(true);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-accrual/run'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not run the accrual');
+      setPolicySuccess(
+        data.credited > 0 ? `${data.days} day(s) credited to ${data.credited} account(s) for ${data.months} month(s).` : 'Nothing owed right now — every completed month is already credited.'
+      );
+    } catch (err: any) {
+      setPolicyError(err.message || 'Could not run the accrual');
+    } finally {
+      setAccrualRunning(false);
     }
   };
 
@@ -168,6 +256,17 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     const d = new Date(2024, month - 1, day);
     d.setDate(d.getDate() + 1);
     return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // Only month-day is stored; the date pickers show it on the current Leave
+  // Year (Close this year, Start the year after when it comes round again),
+  // so Dec 31 2026 -> Jan 1 2027 instead of an old fixed year that made the
+  // Start Date look earlier than the Close Date. Feb 29 moves to the next
+  // leap year so the picker never shows an invalid date.
+  const yearDateValue = (monthDay: string, yearOffset: number): string => {
+    let year = new Date().getFullYear() + yearOffset;
+    if (monthDay === '02-29') while (!(year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0))) year++;
+    return `${year}-${monthDay}`;
   };
 
   const fetchYearSettings = async () => {
@@ -345,7 +444,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   };
 
   const deleteWorkflow = async (workflowId: number) => {
-    if (!window.confirm('Delete this Leave Balance Workflow? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this Leave Balance Workflow? This cannot be undone.'))) return;
     setDeletingWorkflowId(workflowId);
     setWorkflowError('');
     try {
@@ -478,37 +577,71 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     });
   };
 
-  const departmentOptions = Array.from(
-    new Set(balances.map((b) => b.department).filter((d): d is string => !!d))
-  ).sort((a, b) => a.localeCompare(b));
+  const departmentOptions = departments.length
+    ? departments
+    : Array.from(new Set(balances.map((b) => b.department).filter((d): d is string => !!d))).sort((a, b) => a.localeCompare(b));
 
   const fetchBalances = async () => {
+    const req = ++balancesReq.current;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(apiUrl('/api/leave-balances'), {
+      const qs = canManageAll ? `?page=${page}&limit=${pageSize}&q=${encodeURIComponent(appliedSearch)}` : '';
+      const res = await fetch(apiUrl(`/api/leave-balances${qs}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave balances');
-      setBalances(Array.isArray(data) ? data : []);
+      if (req !== balancesReq.current) return; // a newer request is on its way
+      if (Array.isArray(data)) {
+        setBalances(data);
+        setTotal(data.length);
+      } else {
+        setBalances(Array.isArray(data.rows) ? data.rows : []);
+        setTotal(Number(data.total) || 0);
+        if (Array.isArray(data.departments)) setDepartments(data.departments);
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to load Leave balances');
+      if (req === balancesReq.current) setError(err.message || 'Failed to load Leave balances');
     } finally {
-      setLoading(false);
+      if (req === balancesReq.current) setLoading(false);
     }
   };
 
+  // The name search waits for a pause in typing, then goes back to page 1.
+  useEffect(() => {
+    if (search === appliedSearch) return;
+    const t = setTimeout(() => {
+      setAppliedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
   useEffect(() => {
     fetchBalances();
-    if (canManageAll) {
-      fetchCategories();
-      fetchPolicies();
-      fetchYearSettings();
-      fetchWorkflows();
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, appliedSearch]);
+
+  // Leave categories are columns of the list, so they come with it; the other
+  // panels start collapsed and load their data only when opened.
+  useEffect(() => {
+    if (canManageAll) fetchCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (canManageAll && showPoliciesPanel) fetchPolicies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPoliciesPanel]);
+  useEffect(() => {
+    if (canManageAll && showYearSettingsPanel) fetchYearSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showYearSettingsPanel]);
+  useEffect(() => {
+    if (canManageAll && showWorkflowsPanel) fetchWorkflows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWorkflowsPanel]);
 
   const startEdit = (b: LeaveBalance) => {
     setEditingId(b.user_id);
@@ -558,9 +691,9 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     }
   };
 
-  const filtered = balances.filter((b) =>
-    (b.user_name || '').toLowerCase().includes(search.toLowerCase())
-  );
+  // Search is done by the server (see fetchBalances), so the page is shown as it came.
+  const filtered = balances;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   const selectBulkAll = () => {
     setBulkApplyToAll(true);
@@ -641,7 +774,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
-            <ModulePath path={['Self Service', 'Leave Manage']} />
+            <ModulePath path={['Admin Panel', 'HRM', 'Leave', 'Leave Manage']} />
             <button
               type="button"
               onClick={onBack}
@@ -661,7 +794,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
               <div>
                 <h1 className="text-lg font-semibold text-slate-800">Leave Manage</h1>
                 <p className="text-xs text-slate-500 mt-0.5 max-w-md">
-                  Set the Casual Leave, Sick Leave and Leave without Pay balance for every account.
+                  Set every account's leave balance (Casual, Sick, Earn and any other category), the leave rules, the Leave Year and yearly balance workflows.
                 </p>
               </div>
             </div>
@@ -1033,12 +1166,28 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   <p className="text-[11px] text-slate-500 mb-3 max-w-2xl">
                     Set the rules for each Leave Type — how many days ahead it must be applied, whether a Reliever is
                     required, the longest single application allowed, and (for a type like Leave Without Pay) whether
-                    Casual/Sick must be exhausted first. Enforced automatically when anyone submits a Leave Application.
+                    Casual/Sick must be exhausted first, and whether weekends and holidays inside a leave come off the
+                    balance. Enforced automatically when anyone submits a Leave Application.
                   </p>
+
+                  {canRules && (
+                    <div className="mb-3 flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => void runAccrualNow()}
+                        disabled={accrualRunning}
+                        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {accrualRunning ? <Spinner size={12} /> : <PlayCircle className="w-3.5 h-3.5 text-blue-600" />} Credit owed accrual now
+                      </button>
+                      <span className="text-[11px] text-slate-500">Days earned each month are credited by themselves; this just does it right now.</span>
+                    </div>
+                  )}
 
                   <div className="space-y-3">
                     {policyCategories.map((cat) => {
                       const draft = draftFor(cat.key);
+                      const rules = rulesFor(cat.key);
                       const isSaving = savingPolicyFor === cat.key;
                       return (
                         <div key={cat.key} className="rounded-xl border border-slate-200 bg-white p-3.5">
@@ -1112,7 +1261,128 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                               />
                               Only after Casual + Sick exhausted
                             </label>
+
+                            <div className="sm:col-span-2 lg:col-span-4">
+                              <label htmlFor={`count-off-${cat.key}`} className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Weekends &amp; holidays inside the leave
+                              </label>
+                              <select
+                                id={`count-off-${cat.key}`}
+                                value={draft.count_off_days ? 'count' : 'skip'}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), count_off_days: e.target.value === 'count' } }))
+                                }
+                                className="w-full sm:max-w-md px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="count">Count them (every calendar day comes off the balance)</option>
+                                <option value="skip">Don't count them (only working days come off the balance)</option>
+                              </select>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                E.g. Thursday to Saturday with Friday off: {draft.count_off_days ? '3 days' : '2 days'} off the balance. Salary is the same either way — off days are never unpaid.
+                              </p>
+                            </div>
                           </div>
+
+                          {canRules && (
+                            <div className="mt-3 pt-3 border-t border-slate-100">
+                              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                                <span className="text-[11px] font-bold text-slate-700">Leave Rules</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setRules(cat.key, { gender: 'female', min_service_months: '6' })}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    title="Female staff with 6 months of service. Also set Max Consecutive Days above (16 weeks = 112)."
+                                  >
+                                    Maternity preset
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRules(cat.key, { accrual_per_month: '1.7', balance_cap: rules.balance_cap })}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    title="About 1 day for every 18 days (≈ 1.7 a month)"
+                                  >
+                                    Earned leave: ~1 day per 18
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveRules(cat.key)}
+                                    disabled={savingRulesFor === cat.key}
+                                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+                                  >
+                                    {savingRulesFor === cat.key ? <Spinner size={12} className="text-white" /> : <Save className="w-3 h-3" />}
+                                    Save rules
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Who may apply</label>
+                                  <select
+                                    value={rules.gender}
+                                    onChange={(e) => setRules(cat.key, { gender: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="any">Everyone</option>
+                                    <option value="female">Female only</option>
+                                    <option value="male">Male only</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Months of service needed</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={rules.min_service_months}
+                                    onChange={(e) => setRules(cat.key, { min_service_months: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">From the joining date; 0 = none</p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Days earned per month</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={0.1}
+                                    value={rules.accrual_per_month}
+                                    onChange={(e) => setRules(cat.key, { accrual_per_month: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">
+                                    0 = none{(() => {
+                                      const p = policies.find((x) => x.category_key === cat.key);
+                                      return p?.accrual_from && (p.accrual_per_month || 0) > 0 ? ` · from ${p.accrual_from}` : '';
+                                    })()}
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Balance cap (days)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="No cap"
+                                    value={rules.balance_cap}
+                                    onChange={(e) => setRules(cat.key, { balance_cap: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">Earning stops at this</p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Carry forward (days)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="No rule"
+                                    value={rules.carry_forward_max}
+                                    onChange={(e) => setRules(cat.key, { carry_forward_max: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">Most that moves into next year; 0 = all lapse</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1164,7 +1434,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                       <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Close Date</label>
                       <input
                         type="date"
-                        value={`2024-${yearSettingsDraft.close_month_day}`}
+                        value={yearDateValue(yearSettingsDraft.close_month_day, 0)}
                         onChange={(e) => {
                           const parts = e.target.value.split('-');
                           if (parts.length === 3) handleCloseDateChange(`${parts[1]}-${parts[2]}`);
@@ -1176,7 +1446,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                       <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Start Date (suggested)</label>
                       <input
                         type="date"
-                        value={`2024-${yearSettingsDraft.start_month_day}`}
+                        value={yearDateValue(yearSettingsDraft.start_month_day, yearSettingsDraft.start_month_day <= yearSettingsDraft.close_month_day ? 1 : 0)}
                         onChange={(e) => {
                           const parts = e.target.value.split('-');
                           if (parts.length === 3) setYearSettingsDraft((prev) => ({ ...prev, start_month_day: `${parts[1]}-${parts[2]}` }));
@@ -1367,20 +1637,18 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                         </div>
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 mb-1">Designation</label>
-                          <input
-                            type="text"
-                            list="leave-workflow-designation-options"
-                            disabled={addingWorkflow}
-                            value={newWorkflowDesignation}
-                            onChange={(e) => setNewWorkflowDesignation(e.target.value)}
-                            placeholder="e.g. Manager"
-                            className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                          />
-                          <datalist id="leave-workflow-designation-options">
-                            {workflowDesignationOptions.map((d) => (
-                              <option key={d} value={d} />
-                            ))}
-                          </datalist>
+                          <div className="w-40">
+                            <Combobox
+                              free
+                              ariaLabel="Designation"
+                              disabled={addingWorkflow}
+                              value={newWorkflowDesignation}
+                              onChange={setNewWorkflowDesignation}
+                              options={workflowDesignationOptions}
+                              placeholder="e.g. Manager"
+                              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                            />
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -1463,10 +1731,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
           )}
 
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-              <Spinner size={24} className="mb-2" />
-              <p className="text-xs">Loading Leave balances...</p>
-            </div>
+            <LoadingBlock />
           ) : canManageAll && isNativeApp ? (
             <div className="p-4 space-y-2.5">
               {filtered.map((b) => {
@@ -1691,6 +1956,49 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
             <p className="p-10 text-center text-xs text-slate-400">
               You don't have access to manage Leave balances.
             </p>
+          )}
+          {canManageAll && !loading && total > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-slate-200 text-xs text-slate-600">
+              <span>
+                {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} account{total === 1 ? '' : 's'}
+              </span>
+              <div className="flex items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                  aria-label="Rows per page"
+                >
+                  {[25, 50, 100, 200].map((n) => (
+                    <option key={n} value={n}>
+                      {n} / page
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span>
+                  Page {page} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

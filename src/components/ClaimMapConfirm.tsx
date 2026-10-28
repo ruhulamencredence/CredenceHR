@@ -181,7 +181,7 @@ export default function ClaimMapConfirm({
       .bindPopup(kind === 'out' ? 'Checking out here' : 'You are here');
 
     if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: CLAIM_ZOOM });
+      map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: CLAIM_ZOOM });
     }
 
     setTimeout(() => {
@@ -220,7 +220,7 @@ export default function ClaimMapConfirm({
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasCheckIn) bounds.push([checkInCoords!.latitude, checkInCoords!.longitude]);
         if (bounds.length > 1) {
-          mapRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: CLAIM_ZOOM });
+          mapRef.current.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: CLAIM_ZOOM });
         } else {
           mapRef.current.panTo([fresh.latitude, fresh.longitude]);
         }

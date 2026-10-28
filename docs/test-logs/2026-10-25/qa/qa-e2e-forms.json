@@ -1,0 +1,69 @@
+{
+ "when": "2026-10-25T21:02:16.269Z",
+ "summary": {
+  "PASS": 10,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "E2E-01",
+   "status": "PASS",
+   "name": "Wrong password: the form says so and does not sign in",
+   "detail": "WELCOME BACK Sign in to Credence Group Invalid login ID or password Email or Project Name Password Forgot password? Sign in Don't have an account? Contact your Admin to get one created. Not Creden"
+  },
+  {
+   "id": "E2E-02",
+   "status": "PASS",
+   "name": "Right password: signed in, the menu is shown",
+   "detail": ""
+  },
+  {
+   "id": "E2E-03",
+   "status": "PASS",
+   "name": "New Employee: a 10-year-old date of birth is refused with a message, nothing saved",
+   "detail": "saved 0"
+  },
+  {
+   "id": "E2E-04",
+   "status": "PASS",
+   "name": "New Employee: after fixing the date it is saved with every field as typed",
+   "detail": "1\tExecutive\tui.form.person@credence.test\t2026-10-01\t1995-05-20\t3"
+  },
+  {
+   "id": "E2E-05",
+   "status": "PASS",
+   "name": "New Employee: without a Name nothing is saved",
+   "detail": ""
+  },
+  {
+   "id": "E2E-06",
+   "status": "PASS",
+   "name": "The new employee signs in with the easy password",
+   "detail": ""
+  },
+  {
+   "id": "E2E-07",
+   "status": "PASS",
+   "name": "Leave form: an employee applies for Casual Leave today; it is saved as pending",
+   "detail": "1\tpending\tcasual\t2026-10-26\tFamily programme (typed in the form)"
+  },
+  {
+   "id": "E2E-08",
+   "status": "PASS",
+   "name": "Approve Applications: clicking Approve approves the leave and takes 1 day off the balance",
+   "detail": "status approved; casual balance 9.0"
+  },
+  {
+   "id": "E2E-09",
+   "status": "PASS",
+   "name": "The approved leave leaves the Pending list",
+   "detail": ""
+  },
+  {
+   "id": "E2E-10",
+   "status": "PASS",
+   "name": "Timesheet correction: In 22:00 / Out 06:00 shows \"Next day\" and is saved as a night shift ending the next morning",
+   "detail": "hint true; saved 2026-10-24 22:00\t2026-10-25 06:00"
+  }
+ ]
+}

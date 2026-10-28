@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import {
@@ -23,10 +23,13 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { payslipRows, pdfMoney, PayslipLine } from '../lib/payslipRows';
+import { PayrollAdjustmentsPanel } from './PayrollAdjustmentsPanel';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { PayrollListPanel } from './PayrollListPanel';
 import { SalaryStructureSetupPanel } from './SalaryStructureSetupPanel';
@@ -34,8 +37,12 @@ import { RunPayrollWizard } from './RunPayrollWizard';
 import { AttendanceOvertimeSummaryPanel } from './AttendanceOvertimeSummaryPanel';
 import { PayslipManagementPanel } from './PayslipManagementPanel';
 import { LoanAdvanceManagementPanel } from './LoanAdvanceManagementPanel';
+import { PayrollApprovalPanel } from './PayrollApprovalPanel';
+import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
+import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD, STD_FOOT } from '../lib/pdfStandard';
 interface PayrollModuleProps {
   token: string;
   onBack: () => void;
@@ -101,6 +108,9 @@ interface PayrollRecord {
   pf_deduction: number;
   advance_deduction: number;
   other_deduction: number;
+  item_earnings?: number;
+  item_deductions?: number;
+  pay_lines?: PayslipLine[];
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
@@ -273,6 +283,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
   const [loading, setLoading] = useState(true);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     (async () => {
@@ -290,13 +301,14 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
     })();
   }, [monthYear]);
 
-  const downloadPayslip = async (record: PayrollRecord) => {
+  const downloadPayslip = async (record: PayrollRecord, mode: 'save' | 'email' = 'save') => {
     setGeneratingId(record.id);
     try {
       const logoImg = await loadImageElement(credenceLogo);
       const doc = new jsPDF();
       const startY = drawPdfLetterhead(doc, logoImg, {
         reportTitle: `Payslip — ${monthLabel(record.month_year)}`,
+        filtersLabel: 'Employee Details:',
         filters: [
           ['Employee', `${record.employee_name}${record.employee_code ? ` (${record.employee_code})` : ''}`],
           ['Designation', record.designation || '—'],
@@ -309,25 +321,19 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
         startY,
         margin: { top: startY, left: 14, right: 14 },
         head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
-        body: [
-          ['Basic Salary', money(record.basic_amount), 'Absent / LWP Deduction', money(record.absent_deduction)],
-          ['Allowances', money(record.allowances_total), 'Tax Deduction', money(record.tax_deduction)],
-          ['Overtime', money(record.overtime_amount), 'Provident Fund', money(record.pf_deduction)],
-          ['Bonus', money(record.bonus_amount), 'Advance Recovery', money(record.advance_deduction)],
-          ['', '', 'Other Deduction', money(record.other_deduction)]
-        ],
-        foot: [['Gross Earned', money(record.gross_earned), 'Total Deduction', money(record.total_deduction)]],
+        body: payslipRows(record, pdfMoney),
+        foot: [['Gross Earned', pdfMoney(record.gross_earned), 'Total Deduction', pdfMoney(record.total_deduction)]],
         theme: 'grid',
-        styles: { fontSize: 9, cellPadding: 2.5 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' }
+        styles: { ...STD_STYLES, fontSize: 9, cellPadding: 2.5 },
+        headStyles: { ...STD_HEAD },
+        footStyles: { ...STD_FOOT }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 10;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12.5);
       doc.setTextColor(15, 23, 42);
-      doc.text(`Net Salary: ${money(record.net_salary)}`, 14, finalY);
+      doc.text(`Net Salary: ${pdfMoney(record.net_salary)}`, 14, finalY);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
@@ -341,6 +347,10 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
       }
 
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Payslip_${record.employee_name.replace(/\s+/g, '_')}_${record.month_year}.pdf`, title: `Payslip — ${monthLabel(record.month_year)}` });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Payslip_${record.employee_name.replace(/\s+/g, '_')}_${record.month_year}.pdf`);
     } finally {
       setGeneratingId(null);
@@ -364,7 +374,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
 
         <div className="p-2">
           {loading ? (
-            <div className="flex justify-center py-10"><Spinner size={24} /></div>
+            <LoadingBlock />
           ) : error ? (
             <p className="text-xs text-rose-600 text-center py-10">{error}</p>
           ) : records.length === 0 ? (
@@ -377,13 +387,22 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
                     <p className="text-sm font-medium text-slate-800 truncate">{r.employee_name}</p>
                     <p className="text-[11px] text-slate-400">{r.department || '—'} &middot; Net {money(r.net_salary)}</p>
                   </div>
-                  <button
-                    onClick={() => downloadPayslip(r)}
-                    disabled={generatingId === r.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
-                  >
-                    {generatingId === r.id ? <Spinner size={14} /> : <FileDown className="w-3.5 h-3.5" />} PDF
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => downloadPayslip(r)}
+                      disabled={generatingId === r.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
+                    >
+                      {generatingId === r.id ? <Spinner size={14} /> : <FileDown className="w-3.5 h-3.5" />} PDF
+                    </button>
+                    {canEmailReports && (
+                      <EmailReportButton
+                        onClick={() => downloadPayslip(r, 'email')}
+                        disabled={generatingId === r.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
+                      />
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -408,6 +427,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
   const [error, setError] = useState('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     (async () => {
@@ -442,6 +462,9 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
         Allowances: r.allowances_total,
         Overtime: r.overtime_amount,
         Bonus: r.bonus_amount,
+        'Extra Pay (Allowance/Arrear)': Number(r.item_earnings) || 0,
+        'Extra Deduction (Deduction/Recovery)': Number(r.item_deductions) || 0,
+        'Extra Lines': (r.pay_lines || []).map((l) => `${l.name} ${l.kind === 'earning' ? '+' : '-'}${l.amount}`).join('; '),
         'Gross Earned': r.gross_earned,
         'Total Deduction': r.total_deduction,
         'Net Salary': r.net_salary,
@@ -456,7 +479,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
     }
   };
 
-  const exportPdf = async () => {
+  const exportPdf = async (mode: 'save' | 'email' = 'save') => {
     setExporting('pdf');
     try {
       const logoImg = await loadImageElement(credenceLogo);
@@ -469,6 +492,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
         ]
       });
       autoTable(doc, {
+      theme: 'grid',
         startY,
         margin: { top: startY, left: 10, right: 10 },
         head: [['Employee', 'Code', 'Department', 'Gross Earned', 'Total Deduction', 'Net Salary', 'Status']],
@@ -481,11 +505,14 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
           money(r.net_salary),
           r.payment_status
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
-        alternateRowStyles: { fillColor: [248, 250, 252] }
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5 },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Payroll_Report_${monthYear}.pdf`, title: `Payroll Report — ${monthLabel(monthYear)}` });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Payroll_Report_${monthYear}.pdf`);
     } finally {
       setExporting(null);
@@ -520,12 +547,19 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
                 {exporting === 'excel' ? <Spinner size={16} /> : <FileSpreadsheet className="w-4 h-4" />} Export as Excel
               </button>
               <button
-                onClick={exportPdf}
+                onClick={() => exportPdf()}
                 disabled={records.length === 0 || exporting !== null}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg transition-all disabled:opacity-50"
               >
                 {exporting === 'pdf' ? <Spinner size={16} /> : <FileDown className="w-4 h-4" />} Export as PDF
               </button>
+              {canEmailReports && (
+                <EmailReportButton
+                  onClick={() => exportPdf('email')}
+                  disabled={records.length === 0 || exporting !== null}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg transition-all disabled:opacity-50"
+                />
+              )}
             </>
           )}
         </div>
@@ -542,8 +576,19 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'setup'
-  >('dashboard');
+    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'approval' | 'activity'
+  >(() => {
+    // A Loan / Advance alert opens Loans & Advances straight away.
+    try {
+      const t = sessionStorage.getItem('payroll_tab');
+      sessionStorage.removeItem('payroll_tab');
+      if (t === 'loans') return 'loans';
+      if (t === 'approval') return 'approval';
+    } catch {
+      // storage unavailable
+    }
+    return 'dashboard';
+  });
   const [monthYear, setMonthYear] = useState(currentMonthYear());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -553,6 +598,53 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showPayslipModal, setShowPayslipModal] = useState(false);
   const [showReportsModal, setShowReportsModal] = useState(false);
+
+  // Payroll -> Activity Log: every visit here, each page opened and each
+  // report window, recorded with who and when (PayrollApprovalRoutes.ts).
+  const logVisit = useCallback(
+    (kind: 'open' | 'view', area: string, detail?: string) => {
+      fetch(apiUrl('/api/payroll/access-log'), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, area, detail })
+      }).catch(() => {});
+    },
+    [authHeaders]
+  );
+  const TAB_NAMES: Record<string, string> = {
+    dashboard: 'Dashboard',
+    list: 'Payroll List',
+    attendance: 'Attendance & OT',
+    payslips: 'Payslips',
+    loans: 'Loans & Advances',
+    bonus: 'Bonus & Incentive',
+    adjustments: 'Allowance & Adjustment',
+    setup: 'Salary Setup',
+    approval: 'Approval',
+    activity: 'Activity Log'
+  };
+  useEffect(() => {
+    logVisit('open', 'Opened Payroll');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    logVisit('view', TAB_NAMES[activeTab] || activeTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  // Activity Log tab: only for Payroll's "access_log" layer. canEdit = the
+  // "Payroll" layer; a "View only" account (Audit / Accounts) gets just the
+  // Dashboard, the list, Approval and the log — no tab that changes salaries.
+  const [canSeeLog, setCanSeeLog] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        setCanSeeLog(!!d?.access_log);
+        setCanEdit(!!d?.edit);
+      })
+      .catch(() => {});
+  }, [authHeaders]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true);
@@ -590,7 +682,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
-            <ModulePath path={['Self Service', 'Payroll']} />
+            <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} />
             <button
               type="button"
               onClick={onBack}
@@ -633,7 +725,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
         </div>
 
         {/* Dashboard / Payroll List tabs */}
-        <div className="flex items-center gap-1 mb-4 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+        <div className="flex items-center gap-1 mb-4 bg-white border border-slate-200 rounded-xl p-1 w-fit max-w-full overflow-x-auto [&>button]:whitespace-nowrap [&>button]:shrink-0">
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -650,50 +742,90 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           >
             Payroll List
           </button>
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('attendance')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Attendance & OT
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('payslips')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'payslips' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Payslips
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('loans')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'loans' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Loans & Advances
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('bonus')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'bonus' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Bonus & Incentive
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('adjustments')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'adjustments' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Allowance & Adjustment
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('setup')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'setup' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Salary Setup
+            </button>
+          )}
           <button
-            onClick={() => setActiveTab('attendance')}
+            onClick={() => setActiveTab('approval')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              activeTab === 'approval' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
             }`}
           >
-            Attendance & OT
+            Approval
           </button>
-          <button
-            onClick={() => setActiveTab('payslips')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'payslips' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Payslips
-          </button>
-          <button
-            onClick={() => setActiveTab('loans')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'loans' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Loans & Advances
-          </button>
-          <button
-            onClick={() => setActiveTab('bonus')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'bonus' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Bonus & Incentive
-          </button>
-          <button
-            onClick={() => setActiveTab('setup')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'setup' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Salary Setup
-          </button>
+          {canSeeLog && (
+            <button
+              onClick={() => setActiveTab('activity')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Activity Log
+            </button>
+          )}
         </div>
 
         {activeTab === 'list' ? (
-          <PayrollListPanel token={token} />
+          <PayrollListPanel token={token} canEdit={canEdit} />
+        ) : !canEdit && ['attendance', 'payslips', 'loans', 'bonus', 'adjustments', 'setup'].includes(activeTab) ? (
+          <PayrollApprovalPanel token={token} monthYear={monthYear} />
         ) : activeTab === 'attendance' ? (
           <AttendanceOvertimeSummaryPanel token={token} />
         ) : activeTab === 'payslips' ? (
@@ -702,8 +834,14 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           <LoanAdvanceManagementPanel token={token} />
         ) : activeTab === 'bonus' ? (
           <BonusIncentiveManagementPanel token={token} />
+        ) : activeTab === 'adjustments' ? (
+          <PayrollAdjustmentsPanel token={token} />
         ) : activeTab === 'setup' ? (
           <SalaryStructureSetupPanel token={token} />
+        ) : activeTab === 'approval' ? (
+          <PayrollApprovalPanel token={token} monthYear={monthYear} />
+        ) : activeTab === 'activity' && canSeeLog ? (
+          <PayrollActivityLog token={token} />
         ) : forbidden ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
@@ -711,7 +849,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <p className="text-xs text-slate-400 mt-1">Ask an Admin to grant Payroll access from Admin Panel → Users → Module Access.</p>
           </div>
         ) : loading && !summary ? (
-          <div className="flex justify-center py-20"><Spinner size={28} /></div>
+          <LoadingBlock />
         ) : loadError ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <p className="text-sm text-rose-600">{loadError}</p>
@@ -769,20 +907,33 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Quick Actions</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {canEdit && (
+                  <>
                 <button
-                  onClick={() => setShowProcessModal(true)}
+                  onClick={() => {
+                    setShowProcessModal(true);
+                    logVisit('view', 'Run Payroll window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <PlayCircle className="w-4 h-4" /> Run Payroll
                 </button>
                 <button
-                  onClick={() => setShowPayslipModal(true)}
+                  onClick={() => {
+                    setShowPayslipModal(true);
+                    logVisit('view', 'Generate Payslips window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <ReceiptText className="w-4 h-4" /> Generate Payslips
                 </button>
+                  </>
+                )}
                 <button
-                  onClick={() => setShowReportsModal(true)}
+                  onClick={() => {
+                    setShowReportsModal(true);
+                    logVisit('view', 'Download Reports window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <FileSpreadsheet className="w-4 h-4" /> Download Reports
@@ -793,7 +944,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
         ) : null}
       </div>
 
-      {showProcessModal && (
+      {showProcessModal && canEdit && (
         <RunPayrollWizard
           token={token}
           initialMonthYear={monthYear}
@@ -801,7 +952,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           onCompleted={fetchSummary}
         />
       )}
-      {showPayslipModal && (
+      {showPayslipModal && canEdit && (
         <GeneratePayslipModal token={token} monthYear={monthYear} onClose={() => setShowPayslipModal(false)} />
       )}
       {showReportsModal && (

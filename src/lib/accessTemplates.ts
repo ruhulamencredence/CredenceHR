@@ -26,17 +26,33 @@ export type SelfServiceFeature =
   | 'can_view_conveyance_claims'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
-  | 'can_view_my_leave'
-  | 'can_receive_material'
-  | 'can_return_dispatch';
+  | 'can_view_tasks'
+  | 'can_view_mobile_bill'
+  | 'can_view_service_book'
+  | 'can_view_loan_request'
+  | 'can_view_targets'
+  | 'can_use_mail'
+  | 'can_view_roster'
+  | 'can_take_break'
+  | 'can_sign_documents'
+  | 'can_view_payslip'
+  | 'can_request_items';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
   can_view_conveyance_claims: 'conveyance-claim-access',
   can_view_timesheet: 'timesheet-access',
   can_view_leave_application: 'leave-application-access',
-  can_view_my_leave: 'my-leave-access',
-  can_receive_material: 'material-receive-access',
-  can_return_dispatch: 'return-dispatch-access'
+  can_view_tasks: 'tasks-access',
+  can_view_mobile_bill: 'mobile-bill-access',
+  can_view_service_book: 'service-book-access',
+  can_view_loan_request: 'loan-request-access',
+  can_view_targets: 'targets-access',
+  can_use_mail: 'mail-access',
+  can_view_roster: 'roster-access',
+  can_take_break: 'break-access',
+  can_sign_documents: 'sign-documents-access',
+  can_view_payslip: 'payslip-access',
+  can_request_items: 'request-items-access'
 };
 export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
 
@@ -50,9 +66,17 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', selfService: true },
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
-  { key: 'can_view_my_leave', label: 'My Leave', selfService: true },
-  { key: 'can_receive_material', label: 'Material Receive', selfService: true },
-  { key: 'can_return_dispatch', label: 'Take back / Confirm in Dispatch', selfService: true }
+  { key: 'can_view_tasks', label: 'My Tasks', selfService: true },
+  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true },
+  { key: 'can_view_service_book', label: 'My Service Book', selfService: true },
+  { key: 'can_view_loan_request', label: 'Loan / Advance Request', selfService: true },
+  { key: 'can_view_targets', label: 'My Targets', selfService: true },
+  { key: 'can_use_mail', label: 'Credence Mail', selfService: true },
+  { key: 'can_view_roster', label: 'My Duty Roster', selfService: true },
+  { key: 'can_take_break', label: 'Break Time', selfService: true },
+  { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true },
+  { key: 'can_view_payslip', label: 'My Payslip', selfService: true },
+  { key: 'can_request_items', label: 'SIM & ID Card requests', selfService: true }
 ];
 
 export interface AccessTemplate {
@@ -61,6 +85,7 @@ export interface AccessTemplate {
   description: string;
   features: TemplateFeature[];
   modules: string[];
+  // Given to every login Data Import -> Employee Details creates.
   is_default?: boolean;
 }
 

@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Navigation } from 'lucide-react';
+import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest, chatAllowed } from '../types';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, CreditCard, PackageCheck, Coffee, MessageSquareHeart } from 'lucide-react';
+import { canGiveFeedback } from './feedback/FeedbackPopup';
+import type { MoreItem } from './BottomNav';
+
+// Mobile Dashboard: at most this many quick access tiles; the rest go to the
+// bottom bar's More popup.
+const MAX_DASHBOARD_TILES = 9;
+type DashboardTile = MoreItem & { tileBg: string; badgeBg?: string };
+import { Navigation, Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
+import { useSiteSupervisor } from './TeamAttendance';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
 import { useStableCallback } from '../lib/useStableCallback';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -22,7 +31,10 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
+import { BookRideCard, useActiveRides } from './BookRideCard';
+import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
+import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
@@ -34,7 +46,10 @@ import { MyClaimsCard } from './MyClaimsCard';
 import { ConveyanceClaimCard } from './ConveyanceClaimCard';
 import { BottomNav } from './BottomNav';
 import { ModulePath } from './ModulePath';
+import { confirmDialog } from '../lib/confirmDialog';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -64,7 +79,19 @@ interface UserPanelProps {
   // localStorage-restored default on mount) instead of just the last thing
   // it was asked to navigate to.
   onActiveSectionChange?: (info: { desktop: string; mobile: string | null }) => void;
+  // Web Dashboard's Book a Ride quick access card -> Self Service -> Book a
+  // Ride (App.tsx), opened on the given tab.
+  onOpenBookRide?: (tab: BookRideTarget) => void;
+  // Dashboard's My Asset quick access card/tile -> Self Service -> My Asset.
+  onOpenMyAsset?: (target: MyAssetTarget) => void;
+  // Mobile More popup -> the rest of Self Service (App.tsx routes it the
+  // same way GlobalSidebar does).
+  onOpenSelfService?: (target: SelfServiceTarget) => void;
 }
+
+export type SelfServiceTarget =
+  | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
+  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -910,7 +937,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset, onOpenSelfService }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -918,6 +945,22 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // in its usual spot on first paint instead of only appearing once this
   // fetch completes.
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+  // Remote Attendance card's own Projects (GET /api/attendance/my-projects) —
+  // the pinned check-in Project, even without any Budget / Jobs / MPR access.
+  const [attendanceProjects, setAttendanceProjects] = useState<Project[]>([]);
+  const [attendanceProjectsLoaded, setAttendanceProjectsLoaded] = useState(false);
+  useEffect(() => {
+    if (!user.can_use_attendance) return;
+    let cancelled = false;
+    fetch(apiUrl('/api/attendance/my-projects'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => !cancelled && setAttendanceProjects(Array.isArray(rows) ? rows : []))
+      .catch(() => {})
+      .finally(() => !cancelled && setAttendanceProjectsLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user.can_use_attendance, user.attendance_project_id]);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   // System-wide "which Job is this MPR No already used under" lookup — kept separate
@@ -986,12 +1029,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
+  // Live badges for the mobile Dashboard's Book a Ride / My Asset tiles.
+  const activeRides = useActiveRides(token, user.id) || [];
+  const assetSummary = useMyAssetSummary(token);
+  const siteSupervisor = useSiteSupervisor(token);
   // Employee Tracking tile (mobile) — counts only for accounts with the
   // 'tracking' module; its popup opens from the tile.
   const canSeeTracking = user.role === 'superadmin' || (user.module_permissions || []).includes('tracking');
   const trackingStatus = useTrackingStatus(token, canSeeTracking);
   const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
+  // Timesheet stays mounted (hidden) once opened from the bottom nav.
+  const [timesheetVisited, setTimesheetVisited] = useState(false);
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
@@ -1056,9 +1105,24 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // the header before the new page's actual content came into view. Every
   // plain "go to this section" call below uses this instead of calling
   // setMobileActiveSection directly, so the page always starts at the top.
+  //
+  // Bottom nav tabs (Home, Claim, Timesheet, Leave / Directory) slide in
+  // from the side of the tab tapped (index.css, html[data-page-dir]) and
+  // come back where they were scrolled to; every other page starts at the top.
+  const tabScroll = useRef<Record<string, number>>({});
   const goToMobileSection = (section: typeof mobileActiveSection) => {
+    const order = (x: typeof mobileActiveSection) =>
+      x === null ? 0 : x === 'claim' || x === 'claims' || x === 'conveyanceClaim' ? 1 : x === 'timesheet' ? 2 : x === 'leave' || x === 'employeeDirectory' ? 3 : 1.5;
+    const isTab = (x: typeof mobileActiveSection) => x === null || x === 'claim' || x === 'timesheet' || x === 'leave' || x === 'employeeDirectory';
+    // The tab already open: just back to its top, as before.
+    if (section === mobileActiveSection) return void window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.documentElement.dataset.pageDir = order(section) >= order(mobileActiveSection) ? 'forward' : 'back';
+    if (isTab(mobileActiveSection)) tabScroll.current[String(mobileActiveSection)] = window.scrollY;
+    const to = isTab(section) ? tabScroll.current[String(section)] || 0 : 0;
+    if (section === 'timesheet') setTimesheetVisited(true);
     setMobileActiveSection(section);
     window.scrollTo({ top: 0 });
+    if (to) requestAnimationFrame(() => window.scrollTo({ top: to }));
   };
   // Whether one of the Claims sections (Movement Claim, My Claims, Conveyance
   // Bill Claim) is the active section — on desktop this now means "show that
@@ -1081,13 +1145,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
   // from opening at all (e.g. a stale nav request) without the grant.
   const canSeeMovementClaim = user.role === 'superadmin' || !!user.can_view_movement_claims;
-  const canSeeConveyanceClaim = user.role === 'superadmin' || !!user.can_view_conveyance_claims;
+  // Holding the Bill Claim ("conveyance") Admin module counts too — that's
+  // where those accounts see their own claims.
+  const canSeeConveyanceClaim =
+    user.role === 'superadmin' || !!user.can_view_conveyance_claims || (user.module_permissions || []).includes('conveyance');
   // Same Superadmin-gated pattern as the two above, but ON by default (see
   // types.ts) — covers the "Select a Budget", "Jobs" and "Job Entry Details"
   // mobile tiles, the matching BottomNav tabs, and the desktop Navbar/
   // GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items. Job Edit stays
   // on its own separate can_job_edit gate.
-  const canSeeBudgetModule = user.role === 'superadmin' || user.can_view_budget_module !== false;
+  const canSeeBudgetModule = user.pepm_enabled !== false && (user.role === 'superadmin' || user.can_view_budget_module !== false);
   // Superadmin-gated, same as can_view_movement_claims/can_view_conveyance_claims
   // above — OFF by default, granted per account via Admin Panel -> Users ->
   // Module Access (PUT /api/users/:id/timesheet-access). Also mirrored in
@@ -1098,13 +1165,82 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // that card's "tap to open" target IS this same page. Previously ungated
   // (every account saw "Leave" in the bottom bar regardless of permission);
   // now an account without it falls back to "Directory" instead — see
-  // BottomNav.tsx. ALSO true for can_view_leave_application — GlobalSidebar's
-  // "Leave Application" item now opens this exact page too (see
-  // leaveNavRequest below), and that item is gated by can_view_leave_application
-  // (a separate, older grant from before LeaveReviewPage/the Leave Summary
-  // card existed) — OR'd together so an account already granted the older
-  // flag doesn't lose access to the page its own sidebar item points at.
-  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application;
+  // BottomNav.tsx. ALSO true for can_view_leave_application/can_view_my_leave
+  // — GlobalSidebar's single "Leave Application" item now opens this exact
+  // page too (see leaveNavRequest below), merging in what the old separate
+  // "My Leave" page (can_view_my_leave) used to show; OR'd together so an
+  // account already granted either older flag doesn't lose access to the
+  // page its own sidebar item points at.
+  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application || !!user.can_view_my_leave;
+
+  // Mobile More popup: every Self Service module that isn't a Dashboard tile
+  // (PEPM + Movement/Conveyance Claim, Employee Directory, Book a Ride,
+  // My Asset, Team Attendance stay on the Dashboard). Same permission rules
+  // as GlobalSidebar's Self Service list.
+  const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
+  const mobileMoreItems: MoreItem[] = [
+    // Credence Assistant (AiAssistant.tsx) lives here on phones instead of a
+    // floating button; same access rule as the Assistant itself.
+    ...(!user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false)
+      ? [{ key: 'assistant', label: 'Credence Assistant', icon: Sparkles, iconBg: 'from-violet-400 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.4)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-assistant')) }]
+      : []),
+    { key: 'noticeBoard', label: 'Notice Board', icon: Bell, iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
+    ...(onOpenSelfService
+      ? ([
+          ...(user.role === 'superadmin' || !!user.can_view_leave_application || !!user.can_view_my_leave
+            ? [{ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('leaveApplication') }]
+            : []),
+          ...(canSeeTimesheet
+            ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]
+            : []),
+          { key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('approveApplications') },
+          ...(user.role === 'superadmin' || !!user.can_view_tasks || (user.module_permissions || []).includes('task_management')
+            ? [{ key: 'myTasks', label: 'My Tasks', icon: ListChecks, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('myTasks') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_mobile_bill || (user.module_permissions || []).includes('mobile_bill')
+            ? [{ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, iconBg: 'from-teal-300 to-teal-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => openSelfService('myMobileSim') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_payslip
+            ? [{ key: 'myPayslips', label: 'My Payslip', icon: ReceiptText, iconBg: 'from-sky-300 to-sky-600 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('myPayslips') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_loan_request
+            ? [{ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('myLoans') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_request_items
+            ? [{ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, iconBg: 'from-violet-300 to-violet-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRequisitions') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_sign_documents
+            ? [{ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, iconBg: 'from-blue-300 to-blue-600 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('mySignatures') }]
+            : []),
+          ...(user.pepm_enabled !== false && (user.role === 'superadmin' || !!user.can_receive_material)
+            ? [{ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, iconBg: 'from-emerald-300 to-emerald-600 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('materialReceive') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_roster
+            ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRoster') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_take_break
+            ? [{ key: 'myBreak', label: 'Break Time', icon: Coffee, iconBg: 'from-amber-300 to-amber-500 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => openSelfService('myBreak') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_targets
+            ? [{ key: 'myTargets', label: 'My Targets', icon: Target, iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('myTargets') }]
+            : []),
+          { key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => openSelfService('myLetters') },
+          { key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myCases') },
+          { key: 'resignation', label: 'My Resignation', icon: LogOut, iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => openSelfService('resignation') },
+          ...(user.role === 'superadmin' || !!user.can_use_mail
+            ? [{ key: 'credenceMail', label: 'Credence Mail', icon: Mail, iconBg: 'from-sky-300 to-sky-600 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('credenceMail') }]
+            : []),
+          ...(chatAllowed(user)
+            ? [{ key: 'chat', label: 'Chat', icon: MessageSquare, iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') }]
+            : []),
+          { key: 'alerts', label: 'Alerts', icon: Bell, iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
+          ...(canGiveFeedback(user)
+            ? [{ key: 'feedback', label: 'Give feedback', icon: MessageSquareHeart, iconBg: 'from-pink-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-feedback')) }]
+            : []),
+          { key: 'erp360', label: '360 ERP', icon: ExternalLink, iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
+        ] as MoreItem[])
+      : [])
+  ];
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a
@@ -1392,6 +1528,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // see handleExportPdf below).
   const [pdfPreview, setPdfPreview] = useState<{ doc: any; bytes: Uint8Array; filename: string } | null>(null);
   const closePdfPreview = () => setPdfPreview(null);
+  const canEmailReports = useCanEmailReports();
 
   // Android hardware back button: each of these closes just that one
   // modal/drill-down instead of exiting the app (see useBackButtonClose.ts).
@@ -2268,7 +2405,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // straight to the native Share sheet instead (which itself offers "Open
   // with [PDF viewer]" as well as "Save to..." — effectively the native
   // equivalent of preview-then-download).
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (mode: 'save' | 'email' = 'save') => {
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -2288,6 +2425,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 8, right: 8 },
       head: [['SL', 'Job No', 'Job Name', 'MPR No', 'Item Name', 'Specification', 'Qty', 'Job Duration', 'Delivery Date', 'Budget']],
@@ -2307,7 +2445,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // usable width here vs ~270mm before), so every column gets an explicit,
       // tight width — long text wraps onto a second line within its cell
       // (autoTable's default) rather than overflowing or getting truncated.
-      styles: { fontSize: 6.5, cellPadding: 1.3, overflow: 'linebreak' },
+      styles: { ...STD_STYLES, fontSize: 6.5, cellPadding: 1.3, overflow: 'linebreak' },
       columnStyles: {
         0: { cellWidth: 7 }, // SL
         1: { cellWidth: 15 }, // Job No
@@ -2320,11 +2458,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         8: { cellWidth: 16 }, // Delivery Date
         9: { cellWidth: 18 } // Budget
       },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 6.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      headStyles: { ...STD_HEAD, fontSize: 6.5 },
       // Repeats the full letterhead (logo, title, filters box) on every page of
       // a multi-page table, not just the first.
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+      didDrawPage: () => {
+        drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY;
@@ -2336,6 +2475,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     finalizePdfPageNumbers(doc);
 
     const filename = `Job_Entry_Details_${todayDateOnlyString()}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     // Always preview first — on every platform, including the Android APK —
     // rather than jumping straight to a save/share action. Nothing is written
     // to disk or shared until the user explicitly taps Download inside the
@@ -2500,9 +2643,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const handleSubmitBudget = async (target: { id: number; budget_name: string; submitted?: boolean }) => {
     if (!target || target.submitted) return;
 
-    const confirmed = window.confirm(
+    const confirmed = (await confirmDialog(
       `Submit "${target.budget_name}"? Once submitted, you won't be able to add any more entries to this Budget.`
-    );
+    ));
     if (!confirmed) return;
 
     setSubmittingBudgetId(target.id);
@@ -2534,7 +2677,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Final Submit ONE Job — only this Job locks; the Budget's other Jobs stay open
   // for more entries and edits (POST /api/jobs/:id/submit).
   const handleSubmitJob = async (job: { job_id: number; job_no: string }) => {
-    if (!window.confirm(`Final Submit Job ${job.job_no}? After this you can't add to or change this Job's entries (other Jobs stay open).`)) return;
+    if (!(await confirmDialog(`Final Submit Job ${job.job_no}? After this you can't add to or change this Job's entries (other Jobs stay open).`))) return;
     setSubmittingJobId(job.job_id);
     setMessage(null);
     try {
@@ -2848,7 +2991,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // delete) — it isn't gone forever, but it disappears from your own list right away
   // and its MPR No becomes usable again.
   const handleDeleteEntry = async (entryId: number) => {
-    if (!confirm('Delete this Job Entry? An Admin will be able to restore it from the Job Recycle bin if needed.')) return;
+    if (!(await confirmDialog('Delete this Job Entry? An Admin will be able to restore it from the Job Recycle bin if needed.'))) return;
     setDeletingEntryId(entryId);
     setDeleteError('');
     try {
@@ -2941,18 +3084,33 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // edited, if any) instead of being re-derived twice per render as before.
   const editMprOptions = filteredEditMprOptions();
 
-  // Attendance-only Project restriction: when an Admin/Superadmin has pinned
-  // this account to one Project (Admin Panel -> Users -> "Attend. Project"),
-  // the Attendance card below only ever offers that single Project — not the
-  // full `projects` list Budget/Jobs/MPR uses everywhere else on this page,
-  // which stays completely untouched by this. Falls back to the full list
-  // when nothing's pinned (today's behavior).
-  const attendanceProjects = user.attendance_project_id
-    ? projects.filter((p) => p.id === user.attendance_project_id)
-    : projects;
+
+
+  // Mobile Dashboard quick access tiles, in order, each only when this
+  // account may use it. The first MAX_DASHBOARD_TILES sit on the Dashboard;
+  // the rest go to the bottom bar's More popup (mobileMoreItems).
+  const dashboardTiles: DashboardTile[] = [
+    ...(canSeeBudgetModule
+      ? [
+          { key: 'budget', label: selectedBudget ? 'MPR Entry' : 'Select a Budget', icon: Wallet, tileBg: 'from-blue-100/70 via-white/50 to-indigo-50/40', iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => { showBudgetPicker(); goToMobileSection('budget'); } },
+          { key: 'jobs', label: 'Jobs', icon: Briefcase, badge: totalJobsCount, badgeBg: 'bg-violet-600', tileBg: 'from-violet-100/70 via-white/50 to-fuchsia-50/40', iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => goToMobileSection('jobs') },
+          { key: 'entries', label: 'Job Entry Details', icon: FileText, badge: filteredEntries.length, badgeBg: 'bg-rose-600', tileBg: 'from-rose-100/70 via-white/50 to-pink-50/40', iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => goToMobileSection('entries') }
+        ]
+      : []),
+    ...(user.can_job_edit ? [{ key: 'jobEdit', label: 'Job Edit', icon: Edit2, tileBg: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => goToMobileSection('jobEdit') }] : []),
+    ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Movement Claim', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
+    ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Conveyance Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
+    { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, tileBg: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => goToMobileSection('employeeDirectory') },
+    ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
+    ...(onOpenMyAsset ? [{ key: 'myAsset', label: 'My Asset', icon: Package, badge: assetSummary?.awaitingAck || 0, badgeBg: 'bg-green-600', tileBg: 'from-lime-100/70 via-white/50 to-green-50/40', iconBg: 'from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)]', onClick: () => onOpenMyAsset('my-assets') }] : []),
+    // Only for accounts with the 'tracking' module (trackingStatus is null otherwise).
+    ...(canSeeTracking && trackingStatus !== null ? [{ key: 'tracking', label: 'Employee Tracking', icon: Navigation, badge: trackingStatus?.tracked || 0, badgeBg: 'bg-emerald-600', tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => trackingStatus && setTrackingChooserOpen(true) }] : []),
+    ...(siteSupervisor.teams > 0 ? [{ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, badge: siteSupervisor.notSubmitted, badgeBg: 'bg-rose-600', tileBg: 'from-teal-100/70 via-white/50 to-emerald-50/40', iconBg: 'from-teal-400 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' })) }] : [])
+  ];
+  const bottomNavMoreItems: MoreItem[] = [...dashboardTiles.slice(MAX_DASHBOARD_TILES), ...mobileMoreItems];
 
   return (
-    <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden">
       {/* Violet gradient welcome banner — now sits flush directly under the
           header (no gap/margin above it, unlike before) so it reads as part
           of the header instead of a separate card further down the page.
@@ -2970,7 +3128,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {!!user.can_use_attendance && (
           <div className="relative z-10 px-2 -mt-6 pb-7">
-            <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
+            <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
           </div>
         )}
 
@@ -3002,13 +3160,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
-      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
-        <div
-          className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
-          style={{ background: 'var(--g-gradient)' }}
-        >
-          <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
-          <p className="mt-1 text-sm text-white/85">Check in your attendance, submit a New MPR Entry, and keep an eye on Notices — all from here.</p>
+      {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
+      <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+        {!isNativeApp && <ModulePath path={['Dashboard']} />}
+        {/* Same greeting as the Admin Dashboard (AdminPanel.tsx): plain text
+            on the page background — "Hi Name," in the accent colour, a large
+            heading and the line under it. */}
+        <div className="pt-1 pb-1">
+          <p className="text-sm font-semibold" style={{ color: 'var(--g-accent)' }}>Hi {user.name.split(' ')[0]},</p>
+          <h3 className="mt-0.5 text-2xl sm:text-[32px] sm:leading-tight font-bold tracking-tight text-slate-900">Welcome back!</h3>
+          <p className="mt-1 text-sm text-slate-500">Check in your attendance, submit a New MPR Entry, and keep an eye on Notices — all from here.</p>
         </div>
       </div>
 
@@ -3035,7 +3196,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         {!!user.can_use_attendance && (
-          <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
+          <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
         )}
         {!!user.can_view_leave_summary && (
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
@@ -3046,6 +3207,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
 
+        {/* Book a Ride + My Asset quick access — web only; the app's own
+            Dashboard has the mobile tiles above. */}
+        {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
+        {!Capacitor.isNativePlatform() && onOpenMyAsset && <MyAssetCard token={token} onOpen={onOpenMyAsset} />}
         {/* Employee Tracking quick access — only for accounts with the
             'tracking' module (renders nothing otherwise; its API refuses). */}
         {!Capacitor.isNativePlatform() && canSeeTracking && trackingStatus !== null && (
@@ -3092,9 +3257,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           the complete Check In/Check Out history on mobile (with a floating "Add
           Check In/Out" button opening the form in a sheet) and the plain Check
           In/Out form directly on desktop, where there's room for it inline. */}
-      <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {/* Mounted only for an account with the claim (they load data on mount;
+          without access every page asked and got 403s). */}
+      {canSeeMovementClaim && (
+      <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
-          <ClaimCard token={token} />
+          {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} />}
+          <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
+          {/* The claim history (Open / Completed) — on the web too, not only in the mobile app. */}
+          <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
         </div>
         <div className="md:hidden">
           <MyClaimsCard
@@ -3104,6 +3275,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           />
         </div>
       </div>
+      )}
 
       {/* My Claims — reachable via its own mobile tile / bottom-nav item, same as
           Movement Claim above; no separate desktop entry point (Movement Claim's
@@ -3111,7 +3283,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           mobile-only. onCheckOut/refreshKey wired the same as the 'claim'
           section's copy above, so a still-open claim can be completed straight
           from this list too, without bouncing back to the Movement Claim page. */}
-      <div className={mobileActiveSection === 'claims' && canSeeMovementClaim ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {canSeeMovementClaim && (
+      <div className={mobileActiveSection === 'claims' ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <MyClaimsCard
           token={token}
           onBack={() => goToMobileSection(null)}
@@ -3119,14 +3292,17 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           onCheckOut={() => setShowClaimFormSheet(true)}
         />
       </div>
+      )}
 
       {/* Conveyance Bill Claim — direct user-submitted expense claims (separate
           from the GPS-based Movement Claims above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
-      <div className={mobileActiveSection === 'conveyanceClaim' && canSeeConveyanceClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {canSeeConveyanceClaim && (
+      <div className={mobileActiveSection === 'conveyanceClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <ConveyanceClaimCard token={token} onBack={() => goToMobileSection(null)} />
       </div>
+      )}
 
       {/* Leave Applications (Review/Approved/Rejected) — reachable by tapping
           the Leave Summary card above, on both mobile and desktop (same
@@ -3134,7 +3310,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           can_view_leave_summary — see canSeeLeave above — same as the Leave
           Summary card itself and the BottomNav "Leave" tab that opens this. */}
       <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} />
+        {!isNativeApp && (
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} />
+          </div>
+        )}
+        <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} active={mobileActiveSection === 'leave'} />
       </div>
 
       {/* Employee Directory — company-wide roster, ungated for every account
@@ -3160,9 +3341,17 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
           opens, reachable here too via the BottomNav "Timesheet" tab below. */}
-      <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
-      </div>
+      {/* Mounted only while open, so it loads fresh every time — kept
+          mounted in the background it showed the data from when the
+          Dashboard first loaded (e.g. "Absent" right after a Check In). */}
+      {/* Mounted on the first visit and kept (hidden) after, so coming back
+          shows it at once; it refreshes itself whenever it is shown again
+          (Timesheet's `active`), which keeps a Check In made meanwhile. */}
+      {(timesheetVisited || mobileActiveSection === 'timesheet') && (
+        <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+          <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} active={mobileActiveSection === 'timesheet'} />
+        </div>
+      )}
 
       {/* Floating "Add Check In/Out" — mobile only, shown only while the
           Movement Claim page itself is open, sitting above BottomNav's fixed
@@ -3254,133 +3443,33 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           one flat block. The icon badge inside each card is a vivid color-matched
           gradient square with a soft colored glow (white icon on top), rather than a
           flat white icon box, so it reads at a glance like a home-screen app icon. */}
+      {/* App-icon look: a frosted-glass squircle (translucent, bright top
+          edge, soft drop shadow) holding the colored icon, with the name
+          under the card instead of inside it. */}
       {mobileActiveSection === null && (
-        <div className="md:hidden grid grid-cols-3 gap-2.5 mobile-page-in">
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => {
-              showBudgetPicker();
-              goToMobileSection('budget');
-            }}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)] border border-white/30">
-              <Wallet className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">
-              {selectedBudget ? 'MPR Entry' : 'Select a Budget'}
-            </span>
-          </button>
-          )}
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => goToMobileSection('jobs')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)] border border-white/30 relative">
-              <Briefcase className="w-6 h-6 text-white" />
-              {totalJobsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-violet-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                  {totalJobsCount}
+        <div className="md:hidden grid grid-cols-3 gap-x-2 gap-y-4 pt-1 mobile-page-in">
+          {dashboardTiles.slice(0, MAX_DASHBOARD_TILES).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={t.onClick}
+              className="group flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
+            >
+              <span className="relative w-[78px] h-[78px] rounded-[26px] bg-white/55 border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_10px_24px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
+                <span className={`absolute inset-0 rounded-[26px] bg-gradient-to-br ${t.tileBg} opacity-70`} />
+                <span className="absolute inset-x-2 top-0 h-1/2 rounded-t-[24px] bg-gradient-to-b from-white/55 to-transparent" />
+                <span className={`app-tile-icon relative w-11 h-11 rounded-[14px] bg-gradient-to-br ${t.iconBg} flex items-center justify-center`}>
+                  <t.icon className="w-6 h-6 text-white" />
                 </span>
-              )}
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Jobs</span>
-          </button>
-          )}
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => goToMobileSection('entries')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)] border border-white/30 relative">
-              <FileText className="w-6 h-6 text-white" />
-              {filteredEntries.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                  {filteredEntries.length}
-                </span>
-              )}
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Entry Details</span>
-          </button>
-          )}
-          {user.can_job_edit && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('jobEdit')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)] border border-white/30">
-                <Edit2 className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Edit</span>
-            </button>
-          )}
-          {canSeeMovementClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('claim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30">
-                <Route className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
-            </button>
-          )}
-          {canSeeConveyanceClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('conveyanceClaim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
-                <Wallet className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => goToMobileSection('employeeDirectory')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)] border border-white/30">
-              <Contact className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Directory</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => goToMobileSection('noticeBoard')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
-              <Bell className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
-          </button>
-          {/* Employee Tracking — only for accounts with the 'tracking' module. */}
-          {canSeeTracking && trackingStatus !== null && (
-            <button
-              type="button"
-              onClick={() => trackingStatus && setTrackingChooserOpen(true)}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30 relative">
-                <Navigation className="w-6 h-6 text-white" />
-                {!!trackingStatus?.tracked && (
-                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-emerald-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white">
-                    {trackingStatus.tracked}
+                {!!t.badge && (
+                  <span className={`absolute -top-1 -right-1 text-[10px] font-semibold ${t.badgeBg || 'bg-rose-600'} text-white rounded-full min-w-[19px] h-[19px] flex items-center justify-center px-1 border-2 border-white shadow-sm`}>
+                    {t.badge}
                   </span>
                 )}
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Tracking</span>
+              </span>
+              <span className="text-[11.5px] font-medium text-slate-700 text-center leading-tight line-clamp-2 px-0.5">{t.label}</span>
             </button>
-          )}
+          ))}
         </div>
       )}
       {/* Employee Tracking tile's popup (both numbers -> department lists). */}
@@ -3437,7 +3526,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         >
           {!isNativeApp && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Entry']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Entry']} />
             </div>
           )}
           {!selectedBudget ? (
@@ -4383,7 +4472,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Jobs']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Jobs']} />
             </div>
           )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
@@ -4523,7 +4612,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Entry Details']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Entry Details']} />
             </div>
           )}
           <div
@@ -4549,13 +4638,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </span>
                   <button
                     type="button"
-                    onClick={handleExportPdf}
+                    onClick={() => handleExportPdf()}
                     disabled={filteredEntries.length === 0}
                     title="Download this table as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton
+                      onClick={() => handleExportPdf('email')}
+                      disabled={filteredEntries.length === 0}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -5123,7 +5219,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         // under both that mt-8 AND the container's own pt-8, a ~4rem gap above
         // just a breadcrumb before an otherwise near-empty page.
         <div className="hidden md:block !mt-0">
-          <ModulePath path={['Main', 'Job Edits']} />
+          <ModulePath path={['Self Service', 'PEPM Operation', 'Job Edits']} />
         </div>
       )}
       {user.can_job_edit && (
@@ -5454,6 +5550,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewMovementClaim={canSeeMovementClaim}
         canViewTimesheet={canSeeTimesheet}
         canViewLeave={canSeeLeave}
+        moreItems={bottomNavMoreItems}
       />
     </div>
   );

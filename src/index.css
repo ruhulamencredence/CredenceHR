@@ -52,16 +52,44 @@
    Claim", ...), and transform would pin that button to THIS wrapper's box
    instead of the viewport — margin-top produces the same slide-in look
    without ever becoming a containing block. */
+/* A page coming into view. transform + opacity only (no layout work each
+   frame, smooth on phones); `margin` used to move the whole layout. */
 @keyframes mobile-page-in {
-  from { opacity: 0; margin-top: 10px; }
-  to { opacity: 1; margin-top: 0; }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 .mobile-page-in {
   animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) both;
 }
+/* Phones: a bottom-nav page slides in from the side of the tab tapped —
+   from the right going forward (Home -> Claim -> Timesheet -> Leave), from
+   the left going back (UserPanel.tsx goToMobileSection sets data-page-dir),
+   in step with the nav's white circle (BottomNav.tsx, same 0.28s). */
+@keyframes mobile-page-in-forward {
+  from { opacity: 0; transform: translateX(28%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mobile-page-in-back {
+  from { opacity: 0; transform: translateX(-28%); }
+  to { opacity: 1; transform: none; }
+}
+@media (max-width: 767px) {
+  html[data-page-dir="forward"] .mobile-page-in {
+    animation: mobile-page-in-forward 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  html[data-page-dir="back"] .mobile-page-in {
+    animation: mobile-page-in-back 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+/* Reduce motion: a plain fade, nothing sliding. */
+@keyframes mobile-page-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .mobile-page-in {
-    animation: none;
+  .mobile-page-in,
+  html[data-page-dir] .mobile-page-in {
+    animation: mobile-page-fade 0.15s linear both;
   }
 }
 
@@ -89,7 +117,7 @@
    does this with zero visible effect of its own — it's not actually
    masking anything out, just changing which renderer draws the corners.
    Apply this class to any card that pairs rounded corners with a
-   translucent/gradient fill, alongside its existing rounded-*/overflow
+   translucent/gradient fill, alongside its existing rounded-* and overflow
    classes. */
 .glass-mask-fix {
   -webkit-mask-image: -webkit-radial-gradient(white, white);
@@ -147,6 +175,18 @@ html, body, #root {
   height: 100%;
 }
 
+/* iPhone: never enlarge text by itself, and never let one wide element make
+   the page wider than the screen (the app then looks zoomed, with text and
+   icons cut off at the edge). */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html, body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 body {
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   /* Keeps content clear of the Android gesture nav bar / iOS home indicator, since
@@ -198,7 +238,7 @@ body::before {
   were not rewritten line-by-line; this maps that existing utility vocabulary
   onto the same brand tokens above so the whole app reads as one design system
   instead of two. Every blue-###/variant combination actually used anywhere in
-  src/**/*.tsx is covered below (checked against the full component tree, not
+  the src tree's .tsx files is covered below (checked against the full component tree, not
   just the handful used in the most common places) so no button/badge/border is
   left showing the Tailwind default blue once the rest of the app goes violet.
 */
@@ -394,7 +434,7 @@ body::before {
 }
 .hero-spot-beam {
   clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%);
-  background: linear-gradient(180deg, rgba(255, 236, 170, 0.75) 0%, rgba(255, 232, 170, 0.45) 40%, rgba(255, 236, 190, 0.28) 75%, rgba(255, 240, 200, 0.05) 100%);
+  background: linear-gradient(180deg, rgba(255, 236, 170, 0.95) 0%, rgba(255, 232, 170, 0.65) 40%, rgba(255, 236, 190, 0.42) 75%, rgba(255, 240, 200, 0.12) 100%);
   filter: blur(5px);
   animation: hero-spot-breathe 5s ease-in-out infinite;
 }
@@ -432,6 +472,8 @@ body::before {
 */
 html[data-ui="mono"] {
   --g-bg: #f2f2f3;
+  /* Until an app background is picked (and on the sign-in page) */
+  --g-bg-gradient: linear-gradient(180deg, #f6f6f7 0%, #f1f1f2 100%);
   --g-surface: #ffffff;
   --g-surface-muted: #f6f6f7;
   --g-border: #e7e7ea;
@@ -481,6 +523,12 @@ html[data-ui="mono"] {
   --color-indigo-50: var(--mono-50); --color-indigo-100: var(--mono-100); --color-indigo-200: var(--mono-200); --color-indigo-300: var(--mono-300); --color-indigo-400: var(--mono-400); --color-indigo-500: var(--mono-500); --color-indigo-600: var(--mono-600); --color-indigo-700: var(--mono-700); --color-indigo-800: var(--mono-800); --color-indigo-900: var(--mono-900); --color-indigo-950: var(--mono-950);
   --color-fuchsia-50: var(--mono-50); --color-fuchsia-100: var(--mono-100); --color-fuchsia-200: var(--mono-200); --color-fuchsia-300: var(--mono-300); --color-fuchsia-400: var(--mono-400); --color-fuchsia-500: var(--mono-500); --color-fuchsia-600: var(--mono-600); --color-fuchsia-700: var(--mono-700); --color-fuchsia-800: var(--mono-800); --color-fuchsia-900: var(--mono-900); --color-fuchsia-950: var(--mono-950);
   --color-blue-50: var(--mono-50); --color-blue-100: var(--mono-100); --color-blue-200: var(--mono-200); --color-blue-300: var(--mono-300); --color-blue-400: var(--mono-400); --color-blue-500: var(--mono-500); --color-blue-600: var(--mono-600); --color-blue-700: var(--mono-700); --color-blue-800: var(--mono-800); --color-blue-900: var(--mono-900); --color-blue-950: var(--mono-950);
+}
+/* Sign-in page: only the sky-blue / violet glow behind it turns neutral
+   grey; the hero animation, its spotlight and the company logo keep their
+   colours. */
+html[data-ui="mono"] .auth-glow {
+  background: radial-gradient(ellipse 900px 650px at 50% 55%, rgba(255, 255, 255, 0.9) 0%, rgba(228, 228, 231, 0.45) 45%, rgba(255, 255, 255, 0) 72%) !important;
 }
 /* Cards: white with a hairline border and a barely-there shadow. */
 html[data-ui="mono"] .gemini-card {
@@ -537,11 +585,53 @@ html[data-ui="mono"] [data-gsidebar-flyout] {
 html[data-ui="mono"] [data-gsidebar-flyout] [class*="text-white"] { color: #52525b !important; }
 html[data-ui="mono"] [data-gsidebar-flyout] [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
 html[data-ui="mono"] [data-gsidebar-flyout] [class*="hover:bg-white/10"]:hover { background-color: #f4f4f5 !important; }
+/* Minimized sidebar: the search popup and the icon-name tooltip. */
+html[data-ui="mono"] [data-gsidebar-searchfly] [class*="text-white"] { color: #52525b !important; }
+html[data-ui="mono"] [data-gsidebar-searchfly] [class*="text-white/4"],
+html[data-ui="mono"] [data-gsidebar-searchfly] [class*="text-white/5"] { color: #a1a1aa !important; }
+html[data-ui="mono"] [data-gsidebar-searchfly] [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
+html[data-ui="mono"] [data-gsidebar-searchfly] [class*="hover:bg-white/10"]:hover { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] [data-gsidebar-searchfly] input { background-color: #f4f4f5 !important; color: #18181b !important; }
+html[data-ui="mono"] [data-gsidebar-searchfly] input::placeholder { color: #a1a1aa !important; }
+html[data-ui="mono"] .gsidebar-tip,
+html[data-ui="mono"] .gsidebar-tip > span:first-child { background: #18181b !important; border-color: #18181b !important; }
 /* Page wrappers that paint their own pastel background: let the theme's
    grey through; the violet ones go neutral. */
 html[data-ui="mono"] .bg-\[\#dceeff\] { background-color: transparent !important; }
 html[data-ui="mono"] .bg-\[\#e4d4ff\] { background-color: #f4f4f5 !important; }
 html[data-ui="mono"] .bg-\[\#7F00FF\] { background-color: #18181b !important; }
+
+/* Minimal Mono — colour touch (Profile -> Appearance, html[data-accent]):
+   the pale shades take a soft colour, everything dark stays black. */
+html[data-ui="mono"][data-accent="sky"] { --mt-50: #f0f9ff; --mt-100: #e0f2fe; --mt-200: #bae6fd; --mt-500: #0ea5e9; --mt-600: #0284c7; --mt-800: #075985; }
+html[data-ui="mono"][data-accent="teal"] { --mt-50: #f0fdfa; --mt-100: #ccfbf1; --mt-200: #99f6e4; --mt-500: #14b8a6; --mt-600: #0d9488; --mt-800: #115e59; }
+html[data-ui="mono"][data-accent="violet"] { --mt-50: #f5f3ff; --mt-100: #ede9fe; --mt-200: #ddd6fe; --mt-500: #8b5cf6; --mt-600: #7c3aed; --mt-800: #5b21b6; }
+html[data-ui="mono"][data-accent="rose"] { --mt-50: #fff1f2; --mt-100: #ffe4e6; --mt-200: #fecdd3; --mt-500: #f43f5e; --mt-600: #e11d48; --mt-800: #9f1239; }
+html[data-ui="mono"][data-accent] {
+  --mono-50: var(--mt-50);
+  --mono-100: var(--mt-100);
+  --mono-200: var(--mt-200);
+  --g-accent-soft: var(--mt-50);
+  --g-accent-100: var(--mt-100);
+  --g-accent-200: var(--mt-200);
+  --g-avatar-1: var(--mt-600);
+  --g-chart-2: var(--mt-500);
+  --g-badge-check: var(--mt-200);
+}
+/* The open sidebar item and its hover: a pale tinted pill, dark text. */
+html[data-ui="mono"][data-accent] .gsidebar [class*="bg-white/15"],
+html[data-ui="mono"][data-accent] [data-gsidebar-flyout] [class*="bg-white/15"],
+html[data-ui="mono"][data-accent] [data-gsidebar-searchfly] [class*="bg-white/15"] { background-color: var(--mt-100) !important; color: var(--mt-800) !important; }
+html[data-ui="mono"][data-accent] [data-gsidebar-searchfly] [class*="bg-white/15"] [class*="text-white"] { color: var(--mt-800) !important; }
+html[data-ui="mono"][data-accent] .gsidebar [class*="bg-white/15"] [class*="text-white"] { color: var(--mt-800) !important; }
+html[data-ui="mono"][data-accent] .gsidebar [class*="hover:bg-white/10"]:hover,
+html[data-ui="mono"][data-accent] .gsidebar [class*="hover:bg-white/5"]:hover { background-color: var(--mt-50) !important; }
+/* Dashboard stat tiles: a tinted well with a coloured icon. */
+html[data-ui="mono"][data-accent] .kpi-icon {
+  background: var(--mt-50) !important;
+  box-shadow: inset 0 0 0 1px var(--mt-100);
+}
+html[data-ui="mono"][data-accent] .kpi-icon svg { color: var(--mt-600) !important; }
 
 /* Minimal Mono — the rest: avatars, charts, dashboard icons, maps. */
 html[data-ui="mono"] {
@@ -578,8 +668,14 @@ html[data-ui="mono"] .leaflet-tile-pane { filter: grayscale(1) contrast(1.02) br
 html[data-ui="mono"] .leaflet-container path[stroke="#7F00FF" i] { stroke: #18181b; }
 html[data-ui="mono"] .leaflet-container path[fill="#7F00FF" i] { fill: #18181b; }
 html[data-ui="mono"] .leaflet-container [fill="#7F00FF" i] { fill: #18181b; }
-/* Home / More menu app tiles: black tiles with white icons. */
-html[data-ui="mono"] .app-tile-icon {
+/* Home / More menu app tiles: black tiles with white icons — on the website.
+   In the app (APK / iOS) and on an iPhone Home Screen (html[data-app-shell],
+   set in main.tsx) they keep their own colours: the violet / purple /
+   indigo / fuchsia / blue scales Mono turns grey are given back here. */
+html[data-ui="mono"][data-app-shell] .app-tile-icon {
+  --color-blue-50: oklch(97% 0.014 254.604); --color-blue-100: oklch(93.2% 0.032 255.585); --color-blue-200: oklch(88.2% 0.059 254.128); --color-blue-300: oklch(80.9% 0.105 251.813); --color-blue-400: oklch(70.7% 0.165 254.624); --color-blue-500: oklch(62.3% 0.214 259.815); --color-blue-600: oklch(54.6% 0.245 262.881); --color-blue-700: oklch(48.8% 0.243 264.376); --color-blue-800: oklch(42.4% 0.199 265.638); --color-blue-900: oklch(37.9% 0.146 265.522); --color-blue-950: oklch(28.2% 0.091 267.935); --color-indigo-50: oklch(96.2% 0.018 272.314); --color-indigo-100: oklch(93% 0.034 272.788); --color-indigo-200: oklch(87% 0.065 274.039); --color-indigo-300: oklch(78.5% 0.115 274.713); --color-indigo-400: oklch(67.3% 0.182 276.935); --color-indigo-500: oklch(58.5% 0.233 277.117); --color-indigo-600: oklch(51.1% 0.262 276.966); --color-indigo-700: oklch(45.7% 0.24 277.023); --color-indigo-800: oklch(39.8% 0.195 277.366); --color-indigo-900: oklch(35.9% 0.144 278.697); --color-indigo-950: oklch(25.7% 0.09 281.288); --color-violet-50: oklch(96.9% 0.016 293.756); --color-violet-100: oklch(94.3% 0.029 294.588); --color-violet-200: oklch(89.4% 0.057 293.283); --color-violet-300: oklch(81.1% 0.111 293.571); --color-violet-400: oklch(70.2% 0.183 293.541); --color-violet-500: oklch(60.6% 0.25 292.717); --color-violet-600: oklch(54.1% 0.281 293.009); --color-violet-700: oklch(49.1% 0.27 292.581); --color-violet-800: oklch(43.2% 0.232 292.759); --color-violet-900: oklch(38% 0.189 293.745); --color-violet-950: oklch(28.3% 0.141 291.089); --color-purple-50: oklch(97.7% 0.014 308.299); --color-purple-100: oklch(94.6% 0.033 307.174); --color-purple-200: oklch(90.2% 0.063 306.703); --color-purple-300: oklch(82.7% 0.119 306.383); --color-purple-400: oklch(71.4% 0.203 305.504); --color-purple-500: oklch(62.7% 0.265 303.9); --color-purple-600: oklch(55.8% 0.288 302.321); --color-purple-700: oklch(49.6% 0.265 301.924); --color-purple-800: oklch(43.8% 0.218 303.724); --color-purple-900: oklch(38.1% 0.176 304.987); --color-purple-950: oklch(29.1% 0.149 302.717); --color-fuchsia-50: oklch(97.7% 0.017 320.058); --color-fuchsia-100: oklch(95.2% 0.037 318.852); --color-fuchsia-200: oklch(90.3% 0.076 319.62); --color-fuchsia-300: oklch(83.3% 0.145 321.434); --color-fuchsia-400: oklch(74% 0.238 322.16); --color-fuchsia-500: oklch(66.7% 0.295 322.15); --color-fuchsia-600: oklch(59.1% 0.293 322.896); --color-fuchsia-700: oklch(51.8% 0.253 323.949); --color-fuchsia-800: oklch(45.2% 0.211 324.591); --color-fuchsia-900: oklch(40.1% 0.17 325.612); --color-fuchsia-950: oklch(29.3% 0.136 325.661);
+}
+html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
   background-image: none !important;
   background-color: #18181b !important;
   box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.45) !important;
@@ -587,3 +683,18 @@ html[data-ui="mono"] .app-tile-icon {
 
 /* Chat: a quoted message flashes when its reply's quote is tapped (ChatPanel.tsx). */
 .chat-flash { background-color: rgba(var(--g-accent-rgb, 127, 0, 255), 0.12); }
+
+/* GlobalSidebar.tsx: a minimized sidebar icon's name, beside it on hover. */
+.gsidebar-tip {
+  animation: gsidebar-tip-in 120ms ease-out;
+}
+@keyframes gsidebar-tip-in {
+  from {
+    opacity: 0;
+    margin-left: -4px;
+  }
+  to {
+    opacity: 1;
+    margin-left: 0;
+  }
+}

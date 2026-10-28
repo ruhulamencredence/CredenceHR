@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
@@ -86,8 +87,10 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
   const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number } } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchStatus = async () => {
-    setLoadingStatus(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => fetchStatus(true));
+  const fetchStatus = async (silent?: unknown) => {
+    if (silent !== true) setLoadingStatus(true);
     try {
       const res = await fetch(apiUrl('/api/claims/status'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {

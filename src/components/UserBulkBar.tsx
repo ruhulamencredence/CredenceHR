@@ -25,6 +25,7 @@ import {
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 interface UserBulkBarProps {
   token: string;
   selected: User[];
@@ -100,7 +101,7 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
                 </option>
               ))}
             </select>
-            <select value="" onChange={(e) => onTemplate(e.target.value)} className={selectClass}>
+            <SearchSelect value="" onChange={(e) => onTemplate(e.target.value)} className={selectClass}>
               <option value="">Apply template…</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -108,7 +109,7 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
                 </option>
               ))}
               <option value="__manage">{templates.length === 0 ? '+ Create a template…' : 'Manage templates…'}</option>
-            </select>
+            </SearchSelect>
             {onOpenModuleAccess && selected.some((u) => canEditUserModules(u, viewer)) && (
               <button
                 type="button"

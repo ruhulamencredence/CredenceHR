@@ -23,7 +23,9 @@
 // client renders as "Not linked to an Employee record".
 
 import type { Express } from "express";
+import { endAllSessions, sessionKeyOf } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
+import { passwordProblem } from "./src/lib/passwordPolicy";
 
 interface ProfileRouteDeps {
   authenticateToken: any;
@@ -59,17 +61,19 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       );
       const emp = empRows[0] || null;
 
+      // A row created by a photo upload alone has NULL names, so fall back
+      // per field rather than only when no row exists yet.
       let fallbackFirst = "";
       let fallbackLast = "";
-      if (!detail) {
+      if (!detail || detail.first_name == null) {
         const parts = String(req.user.name || "").trim().split(/\s+/).filter(Boolean);
         fallbackFirst = parts[0] || "";
         fallbackLast = parts.slice(1).join(" ");
       }
 
       res.json({
-        first_name: detail ? detail.first_name || "" : fallbackFirst,
-        last_name: detail ? detail.last_name || "" : fallbackLast,
+        first_name: detail?.first_name != null ? detail.first_name : fallbackFirst,
+        last_name: detail?.first_name != null ? detail.last_name || "" : fallbackLast,
         date_of_birth: detail?.date_of_birth || null,
         country: detail?.country || null,
         state: detail?.state || null,
@@ -180,7 +184,10 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
         [targetId]
       );
       const row = rows[0];
-      if (!row || !row.photo_data) return res.status(404).json({ error: "No photo on file." });
+      // No photo is the normal case for most people, not an error: 204, so the
+      // browser console doesn't fill with a red 404 per colleague. Callers
+      // treat 204 as "show the initials".
+      if (!row || !row.photo_data) return res.status(204).end();
       const buffer: Buffer = Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data);
       res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
       res.setHeader("Cache-Control", "private, max-age=300");
@@ -201,7 +208,8 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       const currentPassword = String(req.body?.current_password || "");
       const newPassword = String(req.body?.new_password || "");
       if (!currentPassword) return res.status(400).json({ error: "Current password is required." });
-      if (newPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters." });
+      const pwBad = passwordProblem(newPassword, { email: req.user.email, name: req.user.name });
+      if (pwBad) return res.status(400).json({ error: pwBad });
 
       const rows = await queryDB("SELECT password_hash FROM users WHERE id = ?", [userId]);
       if (rows.length === 0) return res.status(404).json({ error: "User not found." });
@@ -210,7 +218,10 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       if (!valid) return res.status(400).json({ error: "Current password is incorrect." });
 
       const password_hash = await bcrypt.hash(newPassword, 10);
-      await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, userId]);
+      // Also clears "must change password" (a new joiner's temporary password).
+      await queryDB("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", [password_hash, userId]);
+      // Every other sign-in of this account ends; this one stays.
+      await endAllSessions(queryDB, Number(userId), "password", sessionKeyOf(String(req.headers["authorization"] || "").split(" ")[1] || ""));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

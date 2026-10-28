@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { User, chatAllowed } from '../types';
-import { Shield, LogOut, Smartphone, Search, X } from 'lucide-react';
+import { Shield, LogOut, Search, X, Calendar } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
+import { requestQuickAccessTab } from '../lib/quickAccess';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
+import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
 import { useHeaderPageTitle } from '../lib/headerPageTitle';
@@ -86,7 +88,7 @@ interface NavbarProps {
   // Workforce above, this isn't Admin-gated — every account sees it. Leave
   // Approvals is the one exception: only shown to Admin/Superadmin accounts,
   // since only they can ever be picked as a Leave Application's Approver.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'materialReceive') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => void;
   // Mobile-only hamburger button in the header — opens the single
   // GlobalSidebar drawer (see GlobalSidebar.tsx / App.tsx). Desktop
   // (md and up) keeps using the dropdown menus above instead, unchanged —
@@ -135,7 +137,32 @@ export const Navbar: React.FC<NavbarProps> = ({
   // header on the native Android APK (per request) — the web build keeps the
   // solid header either way.
   const isNativeApp = Capacitor.isNativePlatform();
-  const transparentHeader = isNativeApp;
+  // Phone-width web (mobile browser, iPhone "Add to Home Screen") gets the
+  // same purple header as the app — the white one left the status bar strip
+  // white too. Desktop keeps the solid header.
+  const [phoneWidth, setPhoneWidth] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const on = () => setPhoneWidth(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const transparentHeader = isNativeApp || phoneWidth;
+
+  // Today's Date & Day — web header only (see the "hidden md:flex" wrapper
+  // below), same dd-MMM-yyyy convention as formatDate.ts elsewhere in the
+  // app, prefixed with the short weekday name. Re-reads the clock once a
+  // minute (not every render) so it silently rolls over to the next day
+  // around midnight without anyone needing to refresh the page.
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setToday(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+  const todayLabel = today.toLocaleDateString('en-US', { weekday: 'short' }) + ', ' +
+    String(today.getDate()).padStart(2, '0') + '-' +
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][today.getMonth()] + '-' +
+    today.getFullYear();
 
   // Whichever page is showing may have docked its own search box into this
   // header (see headerSearch.ts) — while that page's own search bar has
@@ -350,14 +377,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               above and onGoToBudgetTab/onGoToManageTab/onGoToWorkforceTab in
               App.tsx, which switch viewMode to 'admin' themselves). */}
 
-          <button
-            onClick={onOpenApkInfo}
-            className="hidden md:flex items-center justify-center w-9 h-9 rounded-full transition-colors hover:opacity-70"
-            style={{ color: 'var(--g-text-muted)' }}
-            title="Android APK Build Instructions"
-          >
-            <Smartphone className="w-[18px] h-[18px]" />
-          </button>
+          {/* Android APK Build Instructions button removed from the header
+              (per request) — onOpenApkInfo/onOpenApkInfo prop is left wired
+              in App.tsx in case another entry point still needs it. */}
+
+          {/* Today's Date & Day — web header only, hidden on the native
+              Android APK (transparentHeader's own purple gradient header
+              already has less room, and the mobile page-title/date isn't
+              needed there the way it is on a wide desktop browser tab). */}
+          {!isNativeApp && (
+            <div
+              className={`hidden md:flex items-center gap-1 shrink-0 ${showMobilePageTitle ? 'md:hidden lg:flex' : ''}`}
+              style={{ color: 'var(--g-text-muted)' }}
+              title="Today"
+            >
+              <Calendar className="w-[16px] h-[16px]" />
+              <span className="text-xs font-medium whitespace-nowrap">{todayLabel}</span>
+            </div>
+          )}
+
+          {/* Company switcher — only for accounts in more than one company. */}
+          <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
+            <CompanySwitcher token={token} transparent={transparentHeader} />
+          </div>
 
           {/* Live weather — free (no API key, no permission prompt of its
               own), shown on both the mobile and web header since this
@@ -375,7 +417,27 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
-          <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} onViewAll={onOpenAlerts} />
+          <AlertsBell
+            token={token}
+            onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
+            onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
+            onOpenVehicleManagement={(target) => {
+              // A ride update is about an existing ride — open Ride Status
+              // (or the assign screens for one still needing a vehicle).
+              requestQuickAccessTab('bookRide', target || 'status');
+              onGoToSelfServiceTab('vehicleManagement');
+            }}
+            onOpenConveyanceClaim={onGoToConveyanceBillClaim}
+            onOpenMyAsset={(target) => {
+              requestQuickAccessTab('myAsset', target);
+              onGoToSelfServiceTab('assetManagement');
+            }}
+            onOpenResignation={() => onGoToSelfServiceTab('resignation')}
+            onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
+            canOpenGrievanceAdmin={user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary')}
+            onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
+            onViewAll={onOpenAlerts}
+          />
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}

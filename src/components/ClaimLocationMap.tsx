@@ -80,7 +80,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
     }
 
     if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: CLAIM_ZOOM });
+      map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: CLAIM_ZOOM });
     }
 
     setTimeout(() => {

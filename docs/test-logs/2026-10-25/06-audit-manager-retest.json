@@ -1,0 +1,374 @@
+{
+ "when": "2026-10-25T12:07:22.999Z",
+ "summary": {
+  "PASS": 49,
+  "FAIL": 0,
+  "INFO": 3
+ },
+ "results": [
+  {
+   "id": "PAY-01",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "HR (maker) runs the month's payroll",
+   "detail": ""
+  },
+  {
+   "id": "PAY-02",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "The same employee cannot be paid twice for one month",
+   "detail": ""
+  },
+  {
+   "id": "PAY-03",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Every run reconciles: gross − total deductions = net",
+   "detail": ""
+  },
+  {
+   "id": "PAY-03b",
+   "area": "Payroll — maker / checker / payer",
+   "status": "INFO",
+   "name": "Total deduction = absent + tax + PF + advance + other + late",
+   "detail": "matches on every run"
+  },
+  {
+   "id": "PAY-03c",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Audit (View only + Audit Approve) can open the salary sheet it is asked to approve",
+   "detail": ""
+  },
+  {
+   "id": "PAY-04",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Audit cannot approve a month HR has not submitted",
+   "detail": ""
+  },
+  {
+   "id": "PAY-05",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "HR (maker) cannot audit-approve",
+   "detail": ""
+  },
+  {
+   "id": "PAY-06b",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "A View-only account cannot submit (or change) the month",
+   "detail": ""
+  },
+  {
+   "id": "PAY-06",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "HR submits the month for audit",
+   "detail": ""
+  },
+  {
+   "id": "PAY-07",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Once submitted the month is locked: no edit, delete or re-run",
+   "detail": ""
+  },
+  {
+   "id": "PAY-08",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Accounts cannot pay before Audit approves",
+   "detail": ""
+  },
+  {
+   "id": "PAY-09",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Audit must write a reason to return a sheet",
+   "detail": ""
+  },
+  {
+   "id": "PAY-10",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Returned sheet unlocks for HR to correct",
+   "detail": ""
+  },
+  {
+   "id": "PAY-11",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Audit (checker) approves the corrected sheet",
+   "detail": ""
+  },
+  {
+   "id": "PAY-12",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "After audit approval HR still cannot change a run",
+   "detail": ""
+  },
+  {
+   "id": "PAY-13",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Audit cannot pay (no Accounts layer)",
+   "detail": ""
+  },
+  {
+   "id": "PAY-14",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Accounts must record how it was paid",
+   "detail": ""
+  },
+  {
+   "id": "PAY-14b",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Accounts (pay layer only) can open the bank payment sheet it pays from",
+   "detail": ""
+  },
+  {
+   "id": "PAY-15",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Accounts (payer) pays the approved month",
+   "detail": ""
+  },
+  {
+   "id": "PAY-16",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Paid total = sheet total = bank payment sheet total",
+   "detail": ""
+  },
+  {
+   "id": "PAY-17",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "The month keeps a full trail: who submitted, returned, approved and paid",
+   "detail": ""
+  },
+  {
+   "id": "PAY-18",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "Even the Superadmin cannot edit or delete a paid salary",
+   "detail": ""
+  },
+  {
+   "id": "PAY-19",
+   "area": "Payroll — maker / checker / payer",
+   "status": "PASS",
+   "name": "A paid salary cannot be put on hold afterwards",
+   "detail": ""
+  },
+  {
+   "id": "SOD-01",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "An Audit-only account cannot change an employee's salary structure",
+   "detail": ""
+  },
+  {
+   "id": "SOD-02",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "An Audit-only account cannot run payroll (it would check its own work)",
+   "detail": ""
+  },
+  {
+   "id": "SOD-03",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "An Audit-only account cannot give a loan / advance",
+   "detail": ""
+  },
+  {
+   "id": "SOD-04",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "An Accounts-only account cannot add a bonus",
+   "detail": ""
+  },
+  {
+   "id": "SOD-12",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Whoever ran a salary in a month cannot audit-approve that month",
+   "detail": ""
+  },
+  {
+   "id": "SOD-13",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Whoever changed a salary by hand cannot audit-approve that month",
+   "detail": ""
+  },
+  {
+   "id": "SOD-14",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Someone who did not run, submit or approve the month can pay it",
+   "detail": ""
+  },
+  {
+   "id": "SOD-15",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Whoever audit-approved a month cannot also pay it",
+   "detail": ""
+  },
+  {
+   "id": "SOD-05",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "A run cannot be processed and paid one-by-one while its month was never submitted to Audit",
+   "detail": ""
+  },
+  {
+   "id": "SOD-06",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Whoever submitted a month cannot also approve it",
+   "detail": ""
+  },
+  {
+   "id": "SOD-07",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "The person who prepared (submitted) a month cannot also pay it",
+   "detail": ""
+  },
+  {
+   "id": "SOD-08",
+   "area": "Payroll — segregation of duties",
+   "status": "INFO",
+   "name": "A Superadmin can prepare, approve and pay a month alone",
+   "detail": "submit 200 approve 200 pay 200 — by design (\"Superadmin always has access\"); keep Superadmin accounts few and review their payroll actions in the Activity Log"
+  },
+  {
+   "id": "SOD-09",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Payroll refuses an inactive employee (ghost-employee control)",
+   "detail": ""
+  },
+  {
+   "id": "SOD-09b",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Someone who left on 15 Oct gets an October salary, but none for November",
+   "detail": ""
+  },
+  {
+   "id": "SOD-10",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "A negative bonus / deduction is refused (edit and run)",
+   "detail": ""
+  },
+  {
+   "id": "SOD-11",
+   "area": "Payroll — segregation of duties",
+   "status": "PASS",
+   "name": "Present days above working days is refused or capped",
+   "detail": ""
+  },
+  {
+   "id": "LOG-01",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Audit can read the Payroll Activity Log",
+   "detail": ""
+  },
+  {
+   "id": "LOG-02",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "HR without the Activity Log layer cannot read it",
+   "detail": ""
+  },
+  {
+   "id": "LOG-03",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Refused attempts are logged too (\"Tried: …\")",
+   "detail": ""
+  },
+  {
+   "id": "LOG-04",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Approve and pay actions are logged with the user",
+   "detail": ""
+  },
+  {
+   "id": "LOG-05",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Each log row has time and IP",
+   "detail": ""
+  },
+  {
+   "id": "LOG-06",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Nobody (not even Superadmin) can delete the Activity Log through the app",
+   "detail": ""
+  },
+  {
+   "id": "LOG-07",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "A salary change is logged (who, when)",
+   "detail": ""
+  },
+  {
+   "id": "LOG-08b",
+   "area": "Audit trail",
+   "status": "INFO",
+   "name": "What the log says, and whether the employee was told",
+   "detail": "Bank \"Salary\" BRAC Bank 150200000 � 100% → Bank \"Salary\" BRAC Bank 9999999999 � 100% by #135; alerts to the employee: 2"
+  },
+  {
+   "id": "LOG-08",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Changing an employee's salary bank account is recorded (old → new, who)",
+   "detail": ""
+  },
+  {
+   "id": "LOG-09",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Employee master edits (designation) are recorded old → new",
+   "detail": ""
+  },
+  {
+   "id": "LOG-10",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Granting someone more access is recorded (who gave what to whom)",
+   "detail": ""
+  },
+  {
+   "id": "LOG-11",
+   "area": "Audit trail",
+   "status": "PASS",
+   "name": "Failed sign-ins are kept (login_attempts)",
+   "detail": ""
+  },
+  {
+   "id": "APR-01",
+   "area": "Approvals — self-approval",
+   "status": "PASS",
+   "name": "Nobody can approve their own request, even when an Approval Template names them",
+   "detail": ""
+  }
+ ]
+}

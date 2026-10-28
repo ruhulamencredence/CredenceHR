@@ -9,3 +9,26 @@ coverage/
 
 # Sign-in key made when JWT_SECRET is not set (JwtSecret.ts)
 .jwt-secret
+
+# The Android app the login page offers (AndroidApkRoute.ts) — the folder
+# is in git, the APK put in it on the server by hand is not.
+/downloads/*
+!/downloads/README.md
+
+# Tool caches and IDE / build leftovers — never part of the code.
+.vite/
+android/.idea/
+android/app/debug/
+android/app/release/
+# Phone apps are put on the server (downloads/), never committed; no app
+# file belongs in public/ either, or every build ships it.
+public/**/*.apk
+public/**/*.aab
+
+# Docs sync's biggest outputs: built every run, kept as the run's artifact
+# (CredenceHR-documentation) and by `npm run docs:sync` locally, not in git —
+# committed they grew the repo by ~13 MB on every push.
+docs/architecture/CredenceHR-Documentation.html
+docs/architecture/CredenceHR-Full-Workflow.html
+docs/architecture/database/diagrams/full-application-er.png
+docs/architecture/database/diagrams/full-application-er.pdf

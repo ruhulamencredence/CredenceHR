@@ -12,6 +12,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/readWorkbook';
 import { FileSpreadsheet, Upload, RefreshCw, Loader2, CheckCircle2, History, X } from 'lucide-react';
 import { formatDate } from '../lib/formatDate';
 import { readPoSheet, type PoSheetLine } from '../lib/poSheet';
@@ -80,7 +81,7 @@ export const MprPoImport: React.FC<{ token: string; onImported?: () => void }> =
     setDone('');
     setResults(null);
     try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const wb = readWorkbook(await file.arrayBuffer());
       const rows: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
       const sheet = readPoSheet(rows);
       if (sheet.error) throw new Error(sheet.error);

@@ -1,10 +1,15 @@
-import React, { useState, lazy, Suspense } from 'react';
-import { ArrowUp, MapPin, Download } from 'lucide-react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { ArrowUp, MapPin, Building2, Fingerprint } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
+import googlePlayIcon from '../assets/google-play-icon.png';
+import { AddToHomeScreenButton, isIOSDevice, isStandalone } from './AddToHomeScreen';
 import { apiUrl } from '../lib/api';
+import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
+import { fingerprintLogin, fingerprintSupported, savedFingerprint } from '../lib/fingerprint';
 import { PrivacyPolicy } from './PrivacyPolicy';
+import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
 import { PasswordInput } from './PasswordInput';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
@@ -13,6 +18,41 @@ import { PasswordInput } from './PasswordInput';
 // immediately either way; only this decorative animation pops in a beat
 // later once its own chunk is ready.
 const AuthHeroLottie = lazy(() => import('./AuthHeroLottie'));
+
+// Multi-company: which group's sign-in this is. Typed once on the page before
+// the login form (or taken from the web address, e.g. credence.<domain>), then
+// remembered on this device. See /api/public/workspaces in CompanyRoutes.ts.
+interface Workspace {
+  id: number;
+  code: string;
+  name: string;
+  short_name: string | null;
+  tagline: string | null;
+  has_logo: boolean;
+}
+const WORKSPACE_KEY = 'credence_workspace';
+const readWorkspace = (): Workspace | null => {
+  try {
+    const w = JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null');
+    return w && w.code ? w : null;
+  } catch {
+    return null;
+  }
+};
+const saveWorkspace = (w: Workspace | null) => {
+  try {
+    if (w) localStorage.setItem(WORKSPACE_KEY, JSON.stringify(w));
+    else localStorage.removeItem(WORKSPACE_KEY);
+  } catch {
+    // storage unavailable — asked again next time
+  }
+};
+const lookupWorkspace = async (code: string): Promise<Workspace> => {
+  const res = await fetch(apiUrl(`/api/public/workspaces/${encodeURIComponent(code.trim().toLowerCase())}`));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "This workspace wasn't found.");
+  return data as Workspace;
+};
 
 interface AuthScreenProps {
   onLoginSuccess: (token: string, user: any) => void;
@@ -25,8 +65,48 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // Accepts either an Email (Admin-created accounts) or a Project Name (bulk-created
   // accounts log in with Project Name + Password, spaces are ignored) — sent to the
   // server as a single "identifier" field.
+  const [workspace, setWorkspace] = useState<Workspace | null>(readWorkspace);
+  const [workspaceInput, setWorkspaceInput] = useState('');
+  // The system owner's own sign-in page is <address>/system — no workspace to
+  // type (it isn't mentioned anywhere else); they open any workspace from
+  // inside the app.
+  const [ownerMode] = useState(() => /^\/system\/?$/i.test(window.location.pathname));
+  // The web address can name the workspace (credence.example.com) — then the
+  // workspace page is skipped.
+  const [detecting, setDetecting] = useState(() => !readWorkspace());
+  useEffect(() => {
+    if (workspace || /^\/system\/?$/i.test(window.location.pathname)) {
+      setDetecting(false);
+      return;
+    }
+    const host = window.location.hostname;
+    const labels = host.split('.');
+    if (labels.length < 3 || /^\d+$/.test(labels[labels.length - 1])) {
+      setDetecting(false);
+      return;
+    }
+    lookupWorkspace(labels[0])
+      .then((w) => {
+        saveWorkspace(w);
+        setWorkspace(w);
+      })
+      .catch(() => {})
+      .finally(() => setDetecting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  // "Forgot password?" — always offered; the popup shows the ways a
+  // Superadmin left on (PasswordResetRoutes.ts).
+  const [forgotOptions, setForgotOptions] = useState<ForgotOptions>({ email: false, request: false });
+  const [forgotOpen, setForgotOpen] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/auth/forgot/options'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => j && setForgotOptions({ email: !!j.email, request: !!j.request }))
+      .catch(() => {});
+  }, []);
+  // A phone removed by the Superadmin lands here with the reason shown.
   const [error, setError] = useState(() => takeSignedOutReason());
   const [loading, setLoading] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
@@ -39,6 +119,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // build). On the plain WEB build (opened in a desktop/mobile browser),
   // login works as before with no location prompt at all.
   const isNativeApp = Capacitor.isNativePlatform();
+
+  // Belt-and-braces for the Android keyboard covering a focused field —
+  // making the page scrollable (see the root div's overflow-y-auto below)
+  // is the primary fix, but the browser's own "scroll the focused input
+  // into view when the keyboard opens" behavior isn't reliable on every
+  // WebView/OEM build (confirmed: it silently doesn't happen on at least
+  // one real device). Scrolling it into view here explicitly, from JS,
+  // doesn't depend on that. The delay gives the on-screen keyboard's own
+  // open animation time to finish resizing the visible viewport first —
+  // scrolling immediately on focus would compute the wrong position
+  // against the still-full-height page.
+  const scrollFieldIntoView = (el: HTMLElement) => {
+    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+  };
+
+  // overflow-y-auto (above) only lets the page scroll if there's actually
+  // something to scroll TO — on this page's WebView, the keyboard opening
+  // doesn't reliably shrink the visible layout at all (min-h-dvh's `dvh`
+  // unit not recomputing on keyboard open is a known WebView gap on some
+  // Android builds), so the container never grew taller than the viewport
+  // and scrollFieldIntoView above had nowhere to actually scroll to. Asking
+  // the Capacitor Keyboard plugin directly for the keyboard's real height
+  // and reserving that much space at the bottom (padding-bottom, merged
+  // into the root div's style below) guarantees real scrollable room to
+  // move into, independent of whether dvh/visualViewport behave correctly
+  // on this device — same fix as ChatPanel.tsx's own keyboard handling.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!isNativeApp) return;
+    let willShowHandle: { remove: () => void } | undefined;
+    let willHideHandle: { remove: () => void } | undefined;
+    (async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard');
+        willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          setKeyboardHeight(info.keyboardHeight);
+        });
+        willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          setKeyboardHeight(0);
+        });
+      } catch {
+        // Plugin unavailable — the page still scrolls on its own if the
+        // WebView resizes correctly, just without this extra guarantee.
+      }
+    })();
+    return () => {
+      willShowHandle?.remove();
+      willHideHandle?.remove();
+    };
+  }, [isNativeApp]);
 
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
@@ -75,6 +206,98 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  // Sign in with fingerprint — offered when it was turned on for this device
+  // (Profile -> Fingerprint login) for this workspace. On the app the phone's
+  // fingerprint prompt opens by itself once.
+  const [fp, setFp] = useState(savedFingerprint);
+  const [fpReady, setFpReady] = useState(false);
+  const fpHere = !!fp && fpReady && (ownerMode || !fp.workspace || fp.workspace === workspace?.code);
+  useEffect(() => {
+    if (!fp) return;
+    fingerprintSupported().then(setFpReady);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleFingerprint = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      // The fingerprint first, then (app) the location the password sign-in
+      // also needs — so the phone's fingerprint window opens at once.
+      const extra = async () => {
+        const base: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
+        if (!isNativeApp) return base;
+        const device = await appDeviceInfo();
+        setLocating(true);
+        try {
+          const coords = await requestLoginLocation();
+          return { ...base, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) };
+        } finally {
+          setLocating(false);
+        }
+      };
+      const data = await fingerprintLogin(extra);
+      setActiveCompanyId(data.active_company_id || null);
+      onLoginSuccess(data.token, data.user);
+    } catch (err: any) {
+      if (err?.code !== 'CANCELLED') setError(err instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : err.message || 'Something went wrong');
+      setFp(savedFingerprint());
+    } finally {
+      setLoading(false);
+    }
+  };
+  // On the app the fingerprint window opens by itself once — when the app is
+  // really on screen (asked while it is still starting, Android closes the
+  // window at once or says the sensor isn't ready).
+  const [fpAsked, setFpAsked] = useState(false);
+  useEffect(() => {
+    if (!isNativeApp || !fpHere || fpAsked) return;
+    setFpAsked(true);
+    let stop = false;
+    let handle: { remove: () => void } | undefined;
+    const go = () => {
+      if (stop) return;
+      stop = true;
+      handle?.remove();
+      window.setTimeout(() => void handleFingerprint(), 400);
+    };
+    (async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        if ((await App.getState()).isActive) return go();
+        handle = await App.addListener('appStateChange', (st) => st.isActive && go());
+        if (stop) handle.remove();
+      } catch {
+        go();
+      }
+    })();
+    return () => {
+      stop = true;
+      handle?.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fpHere]);
+
+  const handleWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const w = await lookupWorkspace(workspaceInput);
+      saveWorkspace(w);
+      setWorkspace(w);
+    } catch (err: any) {
+      setError(err instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const changeWorkspace = () => {
+    saveWorkspace(null);
+    setWorkspaceInput(workspace?.code || '');
+    setWorkspace(null);
+    setError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -82,6 +305,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
     try {
       let coords: { latitude: number; longitude: number } | null = null;
+      const device = await appDeviceInfo();
       if (isNativeApp) {
         setLocating(true);
         try {
@@ -91,15 +315,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         }
       }
 
-      // Which phone this is (Device Access, DeviceRoutes.ts).
-      const device = await appDeviceInfo();
       const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
-            : { identifier, password }
+            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }) }
         ),
       });
 
@@ -108,6 +330,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         throw new Error(data.error || 'Authentication failed');
       }
 
+      // Multi-company: start in the account's default company.
+      setActiveCompanyId(data.active_company_id || null);
       onLoginSuccess(data.token, data.user);
     } catch (err: any) {
       setError(
@@ -122,14 +346,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div
-      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-hidden"
-      style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)' }}
+      // Was overflow-hidden — harmless on desktop, but on a phone it also
+      // blocked the page from scrolling at all, so when the on-screen
+      // keyboard opened while typing (Email/Project Name, then Password,
+      // which sits lower), the browser had nowhere to scroll the focused
+      // field into view and it stayed hidden behind the keyboard.
+      // overflow-y-auto lets that happen normally; nothing here actually
+      // needed the clipping (the decorative glow below is sized to this
+      // div's own bounds, inset-0, so it was never overflowing it anyway).
+      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-y-auto"
+      style={{
+        background: 'var(--g-bg-gradient)',
+        paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)',
+        ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+      }}
     >
       {/* Soft centered glow, sky blue fading into the violet brand accent —
           matches the Gemini app's home screen composition rather than
           corner-anchored blobs. */}
       <div
-        className="pointer-events-none absolute inset-0"
+        className="auth-glow pointer-events-none absolute inset-0"
         style={{
           background:
             'radial-gradient(ellipse 900px 650px at 50% 55%, rgba(139, 195, 255, 0.50) 0%, rgba(180, 160, 255, 0.28) 40%, rgba(255, 255, 255, 0) 72%)',
@@ -141,36 +377,45 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             centered next to the form. On mobile these stack above the form
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-6" />
-          <div className="w-72 h-72 pointer-events-none">
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-14 w-auto mb-4" />
+          <div className="hero-art relative isolate w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
+            <HeroSpotlight />
           </div>
         </div>
 
         {/* Mobile: logo + a smaller Lottie hero animation above the form
             (hidden on desktop, where the block above takes over on the left
-            side instead, at full size). */}
-        <div className="flex lg:hidden flex-col items-center text-center mb-4 sm:mb-6">
-          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-3 sm:mb-4" />
-          <div className="w-36 h-36 sm:w-44 sm:h-44 pointer-events-none">
+            side instead, at full size). Pulled up a bit (-mt-2) so the
+            bigger animation below doesn't push the card as far down the
+            screen — less blank space above the logo instead. */}
+        <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+          <div className="hero-art relative isolate w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
+            <HeroSpotlight />
           </div>
         </div>
 
         {/* Right side (desktop) / below (mobile): greeting + the sign-in form,
             so "Welcome back" always sits directly above the fields it belongs to. */}
         <div className="lg:w-1/2">
-        <div className="text-center lg:text-left mb-5">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight gemini-gradient-text mb-2">
-            Welcome back
+        <div className="text-center lg:text-left mb-3">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
+            {workspace || ownerMode ? 'Welcome back' : 'Welcome'}
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            Sign in to CredenceHR to continue
+            {ownerMode ? 'System owner sign-in' : workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
           </p>
+          {workspace?.tagline && (
+            <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
+              {workspace.tagline}
+            </p>
+          )}
         </div>
         <div className="gemini-card px-6 py-6 sm:px-8 sm:py-8">
           {error && (
@@ -182,20 +427,67 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </div>
           )}
 
+          {!workspace && !ownerMode ? (
+            <form className="space-y-4" onSubmit={handleWorkspace}>
+              <div>
+                <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
+                  Workspace
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    autoFocus={!detecting}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={workspaceInput}
+                    onChange={(e) => setWorkspaceInput(e.target.value.replace(/\s+/g, '').toLowerCase())}
+                    aria-label="Workspace code"
+                    placeholder="e.g. credence"
+                    className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
+                    style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                      scrollFieldIntoView(e.currentTarget);
+                    }}
+                    onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
+                  />
+                  <Building2 className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
+                </div>
+                <p className="mt-2 ml-1 text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+                  Your company's short name in this app — ask HR if you don't know it.
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={loading || detecting || !workspaceInput.trim()}
+                className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 rounded-full text-white font-medium text-[15px] transition-all disabled:opacity-50"
+                style={{ background: 'var(--g-accent)' }}
+              >
+                <span>{loading ? 'Checking…' : 'Next'}</span>
+                {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
+              </button>
+            </form>
+          ) : (
+          <>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
-                Email or Project Name
+                Login ID
               </label>
               <input
                 type="text"
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="you@company.com or Project Name"
+                placeholder="Employee ID, email or Project Name"
                 className="block w-full px-5 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                 style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                onFocus={(e) => {
+                  e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                  scrollFieldIntoView(e.currentTarget);
+                }}
                 onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
               />
             </div>
@@ -213,10 +505,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   placeholder="••••••••"
                   className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                   style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                  onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                  onFocus={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                    scrollFieldIntoView(e.currentTarget);
+                  }}
                   onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                 />
               </div>
+              {!ownerMode && (
+                <div className="flex justify-end mt-1.5 mr-1">
+                  <button type="button" onClick={() => setForgotOpen(true)} className="text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
@@ -232,6 +534,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </button>
           </form>
 
+          {fpHere && fp && (
+            <button
+              type="button"
+              onClick={() => void handleFingerprint()}
+              disabled={loading}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full font-medium text-[15px] transition-opacity disabled:opacity-50 hover:opacity-80"
+              style={{ border: '1.5px solid var(--g-accent)', color: 'var(--g-accent)', background: 'transparent' }}
+            >
+              <Fingerprint className="w-5 h-5" />
+              <span className="truncate">Sign in with fingerprint · {fp.name.split(' ')[0]}</span>
+            </button>
+          )}
+
+          {forgotOpen && (
+            <ForgotPasswordPopup
+              options={forgotOptions}
+              initialIdentifier={identifier}
+              onClose={() => setForgotOpen(false)}
+              onReset={(id) => {
+                setForgotOpen(false);
+                setIdentifier(id);
+                setPassword('');
+              }}
+            />
+          )}
+
           {isNativeApp && (
             <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
               <MapPin className="w-3 h-3 shrink-0" />
@@ -239,21 +567,37 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </p>
           )}
 
-          <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-            Don't have an account? Contact your Admin to get one created.
-          </p>
+          {!ownerMode && (
+            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+              Don't have an account? Contact your Admin to get one created.
+            </p>
+          )}
+          {!ownerMode && (
+            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+              Not {workspace?.short_name || workspace?.name}?{' '}
+              <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
+                Change workspace
+              </button>
+            </p>
+          )}
+          </>
+          )}
 
           {/* APK download — WEB build only. Someone already inside the native
               Android app has no use for this, so it's hidden there the same
               way the location notice above is shown only for isNativeApp. */}
-          {!isNativeApp && (
+          {/* iPhone / iPad get "Add to Home Screen" instead (AddToHomeScreen.tsx);
+              opened from the Home Screen already, neither is shown. */}
+          {!isNativeApp && !ownerMode && !isStandalone() && isIOSDevice() && <AddToHomeScreenButton />}
+          {!isNativeApp && !ownerMode && !isStandalone() && !isIOSDevice() && (
             <a
               href="/downloads/CredenceHR.apk"
-              download
+              download="CredenceHR.apk"
+              type="application/vnd.android.package-archive"
               className="mt-5 flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
               style={{ background: '#111318' }}
             >
-              <Download className="w-4 h-4 shrink-0" />
+              <img src={googlePlayIcon} alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
               <span className="flex flex-col items-start leading-tight">
                 <span className="text-[10px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
                   GET IT ON
@@ -272,6 +616,40 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// A spotlight shining down onto the people in the hero illustration: a small
+// bright source, a widening beam and a pool of light where it lands on the
+// table (styles: .hero-spot-* in index.css). Sits over the illustration, sized
+// and placed in % of it — the beam starts just above the group and ends at the
+// table, so it frames the people instead of the whole picture.
+const HeroSpotlight: React.FC = () => (
+  <>
+    <div className="hero-spot hero-spot-beam" style={{ top: '29%', width: '42%', height: '30%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-pool" style={{ top: '54%', width: '46%', height: '9%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-source" style={{ top: '27.5%' }} />
+  </>
+);
+
+// The workspace's own logo on its sign-in page; the app's logo before a
+// workspace is chosen (and for the original workspace until it uploads one).
+const BrandLogo: React.FC<{ workspace: Workspace | null; className?: string }> = ({ workspace, className }) => {
+  const [failed, setFailed] = useState(false);
+  if (workspace?.has_logo && !failed)
+    return (
+      <img
+        src={apiUrl(`/api/public/workspaces/${encodeURIComponent(workspace.code)}/logo`)}
+        alt={workspace.name}
+        className={`${className || ''} object-contain`}
+        onError={() => setFailed(true)}
+      />
+    );
+  if (!workspace || workspace.id === 1) return <img src={credenceLogo} alt="Credence" className={className} />;
+  return (
+    <div className={`${className || ''} !w-auto flex items-center text-2xl font-bold tracking-tight`} style={{ color: 'var(--g-accent)' }}>
+      {workspace.short_name || workspace.name}
     </div>
   );
 };

@@ -1,10 +1,16 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import { Gavel, Plus, X, AlertTriangle, CheckCircle2, MessageSquareWarning, ShieldAlert } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../lib/grievanceNav';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface GrievanceDisciplinaryPanelProps {
   token: string;
+  // Inside HR Operations' own tab: no second card / page title around it.
+  embedded?: boolean;
 }
 
 interface Grievance {
@@ -15,10 +21,38 @@ interface Grievance {
   description: string;
   is_anonymous: boolean;
   status: 'open' | 'investigating' | 'resolved' | 'dismissed';
+  assigned_to: number | null;
   assigned_to_name: string | null;
   resolution_notes: string | null;
   created_at: string;
+  feedback?: CaseFeedback[];
+  feedback_pending?: { named: boolean; assignee: boolean };
 }
+
+interface CaseFeedback {
+  id: number;
+  user_name: string | null;
+  role: 'named' | 'assignee' | 'hr';
+  message: string;
+  created_at: string;
+}
+
+const FEEDBACK_ROLE: Record<string, string> = { named: 'Named person', assignee: 'Investigator', hr: 'HR' };
+
+// Feedback thread (case_feedback) under a grievance / disciplinary action.
+const FeedbackThread: React.FC<{ list?: CaseFeedback[] }> = ({ list }) =>
+  !list || list.length === 0 ? null : (
+    <div className="mt-2 mb-3 space-y-1.5">
+      {list.map((f) => (
+        <div key={f.id} className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs">
+          <div className="text-[10px] font-semibold text-slate-500">
+            {FEEDBACK_ROLE[f.role] || f.role} · {f.user_name || '—'} · {new Date(f.created_at).toLocaleString()}
+          </div>
+          <div className="text-slate-700 whitespace-pre-wrap mt-0.5">{f.message}</div>
+        </div>
+      ))}
+    </div>
+  );
 
 interface DisciplinaryAction {
   id: number;
@@ -30,6 +64,8 @@ interface DisciplinaryAction {
   issued_at: string;
   acknowledged: boolean;
   status: 'active' | 'acknowledged' | 'closed';
+  feedback?: CaseFeedback[];
+  feedback_pending?: boolean;
 }
 
 const GRIEVANCE_STATUS_STYLE: Record<string, string> = {
@@ -37,6 +73,46 @@ const GRIEVANCE_STATUS_STYLE: Record<string, string> = {
   investigating: 'bg-blue-50 text-blue-700 border-blue-200',
   resolved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   dismissed: 'bg-slate-100 text-slate-500 border-slate-200'
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  open: 'Open',
+  investigating: 'Investigating',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+  active: 'Active',
+  acknowledged: 'Acknowledged',
+  closed: 'Closed'
+};
+
+// HR's own reply on a case — posted as an 'hr' entry in its feedback thread
+// (POST .../feedback), which notifies the other side.
+const HrNoteBox: React.FC<{ onSend: (message: string) => Promise<boolean> }> = ({ onSend }) => {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <input
+        type="text"
+        placeholder="HR note / reply…"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg flex-1 min-w-[160px]"
+      />
+      <button
+        type="button"
+        disabled={sending || !text.trim()}
+        onClick={async () => {
+          setSending(true);
+          if (await onSend(text.trim())) setText('');
+          setSending(false);
+        }}
+        className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        {sending ? 'Sending…' : 'Send Note'}
+      </button>
+    </div>
+  );
 };
 
 const ACTION_TYPE_LABEL: Record<string, string> = {
@@ -49,16 +125,37 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
 
 // Admin Panel -> HR Advanced -> "Grievance & Disciplinary" — a shared
 // grievance queue (assign/investigate/resolve) and a log of formal
-// disciplinary actions issued to employees. Management-only view; the
-// backend already lets any employee raise their OWN grievance
-// (POST /api/grievances) and acknowledge their own disciplinary action
-// (PUT .../:id with acknowledge:true) — those two are just not wired into a
-// self-service page yet, same "layer on later" note as the other 5 HR
-// Advanced panels.
-export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token }) => {
+// disciplinary actions issued to employees, each with its feedback thread.
+// Employees raise grievances and give their feedback from Self Service ->
+// Grievance & Disciplinary (MyCases.tsx).
+export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token, embedded = false }) => {
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-  const [tab, setTab] = useState<'grievances' | 'disciplinary'>('grievances');
+  // An HR-side alert (e.g. "Disciplinary Feedback Received") asks for a tab
+  // through grievanceNav — on mount via sessionStorage, or by event when the
+  // panel is already open.
+  const [tab, setTab] = useState<GrievanceAdminTab>(() => {
+    try {
+      const asked = sessionStorage.getItem(GRIEVANCE_TAB_KEY);
+      sessionStorage.removeItem(GRIEVANCE_TAB_KEY);
+      return asked === 'disciplinary' ? 'disciplinary' : 'grievances';
+    } catch {
+      return 'grievances';
+    }
+  });
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const t = (e as CustomEvent).detail;
+      if (t === 'grievances' || t === 'disciplinary') setTab(t);
+      try {
+        sessionStorage.removeItem(GRIEVANCE_TAB_KEY);
+      } catch {
+        // storage unavailable
+      }
+    };
+    window.addEventListener(GRIEVANCE_TAB_EVENT, onTab);
+    return () => window.removeEventListener(GRIEVANCE_TAB_EVENT, onTab);
+  }, []);
   const [grievances, setGrievances] = useState<Grievance[]>([]);
   const [actions, setActions] = useState<DisciplinaryAction[]>([]);
   const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
@@ -73,14 +170,17 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
   const [newActionType, setNewActionType] = useState('verbal_warning');
   const [newActionReason, setNewActionReason] = useState('');
 
-  const fetchAll = async () => {
-    setLoading(true);
+  // silent: refresh in place (after a note) without the full-page spinner.
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const [gRes, aRes, uRes] = await Promise.all([
         fetch(apiUrl('/api/grievances'), { headers: authHeaders }),
         fetch(apiUrl('/api/disciplinary-actions'), { headers: authHeaders }),
-        fetch(apiUrl('/api/users'), { headers: authHeaders })
+        // Same picker list the self-service form uses — GET /api/users needs
+        // the Users module, which an HR account usually doesn't have.
+        fetch(apiUrl('/api/grievances/people'), { headers: authHeaders })
       ]);
       const gData = await gRes.json();
       const aData = await aRes.json();
@@ -89,7 +189,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
       if (!aRes.ok) throw new Error(aData.error || 'Failed to load disciplinary actions');
       setGrievances(Array.isArray(gData) ? gData : []);
       setActions(Array.isArray(aData) ? aData : []);
-      if (uRes.ok) setUsers(Array.isArray(uData) ? uData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (uRes.ok) setUsers(Array.isArray(uData) ? uData : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load');
     } finally {
@@ -102,7 +202,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const updateGrievance = async (id: number, patch: { status?: string; resolution_notes?: string }) => {
+  const updateGrievance = async (id: number, patch: { status?: string; resolution_notes?: string; assigned_to?: number | null }) => {
     setError('');
     setSuccess('');
     try {
@@ -139,7 +239,22 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
     }
   };
 
+  const sendNote = async (kind: 'grievances' | 'disciplinary-actions', id: number, message: string) => {
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/${kind}/${id}/feedback`), { method: 'POST', headers: authHeaders, body: JSON.stringify({ message }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send note');
+      await fetchAll(true);
+      return true;
+    } catch (err: any) {
+      setError(err.message || 'Failed to send note');
+      return false;
+    }
+  };
+
   const closeAction = async (id: number) => {
+    if (!(await confirmDialog('Close this disciplinary action? The employee is notified and no more feedback can be added.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/disciplinary-actions/${id}`), {
         method: 'PUT',
@@ -155,9 +270,9 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="p-6 border-b border-slate-200 flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-start gap-3">
+    <div className={embedded ? '-m-6' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
+      <div className={`border-b border-slate-200 flex items-start justify-between gap-4 flex-wrap ${embedded ? 'px-6 py-4' : 'p-6'}`}>
+        <div className={embedded ? 'hidden' : 'flex items-start gap-3'}>
           <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
             <Gavel className="w-5 h-5 text-blue-600" />
           </div>
@@ -169,7 +284,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setTab('grievances')}
+            onClick={() => { setTab('grievances'); setSuccess(''); setError(''); }}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
               tab === 'grievances' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
             }`}
@@ -178,7 +293,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
           </button>
           <button
             type="button"
-            onClick={() => setTab('disciplinary')}
+            onClick={() => { setTab('disciplinary'); setSuccess(''); setError(''); }}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
               tab === 'disciplinary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
             }`}
@@ -200,10 +315,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : tab === 'grievances' ? (
         <div className="p-4 space-y-2.5">
           {grievances.map((g) => (
@@ -213,10 +325,48 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                   {g.raised_by_name} {g.against_user_name && <span className="text-slate-400 font-normal">against {g.against_user_name}</span>}
                   {g.category && <span className="text-slate-400 font-normal"> · {g.category}</span>}
                 </p>
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${GRIEVANCE_STATUS_STYLE[g.status]}`}>{g.status}</span>
+                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${GRIEVANCE_STATUS_STYLE[g.status]}`}>{STATUS_LABEL[g.status] || g.status}</span>
               </div>
-              <p className="text-xs text-slate-600 mb-3">{g.description}</p>
+              <p className="text-xs text-slate-600 mb-1">{g.description}</p>
+              <p className="text-[11px] text-slate-400 mb-2">
+                Raised {new Date(g.created_at).toLocaleDateString()}
+                {g.assigned_to_name ? ` · Investigator: ${g.assigned_to_name}` : ''}
+              </p>
+              {(g.status === 'resolved' || g.status === 'dismissed') && g.resolution_notes && (
+                <p className="text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 mb-2">
+                  <span className="font-semibold">Resolution:</span> {g.resolution_notes}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                {g.feedback_pending?.named && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for {g.against_user_name || 'named person'}'s feedback
+                  </span>
+                )}
+                {g.feedback_pending?.assignee && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for investigator {g.assigned_to_name || ''}'s feedback
+                  </span>
+                )}
+              </div>
+              <FeedbackThread list={g.feedback} />
+              {(g.status === 'open' || g.status === 'investigating') && <HrNoteBox onSend={(m) => sendNote('grievances', g.id, m)} />}
               <div className="flex flex-wrap items-center gap-2">
+                {(g.status === 'open' || g.status === 'investigating') && (
+                  <SearchSelect
+                    value={g.assigned_to ?? ''}
+                    onChange={(e) => updateGrievance(g.id, { assigned_to: e.target.value ? Number(e.target.value) : null })}
+                    title="Assign to someone to investigate — they're notified and asked for feedback"
+                    className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg"
+                  >
+                    <option value="">Assign investigator…</option>
+                    {activePeople(users, g.assigned_to).map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </SearchSelect>
+                )}
                 {g.status === 'open' && (
                   <button type="button" onClick={() => updateGrievance(g.id, { status: 'investigating' })} className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
                     Start Investigating
@@ -265,14 +415,14 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
           </div>
           {showNewAction && (
             <div className="rounded-xl border border-dashed border-blue-300 p-3.5 mb-3 flex flex-wrap items-end gap-2">
-              <select value={newActionUserId} onChange={(e) => setNewActionUserId(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
+              <SearchSelect value={newActionUserId} onChange={(e) => setNewActionUserId(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                 <option value="">Select employee…</option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <select value={newActionType} onChange={(e) => setNewActionType(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                 {Object.entries(ACTION_TYPE_LABEL).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -310,10 +460,20 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                     >
                       {a.acknowledged ? 'Acknowledged' : 'Pending acknowledgement'}
                     </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{a.status}</span>
+                    {/* Active/Acknowledged is already said by the badge above; only Closed adds anything. */}
+                    {a.status === 'closed' && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{STATUS_LABEL.closed}</span>
+                    )}
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 mb-2">{a.reason}</p>
+                {a.status !== 'closed' && a.feedback_pending && (
+                  <span className="inline-block mb-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for {a.user_name || 'the employee'}'s feedback
+                  </span>
+                )}
+                <FeedbackThread list={a.feedback} />
+                {a.status !== 'closed' && <HrNoteBox onSend={(m) => sendNote('disciplinary-actions', a.id, m)} />}
                 <p className="text-[11px] text-slate-400">
                   Issued by {a.issued_by_name || '—'} · {new Date(a.issued_at).toLocaleDateString()}
                 </p>

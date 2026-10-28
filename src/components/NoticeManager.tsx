@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LottieLight } from 'lottie-react';
+import { LottieLight } from './LazyLottie';
 import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import {
   Bell, Plus, Trash2, Edit2, X, Eye, EyeOff, Sparkles,
@@ -8,7 +8,8 @@ import {
 import { Notice, NoticeRecipient, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface NoticeManagerProps {
   token: string;
@@ -191,7 +192,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this notice? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this notice? This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/notices/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -249,9 +250,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
 
       {/* --- List --- */}
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-          <Spinner size={16} /> Loading notices…
-        </div>
+        <LoadingBlock />
       ) : notices.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -269,7 +268,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-semibold text-slate-900 text-sm truncate">{n.title}</h4>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${n.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${n.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : n.source === 'budget_import' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
                         {n.is_active ? 'Active' : n.source === 'budget_import' ? 'Draft — review & publish' : 'Paused'}
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 flex items-center gap-1">
@@ -284,6 +283,14 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                       {n.source === 'tracking' && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           Employee Tracking
+                        </span>
+                      )}
+                      {typeof n.seen_count === 'number' && typeof n.audience_count === 'number' && (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 flex items-center gap-1"
+                          title={n.seen_by && n.seen_by.length > 0 ? `Seen by: ${n.seen_by.join(', ')}` : 'Nobody has seen it yet'}
+                        >
+                          <Eye className="w-2.5 h-2.5" /> Seen by {n.seen_count} of {n.audience_count}
                         </span>
                       )}
                     </div>

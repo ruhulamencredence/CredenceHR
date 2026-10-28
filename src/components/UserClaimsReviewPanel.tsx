@@ -11,6 +11,9 @@ import { formatDate } from '../lib/formatDate';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
+import { ClaimBillLines } from './ClaimBillLines';
+import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface UserClaimsReviewPanelProps {
   token: string;
@@ -26,6 +29,7 @@ interface UserClaimsReviewPanelProps {
 // claim only shows Approve/Reject buttons HERE when it has no Approval Request
 // tracking it at all (a claim submitted back when no Chain was configured yet).
 export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ token }) => {
+  const categoryNames = useBillClaimCategoryNames(token);
   const authHeaders = { Authorization: `Bearer ${token}` };
   const [claims, setClaims] = useState<UserClaim[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,7 +178,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
   };
 
   const handleDelete = async (claim: UserClaim) => {
-    if (!confirm(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`))) return;
     setDeletingId(claim.id);
     setError('');
     try {
@@ -317,10 +321,12 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                           <label className="block text-[10px] font-semibold text-slate-500 mb-1">Category</label>
                           <select
                             value={editDraft.category}
+                            disabled={!!c.items && c.items.length > 0}
+                            title={c.items && c.items.length > 0 ? 'Set per bill — not editable here' : undefined}
                             onChange={(e) => setEditDraft((d) => (d ? { ...d, category: e.target.value as UserClaimCategory } : d))}
-                            className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                           >
-                            {USER_CLAIM_CATEGORIES.map((cat) => (
+                            {[...new Set([...categoryNames, editDraft.category])].map((cat) => (
                               <option key={cat} value={cat}>{cat}</option>
                             ))}
                           </select>
@@ -328,13 +334,13 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-                          Amount {c.claim_refs && c.claim_refs.length > 0 && '(derived from referenced check-in/outs — not editable)'}
+                          Amount {c.items && c.items.length > 0 ? '(total of the bills — not editable)' : c.claim_refs && c.claim_refs.length > 0 && '(derived from referenced check-in/outs — not editable)'}
                         </label>
                         <input
                           type="number"
                           step="0.01"
                           value={editDraft.amount}
-                          disabled={!!c.claim_refs && c.claim_refs.length > 0}
+                          disabled={(!!c.claim_refs && c.claim_refs.length > 0) || (!!c.items && c.items.length > 0)}
                           onChange={(e) => setEditDraft((d) => (d ? { ...d, amount: e.target.value } : d))}
                           className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                         />
@@ -371,6 +377,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                   ) : (
                     <>
                       {c.description && <p className="text-xs text-slate-600 mt-1 max-w-md">{c.description}</p>}
+                      <ClaimBillLines items={c.items} compact />
                       {c.claim_refs && c.claim_refs.length > 0 && (
                         <div className="mt-1.5 space-y-1 max-w-md">
                           {c.claim_refs.map((r) => (

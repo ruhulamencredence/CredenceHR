@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Shared letterhead for every "Export PDF" in the app (Job Entry Details today,
-// any future report tomorrow) — logo + company block, report title, an optional
-// "Filtered By" box listing whatever filters were active, and a page-number
+// Shared header for every "Export PDF" in the app — the company's standard
+// report header (pdfStandard.ts): logo + company name and address, report
+// title, the active filters as "Label: value" lines, and a page-number
 // footer. Import drawPdfLetterhead + finalizePdfPageNumbers wherever a PDF is
 // built with jsPDF/jspdf-autotable so every export looks the same.
 //
@@ -21,11 +21,14 @@
 //   doc.save('report.pdf');
 
 import type jsPDFType from 'jspdf';
+import { cachedPdfCompany, drawStandardHeader } from './pdfStandard';
 
 export interface PdfLetterheadOptions {
   reportTitle: string;
-  /** Label/value pairs shown in the "Filtered By" box — omit or pass [] to hide it entirely. */
+  /** Label/value pairs listed under the title (the active filters, or a voucher/payslip's details) — omit or pass [] for none. */
   filters?: [string, string][];
+  /** No longer drawn — the standard header lists the details as "Label: value" lines without a heading. Kept so existing callers compile. */
+  filtersLabel?: string;
 }
 
 // Preloads an <img> so jsPDF's addImage (which needs actual pixel data, not just
@@ -53,89 +56,19 @@ export function printedOnTimestamp(): string {
   return `${day}-${month}-${year} ${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
 }
 
-// Draws the logo + company header + report title + (optional) "Filtered By" box
-// at the top of the CURRENT page, and returns the Y position content should
-// start at. Call again inside autoTable's `didDrawPage` if you want the same
-// header repeated on every page of a multi-page table.
+// Draws the company's standard report header (pdfStandard.ts — the
+// active company's logo, name and address, a rule, the title, then
+// "Label: value" lines for the filters) at the top of the CURRENT page, and
+// returns the Y position content should start at. Every report PDF uses this
+// one header. `logoImg` is only the fallback when the company isn't loaded.
+// Call again inside autoTable's `didDrawPage` to repeat it on every page.
 export function drawPdfLetterhead(
   doc: jsPDFType,
   logoImg: HTMLImageElement,
   options: PdfLetterheadOptions
 ): number {
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const filters = options.filters || [];
-
-  // Logo, top-left. Keeps the source image's aspect ratio.
-  const logoWidth = 32;
-  const logoHeight = (logoImg.height / logoImg.width) * logoWidth;
-  doc.addImage(logoImg, 'PNG', 14, 8, logoWidth, logoHeight);
-
-  // Company block, centered.
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(30, 41, 59);
-  doc.text('Credence', pageWidth / 2, 13, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
-  doc.text('CredenceHR', pageWidth / 2, 18.5, { align: 'center' });
-
-  // Separator line under the letterhead.
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.3);
-  doc.line(14, 23, pageWidth - 14, 23);
-
-  // Report title.
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text(options.reportTitle, pageWidth / 2, 30, { align: 'center' });
-
-  let y = 34;
-
-  if (filters.length > 0) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text('Filtered By:', 14, y);
-    y += 2.5;
-
-    const boxX = 14;
-    const boxY = y;
-    const boxWidth = pageWidth - 28;
-    const colWidth = boxWidth / 2;
-    const rowHeight = 6.5;
-    const rowCount = Math.ceil(filters.length / 2);
-    const boxHeight = rowHeight * rowCount;
-
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.25);
-    doc.rect(boxX, boxY, boxWidth, boxHeight);
-    // Vertical divider between the two columns.
-    doc.line(boxX + colWidth, boxY, boxX + colWidth, boxY + boxHeight);
-    // Horizontal dividers between rows.
-    for (let r = 1; r < rowCount; r++) {
-      doc.line(boxX, boxY + r * rowHeight, boxX + boxWidth, boxY + r * rowHeight);
-    }
-
-    filters.forEach(([label, value], i) => {
-      const row = Math.floor(i / 2);
-      const col = i % 2;
-      const cellX = boxX + col * colWidth;
-      const cellY = boxY + row * rowHeight + rowHeight / 2 + 1.3;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(51, 65, 85);
-      doc.text(label, cellX + 3, cellY);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(234, 88, 12);
-      doc.text(value || '—', cellX + colWidth / 2 + 2, cellY);
-    });
-
-    y = boxY + boxHeight + 6;
-  }
-
-  return y;
+  const co = cachedPdfCompany() || { name: 'Credence Housing Limited', address: null, logo: logoImg };
+  return drawStandardHeader(doc, co.logo ? co : { ...co, logo: logoImg }, options.reportTitle, options.filters || []);
 }
 
 // Call once, after the document is fully built (table drawn, all pages exist) —

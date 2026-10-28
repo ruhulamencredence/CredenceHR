@@ -1,55 +1,103 @@
 import express from "express";
 import path from "path";
+import fsSync from "fs";
 import http from "http";
-import cors from "cors";
 import compression from "compression";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
-import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule } from "./zkSync";
+import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
+import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
-import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } from "./holidayRoutes";
-import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
-import { ensureBudgetNoticeSchema, draftBudgetNotice } from "./BudgetNoticeDraft";
-import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
-import { ensureLoginGuardSchema, loginBlocked, recordLogin } from "./LoginGuard";
-import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
-import { resolveJwtSecret } from "./JwtSecret";
-import { clientIp } from "./ActiveUsersRoutes";
+import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
+import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
-import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
+import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
-import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
-import { registerServerProfileRoutes, ensureServerProfilesSchema } from "./ServerProfileRoutes";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
-import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
-import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./AssetManagementRoutes";
+import { registerApkDownload } from "./AndroidApkRoute";
+import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave } from "./PayrollRoutes";
+import { registerPayrollApprovalRoutes, ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
+import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
+import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
+import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
-import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
+import { registerDebugRoutes } from "./DebugRoutes";
+import { registerProjectRoutes } from "./ProjectRoutes";
+import { registerAuthRoutes } from "./AuthRoutes";
+import { ensureLoginGuardSchema } from "./LoginGuard";
+import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
+import { ensureFeedbackSchema, registerFeedbackRoutes } from "./FeedbackRoutes";
+import { ensureFingerprintSchema, registerFingerprintRoutes } from "./FingerprintRoutes";
+import { ensureSchemaMigrations } from "./schemaMigrations";
+import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
+import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
+import { registerOfficeAttendanceRoutes } from "./OfficeAttendanceRoutes";
+import { registerEmployeeTrackingRoutes } from "./EmployeeTrackingRoutes";
+import { registerNoticeRoutes } from "./NoticeRoutes";
+import { registerEmployeeRoutes } from "./EmployeeRoutes";
+import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
+import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
+import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
+import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
+import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
+import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
+import { registerHrReminderRoutes } from "./HrRemindersRoutes";
+import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
+import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
+import { registerDataImportRoutes } from "./DataImportRoutes";
+import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
+import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
+import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
+import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
+import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
+import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
+import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
+import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
+import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
+import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
+import { ensureReportEmailSchema, registerReportEmailRoutes } from "./ReportEmailRoutes";
+import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
+import { sendPushToUserIds } from "./PushNotificationService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
+import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
+import { registerTargetRoutes } from "./TargetRoutes";
 import { registerTrackingStayReportRoutes, wallMinutes } from "./TrackingStayReport";
+import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
+import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
+import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
+import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
+import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
+import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
+import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
+import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
+import { recordClaimHistory } from "./ConveyanceClaimHistory";
+import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
+import { companyStore, activeCompanyId, activeGroupId, type CompanyContext } from "./companyContext";
+import { scopeSql, scopeColumnsFor } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
+import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
-import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
-import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
-import { ensureUserAccessSchema, registerUserAccessExtras, accountState } from "./UserAccessExtras";
-import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
-import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
-import { sanitizeNoticeHtml, safeLottieJson, safeLottieUrl } from "./NoticeSafety";
-import { ensureEmployeeRecordsGuard, keptRecordsOf } from "./EmployeeRecordsGuard";
+import { runsBackgroundJobs } from "./jobRunner";
+import { resolveJwtSecret } from "./JwtSecret";
+import { installWebSecurity, socketCorsOrigin } from "./WebSecurity";
 
 dotenv.config();
 
@@ -67,7 +115,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // the first 6 hours of every Bangladesh calendar day (00:00–05:59 BD = 18:00–23:59 UTC
 // the previous day), which is exactly the kind of "date shown one day behind" bug this
 // app has been chasing.
-function todayInDhaka(): string {
+export function todayInDhaka(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Dhaka",
     year: "numeric",
@@ -125,7 +173,46 @@ function parseQtyNumber(value: any): number | null {
 }
 
 let dbPool: mysql.Pool | null = null;
+// Socket.IO server, set once it starts (see httpServer below); used to tell
+// open apps that a Notice was published.
+let liveIo: SocketIOServer | null = null;
 let isMySQLConnected = false;
+
+// A brand-new, empty database (no `users` table): run schema.sql once, so a new
+// installation only needs an empty database and the .env — every newer table
+// and column is then added by ensureSchemaMigrations and the modules as usual.
+async function bootstrapBaseSchema(pool: mysql.Pool) {
+  const [rows]: any = await pool.query("SHOW TABLES LIKE 'users'");
+  if (Array.isArray(rows) && rows.length) return;
+  const candidates = [
+    path.join(process.cwd(), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "..", "schema.sql")
+  ];
+  const file = candidates.find((f) => fsSync.existsSync(f));
+  if (!file) {
+    console.warn("⚠️ The database is empty and schema.sql wasn't found next to the app — import it by hand (see schema.sql).");
+    return;
+  }
+  const sql = fsSync
+    .readFileSync(file, "utf8")
+    .replace(/^\s*CREATE DATABASE[^;]*;/gim, "")
+    .replace(/^\s*USE\s+[^;]*;/gim, "");
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "mpr_tracker_db",
+    port: Number(process.env.DB_PORT) || 3306,
+    multipleStatements: true
+  });
+  try {
+    await conn.query(`SET FOREIGN_KEY_CHECKS = 0;\n${sql}\nSET FOREIGN_KEY_CHECKS = 1;`);
+    console.log(`✅ Empty database: created the base tables from ${path.basename(file)}.`);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
 
 async function initDB() {
   try {
@@ -153,6 +240,15 @@ async function initDB() {
       // lower this per-worker limit to fit.
       connectionLimit: 30,
       queueLimit: 0,
+      // Every distinct SQL run through execute() stays prepared on its
+      // connection (mysql2's default keeps up to 16,000 per connection), and
+      // MySQL allows only max_prepared_stmt_count (16,382 by default) across
+      // ALL connections. With 4 PM2 workers x 30 connections that limit was
+      // hit under load and queries failed ("Can't create more than
+      // max_prepared_stmt_count statements"). 100 per connection keeps the
+      // most-used statements fast (least-used ones are closed) and leaves
+      // room for 5 workers: 5 x 30 x 100 = 15,000.
+      maxPreparedStatements: 100,
       // Without this, mysql2 hands back DATE/DATETIME columns as JS Date objects built
       // from LOCAL midnight. Those then get flattened to a string either by our own
       // `.toISOString()` calls or implicitly by JSON.stringify (which also calls
@@ -169,1970 +265,58 @@ async function initDB() {
     console.log(" Connected to MySQL Database successfully!");
     isMySQLConnected = true;
     connection.release();
-    await ensureSchemaMigrations();
-    startZkSyncSchedule(dbPool);
+    await bootstrapBaseSchema(dbPool);
+    await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
+    // Credence Mail tables (MailRoutes.ts).
+    await ensureMailSchema(dbPool);
+    // Duty Roster tables (RosterRoutes.ts).
+    await ensureRosterSchema(dbPool);
+    // Break Time tables (BreakRoutes.ts).
+    await ensureBreakSchema(dbPool);
+    // Forgot password (PasswordResetRoutes.ts).
+    await ensurePasswordResetSchema(dbPool);
+    // Sign-in attempts, for stopping password guessing (LoginGuard.ts).
+    await ensureLoginGuardSchema(dbPool);
+    // User feedback about the app (FeedbackRoutes.ts).
+    await ensureFeedbackSchema(dbPool);
+    await ensureFingerprintSchema(dbPool);
+    // Approval requests with no approver yet (rehomeAwaitingApprovals).
+    await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
+    });
+    // Budget import -> draft notice (BudgetNoticeDraft.ts).
+    await ensureBudgetNoticeSchema(dbPool);
+    // Measurement Sheet was taken out of the software: drop its table and the
+    // module's saved permissions (no-ops once they are gone).
+    for (const sql of [
+      "DROP TABLE IF EXISTS measurement_sheets",
+      "DELETE FROM admin_module_permission_layers WHERE module_key = 'measurement_sheet'",
+      "DELETE FROM admin_module_permissions WHERE module_key = 'measurement_sheet'"
+    ]) {
+      await dbPool.query(sql).catch((err: any) => console.warn("⚠️ Measurement Sheet removal: " + err.message));
+    }
+    // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
+    await ensureMprDispatchSchema(dbPool);
+    await ensurePoImportSchema(dbPool);
+    // E-Signature on Document Vault documents (ESignRoutes.ts).
+    await ensureESignSchema(dbPool);
+    // Self Service -> My Payslip switch (PayslipRoutes.ts).
+    await ensurePayslipSchema(dbPool);
+    // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
+    await ensureReportEmailSchema(dbPool);
+    await ensureZkSchema(dbPool);
+    // Pay and service records keep their Employee from being deleted
+    // (EmployeeRecordsGuard.ts) — after every table above exists.
+    await ensureEmployeeRecordsGuard(dbPool);
+    // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
+    await backfillEmployeeLoginIds(queryDB);
+    // SIM & ID card requisitions (RequisitionRoutes.ts).
+    await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
+    // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
+    if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");
     isMySQLConnected = false;
-  }
-}
-
-// Self-healing migrations for tables added AFTER the original schema.sql was written.
-// Anyone who imported schema.sql before this table existed (an already-running,
-// pre-existing database) would otherwise hit "Table doesn't exist" the first time this
-// feature is used — CREATE TABLE IF NOT EXISTS here means a normal server restart is
-// enough to pick it up, no manual SQL required.
-// Live socket server (set once it starts) — Live Follow pushes to the phones through it.
-let liveIo: SocketIOServer | null = null;
-
-async function ensureSchemaMigrations() {
-  if (!dbPool) return;
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS budget_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        budget_id INT NOT NULL,
-        user_id INT NOT NULL,
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_budget_user (budget_id, user_id),
-        FOREIGN KEY (budget_id) REFERENCES budgets(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure budget_submissions table exists: " + err.message);
-  }
-  // Final Submit of ONE Job (Jobs list -> Submit) — locks just that Job's
-  // entries for that user; budget_submissions above still locks a whole Budget.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS job_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        job_id INT NOT NULL,
-        budget_id INT NULL,
-        user_id INT NOT NULL,
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_job_user (job_id, user_id),
-        KEY idx_job_submissions_budget (budget_id),
-        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure job_submissions table exists: " + err.message);
-  }
-
-  // Global Calendar (Weekend/Holiday) — table + schema owned by holidayRoutes.ts,
-  // only the call site lives here, same as every other self-healing migration
-  // in this function.
-  await ensureHolidayCalendarSchema(dbPool);
-
-  // Personal Alerts (bell icon, web + mobile) — table + schema owned by
-  // Alerts.ts, only the call site lives here, same as every other
-  // self-healing migration in this function.
-  await ensureAlertsSchema(dbPool);
-
-  // Payroll Module (salary_structures / employee_advances / payrolls) —
-  // table + schema owned by PayrollRoutes.ts, only the call site lives here,
-  // same as every other self-healing migration in this function.
-  await ensurePayrollSchema(dbPool);
-
-  // Asset Management (Employee Profile -> My Assets / New Requisition /
-  // Requisition Status, plus Admin Panel -> Asset Management) — table +
-  // schema owned by AssetManagementRoutes.ts, only the call site lives here,
-  // same as every other self-healing migration in this function.
-  await ensureAssetManagementSchema(dbPool);
-
-  // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
-  // — table + schema owned by EmployeeTransferRoutes.ts, only the call site
-  // lives here, same as every other self-healing migration in this function.
-  await ensureEmployeeTransferSchema(dbPool);
-
-  // Admin Panel -> Active Users: one row per sign-in (ActiveUsersRoutes.ts).
-  await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
-
-  // World-class HRM extension modules — Exit/Offboarding, Performance
-  // Management, Recruitment/ATS, Grievance & Disciplinary, Document Vault
-  // (HR Analytics has no tables of its own, just aggregation queries over
-  // these and existing tables) — each owns its schema in its own file, same
-  // self-healing pattern as every migration above.
-  await ensureExitOffboardingSchema(dbPool);
-  await ensurePerformanceSchema(dbPool);
-  await ensureRecruitmentSchema(dbPool);
-  await ensureGrievanceSchema(dbPool);
-  await ensureDocumentVaultSchema(dbPool);
-  // Measurement Sheet was taken out of the software: drop its table and the
-  // module's saved permissions (no-ops once they are gone).
-  for (const sql of [
-    "DROP TABLE IF EXISTS measurement_sheets",
-    "DELETE FROM admin_module_permission_layers WHERE module_key = 'measurement_sheet'",
-    "DELETE FROM admin_module_permissions WHERE module_key = 'measurement_sheet'"
-  ]) {
-    await dbPool.query(sql).catch((err: any) => console.warn("⚠️ Measurement Sheet removal: " + err.message));
-  }
-  // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
-  await ensureMprDispatchSchema(dbPool);
-  // Budget import -> draft notice (BudgetNoticeDraft.ts).
-  await ensureBudgetNoticeSchema(dbPool);
-  // PEPM -> Reports -> P.O Import (PoImportRoutes.ts).
-  await ensurePoImportSchema(dbPool);
-  // Sign-in attempts, for stopping password guessing (LoginGuard.ts).
-  await ensureLoginGuardSchema(dbPool);
-  // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
-  await ensureUserAccessSchema(dbPool);
-
-  // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
-  // schema owned by ServerProfileRoutes.ts, only the call site lives here,
-  // same as every other self-healing migration in this function.
-  await ensureServerProfilesSchema(dbPool);
-
-  // Chat (Direct/Group/Community messaging) — table + schema owned by
-  // ChatRoutes.ts, only the call site lives here, same as every other
-  // self-healing migration in this function.
-  await ensureChatSchema(dbPool);
-
-  // Pay and service records keep their Employee from being deleted
-  // (EmployeeRecordsGuard.ts) — after every table above exists.
-  await ensureEmployeeRecordsGuard(dbPool);
-
-  // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
-  // created on first save. Position/Department are deliberately NOT columns
-  // here — they're read live from all_employees (via all_employees.user_id)
-  // by profileRoutes.ts instead, so the Employees module stays the single
-  // source of truth for both. Same self-healing pattern as the other tables
-  // in this function.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_profile_details (
-        user_id INT PRIMARY KEY,
-        first_name VARCHAR(150) NULL,
-        last_name VARCHAR(150) NULL,
-        date_of_birth DATE NULL,
-        country VARCHAR(100) NULL,
-        state VARCHAR(100) NULL,
-        city VARCHAR(100) NULL,
-        full_address TEXT NULL,
-        photo_mimetype VARCHAR(150) NULL,
-        photo_data LONGBLOB NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_profile_details table exists: " + err.message);
-  }
-
-  // Entry edit history audit table — same self-healing pattern as budget_submissions
-  // above, so an already-running database picks it up on next restart automatically.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS entry_edit_history (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        entry_id INT NOT NULL,
-        edited_by INT,
-        field_name VARCHAR(50) NOT NULL,
-        old_value VARCHAR(255),
-        new_value VARCHAR(255),
-        edited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
-        FOREIGN KEY (edited_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure entry_edit_history table exists: " + err.message);
-  }
-
-  // Permanent Delete Log — Superadmin-only audit trail of every entry ever
-  // erased from the Job Recycle bin (DELETE /api/entries/:id/permanent, which
-  // hard-deletes the entries row). No FK to entries on purpose: the row this
-  // refers to is already gone by the time the log is read, so every
-  // identifying field here is a plain snapshot taken right before that
-  // DELETE, not a live join — see schema.sql's comment on this table.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS entry_permanent_delete_log (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        entry_id INT NOT NULL,
-        entry_date DATE,
-        job_name VARCHAR(30),
-        job_no VARCHAR(100),
-        project_name VARCHAR(150),
-        mpr_no VARCHAR(100),
-        item_name VARCHAR(255),
-        requisitioned_qty DECIMAL(14,2),
-        entry_created_by_name VARCHAR(100),
-        entry_deleted_by_name VARCHAR(100),
-        entry_deleted_at TIMESTAMP NULL,
-        permanently_deleted_by INT NULL,
-        permanently_deleted_by_name VARCHAR(100) NOT NULL,
-        permanently_deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (permanently_deleted_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure entry_permanent_delete_log table exists: " + err.message);
-  }
-
-  // Delivery Date "minimum lead time" conditions — Admin Panel -> PEPM Manage
-  // -> Data Import -> Condition Set (see deliveryDateConditions.ts's resolver
-  // and EntriesRoutes.ts's enforcement). Two independent condition_types
-  // ("entry" — New Job Entry/Add MPR, "job_edit" — changing an existing
-  // entry's Delivery Date), each with one Global row (scope='global',
-  // scope_id=0) plus any number of Project/Budget override rows. scope_id
-  // is 0 (not NULL) for the Global row specifically so the unique key below
-  // can actually enforce "only one Global row per condition_type" — MySQL
-  // treats every NULL in a unique index as distinct from every other NULL,
-  // which would silently allow duplicate Global rows otherwise.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS delivery_date_conditions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        condition_type ENUM('entry','job_edit') NOT NULL,
-        scope ENUM('global','project','budget') NOT NULL DEFAULT 'global',
-        scope_id INT NOT NULL DEFAULT 0,
-        min_lead_days INT NOT NULL DEFAULT 0,
-        apply_to_admins TINYINT(1) NOT NULL DEFAULT 0,
-        enabled TINYINT(1) NOT NULL DEFAULT 0,
-        updated_by INT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_delivery_condition (condition_type, scope, scope_id),
-        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    // Seed the two Global rows (disabled by default) so the resolver and the
-    // Condition Set UI always have a row to read/upsert against instead of
-    // needing separate "does a Global row exist yet" branches everywhere.
-    await dbPool.query(
-      `INSERT IGNORE INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled) VALUES
-       ('entry', 'global', 0, 0, 0, 0),
-       ('job_edit', 'global', 0, 0, 0, 0)`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure delivery_date_conditions table exists: " + err.message);
-  }
-
-  // Per-Leave-Category Policy (Self Service -> Leave Manage -> "Leave
-  // Policies") — see schema.sql's leave_category_policies comment for the
-  // full design. Seeded with today's actual behavior (Reliever always
-  // required, no other restriction) so an existing install's behavior never
-  // silently changes on upgrade — a Leave Manager has to explicitly turn a
-  // restriction on.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_category_policies (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        category_key VARCHAR(100) NOT NULL,
-        min_advance_notice_days INT NOT NULL DEFAULT 0,
-        reliever_required TINYINT(1) NOT NULL DEFAULT 1,
-        max_consecutive_days INT NULL DEFAULT NULL,
-        require_paid_leave_exhausted TINYINT(1) NOT NULL DEFAULT 0,
-        updated_by INT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_leave_category_policy (category_key),
-        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    await dbPool.query(
-      `INSERT IGNORE INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted) VALUES
-       ('casual', 0, 1, NULL, 0),
-       ('sick', 0, 1, NULL, 0),
-       ('without_pay', 0, 1, NULL, 0),
-       ('custom_earn_leave', 0, 0, NULL, 0)`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_category_policies table exists: " + err.message);
-  }
-
-  // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
-  // See schema.sql's job_edit_requests comment for the full explanation.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS job_edit_requests (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        -- NULL for a still-pending 'add_job' request — there's no real Job yet to
-        -- point at, only what's proposed in payload; backfilled once approved.
-        job_id INT NULL,
-        entry_id INT NULL,
-        action ENUM('add_item', 'delete_entry', 'add_job') NOT NULL,
-        payload TEXT NULL,
-        status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
-        requested_by INT NOT NULL,
-        reviewed_by INT NULL,
-        reviewed_at TIMESTAMP NULL DEFAULT NULL,
-        review_note VARCHAR(500) NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-        FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE SET NULL,
-        FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure job_edit_requests table exists: " + err.message);
-  }
-
-  // Job Edit's "Add New Job" — self-heal an existing job_edit_requests table (created
-  // before 'add_job' existed) onto the new shape: job_id must become nullable (a
-  // brand-new Job doesn't exist yet while its request is pending) and the action
-  // ENUM needs the new 'add_job' member. Both MODIFY COLUMN calls are naturally
-  // idempotent — safe to run on every startup, fresh installs included.
-  try {
-    await dbPool.query(`ALTER TABLE job_edit_requests MODIFY COLUMN job_id INT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not make job_edit_requests.job_id nullable: " + err.message);
-  }
-  try {
-    await dbPool.query(`ALTER TABLE job_edit_requests MODIFY COLUMN action ENUM('add_item', 'delete_entry', 'add_job') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not add 'add_job' to job_edit_requests.action: " + err.message);
-  }
-
-  // Self-healing column additions for the Admin-set Delivery Date window feature —
-  // ignore the error if the column already exists (older MySQL doesn't support
-  // "ADD COLUMN IF NOT EXISTS" reliably, so this is the portable approach).
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN delivery_date_from DATE DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.delivery_date_from column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN delivery_date_to DATE DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.delivery_date_to column: " + err.message);
-    }
-  }
-
-  // Self-healing column additions for the "Job Recycle" soft-delete feature — Users
-  // can delete their own (unlocked) entries, but a delete only sets deleted_at /
-  // deleted_by instead of erasing the row, so the Admin can review + restore it from
-  // the Recycle bin. Ignore the error if the column already exists.
-  try {
-    await dbPool.query(`ALTER TABLE entries ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add entries.deleted_at column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE entries ADD COLUMN deleted_by INT NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add entries.deleted_by column: " + err.message);
-    }
-  }
-
-  // GET /api/entries and /api/entries/mpr-usage both start with `WHERE
-  // e.deleted_at IS NULL`, and a plain 'user' account (the majority of
-  // accounts) additionally filters `AND e.created_by = ?` — created_by has
-  // no FK (an entry's creator can be deleted without taking their entries
-  // with them), so it was never indexed at all. Without this, every one of
-  // those calls was a full table scan of `entries`, which only grows over
-  // the life of the app and is hit on nearly every Dashboard open. Ignore
-  // the error if it already exists (older MySQL has no
-  // "CREATE INDEX IF NOT EXISTS").
-  await dbPool
-    .query(`CREATE INDEX idx_entries_deleted_created ON entries (deleted_at, created_by)`)
-    .catch(() => {});
-
-  // entries.item_name must be able to hold the full imported budget_items.description
-  // (VARCHAR(255)) it's matched against in GET /api/entries — an older, shorter column
-  // here silently truncates long item names on insert, which then never matches the
-  // Description in budget_items, so Specification/Req. Qty/etc. show blank in Job
-  // Entry Details for those rows. Widen it on every startup so this self-heals on an
-  // existing database too, not just fresh installs from schema.sql.
-  try {
-    await dbPool.query(`ALTER TABLE entries MODIFY COLUMN item_name VARCHAR(255) NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen entries.item_name column: " + err.message);
-  }
-
-  // Self-healing column addition: pins each entry to the EXACT imported Budget Excel
-  // row (budget_items.id) its Item Name came from, instead of only being matched back
-  // to it by description text. Multiple Excel rows under the same MRF No can share the
-  // exact same "Description of Materials" text (different Qty/Specification/Sl.No.) —
-  // without this column those were indistinguishable, so entry creation collapsed them
-  // down to one entry per unique description instead of one entry per Excel row.
-  try {
-    await dbPool.query(`ALTER TABLE entries ADD COLUMN budget_item_id INT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add entries.budget_item_id column: " + err.message);
-    }
-  }
-
-  // Rate/Amount/Category columns — filled in by POST /api/budgets/:id/approve, which
-  // matches each entry's Item Name (+ Specification) against the Rate File's "Rate" and
-  // "Materials Category" sheets. NULL means "not yet approved" or "no match found"
-  // (distinguished by rate_calculated_at: NULL there means never attempted, NOT NULL
-  // with matched_rate still NULL means it WAS attempted but genuinely has no match —
-  // i.e. belongs in the Admin's Missing Rate / Missing Category review list).
-  const entryRateColumns: [string, string][] = [
-    ["matched_rate", "DECIMAL(14,2) NULL"],
-    ["computed_amount", "DECIMAL(16,2) NULL"],
-    ["category_head", "VARCHAR(150) NULL"],
-    ["category_sub1", "VARCHAR(150) NULL"],
-    ["category_sub2", "VARCHAR(150) NULL"],
-    ["category_sub3", "VARCHAR(150) NULL"],
-    ["category_sector", "VARCHAR(100) NULL"],
-    ["rate_calculated_at", "TIMESTAMP NULL DEFAULT NULL"]
-  ];
-  for (const [col, def] of entryRateColumns) {
-    try {
-      await dbPool.query(`ALTER TABLE entries ADD COLUMN ${col} ${def}`);
-    } catch (err: any) {
-      if (err.code !== "ER_DUP_FIELDNAME") {
-        console.warn(`⚠️ Could not add entries.${col} column: ` + err.message);
-      }
-    }
-  }
-
-  // Tracks the Admin's "Approve & Calculate" action per Budget (who ran it, when) —
-  // shown in the Budget list so the Admin can see which Budgets still need it / were
-  // last recalculated when.
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN rate_approved_at TIMESTAMP NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.rate_approved_at column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN rate_approved_by INT NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.rate_approved_by column: " + err.message);
-    }
-  }
-
-  // Self-healing column addition: per-entry editable Requisitioned Qty, so a User can
-  // split one Item's total Qty across several entries (each with its own Delivery
-  // Date) instead of always requisitioning the whole thing in one entry. Capped
-  // server-side in POST/PUT /api/entries against budget_items.req_qty.
-  try {
-    await dbPool.query(`ALTER TABLE entries ADD COLUMN requisitioned_qty DECIMAL(14,2) NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add entries.requisitioned_qty column: " + err.message);
-    }
-  }
-
-  // "Submit" (publish) gate for the Admin's Import Rate File / Import Budget from
-  // Excel workflow — a freshly created/imported Budget starts hidden from Users
-  // (is_published = FALSE) until the Admin reviews it and clicks "Submit" on the
-  // System Management & Reports → Data Import page. GET /api/budgets filters
-  // unpublished Budgets out for non-admin callers so Users simply never see a Budget
-  // that hasn't been submitted yet.
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.is_published column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE budgets ADD COLUMN published_at TIMESTAMP NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add budgets.published_at column: " + err.message);
-    }
-  }
-
-  // Bulk User Import (Admin Panel -> Users -> Bulk Add Users): these users log in
-  // with a Project Name (no email) + Password, so users.username stores that login
-  // ID (the Project Name with all spaces stripped + lowercased). email is relaxed to
-  // nullable since bulk-created users never get one. See POST /api/users/bulk and the
-  // updated POST /api/auth/login below.
-  try {
-    await dbPool.query(`ALTER TABLE users ADD COLUMN username VARCHAR(150) NULL UNIQUE AFTER email`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add users.username column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE users MODIFY COLUMN email VARCHAR(150) NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not relax users.email to nullable: " + err.message);
-  }
-  try {
-    // Login-location capture: only the latest login's coordinates are kept
-    // (overwritten each login), not a history table. See POST /api/auth/login.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN last_login_lat DECIMAL(10, 7) NULL`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN last_login_lng DECIMAL(10, 7) NULL`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP NULL`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.last_login_lat/lng/at columns: " + err.message);
-  }
-  try {
-    // Feature permissions (Admin Panel -> Users). Defaults match schema.sql: delivery
-    // date edit ON for everyone, Job Edit OFF until an Admin turns it on per user.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_edit_delivery_date TINYINT(1) NOT NULL DEFAULT 1`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_job_edit TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    // Column already exists — safe to ignore on every server restart after the first.
-  }
-  try {
-    // Gate for the Remote Attendance Check In/Out card on a plain User's own
-    // Dashboard (User Panel) — OFF by default; an Admin/Superadmin must grant
-    // it per account (Admin Panel -> Users -> Feature Permissions), same
-    // pattern as can_job_edit above. This is separate from the "attendance"
-    // Admin Panel module (admin_module_permissions), which is about an
-    // Admin/User REVIEWING everyone else's attendance records, not their own
-    // ability to check in/out.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_attendance TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    // Column already exists — safe to ignore on every server restart after the first.
-  }
-  try {
-    // Superadmin-only grant: lets a plain Admin see the "Last Login Location" column
-    // in Admin Panel -> Users. OFF by default; a Superadmin always sees it regardless.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_login_location TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_login_location column: " + err.message);
-  }
-  try {
-    // Superadmin-only grant, ONLY ever meaningful for role='admin': lets that Admin
-    // ALSO set OTHER accounts' "Module Access" (Admin Panel -> Users -> Modules —
-    // the admin_module_permissions rows GET/PUT /api/users/:id/module-permissions
-    // manages) themselves, instead of every such grant needing the Superadmin.
-    // Same on/off switch pattern as can_view_login_location above. Deliberately
-    // narrower than that switch's own power, though: a delegated Admin using this
-    // can only set Module Access for role='user' targets, never for another 'admin'
-    // — promoting what an ADMIN can reach stays exclusively the Superadmin's call
-    // (enforced server-side in UserManagement.ts's module-permissions handler, not
-    // just hidden in the UI). OFF by default; a Superadmin always has this
-    // implicitly and is never itself a valid target.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_grant_module_access TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_grant_module_access column: " + err.message);
-  }
-  try {
-    // Superadmin-only grant: lets a plain Admin ALSO use the User Panel (mark
-    // Remote Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) on top
-    // of their normal Admin Panel — the same on/off switch pattern as
-    // can_view_login_location above. OFF by default; only ever meaningful for
-    // role='admin' (a plain 'user' already has this by definition, a Superadmin's
-    // own account is never granted it — see PUT /api/users/:id/user-panel-access).
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_access_user_panel TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_access_user_panel column: " + err.message);
-  }
-  try {
-    // Superadmin-only grant: lets an Admin or User account ALSO edit other
-    // accounts' Leave balances on Self Service -> Leave Management (see the
-    // leave_balances table below) — same on/off switch pattern as
-    // can_access_user_panel above, but (unlike that one) applies to BOTH 'admin'
-    // and 'user' roles. OFF by default; a Superadmin always has this implicitly.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_manage_leave TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_manage_leave column: " + err.message);
-  }
-  try {
-    // Superadmin-only grants: whether this Admin or User account can see/use the
-    // Movement Claim (GPS Check In/Out) and Conveyance Bill Claim sections on their
-    // own User Panel at all — same on/off pattern as can_manage_leave above, gated
-    // for BOTH 'admin' and 'user' roles. OFF by default; a Superadmin always has
-    // both implicitly.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_movement_claims/can_view_conveyance_claims columns: " + err.message);
-  }
-  try {
-    // Gate for the mobile app's background Employee Tracking ping loop — OFF by
-    // default; an Admin/Superadmin must grant it per account (Admin Panel -> Users
-    // -> Feature Permissions), same pattern as can_use_attendance above. Separate
-    // from the "tracking" Admin Panel module (admin_module_permissions), which is
-    // about VIEWING everyone's live location, not this account's own device
-    // reporting its location.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_tracking TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    // Column already exists — safe to ignore on every server restart after the first.
-  }
-  try {
-    // Superadmin-only grant: whether this Admin or User account can see/use the
-    // core MPR entry workflow on their own User Panel — "Select a Budget", "Jobs"
-    // and "Job Entry Details" (the mobile tile menu's three main tiles, the
-    // Navbar/GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items, and the
-    // BottomNav's Budget/Jobs/Entries tabs). One combined switch for all three,
-    // same on/off pattern as can_view_movement_claims/can_view_conveyance_claims
-    // above, applying to BOTH 'admin' and 'user' roles. ON by default (unlike
-    // those two) so every existing account keeps today's behavior until a
-    // Superadmin explicitly turns it off; a Superadmin always has it implicitly.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_budget_module TINYINT(1) NOT NULL DEFAULT 1`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_budget_module column: " + err.message);
-  }
-  try {
-    // Admin/Superadmin-granted per account (Admin Panel -> Users -> Leave):
-    // shows the Leave Summary card on THIS account's own Dashboard. Always
-    // true for role === 'superadmin'. OFF by default for 'admin'/'user' —
-    // same toggle pattern as can_use_attendance/can_use_tracking above.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_leave_summary TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_leave_summary column: " + err.message);
-  }
-  try {
-    // Superadmin-only grants: whether this Admin or User account can see/use
-    // the Self Service -> Timesheet / Leave Application / My Leave sections at
-    // all — same on/off pattern as can_view_movement_claims/can_view_
-    // conveyance_claims above, applying to BOTH 'admin' and 'user' roles. OFF
-    // by default; a Superadmin always has all three implicitly. Employee
-    // Directory deliberately keeps NO such gate — every account can browse it
-    // regardless of role or module access (see GlobalSidebar.tsx).
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_timesheet TINYINT(1) NOT NULL DEFAULT 0`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_leave_application TINYINT(1) NOT NULL DEFAULT 0`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_my_leave TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_timesheet/can_view_leave_application/can_view_my_leave columns: " + err.message);
-  }
-  try {
-    // Admin/Superadmin-granted per account (Admin Panel -> Users -> "Attend.
-    // Project", right next to can_use_attendance): pins a 'user' OR 'admin'
-    // account to exactly one Project for Remote Attendance. NULL by default
-    // (unrestricted — same behavior as before this column existed). When set,
-    // the account's own Attendance card only offers this one Project and the
-    // server rejects check-in/check-out against any other one, even for
-    // role='admin' (who is otherwise unrestricted on Projects). Never applies
-    // to 'superadmin'. Nullable FK so a deleted Project just clears the pin
-    // instead of blocking the delete or leaving a dangling id.
-    await dbPool.query(`ALTER TABLE users ADD COLUMN attendance_project_id INT NULL`);
-    await dbPool.query(
-      `ALTER TABLE users ADD CONSTRAINT fk_users_attendance_project FOREIGN KEY (attendance_project_id) REFERENCES projects(id) ON DELETE SET NULL`
-    );
-  } catch (err: any) {
-    // Column/constraint already exists — safe to ignore on every server restart after the first.
-  }
-  try {
-    // Project location pin (Admin Panel -> Projects -> "Set Location on Map"), a
-    // free OpenStreetMap/Leaflet picker — no paid maps API key required.
-    await dbPool.query(`ALTER TABLE projects ADD COLUMN location_lat DECIMAL(10, 7) NULL`);
-    await dbPool.query(`ALTER TABLE projects ADD COLUMN location_lng DECIMAL(10, 7) NULL`);
-    await dbPool.query(`ALTER TABLE projects ADD COLUMN location_label VARCHAR(255) NULL`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add projects.location_lat/lng/label columns: " + err.message);
-  }
-  try {
-    // Optional site-radius circle (meters) drawn around the project's pin in the
-    // map picker — e.g. to mark the approximate boundary of a site.
-    await dbPool.query(`ALTER TABLE projects ADD COLUMN location_radius INT NULL`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add projects.location_radius column: " + err.message);
-  }
-
-  // Job No is scoped PER USER PER BUDGET instead of system-wide (each user's own
-  // submissions start again from JOB-0001 independently of everyone else's, AND start
-  // again from JOB-0001 whenever they switch to a different Budget) — self-heal an
-  // existing database onto the new (created_by, budget_id, job_no) shape:
-  // 1. Add the created_by column if it isn't there yet.
-  try {
-    await dbPool.query(`ALTER TABLE jobs ADD COLUMN created_by INT NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add jobs.created_by column: " + err.message);
-    }
-  }
-  // 1b. Add the budget_id column if it isn't there yet.
-  try {
-    await dbPool.query(`ALTER TABLE jobs ADD COLUMN budget_id INT NULL DEFAULT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add jobs.budget_id column: " + err.message);
-    }
-  }
-  // 2. Drop the old global UNIQUE on job_no alone (it blocks two different users from
-  // ever both having a "JOB-0001") — the index is named "job_no" by default when
-  // declared inline as `job_no VARCHAR(100) UNIQUE NOT NULL` in the original schema.
-  try {
-    await dbPool.query(`ALTER TABLE jobs DROP INDEX job_no`);
-  } catch (err: any) {
-    if (err.code !== "ER_CANT_DROP_FIELD_OR_KEY") {
-      console.warn("⚠️ Could not drop old jobs.job_no unique index: " + err.message);
-    }
-  }
-  // 2b. Drop the previous (created_by, job_no) composite unique key too — it's being
-  // replaced by (created_by, budget_id, job_no) below.
-  try {
-    await dbPool.query(`ALTER TABLE jobs DROP INDEX unique_user_job_no`);
-  } catch (err: any) {
-    if (err.code !== "ER_CANT_DROP_FIELD_OR_KEY") {
-      console.warn("⚠️ Could not drop old jobs.unique_user_job_no key: " + err.message);
-    }
-  }
-  // 3. Add the new composite UNIQUE (created_by, budget_id, job_no) so uniqueness is
-  // enforced per user PER BUDGET instead of per user system-wide.
-  try {
-    await dbPool.query(`ALTER TABLE jobs ADD UNIQUE KEY unique_user_budget_job_no (created_by, budget_id, job_no)`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_KEYNAME") {
-      console.warn("⚠️ Could not add jobs.unique_user_budget_job_no key: " + err.message);
-    }
-  }
-  // 3b. Add a FOREIGN KEY on jobs.budget_id (older DBs upgraded via ALTER above won't
-  // have it from the CREATE TABLE definition).
-  try {
-    await dbPool.query(`ALTER TABLE jobs ADD FOREIGN KEY (budget_id) REFERENCES budgets(id) ON DELETE SET NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
-      console.warn("⚠️ Could not add jobs.budget_id foreign key: " + err.message);
-    }
-  }
-
-  // Rate File reference data (imported wholesale from an Admin-uploaded Excel with two
-  // sheets: "Rate" — a materials price list — and "Materials Category" — a Head /
-  // Sub-1 / Sub-2 / Sub-3 classification tree. Both are plain reference/lookup tables,
-  // fully replaced on every re-import rather than merged, since they're always
-  // re-uploaded as a complete sheet from a source-of-truth Excel file, not edited
-  // row-by-row in the app.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS rate_list (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        materials_name VARCHAR(255) NOT NULL,
-        unit VARCHAR(50) NULL,
-        rate DECIMAL(14,2) NULL,
-        specification VARCHAR(255) NULL,
-        assigned_person VARCHAR(150) NULL,
-        remarks VARCHAR(255) NULL,
-        -- TRUE for a rate the Admin typed in directly (Approve & Calculate -> "No rate
-        -- match" -> manual entry) instead of one that came from the imported Excel.
-        -- Re-importing the Rate File only replaces is_manual = FALSE rows (see
-        -- POST /api/rate-file/import), so a manually-entered rate survives future
-        -- re-imports instead of silently disappearing until the Admin remembers to
-        -- also add it to the Excel.
-        is_manual TINYINT(1) NOT NULL DEFAULT 0,
-        added_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure rate_list table exists: " + err.message);
-  }
-  try {
-    await dbPool.query(`ALTER TABLE rate_list ADD COLUMN is_manual TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add rate_list.is_manual column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`ALTER TABLE rate_list ADD COLUMN added_by INT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add rate_list.added_by column: " + err.message);
-    }
-  }
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS material_categories (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        sl_no INT NULL,
-        head VARCHAR(150) NULL,
-        sub1 VARCHAR(150) NULL,
-        sub2 VARCHAR(150) NULL,
-        sub3 VARCHAR(150) NULL,
-        details VARCHAR(255) NULL,
-        sector VARCHAR(100) NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure material_categories table exists: " + err.message);
-  }
-  // Single-row table (id is always 1) holding the original uploaded Rate File itself,
-  // same "keep the source file, not just the parsed rows" approach as budgets.file_data.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS rate_file_meta (
-        id INT PRIMARY KEY,
-        original_filename VARCHAR(255) NULL,
-        file_mimetype VARCHAR(150) NULL,
-        file_data LONGBLOB NULL,
-        imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure rate_file_meta table exists: " + err.message);
-  }
-  // Superadmin role: widen the users.role ENUM so a 'superadmin' account can be
-  // seeded (see seedAdminFromEnv). Safe to re-run — MySQL just re-declares the
-  // same ENUM if it's already there.
-  try {
-    await dbPool.query(`ALTER TABLE users MODIFY COLUMN role ENUM('superadmin','admin','user') DEFAULT 'user'`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen users.role ENUM to include superadmin: " + err.message);
-  }
-  // Per-Admin module access, set by the Superadmin (Admin Panel -> Users -> Module
-  // Access). Which Admin Panel tabs ('projects','mprs','imports','reports','users',
-  // 'recycle','editlog') an Admin account may open.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS admin_module_permissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        module_key VARCHAR(50) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_module (user_id, module_key),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure admin_module_permissions table exists: " + err.message);
-  }
-  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
-  // Delete-Trash/Permanent Delete — see PERMISSION_LAYERS in src/types.ts),
-  // layered ON TOP of admin_module_permissions above: a row here is only
-  // meaningful for an account that already has module_key granted there. Set
-  // by the Superadmin (Admin Panel -> Users -> Module Access, shown once a
-  // module listed in PERMISSION_LAYER_MODULES is checked). One row per
-  // (user, module, layer) — a module with NO rows here for a given user
-  // falls back to "every layer except permanent_delete" (see
-  // requireModuleLayer() below), so granting the module alone keeps today's
-  // full-access behavior, exactly like every other module not yet on this
-  // system at all. Rolled out module by module, starting with 'departments'.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS admin_module_permission_layers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        module_key VARCHAR(50) NOT NULL,
-        layer_key VARCHAR(30) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_module_layer (user_id, module_key, layer_key),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure admin_module_permission_layers table exists: " + err.message);
-  }
-  // Department-wise scoping for the 'attendance_reports' module only — set by
-  // the Superadmin on top of admin_module_permissions (Admin Panel -> Users ->
-  // Module Access -> "Attendance Report Departments", shown once
-  // 'attendance_reports' itself is checked). A row here means the account may
-  // ONLY see that one Department's rows on the Monthly Attendance Report /
-  // Department filter / Date Wise report — GET /api/attendance/report/* in
-  // AttendanceRoutes.ts filters on it via getAttendanceReportDeptScope()
-  // below. No rows at all for a user (the common case — every existing grant
-  // before this feature) means unrestricted, exactly like today: every
-  // Department is visible. This is deliberately independent of whether the
-  // account is a Department Supervisor (departments.supervisor_user_id) —
-  // that's only used client-side to pre-tick a sensible default the first
-  // time the modal opens; a non-Supervisor account can be scoped here too,
-  // and a Supervisor can be left unscoped (full access) if the tick is
-  // removed. Stores the plain-text Department name (not department_id) so it
-  // reads the same way GET /api/attendance/report/departments and the
-  // department query param on the report routes already do — see the mirror-
-  // column comment there. PUT /api/departments/:id already re-writes
-  // all_employees.department on a rename; the same rename also re-writes this
-  // table's rows so a scoped grant doesn't silently go stale (see that route).
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS attendance_report_department_access (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        department VARCHAR(150) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_department (user_id, department),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure attendance_report_department_access table exists: " + err.message);
-  }
-  // Department-wise scoping for the 'leave_applications' module only —
-  // identical design to attendance_report_department_access above, just for
-  // the "Monthly Leave Application" report (Admin Panel -> Users -> Module
-  // Access -> "Leave Application Departments", shown once 'leave_applications'
-  // itself is checked) instead of the Attendance Report. A row here means the
-  // account may ONLY see Leave Applications from that one Department —
-  // GET /api/leave-applications/report* in LeaveRoutes.ts filters on it via
-  // getLeaveApplicationDeptScope() below. No rows at all for a user means
-  // unrestricted (every Department visible). Independent of whether the
-  // account is a Department Supervisor (departments.supervisor_user_id) —
-  // that's only used client-side to pre-tick a sensible default the first
-  // time the modal opens; a non-Supervisor account can be scoped here too,
-  // and a Supervisor can be left unscoped (full access) if the tick is
-  // removed. Stores the plain-text Department name (not department_id), same
-  // as attendance_report_department_access, so a rename (PUT
-  // /api/departments/:id) can re-write this table's rows too and keep a
-  // scoped grant from silently going stale.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_application_department_access (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        department VARCHAR(150) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_department (user_id, department),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_application_department_access table exists: " + err.message);
-  }
-  // Department-wise scoping for the 'conveyance' module only — identical
-  // design to attendance_report_department_access/leave_application_
-  // department_access above, just for the Admin Panel's "Conveyance Bill
-  // Claim" tab (Admin Panel -> Users -> Module Access -> "Conveyance Claim
-  // Departments", shown once 'conveyance' itself is checked). A row here
-  // means the account may ONLY see Conveyance Bill Claims submitted by users
-  // whose linked Employee Directory row has that one Department —
-  // GET /api/user-claims in ConveyanceBillClaimRoutes.ts filters on it via
-  // getConveyanceClaimDeptScope() below. No rows at all for a user means
-  // unrestricted (every Department's claims visible), exactly like granting
-  // the module alone. Same rename-sync convention as the other two tables —
-  // see PUT /api/departments/:id in DepartmentsAndBranches.ts.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS conveyance_claim_department_access (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        department VARCHAR(150) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_department (user_id, department),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure conveyance_claim_department_access table exists: " + err.message);
-  }
-  // "Remote Attendance" — one row per (user, project, calendar day). check_in_* is
-  // filled when the User taps Check In (server-validated to be inside the Project's
-  // location_radius circle around location_lat/location_lng); check_out_* likewise
-  // when they later tap Check Out the same day. Distances are stored so the
-  // Superadmin's Remote Attendance report can show exactly how far the check-in/out
-  // was from the site, not just pass/fail.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS attendance (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        project_id INT NOT NULL,
-        attendance_date DATE NOT NULL,
-        check_in_at TIMESTAMP NULL DEFAULT NULL,
-        check_in_lat DECIMAL(10, 7) NULL,
-        check_in_lng DECIMAL(10, 7) NULL,
-        check_in_distance_m INT NULL,
-        check_out_at TIMESTAMP NULL DEFAULT NULL,
-        check_out_lat DECIMAL(10, 7) NULL,
-        check_out_lng DECIMAL(10, 7) NULL,
-        check_out_distance_m INT NULL,
-        check_in_remarks TEXT NULL,
-        check_out_remarks TEXT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_project_date (user_id, project_id, attendance_date),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure attendance table exists: " + err.message);
-  }
-  try {
-    // Optional free-text note a User can attach to their own Check In / Check
-    // Out (e.g. "Site visit delayed — traffic", "Left early, cleared with PM").
-    // Nullable/empty on both — remarks are never required.
-    await dbPool.query(`ALTER TABLE attendance ADD COLUMN check_in_remarks TEXT NULL`);
-    await dbPool.query(`ALTER TABLE attendance ADD COLUMN check_out_remarks TEXT NULL`);
-  } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add attendance.check_in_remarks/check_out_remarks columns: " + err.message);
-  }
-  // Employee Tracking (Admin Panel -> Employee Tracking, ADMIN_MODULE_KEYS
-  // "tracking") — every location ping the APK's background service sends while
-  // it's running (see POST /api/tracking/ping), roughly every 5-10 minutes,
-  // whether the app is in the foreground, minimized, or fully backgrounded. We
-  // keep a full history (not just the latest point), so an Admin/Superadmin can
-  // both see everyone's CURRENT position (latest row per user) and play back
-  // WHERE a given user has been on a given day. Rows aren't pruned automatically
-  // — see the recycle-bin-style cleanup pattern elsewhere if this needs capping.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS location_pings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        lat DECIMAL(10, 7) NOT NULL,
-        lng DECIMAL(10, 7) NOT NULL,
-        accuracy_m INT NULL,
-        battery_pct INT NULL,
-        recorded_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_location_pings_user_time (user_id, recorded_at)
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure location_pings table exists: " + err.message);
-  }
-  // Notices — Superadmin/Admin -> User popup shown right after the User logs in,
-  // with optional custom Lottie animation (pasted JSON or a hosted URL) + free-form
-  // text/HTML. See ADMIN_MODULE_KEYS ("notices") and the /api/notices* routes below.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS notices (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(200) NOT NULL,
-        content_html MEDIUMTEXT NOT NULL,
-        lottie_json MEDIUMTEXT NULL,
-        lottie_url VARCHAR(500) NULL,
-        target_type ENUM('all','specific') NOT NULL DEFAULT 'all',
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS notice_targets (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        notice_id INT NOT NULL,
-        user_id INT NOT NULL,
-        UNIQUE KEY unique_notice_user (notice_id, user_id),
-        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS notice_dismissals (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        notice_id INT NOT NULL,
-        user_id INT NOT NULL,
-        dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_notice_user_dismiss (notice_id, user_id),
-        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    // Notices sent from Employee Tracking -> "Currently Not Tracked": one row
-    // per recipient, with why they weren't tracked at that moment — the
-    // month-end Tracking Notice Report reads these.
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS tracking_notice_recipients (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        notice_id INT NOT NULL,
-        user_id INT NOT NULL,
-        employee_pk INT NULL,
-        reason VARCHAR(80) NULL,
-        last_ping DATETIME NULL,
-        sent_by INT NULL,
-        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_tnr_sent (sent_at),
-        INDEX idx_tnr_user (user_id),
-        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `).catch((e: any) => console.warn("⚠️ Could not ensure tracking_notice_recipients table exists: " + e.message));
-    await dbPool.query(`ALTER TABLE notices ADD COLUMN source VARCHAR(30) NULL`).catch((e: any) => {
-      if (e.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add notices.source: " + e.message);
-    });
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure notices/notice_targets/notice_dismissals tables exist: " + err.message);
-  }
-  // Employee Directory (Admin Panel -> Employees, ADMIN_MODULE_KEYS "employees").
-  // Plain hand-entered reference data — employee_id/designation/department/
-  // email/phone, none of it required except name — not linked to a login
-  // account. Table name/columns mirror an existing `all_employees` export 1:1
-  // so that data can be imported straight into this table if needed.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS all_employees (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        employee_id VARCHAR(50) NULL,
-        name VARCHAR(255) NOT NULL,
-        designation VARCHAR(255) NULL,
-        department VARCHAR(255) NULL,
-        email VARCHAR(255) NULL,
-        phone VARCHAR(50) NULL,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        middle_name VARCHAR(255) NULL,
-        gender VARCHAR(20) NULL,
-        date_of_birth DATE NULL,
-        nid_ssn VARCHAR(50) NULL,
-        nationality VARCHAR(100) NULL,
-        marital_status VARCHAR(30) NULL,
-        blood_group VARCHAR(10) NULL,
-        religion VARCHAR(50) NULL,
-        is_foreigner TINYINT(1) NOT NULL DEFAULT 0,
-        division VARCHAR(255) NULL,
-        branch VARCHAR(255) NULL,
-        unit VARCHAR(255) NULL,
-        status_effective_date DATE NULL,
-        job_status VARCHAR(50) NULL,
-        job_status_effective_date DATE NULL,
-        job_base VARCHAR(50) NULL,
-        job_base_effective_date DATE NULL,
-        review_month VARCHAR(20) NULL,
-        employment_category VARCHAR(50) NULL,
-        employment_category_effective_date DATE NULL,
-        designation_effective_date DATE NULL,
-        mobile VARCHAR(50) NULL,
-        telephone VARCHAR(50) NULL,
-        personal_email VARCHAR(255) NULL,
-        present_address TEXT NULL,
-        present_country VARCHAR(100) NULL,
-        present_state VARCHAR(100) NULL,
-        present_city VARCHAR(100) NULL,
-        present_zip VARCHAR(20) NULL,
-        permanent_address TEXT NULL,
-        permanent_country VARCHAR(100) NULL,
-        permanent_state VARCHAR(100) NULL,
-        permanent_city VARCHAR(100) NULL,
-        permanent_zip VARCHAR(20) NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure all_employees table exists: " + err.message);
-  }
-  // Supervisor assignments for an Employee Directory row (Admin Panel ->
-  // Employees -> Edit -> Supervisor tab). The Supervisor is always another
-  // row from the same all_employees list, picked from a dropdown — never
-  // typed free-hand. See EMPLOYEE_EXT_FIELDS / /api/employees/:id/supervisors.
-  // The row marked is_direct = 1 (an Employee may have several Supervisor
-  // rows, but only ONE "Direct Supervisor") is what resolveSupervisorApprover
-  // uses for the Approval Workflow auto-layer below — PROVIDED that Direct
-  // Supervisor's own Employee Directory row is linked to a login account
-  // (all_employees.user_id); a Supervisor with no login can't act on
-  // approvals, so that case falls through to the Department Supervisor.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS employee_supervisors (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        employee_id INT NOT NULL,
-        supervisor_id INT NOT NULL,
-        effective_date DATE NULL,
-        is_direct TINYINT(1) NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE,
-        FOREIGN KEY (supervisor_id) REFERENCES all_employees(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure employee_supervisors table exists: " + err.message);
-  }
-  // Departments (Admin Panel -> Departments, its own AdminModuleKey/module
-  // permission) — real org-structure master data: every Employee Directory
-  // row optionally belongs to exactly one Department (all_employees.
-  // department_id below), and a Department optionally has a Supervisor — a
-  // login account (users.id), NOT an all_employees.id like
-  // employee_supervisors above, since the Supervisor needs to actually act
-  // on Approval Workflow requests in the app. Unless
-  // include_supervisor_approval is turned off, that Supervisor is
-  // automatically inserted as this Department's first Approval Workflow
-  // layer, ahead of whatever Approval Template applies (see
-  // resolveDepartmentSupervisor / createTemplateApprovalRequest below) —
-  // defaults ON, so simply setting a Supervisor is enough; no separate
-  // Template step needs to be built for "my manager approves first".
-  // Deliberately a SEPARATE concept from employee_supervisors (Admin Panel ->
-  // Employees -> Edit -> Supervisor tab). Both now feed the same Approval
-  // Workflow auto-layer (see resolveSupervisorApprover below): the Employee's
-  // own "Direct Supervisor" (employee_supervisors) is tried FIRST, and only
-  // when that Employee has none (or that Supervisor has no login account to
-  // act with) does the Department Supervisor apply as the fallback.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS departments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(150) NOT NULL UNIQUE,
-        supervisor_user_id INT NULL,
-        include_supervisor_approval TINYINT(1) NOT NULL DEFAULT 1,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (supervisor_user_id) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure departments table exists: " + err.message);
-  }
-  // "Movement Claims" — a free-form (not tied to a fixed Project geofence) point A
-  // -> point B travel record: a User checks in with a Purpose (why/where they're
-  // heading out for office work) then later checks out once they get there/finish.
-  // Used for TA/DA-style reimbursement review in the Admin Panel -> Movement Claims
-  // tab. Only one row per User may have status = 'open' at a time (enforced in
-  // POST /api/claims/check-in) — distance_km is computed server-side on check-out.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS claims (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        purpose VARCHAR(255) NOT NULL,
-        status ENUM('open','completed') NOT NULL DEFAULT 'open',
-        check_in_at TIMESTAMP NULL DEFAULT NULL,
-        check_in_lat DECIMAL(10, 7) NULL,
-        check_in_lng DECIMAL(10, 7) NULL,
-        check_in_remarks TEXT NULL,
-        check_out_at TIMESTAMP NULL DEFAULT NULL,
-        check_out_lat DECIMAL(10, 7) NULL,
-        check_out_lng DECIMAL(10, 7) NULL,
-        check_out_remarks TEXT NULL,
-        distance_km DECIMAL(10, 2) NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure claims table exists: " + err.message);
-  }
-  // "Conveyance Bill Claim" — Admin Panel tab restricted to the Superadmin and any
-  // Admin the Superadmin explicitly grants the "conveyance" module to (see
-  // ADMIN_MODULE_KEYS). One BILL groups several conveyance/travel line ITEMS for a
-  // single User into one claim document. Each item is either pulled in from that
-  // User's own completed "Movement Claim" (the `claims` table above — its
-  // distance_km carries straight over so an Amount can be computed at a Rate/KM)
-  // or entered fully by hand for a trip that was never logged as a Movement Claim
-  // check-in/out at all (e.g. a one-off fare, or a trip from before this feature
-  // existed). Item fields are copied from the source Claim at insert time rather
-  // than just referencing it, so a bill's line items stay intact and printable
-  // even if that Claim is later edited or removed elsewhere.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS conveyance_bills (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        bill_date DATE NOT NULL,
-        remarks TEXT NULL,
-        created_by INT NULL,
-        -- Set once this Bill has actually been paid out (Admin Panel -> Conveyance
-        -- Disbursement — its own "disbursement" AdminModuleKey, see
-        -- ADMIN_MODULE_KEYS). Kept separate from the Bill/items above so an Admin
-        -- can be trusted to BUILD bills without also being trusted to authorize
-        -- payouts, and vice versa. voucher_no is reprinted on the Payment Voucher
-        -- PDF every time; see POST /api/conveyance-bills/:id/disburse and .../undisburse.
-        is_disbursed TINYINT(1) NOT NULL DEFAULT 0,
-        voucher_no VARCHAR(100) NULL,
-        disbursed_at TIMESTAMP NULL DEFAULT NULL,
-        disbursed_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-        FOREIGN KEY (disbursed_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS conveyance_bill_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        bill_id INT NOT NULL,
-        source ENUM('movement_claim','manual') NOT NULL DEFAULT 'manual',
-        -- Which Movement Claim this item came from, if any. UNIQUE so the same
-        -- Claim can never end up billed twice across any Bill.
-        claim_id INT NULL UNIQUE,
-        entry_date DATE NOT NULL,
-        particulars VARCHAR(255) NOT NULL,
-        from_location VARCHAR(255) NULL,
-        to_location VARCHAR(255) NULL,
-        distance_km DECIMAL(10, 2) NULL,
-        rate_per_km DECIMAL(10, 2) NULL,
-        amount DECIMAL(12, 2) NOT NULL,
-        remarks TEXT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (bill_id) REFERENCES conveyance_bills(id) ON DELETE CASCADE,
-        FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure conveyance_bills/conveyance_bill_items tables exist: " + err.message);
-  }
-  // Conveyance Disbursement columns — for a conveyance_bills table that already
-  // existed before this feature (a fresh install gets these straight from the
-  // CREATE TABLE above). Each ADD COLUMN/FOREIGN KEY is its own try/catch since
-  // an already-existing column throws and would otherwise skip the rest.
-  try {
-    await dbPool.query(`ALTER TABLE conveyance_bills ADD COLUMN is_disbursed TINYINT(1) NOT NULL DEFAULT 0`);
-  } catch (err: any) {
-    // Column already exists — safe to ignore on every server restart after the first.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE conveyance_bills ADD COLUMN voucher_no VARCHAR(100) NULL`);
-  } catch (err: any) {}
-  try {
-    await dbPool.query(`ALTER TABLE conveyance_bills ADD COLUMN disbursed_at TIMESTAMP NULL DEFAULT NULL`);
-  } catch (err: any) {}
-  try {
-    await dbPool.query(`ALTER TABLE conveyance_bills ADD COLUMN disbursed_by INT NULL`);
-  } catch (err: any) {}
-  try {
-    await dbPool.query(`ALTER TABLE conveyance_bills ADD FOREIGN KEY (disbursed_by) REFERENCES users(id) ON DELETE SET NULL`);
-  } catch (err: any) {}
-  // "Conveyance Bill Claim" (User Panel) — a User-submitted expense claim filled
-  // in by hand (unlike the live GPS check-in/out `claims` table above), optionally
-  // spanning several days (a multi-day tour) and optionally carrying a receipt/
-  // attachment (same FileReader/Base64 -> LONGBLOB pattern as budgets.file_data —
-  // no multipart/multer). Starts 'pending'; an Admin with the "conveyance" module
-  // then Approves (which attaches it onto an official Conveyance Bill as a
-  // conveyance_bill_items row, source = 'user_claim') or Rejects it with remarks.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_claims (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        claim_date DATE NOT NULL,
-        from_date DATE NOT NULL,
-        to_date DATE NOT NULL,
-        category ENUM('Transport','Fuel','Toll','Parking','Others') NOT NULL DEFAULT 'Others',
-        amount DECIMAL(12, 2) NOT NULL,
-        description TEXT NULL,
-        file_name VARCHAR(255) NULL,
-        file_mimetype VARCHAR(150) NULL,
-        file_data LONGBLOB NULL,
-        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
-        admin_remarks TEXT NULL,
-        reviewed_by INT NULL,
-        reviewed_at TIMESTAMP NULL DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    // Lets an Approved user_claim be attached onto a Conveyance Bill as its own
-    // line item (source = 'user_claim'), alongside the existing 'movement_claim'/
-    // 'manual' sources — UNIQUE so the same claim can never be billed twice.
-    await dbPool.query(`
-      ALTER TABLE conveyance_bill_items
-        MODIFY COLUMN source ENUM('movement_claim','manual','user_claim') NOT NULL DEFAULT 'manual'
-    `);
-    const [ucCol]: any = await dbPool.query(`SHOW COLUMNS FROM conveyance_bill_items LIKE 'user_claim_id'`);
-    if (!ucCol || ucCol.length === 0) {
-      await dbPool.query(`
-        ALTER TABLE conveyance_bill_items
-          ADD COLUMN user_claim_id INT NULL UNIQUE AFTER claim_id,
-          ADD FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE SET NULL
-      `);
-    }
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_claims table / conveyance_bill_items.user_claim_id exists: " + err.message);
-  }
-  // Approved Amount — set by the approver at Approvals-tab decision time (Admin
-  // Panel -> Approvals). Lets the approver partially approve a Conveyance Bill
-  // Claim (approve for less than what was claimed); Remaining Amount (Claim
-  // Amount - Approved Amount) is derived live from these two, never stored.
-  // NULL until a decision is made (still 'pending') and for anything decided
-  // before this feature existed.
-  try {
-    await dbPool.query(`ALTER TABLE user_claims ADD COLUMN approved_amount DECIMAL(12, 2) NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add user_claims.approved_amount column: " + err.message);
-    }
-  }
-  // Lets a Conveyance Bill Claim reference one or more of the User's own completed
-  // Movement Claims (check-in/out), each with its own Amount — see the long
-  // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
-  // out can only ever be referenced by ONE Conveyance Bill Claim.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_claim_references (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_claim_id INT NOT NULL,
-        claim_id INT NOT NULL UNIQUE,
-        amount DECIMAL(12, 2) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE,
-        FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_claim_references table exists: " + err.message);
-  }
-  // Approval Workflow — a single global, ORDERED chain of Admin/Superadmin
-  // approvers (Admin Panel -> Approvals, Superadmin-only to edit). See the long
-  // comment above these tables in schema.sql for the full flow.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS approval_chain_steps (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        step_order INT NOT NULL,
-        user_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_step_order (step_order),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS approval_requests (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        source_type ENUM('attendance','claim','user_claim','attendance_correction') NOT NULL,
-        event_type ENUM('check_in','check_out','submit') NOT NULL,
-        source_id INT NOT NULL,
-        requested_by INT NOT NULL,
-        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
-        current_step INT NOT NULL DEFAULT 1,
-        total_steps INT NOT NULL,
-        actions_json MEDIUMTEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    // Widen the ENUMs for existing databases created before Conveyance Bill Claims /
-    // Attendance Correction requests routed through this same Approval Workflow engine.
-    await dbPool.query(`
-      ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application') NOT NULL,
-        MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
-    `);
-    // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
-    // open, by every account) starts with `WHERE status = 'pending'`, which
-    // was an unindexed full table scan of every approval request ever
-    // created. Ignore the error if it already exists.
-    await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure approval_chain_steps/approval_requests tables exist: " + err.message);
-  }
-  // ============================================================================
-  // Approval Workflow TEMPLATES (Dynamic Approval Engine — Part 1 of 5).
-  // Superadmin can pre-build any number of named templates, each an ORDERED list
-  // of Layers/Steps, one per request_type (Conveyance Bill Claim / Leave
-  // Application / Timesheet=Attendance Correction). See the long design comment
-  // above approval_chain_steps for the OLD single-global-chain engine this is
-  // replacing — that table/engine is left untouched here; Part 5 migrates it
-  // into this new system without breaking any in-flight request.
-  // ============================================================================
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS approval_templates (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(150) NOT NULL,
-        request_type ENUM('conveyance','leave','timesheet') NOT NULL,
-        -- Company-wide fallback for this request_type — used whenever a
-        -- submitting Employee has no row in employee_template_assignments
-        -- for this request_type. "At most one default per request_type" is
-        -- enforced in the API layer (Part 2), not a DB constraint — MySQL
-        -- can't express a conditional-unique index this cleanly without a
-        -- generated column.
-        is_default TINYINT(1) NOT NULL DEFAULT 0,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    // One row per Layer/Step inside a template, in step_order (1, 2, 3...).
-    // Deliberately holds NO approver column itself — a step's approver(s) live
-    // in approval_template_step_approvers below, since a step can hold more
-    // than one Employee (see that table's comment).
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS approval_template_steps (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        template_id INT NOT NULL,
-        step_order INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_template_step_order (template_id, step_order),
-        FOREIGN KEY (template_id) REFERENCES approval_templates(id) ON DELETE CASCADE
-      )
-    `);
-    // One or more Approvers per Step. ANY ONE of a step's approvers Approving
-    // is enough to clear that step and move the request to the next one —
-    // this is how "put a whole Department on Layer 2" is modeled: every
-    // member of that Department gets their own row here against the same
-    // step_id. A single named individual on a step is just the n=1 case of
-    // this same table.
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS approval_template_step_approvers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        step_id INT NOT NULL,
-        user_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_step_user (step_id, user_id),
-        FOREIGN KEY (step_id) REFERENCES approval_template_steps(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    // Per-Employee, per-Request-Type template pick (Admin Panel -> new
-    // "Template Assignment" screen, Part 2). At most one row per
-    // (employee_user_id, request_type) — the active row is REPLACED, never
-    // duplicated, whenever an Admin re-assigns that Employee's template for
-    // that request type. Missing row = no explicit assignment -> falls back
-    // to approval_templates.is_default for that request_type (Part 3) -> if
-    // there's no default either, the request auto-approves (Part 3 edge case).
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS employee_template_assignments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        employee_user_id INT NOT NULL,
-        request_type ENUM('conveyance','leave','timesheet') NOT NULL,
-        template_id INT NOT NULL,
-        assigned_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_employee_request_type (employee_user_id, request_type),
-        FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (template_id) REFERENCES approval_templates(id) ON DELETE CASCADE,
-        FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure approval_templates/approval_template_steps/approval_template_step_approvers/employee_template_assignments tables exist: " + err.message);
-  }
-  // Dynamic Approval Engine (Part 3) — which Template (if any) is driving a
-  // given approval_requests row. NULL means it's riding the OLD global chain
-  // (approval_chain_steps, via getApprovalChain()) exactly as before; a value
-  // here means current_step is a step_order into THIS template's own steps
-  // instead (see getCurrentStepApprovers). Placed here (after
-  // approval_templates exists) since it's an FK onto that table. Self-healing
-  // ADD COLUMN, same ER_DUP_FIELDNAME-ignoring pattern as every other column
-  // addition in this file.
-  try {
-    await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN template_id INT NULL`);
-    await dbPool.query(`ALTER TABLE approval_requests ADD FOREIGN KEY (template_id) REFERENCES approval_templates(id) ON DELETE SET NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME" && err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
-      console.warn("⚠️ Could not add approval_requests.template_id column: " + err.message);
-    }
-  }
-  // Supervisor auto-layer (see resolveSupervisorApprover /
-  // createTemplateApprovalRequest) — when set,
-  // this request's step_order 1 is the Supervisor (Employee's own Direct
-  // Supervisor, or the Department Supervisor as fallback) rather than the
-  // Template's own step 1 (the Template's steps shift down to step_order 2, 3,
-  // ... — see getCurrentStepApprovers), and total_steps already includes this
-  // extra layer. NULL means this request has no Supervisor gate (no usable
-  // Direct Supervisor or Department Supervisor found, or the Supervisor would
-  // have been approving their own request) — current_step 1 is then the
-  // Template's own step 1, exactly as before this feature existed.
-  try {
-    await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN supervisor_step_user_id INT NULL`);
-    await dbPool.query(`ALTER TABLE approval_requests ADD FOREIGN KEY (supervisor_step_user_id) REFERENCES users(id) ON DELETE SET NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME" && err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
-      console.warn("⚠️ Could not add approval_requests.supervisor_step_user_id column: " + err.message);
-    }
-  }
-  // Timesheet -> click any date's row to manually fix that day's In/Out Time
-  // (typically a day with no attendance at all, but any day can be corrected).
-  // Submitting one NEVER touches the `attendance` table directly — it only
-  // records the REQUEST here, 'pending' until an Admin reviews it. Routed
-  // through the exact same global Approval Workflow chain as Attendance Check
-  // In/Out and Conveyance Bill Claims (see createApprovalRequest/
-  // POST /api/approvals/:id/act) — no separate review page needed, it already
-  // shows up in the existing Admin Panel -> Approvals queue. Only on the LAST
-  // step's Approve does finalizeAttendanceCorrection actually write the
-  // requested times into `attendance` (creating that day's row if it didn't
-  // exist yet); a Reject leaves `attendance` untouched. Optional remarks (why
-  // the edit is needed) and an optional Image/PDF attachment, same
-  // FileReader/Base64 -> LONGBLOB pattern as user_claims.file_data.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS attendance_corrections (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        project_id INT NOT NULL,
-        attendance_date DATE NOT NULL,
-        requested_check_in_at DATETIME NULL,
-        requested_check_out_at DATETIME NULL,
-        remarks TEXT NULL,
-        file_name VARCHAR(255) NULL,
-        file_mimetype VARCHAR(150) NULL,
-        file_data LONGBLOB NULL,
-        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
-        admin_remarks TEXT NULL,
-        reviewed_by INT NULL,
-        reviewed_at TIMESTAMP NULL DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure attendance_corrections table exists: " + err.message);
-  }
-  // Self Service -> Leave Management — one row per Admin/User account holding how
-  // many days of each leave type they currently have left. A missing row just
-  // means 0 for all three (see GET/PUT /api/leave-balances below); it's only
-  // created on first save, not when the account itself is created.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_balances (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        casual_leave DECIMAL(5, 1) NOT NULL DEFAULT 0,
-        sick_leave DECIMAL(5, 1) NOT NULL DEFAULT 0,
-        leave_without_pay DECIMAL(5, 1) NOT NULL DEFAULT 0,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_leave (user_id),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_balances table exists: " + err.message);
-  }
-  // Custom Leave Categories (Leave Manage -> Set Balance in Bulk -> Add
-  // Category) — see schema.sql's comment on leave_categories for the design.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_categories (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        category_key VARCHAR(100) NOT NULL,
-        label VARCHAR(100) NOT NULL,
-        created_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_leave_category_key (category_key),
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_categories table exists: " + err.message);
-  }
-  // Earn Leave (accrual leave) didn't exist as a category at all before, so
-  // no account could ever apply for it and Leave Policies had nothing to
-  // configure for it. Seeded once as an ordinary Custom Leave Category (same
-  // row shape "Add Category" in the bulk panel would create) so it gets the
-  // whole existing pipeline — Set Balance in Bulk, Leave Policies, Leave
-  // Application submission — for free, with no separate code path. Balance
-  // itself is NOT auto-accrued here; a Leave Manager sets it via Set Balance
-  // in Bulk or a Leave Balance Workflow (see leave_balance_workflows below)
-  // same as any other category.
-  try {
-    await dbPool.query(
-      `INSERT IGNORE INTO leave_categories (category_key, label, created_by) VALUES ('custom_earn_leave', 'Earn Leave', NULL)`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not seed the Earn Leave category: " + err.message);
-  }
-  // Per-account balance for each Custom Leave Category above — the dynamic
-  // equivalent of leave_balances' fixed three columns.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_category_balances (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        category_id INT NOT NULL,
-        balance DECIMAL(5, 1) NOT NULL DEFAULT 0,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_category (user_id, category_id),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (category_id) REFERENCES leave_categories(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_category_balances table exists: " + err.message);
-  }
-  // Leave Manage -> "Year Settings" — a single row (id=1) holding the
-  // recurring HR Leave Year close/start dates (MM-DD, no year component —
-  // the same close/start date applies every year) and whether the year
-  // should roll over automatically. start_month_day is normally just the day
-  // after close_month_day (suggested client-side), but stored separately
-  // since an admin can still override it. See checkAndRunLeaveYearRollover in
-  // LeaveRoutes.ts for what "auto_rollover" actually does once the start
-  // date arrives — applies every active Leave Balance Workflow below to
-  // every account, same as clicking "Apply Now" by hand.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_year_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        close_month_day VARCHAR(5) NOT NULL DEFAULT '12-31',
-        start_month_day VARCHAR(5) NOT NULL DEFAULT '01-01',
-        auto_rollover TINYINT(1) NOT NULL DEFAULT 0,
-        last_rollover_year INT NULL,
-        updated_by INT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    await dbPool.query(
-      `INSERT IGNORE INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover) VALUES (1, '12-31', '01-01', 0)`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_year_settings table exists: " + err.message);
-  }
-  // Leave Manage -> "Leave Balance Workflows" — a named set of per-category
-  // annual balances, applied to accounts either Globally ("General", scope_type
-  // 'general', exactly one such row — seeded below, id=1, can never be
-  // deleted) or to every account whose Employee Directory row has a matching
-  // Designation (scope_type 'designation', e.g. "Manager", "GM"). Applying
-  // (POST /api/leave-balance-workflows/apply, or the year-end auto-rollover
-  // above) runs General first, then each active Designation workflow, so a
-  // Designation-specific balance for a category overrides the General one
-  // for just that category, for just accounts with that Designation — any
-  // category the Designation workflow doesn't mention keeps its General
-  // value. See leave_balance_workflow_items below for the per-category
-  // amounts themselves.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_balance_workflows (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        scope_type ENUM('general', 'designation') NOT NULL DEFAULT 'designation',
-        designation VARCHAR(255) NULL,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_by INT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-      )
-    `);
-    await dbPool.query(
-      `INSERT IGNORE INTO leave_balance_workflows (id, name, scope_type, designation, is_active) VALUES (1, 'General', 'general', NULL, 1)`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_balance_workflows table exists: " + err.message);
-  }
-  // Per-Leave-Category balance amount within a Leave Balance Workflow above.
-  // category_key matches "Set Balance in Bulk"'s own key naming — the 3 fixed
-  // 'casual_leave'/'sick_leave'/'leave_without_pay' balance-column names, or a
-  // custom category's leave_categories.category_key (e.g. 'custom_earn_leave').
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_balance_workflow_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        workflow_id INT NOT NULL,
-        category_key VARCHAR(100) NOT NULL,
-        balance_days DECIMAL(5, 1) NOT NULL DEFAULT 0,
-        UNIQUE KEY uniq_workflow_category (workflow_id, category_key),
-        FOREIGN KEY (workflow_id) REFERENCES leave_balance_workflows(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_balance_workflow_items table exists: " + err.message);
-  }
-  // Self Service -> Leave Application — one row per submitted application.
-  // Submitting one immediately deducts day_count from the matching
-  // leave_balances column (see POST /api/leave-applications below).
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS leave_applications (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        leave_type VARCHAR(64) NOT NULL,
-        start_date DATE NOT NULL,
-        end_date DATE NOT NULL,
-        day_count DECIMAL(5, 1) NOT NULL,
-        is_continuous TINYINT(1) NOT NULL DEFAULT 0,
-        is_prefix TINYINT(1) NOT NULL DEFAULT 0,
-        is_suffix TINYINT(1) NOT NULL DEFAULT 0,
-        is_half_day TINYINT(1) NOT NULL DEFAULT 0,
-        include_extra_work_dates TINYINT(1) NOT NULL DEFAULT 0,
-        is_foreign_leave TINYINT(1) NOT NULL DEFAULT 0,
-        purpose TEXT NOT NULL,
-        approver_id INT NOT NULL,
-        status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
-        apply_date DATE NOT NULL,
-        remarks TEXT NULL,
-        decided_by INT NULL,
-        decided_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (approver_id) REFERENCES users(id)
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure leave_applications table exists: " + err.message);
-  }
-  // Widen an already-created leave_applications table (from before Approve/Reject
-  // existed) with the decision columns — safe no-op if they're already there.
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN remarks TEXT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN decided_by INT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN decided_at TIMESTAMP NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  // Custom Leave Categories in Leave Type (see leave_categories/
-  // leave_category_balances above) — leave_type used to be a hardcoded
-  // ENUM('casual', 'sick', 'without_pay'), which made it impossible to submit
-  // a Leave Application against a custom category (only its balance could be
-  // set, never spent). Widened to VARCHAR so it can also hold a Leave
-  // Category's category_key (e.g. "custom_maternity_leave") — see
-  // isValidLeaveType/getLeaveTypeLabel/getLeaveTypeBalance/
-  // adjustLeaveTypeBalance below for how both kinds of value are handled from
-  // here on. MODIFY COLUMN is naturally idempotent — safe to run on every
-  // startup, unlike an ADD COLUMN, and a fresh install already gets VARCHAR(64)
-  // from the CREATE TABLE above so this is a no-op there.
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications MODIFY COLUMN leave_type VARCHAR(64) NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen leave_applications.leave_type to VARCHAR: " + err.message);
-  }
-  // Dynamic Approval Engine (Part 5) — Leave Application no longer has the
-  // applicant pick their own Approver at submission; it's now routed through
-  // this Employee's assigned Template for request_type 'leave' instead (same
-  // as Conveyance/Timesheet, Part 3), tracked via its own approval_requests
-  // row (source_type 'leave_application'). approver_id is widened to NULL-able
-  // here purely so NEW applications can leave it unset — existing PENDING
-  // applications keep whatever approver_id they already had and are decided
-  // exactly as before via POST /api/leave-applications/:id/decision (see that
-  // route and resolveApprovalTemplate's design note for the full migration
-  // story). This MODIFY COLUMN is naturally idempotent — safe to run on every
-  // startup, unlike an ADD COLUMN.
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications MODIFY COLUMN approver_id INT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen leave_applications.approver_id to NULL-able: " + err.message);
-  }
-
-  // Reliever workflow — the applicant now picks a Reliever (ANY account, not
-  // just Admin/Superadmin) when applying; the request sits waiting on that
-  // Reliever's own Approve/Reject FIRST (reliever_status/reliever_* below),
-  // completely separate from — and before — the Dynamic Approval Engine
-  // (Part 5) routing above. Only once the Reliever Approves does
-  // createTemplateApprovalRequest ever get called for this application (see
-  // POST /api/leave-applications and POST
-  // /api/leave-applications/:id/reliever-decision). Reliever Rejecting ends
-  // the application immediately, exactly like a normal Template-step Reject
-  // (refunds the day_count) — it never reaches the Approval Engine at all.
-  // All ADD COLUMNs, safe no-ops on a DB that already has them.
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN reliever_id INT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN reliever_status ENUM('pending','approved','rejected') NULL DEFAULT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN reliever_remarks TEXT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN reliever_decided_by INT NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  try {
-    await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN reliever_decided_at TIMESTAMP NULL`);
-  } catch (err: any) {
-    // Already exists on a fresh install — ignore silently.
-  }
-  // GET /api/my-approvals (PendingApprovalsCard) looks up a Reliever's
-  // still-pending queue with `WHERE reliever_id = ? AND reliever_status =
-  // 'pending' AND status = 'pending'` — without this, that's a full scan of
-  // every Leave Application ever filed, on every Dashboard open. Ignore the
-  // error if it already exists.
-  await dbPool
-    .query(`CREATE INDEX idx_leave_applications_reliever ON leave_applications (reliever_id, reliever_status, status)`)
-    .catch(() => {});
-
-  // Links an Employee Directory row (all_employees) to the login account (a
-  // users row) created for it at the same time — see POST /api/employees'
-  // create_login option. NULL for the (still-normal) case of a directory
-  // entry with no account. Self-healing for any database created before this
-  // feature existed, same ER_DUP_FIELDNAME-ignoring pattern as every other
-  // column addition above.
-  try {
-    await dbPool.query(`ALTER TABLE all_employees ADD COLUMN user_id INT NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add all_employees.user_id column: " + err.message);
-    }
-  }
-
-  // Links an Employee Directory row to its structured Department (Admin Panel
-  // -> Departments, above) — self-healing for any database created before
-  // this feature existed, same pattern as user_id above. Placed after
-  // `departments` exists, since this is an FK onto that table.
-  try {
-    await dbPool.query(`ALTER TABLE all_employees ADD COLUMN department_id INT NULL`);
-    await dbPool.query(`ALTER TABLE all_employees ADD FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL`);
-  } catch (err: any) {
-    if (err.code !== "ER_DUP_FIELDNAME" && err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
-      console.warn("⚠️ Could not add all_employees.department_id column: " + err.message);
-    }
-  }
-
-  // One-time-per-value migration: seed `departments` from any distinct
-  // legacy free-text all_employees.department values that don't have a
-  // matching Department row yet, then backfill department_id for every
-  // directory row still missing it. Safe to run on every startup —
-  // INSERT...SELECT...WHERE NOT EXISTS only inserts names not already there,
-  // and the UPDATE only touches rows still NULL, so a department_id an Admin
-  // already reassigned (or deliberately cleared) is never touched again.
-  try {
-    await dbPool.query(`
-      INSERT INTO departments (name)
-      SELECT DISTINCT TRIM(e.department) FROM all_employees e
-      WHERE e.department IS NOT NULL AND TRIM(e.department) <> ''
-        AND NOT EXISTS (SELECT 1 FROM departments d WHERE d.name = TRIM(e.department))
-    `);
-    await dbPool.query(`
-      UPDATE all_employees e
-      JOIN departments d ON d.name = TRIM(e.department)
-      SET e.department_id = d.id
-      WHERE e.department_id IS NULL AND e.department IS NOT NULL AND TRIM(e.department) <> ''
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not migrate free-text all_employees.department values into the departments table: " + err.message);
-  }
-
-  // Employee Info / Status / Contact tab columns (Admin Panel -> Employees ->
-  // Edit) added after the original all_employees table — self-healing for any
-  // database created before these existed, same ER_DUP_FIELDNAME-ignoring
-  // pattern as user_id above. EMPLOYEE_EXT_FIELDS is the single source of
-  // truth for these column names/types, shared with the GET/POST/PUT
-  // /api/employees handlers further down.
-  for (const { name, ddl } of EMPLOYEE_EXT_FIELD_DDL) {
-    try {
-      await dbPool.query(`ALTER TABLE all_employees ADD COLUMN ${name} ${ddl}`);
-    } catch (err: any) {
-      if (err.code !== "ER_DUP_FIELDNAME") {
-        console.warn(`⚠️ Could not add all_employees.${name} column: ` + err.message);
-      }
-    }
-  }
-
-  // ============================================================================
-  // Dynamic Approval Engine (Part 5) — one-time migration of the OLD global
-  // Approval Chain into the NEW Template system, so a company that already had
-  // a working chain configured doesn't suddenly have every Conveyance/Leave/
-  // Timesheet request auto-approve the moment this feature ships (Part 3/5's
-  // "no Template configured -> auto-approve" edge case is only meant to fire
-  // for a genuinely unconfigured company). For EACH request_type that has NO
-  // Templates at all yet, this clones the old chain's steps/approvers 1:1 into
-  // a brand-new, already-active, already-default Template — so behavior is
-  // unchanged by default, and the Superadmin can later build a real,
-  // distinct-per-type Template whenever they're ready to.
-  //
-  // Deliberately per-request_type and gated on "zero Templates exist yet",
-  // not just "no default exists yet" — so it never overwrites or duplicates
-  // anything once an Admin has started customizing that request_type, and it
-  // safely no-ops on every subsequent restart once the one-time clone is done.
-  // If the old chain has zero steps (nothing was ever configured), nothing is
-  // created — a fresh install auto-approving until someone builds a Template
-  // is the correct, intended behavior in that case.
-  // ============================================================================
-  try {
-    const chain = await getApprovalChain();
-    if (chain.length > 0) {
-      const requestTypes: { key: "conveyance" | "leave" | "timesheet"; label: string }[] = [
-        { key: "conveyance", label: "Conveyance Bill Claim" },
-        { key: "leave", label: "Leave Application" },
-        { key: "timesheet", label: "Timesheet" }
-      ];
-      for (const rt of requestTypes) {
-        const existingTemplates = await queryDB("SELECT COUNT(*) AS cnt FROM approval_templates WHERE request_type = ?", [rt.key]);
-        if (Number(existingTemplates[0]?.cnt || 0) > 0) continue;
-        const templateResult = await queryDB(
-          "INSERT INTO approval_templates (name, request_type, is_default, is_active, created_by) VALUES (?, ?, 1, 1, NULL)",
-          [`Migrated Global Chain \u2014 ${rt.label}`, rt.key]
-        );
-        const templateId = templateResult.insertId;
-        for (const step of chain) {
-          const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order) VALUES (?, ?)", [templateId, step.step_order]);
-          await queryDB("INSERT INTO approval_template_step_approvers (step_id, user_id) VALUES (?, ?)", [stepResult.insertId, step.user_id]);
-        }
-        console.log(`\u2705 Migrated the old global Approval Chain into a default Template for '${rt.key}' (Admin Panel -> Approvals -> Templates).`);
-      }
-    }
-  } catch (err: any) {
-    console.warn("⚠️ Could not migrate the old global Approval Chain into default Templates: " + err.message);
   }
 }
 
@@ -2140,16 +324,27 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault"] as const;
+// 'vehicle_maintainer' — deliberately separate from 'vehicle_management':
+// grants ONLY the Vehicle Requisition bypass actions in
+// VehicleManagementRoutes.ts (POST .../direct-book, PUT .../:id/direct-assign)
+// so a Superadmin can hand this out to whoever actually keeps the vehicles
+// running day-to-day without also giving them the full Admin Panel ->
+// Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
+// etc.). See the two routes' own comments for what the bypass does.
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
 // here, not imported, same convention as ADMIN_MODULE_KEYS/ADMIN_MODULES
 // above — this file has no import of the frontend's types.ts).
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
+// Users: the generic layers plus "block_account" (Block / Unblock a login,
+// AccountBlock.ts) and "password_requests" (Forgot password requests,
+// PasswordResetRoutes.ts) — neither part of the no-saved-layers default.
+const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "employees"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2157,19 +352,95 @@ const TRACKING_LAYER_KEYS = ["read", "stay_report", "live"] as const;
 // What an account with the tracking module but no saved layers gets — Live
 // Follow ("live") is explicit-only, so it is left out.
 const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
-// PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
-// — plus its own "Budget Submission Status" (the second report on that page),
-// which, like Permanent Delete, is never part of the no-saved-rows default:
-// only an account it's explicitly ticked for can open it.
-// "dispatch_material" (Purchase sending material against MPR rows,
-// MprDispatchRoutes.ts) sees only the rows it sent there or dispatched;
-// "dispatch_all" sees everyone's. Both explicit-only, like submission_status.
-// "po_import" (explicit-only): Reports -> P.O Import (PoImportRoutes.ts).
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import"] as const;
+// Payroll's layers: "read" = the whole Payroll module as it was (runs,
+// payslips, salary setup, late policy…); "salary_month" = changing the day
+// a salary month starts (26 -> "26 to 25"). salary_month changes every
+// payroll figure, so it is never part of the no-saved-layers default: only
+// an account it is ticked for (and the Superadmin) can change it.
+// "salary_hold" = holding / releasing one employee's salary for a month
+// (kept out of disbursement until released) — also explicit-only.
+// "audit_approve" = Audit approves / returns a month's salary sheet;
+// "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
+// Activity Log (who opened Payroll, what they looked at and did). All
+// explicit-only (PayrollApprovalRoutes.ts).
+// "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
+// and the Salary Structure kind of HR Data Import (DataImportRoutes.ts).
+// "payroll_view" = View only: opens every Payroll page and report but can't
+// change anything — for Audit and Accounts, so seeing the sheet they approve /
+// pay doesn't also hand them HR's "read" (= run payroll, salaries, loans).
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload"] as const;
+// Mobile Bill's layers: "read" = the module as it was; "limit_history" =
+// Reports -> Limit changes (who changed which SIM's limit, when). Both are
+// reading, so an account with Mobile Bill and no saved layers has both.
+const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
+// Office Attendance: "read" = the module as it was; "link_pins" = Unlinked
+// PINs — tie a device PIN that has punches to an Employee (edits the
+// Employee record, so never part of the no-saved-layers default).
+const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
+// Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
+// Conveyance Bill Claim for another employee (it goes through that
+// employee's approval chain like their own would) — explicit-only.
+const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
+// HR Operations: "read" = the module as it was; New Joiner Onboarding
+// (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
+// application and its temporary login), "onboarding_review" (see, reject,
+// cancel) and "onboarding_approve" (create the Employee). All three are
+// explicit-only — the no-saved-layers default is "read" alone.
+// "reminders_receive" (explicit-only too): HR reminders of probation,
+// contract, document, retirement and increment dates (HrRemindersRoutes.ts).
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions"] as const;
+// Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
+// the dues an exiting Employee still has in other modules (assets, SIM,
+// loans / advances, claims, rides) and adding them to the Full & Final
+// Settlement. Explicit-only — the no-saved-layers default is "read" alone.
+// "exit_clearance_setup" (explicit-only too): add / rename / reorder /
+// remove the clearance departments every new exit is cleared by.
+const EXIT_LAYER_KEYS = ["read", "exit_dues", "exit_pdf", "exit_clearance_setup"] as const;
+// Target Reports (TargetRoutes.ts): "read" = the report; "target_export" =
+// its Excel / PDF; "target_cancel" = cancel or close anyone's target. Both
+// explicit-only — the no-saved-layers default is "read" alone.
+const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
+// Attendance Reports: "read" = the reports as they always were; "late_list"
+// = who came late on a day, by name (the Assistant's "aj ke ke late").
+// Explicit-only — the no-saved-layers default is "read" alone.
+const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
+// Mail Administration (MailRoutes.ts): "read" = the list of everyone's
+// connected Credence Mail mailboxes; "mail_open" = open someone's mailbox
+// (read only); "mail_password" = see a mailbox's saved password. Both
+// explicit-only — the no-saved-layers default is "read" alone. Every open and
+// every password shown is written to mail_admin_log.
+// "mail_settings" = turn internal delivery (mail between our own mailboxes
+// stays inside CredenceHR) on / off and set which domains are ours.
+// "mail_groups" = add / change / remove central mail groups (everyone with
+// "read" sees them). Explicit-only as well.
+const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups"] as const;
+// Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
+// "roster_manage" = add / edit shifts and set who works which shift when.
+// Explicit-only — the no-saved-layers default is "read" alone.
+const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
+// Break Time (BreakRoutes.ts): "read" = the report and who is on a break now;
+// "break_manage" = change the break rules and end a forgotten break.
+// Explicit-only — the no-saved-layers default is "read" alone.
+const BREAK_LAYER_KEYS = ["read", "break_manage"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
 const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete"] as const;
+// Document Vault: "read" = everything it did before (upload, view, send a
+// document for its own employee's signature); "sign_request" = ask anyone
+// else / several people in order to sign (ESignRoutes.ts). Explicit-only.
+// "esign_settings" = turn OTP / read-to-the-end on or off (explicit-only too).
+const DOCUMENT_VAULT_LAYER_KEYS = ["read", "sign_request", "esign_settings"] as const;
+// PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
+// — plus its own "Budget Submission Status" (the second report on that page),
+// which, like Permanent Delete, is never part of the no-saved-rows default:
+// only an account it's explicitly ticked for can open it. "dispatch_material"
+// (Purchase sending material against MPR rows, MprDispatchRoutes.ts) is the
+// third report on that page — explicit-only as well. With it alone an account
+// sees only the rows it sent there or dispatched; "dispatch_all" (also
+// explicit-only) shows everyone's.
+// "po_import" (explicit-only): Reports -> P.O Import (PoImportRoutes.ts).
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -2177,7 +448,10 @@ const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete"] as const;
 // "module" (no admin_module_permissions grant) and its operations don't map
 // onto the generic Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete
 // set — see requireLeaveManagerLayer() below.
-const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage"] as const;
+// "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
+// left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
 // endpoint (UserManagement.ts) accepts — a single map instead of one flat
@@ -2189,11 +463,22 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   departments: PERMISSION_LAYER_KEYS,
   projects: PERMISSION_LAYER_KEYS,
   approvals: PERMISSION_LAYER_KEYS,
-  // Users adds "block_account" (Block login) — explicit-only.
-  users: [...PERMISSION_LAYER_KEYS, "block_account"],
+  users: USERS_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
+  payroll: PAYROLL_LAYER_KEYS,
+  mobile_bill: MOBILE_BILL_LAYER_KEYS,
+  office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
+  conveyance: CONVEYANCE_LAYER_KEYS,
+  hr_operations: HR_OPS_LAYER_KEYS,
+  exit_offboarding: EXIT_LAYER_KEYS,
+  target_reports: TARGET_LAYER_KEYS,
+  attendance_reports: ATTENDANCE_REPORT_LAYER_KEYS,
+  mail_admin: MAIL_ADMIN_LAYER_KEYS,
+  duty_roster: DUTY_ROSTER_LAYER_KEYS,
+  break_time: BREAK_LAYER_KEYS,
   employees: EMPLOYEE_LAYER_KEYS,
+  document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -2206,12 +491,19 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
 // is_foreigner, which is 0/1.
 const EMPLOYEE_TEXT_FIELDS = [
   "middle_name", "gender", "nid_ssn", "nationality", "marital_status", "blood_group", "religion",
-  "division", "branch", "unit", "job_status", "job_base", "review_month", "employment_category",
+  // "branch" pulled out — like "department" before it, it's now a
+  // structured column (branch/branch_id, resolved by resolveEmployeeBranch)
+  // instead of a generic free-text ext field. See that function's comment.
+  "division", "unit", "job_status", "job_base", "review_month", "employment_category",
   "mobile", "telephone", "personal_email",
   "present_address", "present_country", "present_state", "present_city", "present_zip",
   "permanent_address", "permanent_country", "permanent_state", "permanent_city", "permanent_zip"
 ] as const;
 const EMPLOYEE_DATE_FIELDS = [
+  // The day this person actually started — attendance summaries don't count
+  // any day before it as Absent (see /api/my-attendance-summary and the
+  // Monthly Attendance Report).
+  "joining_date",
   "date_of_birth", "status_effective_date", "job_status_effective_date", "job_base_effective_date",
   "employment_category_effective_date", "designation_effective_date"
 ] as const;
@@ -2239,17 +531,10 @@ function normalizeEmployeeExtValue(field: string, value: any): any {
 }
 type AdminModuleKey = typeof ADMIN_MODULE_KEYS[number];
 
-// What an account holding a layered module, with no layer rows saved for
-// it, may do there (requireModuleLayer / hasModuleLayer).
-function defaultLayersFor(moduleKey: string): readonly string[] {
-  if (moduleKey === "tracking") return TRACKING_DEFAULT_LAYERS;
-  if (moduleKey === "employees") return ["read"];
-  return PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
-}
-
 async function getAdminModules(userId: number): Promise<string[]> {
   try {
-    const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [userId]);
+    // Module Access is per company — the one this request is working in.
+    const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [userId, activeCompanyId()]);
     return rows.map((r: any) => r.module_key);
   } catch {
     return [];
@@ -2262,8 +547,8 @@ async function getAdminModules(userId: number): Promise<string[]> {
 async function getModulePermissionLayersForModule(userId: number, moduleKey: string): Promise<string[]> {
   try {
     const rows: any = await queryDB(
-      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
-      [userId, moduleKey]
+      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?",
+      [userId, moduleKey, activeCompanyId()]
     );
     return rows.map((r: any) => r.layer_key);
   } catch {
@@ -2277,8 +562,8 @@ async function getModulePermissionLayersForModule(userId: number, moduleKey: str
 async function getAllModulePermissionLayers(userId: number): Promise<Record<string, string[]>> {
   try {
     const rows: any = await queryDB(
-      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ?",
-      [userId]
+      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ? AND company_id = ?",
+      [userId, activeCompanyId()]
     );
     const byModule: Record<string, string[]> = {};
     for (const row of rows) {
@@ -2393,7 +678,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -2406,8 +691,11 @@ async function resolveApprovalTemplate(employeeUserId: number, requestType: "con
     console.warn("⚠️ Could not resolve employee template assignment: " + err.message);
   }
   try {
-    const def = await queryDB("SELECT * FROM approval_templates WHERE request_type = ? AND is_default = 1 AND is_active = 1 LIMIT 1", [requestType]);
-    if (def.length > 0) return def[0];
+    const allTemplates = await queryDB("SELECT * FROM approval_templates");
+    const def = allTemplates.find(
+      (t: any) => t.request_type === requestType && Number(t.is_default) === 1 && Number(t.is_active) === 1
+    );
+    if (def) return def;
   } catch (err: any) {
     console.warn("⚠️ Could not resolve default template: " + err.message);
   }
@@ -2503,18 +791,28 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application",
+  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
+  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
   sourceId: number,
-  requestedBy: number
+  requestedBy: number,
+  // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
+  // HR/Admin manually files a requisition on someone else's behalf and may
+  // not want (or trust) that person's auto-resolved employee_supervisors row
+  // to be the Layer 1 approver (e.g. an emergency, or the requester has no
+  // Direct Supervisor set). When provided (any value other than undefined,
+  // including null to explicitly force NO Supervisor gate), this REPLACES
+  // resolveSupervisorApprover's own lookup instead of running it. Every
+  // existing caller omits this (stays undefined), so this is a zero-
+  // behavior-change addition for Conveyance/Leave/Timesheet/Asset — see
+  // VehicleManagementRoutes.ts's POST .../admin-create for the one caller
+  // that passes it.
+  overrideSupervisorId?: number | null
 ): Promise<{ autoApproved: boolean; template: any | null }> {
-  const supervisorId = await resolveSupervisorApprover(requestedBy);
-
   let template = await resolveApprovalTemplate(requestedBy, requestType);
   let templateSteps = 0;
   if (template) {
-    const stepCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM approval_template_steps WHERE template_id = ?", [template.id]);
-    templateSteps = Number(stepCountRows[0]?.cnt || 0);
+    const allSteps = await queryDB("SELECT * FROM approval_template_steps");
+    templateSteps = allSteps.filter((s: any) => Number(s.template_id) === Number(template.id)).length;
     // A Template somehow has zero steps (Part 2's editor always requires at
     // least one, but defend against a row created some other way) — treat
     // this exactly like "no template at all" (the Supervisor gate above, if
@@ -2522,8 +820,35 @@ async function createTemplateApprovalRequest(
     if (templateSteps === 0) template = null;
   }
 
+  // Approver Type override: a Template whose Layer 1 was explicitly set to
+  // Employee/Admin (skip_auto_supervisor) skips the automatic Supervisor gate
+  // below entirely — that Template's own step_order 1 becomes this request's
+  // real first step instead. Every pre-existing template defaults to
+  // skip_auto_supervisor = false, so this is a no-op for them.
+  const supervisorId = template?.skip_auto_supervisor
+    ? null
+    : overrideSupervisorId !== undefined
+    ? overrideSupervisorId
+    : await resolveSupervisorApprover(requestedBy);
+
   const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
-  if (totalSteps === 0) return { autoApproved: true, template: null };
+  if (totalSteps === 0) {
+    // HR filing a Vehicle Requisition directly and choosing no Supervisor
+    // (overrideSupervisorId === null) with no Template still goes straight
+    // through, as before.
+    if (overrideSupervisorId === null) return { autoApproved: true, template: null };
+    // Nobody to approve it yet (no Supervisor, no Template): it is NOT
+    // approved on its own any more. It waits as "no approver yet"
+    // (awaiting_approver) — a Superadmin may still decide it — and moves to
+    // a Supervisor / Template the moment one is set (rehomeAwaitingApprovals).
+    const r: any = await queryDB(
+      `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id, awaiting_approver)
+       VALUES (?, 'submit', ?, ?, 'pending', 1, 1, '[]', NULL, NULL, 1)`,
+      [sourceType, sourceId, requestedBy]
+    );
+    await alertNoApprover(sourceType, Number(r?.insertId), requestedBy);
+    return { autoApproved: false, template: null };
+  }
 
   await queryDB(
     `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
@@ -2531,6 +856,118 @@ async function createTemplateApprovalRequest(
     [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
   );
   return { autoApproved: false, template };
+}
+
+// ---- Requests with no approver yet --------------------------------------------
+// A request whose employee has neither a Supervisor nor an Approval Template
+// waits (approval_requests.awaiting_approver = 1) instead of approving
+// itself. Superadmins (and Approvals-module accounts) are told once; when a
+// Supervisor or Template exists for that employee later, the request moves
+// to it (step 1) and that approver is alerted. Runs when an approvals list
+// is opened, when the request's approver is looked up, and every 10 minutes.
+const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
+  user_claim: "conveyance",
+  attendance_correction: "timesheet",
+  leave_application: "leave",
+  asset_requisition: "asset",
+  vehicle_requisition: "vehicle",
+  mobile_limit_request: "mobile",
+  advance_request: "loan"
+};
+const APPROVAL_ALERT: Record<string, { type: AlertType; label: string }> = {
+  user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
+  attendance_correction: { type: "hr_action", label: "Attendance Correction" },
+  leave_application: { type: "leave_approval", label: "Leave Application" },
+  asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
+  vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" },
+  mobile_limit_request: { type: "mobile_limit_approval", label: "Mobile Limit Request" },
+  advance_request: { type: "loan_approval", label: "Loan / Advance Request" }
+};
+async function alertNoApprover(sourceType: string, requestId: number, requestedBy: number): Promise<void> {
+  try {
+    const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [requestedBy])) || [];
+    const label = APPROVAL_ALERT[sourceType]?.label || "Request";
+    const admins: any[] =
+      (await queryDB(
+        `SELECT DISTINCT u.id, u.role FROM users u
+          WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
+             OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'approvals'))`
+      )) || [];
+    // Only a Superadmin can decide such a request, so only a Superadmin is
+    // told to; everyone else is told how to give it an approver.
+    const name = who[0]?.name || "An employee";
+    for (const a of admins) {
+      if (Number(a.id) === Number(requestedBy)) continue;
+      await createAlert(queryDB, {
+        userId: Number(a.id),
+        type: "hr_action",
+        title: "No approver set",
+        message:
+          a.role === "superadmin"
+            ? `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself, or decide it yourself from My Approvals or Admin Panel -> Approvals.`
+            : `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself. Until then only a Superadmin can decide it.`,
+        relatedType: "approval_request",
+        relatedId: requestId
+      }).catch(() => {});
+    }
+    // The employee hears it too, so they don't wait on nobody.
+    await createAlert(queryDB, {
+      userId: Number(requestedBy),
+      type: APPROVAL_ALERT[sourceType]?.type || "hr_action",
+      title: "No approver set yet",
+      message: `Your ${label} has no approver yet: no Supervisor or Approval Template is set for you. HR has been told — it moves on by itself once one is set. You can remind HR.`,
+      relatedType: "approval_request",
+      relatedId: requestId
+    }).catch(() => {});
+  } catch (err: any) {
+    console.warn("⚠️ Could not alert about a request with no approver: " + err.message);
+  }
+}
+async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
+  let moved = 0;
+  const rows: any[] =
+    (await queryDB(
+      `SELECT * FROM approval_requests WHERE status = 'pending' AND awaiting_approver = 1${onlyId ? " AND id = ?" : ""}`,
+      onlyId ? [onlyId] : []
+    ).catch(() => [])) || [];
+  for (const r of rows) {
+    try {
+      const type = APPROVAL_REQUEST_TYPE[r.source_type];
+      if (!type) continue;
+      let template = await resolveApprovalTemplate(Number(r.requested_by), type);
+      let steps = 0;
+      if (template) {
+        const all: any[] = (await queryDB("SELECT * FROM approval_template_steps")) || [];
+        steps = all.filter((x: any) => Number(x.template_id) === Number(template.id)).length;
+        if (!steps) template = null;
+      }
+      const sup = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(Number(r.requested_by));
+      const total = (sup ? 1 : 0) + steps;
+      if (!total) continue;
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET awaiting_approver = 0, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        [template ? template.id : null, sup || null, total, r.id]
+      );
+      if (!Number(done?.affectedRows)) continue;
+      moved++;
+      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, total_steps: total, current_step: 1 });
+      const mapping = APPROVAL_ALERT[r.source_type];
+      const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [r.requested_by])) || [];
+      for (const a of await getCurrentStepApprovers(r)) {
+        await createAlert(queryDB, {
+          userId: a.user_id,
+          type: mapping?.type || "hr_action",
+          title: "Approval waiting on you",
+          message: `${who[0]?.name || "An employee"}'s ${mapping?.label || "request"} was waiting for an approver — it is now waiting on you.`,
+          relatedType: r.source_type,
+          relatedId: Number(r.source_id)
+        }).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Could not move approval request #${r.id} to its new approver: ${err.message}`);
+    }
+  }
+  return moved;
 }
 
 // Who's authorized to act on an approval_requests row's CURRENT step, whether
@@ -2543,6 +980,14 @@ async function createTemplateApprovalRequest(
 // Supervisor and the Template's own steps are shifted down by one (its own
 // step_order 1 is this request's step_order 2, and so on).
 async function getCurrentStepApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
+  // No approver yet: move it to a Supervisor / Template if one exists now,
+  // else nobody (only a Superadmin's override can decide it).
+  if (Number(request.awaiting_approver) === 1) {
+    await rehomeAwaitingApprovals(Number(request.id));
+    const fresh = ((await queryDB("SELECT * FROM approval_requests WHERE id = ?", [request.id])) || [])[0];
+    if (!fresh || Number(fresh.awaiting_approver) === 1) return [];
+    Object.assign(request, fresh);
+  }
   const hasSupervisorStep = !!request.supervisor_step_user_id;
   if (hasSupervisorStep && Number(request.current_step) === 1) {
     const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
@@ -2563,6 +1008,34 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
   const chain = await getApprovalChain();
   const step = chain.find((s: any) => Number(s.step_order) === Number(request.current_step));
   return step ? [{ user_id: Number(step.user_id), user_name: step.user_name }] : [];
+}
+
+// True when a pending request's CURRENT step is a Template step whose
+// approver_type is 'vehicle_maintainer' — used to word the "waiting on you"
+// alert as an assign-a-vehicle task instead of an approval.
+async function getCurrentTemplateStepType(request: any): Promise<string | null> {
+  if (!request?.template_id) return null;
+  const hasSupervisorStep = !!request.supervisor_step_user_id;
+  if (hasSupervisorStep && Number(request.current_step) === 1) return null;
+  const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
+  const steps = await queryDB("SELECT * FROM approval_template_steps");
+  const step = steps.find((s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder);
+  return step ? step.approver_type || null : null;
+}
+async function isVehicleMaintainerStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "vehicle_maintainer";
+}
+// Same idea for an Asset Requisition whose current Layer is the Template's
+// 'asset_fulfiller' Layer — that approver fulfills the items instead of
+// approving them.
+async function isAssetFulfillerStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "asset_fulfiller";
+}
+// Conveyance counterpart — a 'conveyance' Template's last Layer set to
+// 'conveyance_disburser': that approver pays the claim out (Bill + voucher)
+// instead of only approving it. See performApprovalAction.
+async function isConveyanceDisburserStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "conveyance_disburser";
 }
 
 // A small typed error so callers (both the Admin-queue route and the
@@ -2587,14 +1060,27 @@ class ApprovalActionError extends Error {
 async function performApprovalAction(
   requestId: number,
   actorUser: { id: number; name: string; role: string },
-  action: "approved" | "rejected",
+  action: "approved" | "rejected" | "returned",
   remarks: string | null,
   billId: number | null,
-  approvedAmount?: number | null
-): Promise<{ status: string; current_step: number; billInfo: { bill_id: number; bill_item_id: number } | null }> {
+  approvedAmount?: number | null,
+  voucherNo?: string | null,
+  // Conveyance Bill Claims only: `claimVersion` = the claim version the
+  // approver looked at (refused if the employee has edited it since);
+  // `allowReclaim` = Reject, but let the employee edit and resubmit it.
+  claimOpts: { claimVersion?: number | null; allowReclaim?: boolean } = {}
+): Promise<{ status: string; current_step: number; billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null }> {
   const rows = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [requestId]);
   if (rows.length === 0) throw new ApprovalActionError(404, "Approval request not found.");
   const request = rows[0];
+  // A ride request whose start time (+ grace) has passed can't be approved.
+  if (request.source_type === "vehicle_requisition") {
+    await expireOverdueRides();
+    const ride = await queryDB("SELECT status FROM vehicle_requisitions WHERE id = ?", [request.source_id]);
+    if (ride.length > 0 && ride[0].status === "expired") {
+      throw new ApprovalActionError(400, "This ride request has expired — its start time (plus the grace time) has passed.");
+    }
+  }
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
@@ -2604,6 +1090,78 @@ async function performApprovalAction(
   if (actorUser.role !== "superadmin" && !isAssignedApprover) {
     throw new ApprovalActionError(403, "This request isn't waiting on you yet.");
   }
+
+  // Conveyance Bill Claim review rules (Bill Claim Policy -> Editing & review).
+  let claimPolicy: any = null;
+  if (request.source_type === "user_claim") {
+    claimPolicy = await loadBillClaimPolicy(queryDB);
+    if (claimOpts.claimVersion != null) {
+      const v = await queryDB("SELECT version FROM user_claims WHERE id = ?", [request.source_id]);
+      if (v.length > 0 && Number(v[0].version || 1) !== Number(claimOpts.claimVersion)) {
+        throw new ApprovalActionError(409, "The employee changed this claim after you opened it — reload it and check the changes first.");
+      }
+    }
+    if ((action === "returned" || action === "rejected") && claimPolicy.decision_reason_required && !remarks) {
+      throw new ApprovalActionError(400, `Write a reason for the ${action === "returned" ? "Return" : "Rejection"} — the employee sees it.`);
+    }
+    if (action === "returned" && !claimPolicy.allow_return) {
+      throw new ApprovalActionError(400, "Returning claims is turned off in the Bill Claim Policy.");
+    }
+  } else if (action === "returned") {
+    throw new ApprovalActionError(400, "Only a Conveyance Bill Claim can be returned for correction.");
+  }
+
+  // Return for correction: the claim goes back to the employee (out of every
+  // queue) and, once they resubmit, starts again from Layer 1.
+  if (action === "returned") {
+    let trail: any[] = [];
+    try {
+      trail = JSON.parse(request.actions_json || "[]");
+    } catch {
+      trail = [];
+    }
+    trail.push({
+      step_order: Number(request.current_step),
+      approver_id: actorUser.id,
+      approver_name: actorUser.name,
+      action: "returned",
+      remarks,
+      acted_at: new Date().toISOString()
+    });
+    const back: any = await queryDB(
+      "UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
+      [JSON.stringify(trail), requestId, Number(request.current_step)]
+    );
+    if (back && back.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
+    await queryDB("UPDATE user_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
+    await recordClaimHistory(queryDB, Number(request.source_id), "returned", { id: actorUser.id, name: actorUser.name }, remarks);
+    try {
+      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM user_claims WHERE id = ?", [request.source_id]);
+      const uc = ucRows[0];
+      const notifyIds = [...new Set([Number(uc?.user_id), Number(uc?.filed_by || 0)].filter((x) => x > 0))];
+      for (const uid of notifyIds) {
+        await createAlert(queryDB, {
+          userId: uid,
+          type: "conveyance_claim",
+          title: "Conveyance Bill Claim Returned",
+          message: `${actorUser.name} returned Conveyance Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
+          relatedType: "user_claim",
+          relatedId: Number(request.source_id)
+        });
+      }
+    } catch (alertErr: any) {
+      console.warn("⚠️ Could not notify about returned Conveyance Bill Claim #" + request.source_id + ": " + alertErr.message);
+    }
+    return { status: "returned", current_step: 1, billInfo: null };
+  }
+  // The Conveyance Disburser Layer pays out as it approves: the claim gets its
+  // own new Bill (never folded into an existing one) and that Bill is marked
+  // disbursed in the same action.
+  const disburseOnApprove =
+    request.source_type === "user_claim" &&
+    action === "approved" &&
+    Number(request.current_step) >= Number(request.total_steps) &&
+    (await isConveyanceDisburserStep(request));
 
   let actions: any[] = [];
   try {
@@ -2626,6 +1184,18 @@ async function performApprovalAction(
   if (request.source_type === "user_claim" && action === "approved") {
     const ucRows = await queryDB("SELECT amount, approved_amount FROM user_claims WHERE id = ?", [request.source_id]);
     if (ucRows.length > 0) {
+      // Checked before anything is written, so a refused amount leaves the
+      // request exactly where it was.
+      if (approvedAmount != null) {
+        if (!Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) <= 0) {
+          throw new ApprovalActionError(400, "Approved Amount must be a positive number.");
+        }
+        try {
+          assertWithinApprovedCap(ucRows[0], Number(approvedAmount));
+        } catch (capErr: any) {
+          throw new ApprovalActionError(400, capErr.message);
+        }
+      }
       const priorAmount = ucRows[0].approved_amount != null ? Number(ucRows[0].approved_amount) : Number(ucRows[0].amount);
       actionApprovedAmount = approvedAmount != null ? Number(approvedAmount) : priorAmount;
       actionAmountEdited = actionApprovedAmount !== priorAmount;
@@ -2652,12 +1222,34 @@ async function performApprovalAction(
     newStep = Number(request.current_step) + 1;
   }
 
-  await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ?", [
+  // Only if nobody acted on this step meanwhile (two approvers, a
+  // double-click): the second one changes nothing and runs no side effects.
+  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
     newStatus,
     newStep,
     JSON.stringify(actions),
-    requestId
+    requestId,
+    Number(request.current_step)
   ]);
+  if (moved && moved.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
+  // Conveyance Bill Claim: keep this approver's signature with this approval
+  // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
+  if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
+    try {
+      const sig: any[] = (await queryDB("SELECT image FROM user_signatures WHERE user_id = ?", [actorUser.id])) || [];
+      if (sig[0]?.image) {
+        await queryDB(
+          "INSERT INTO claim_approval_signatures (approval_request_id, step_order, approver_user_id, image, signed_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE image = VALUES(image), signed_at = VALUES(signed_at)",
+          [requestId, Number(request.current_step), actorUser.id, sig[0].image, new Date()]
+        );
+      }
+    } catch (sigErr: any) {
+      console.warn("⚠️ Could not keep the approver's signature for approval #" + requestId + ": " + sigErr.message);
+    }
+  }
+  // Open pages of the requester (Ride Status, My Leave…) and the approver's
+  // other tabs refresh at once, even when this layer sends no alert.
+  notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
 
   // Only a 'user_claim' request actually gates something further — a
   // Conveyance Bill Claim only becomes a real Bill line item the moment its
@@ -2665,13 +1257,16 @@ async function performApprovalAction(
   // the moment it's 'rejected' (at any step). Attendance/Movement Claims are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
-  let billInfo: { bill_id: number; bill_item_id: number } | null = null;
+  let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
   if (request.source_type === "user_claim") {
     try {
       if (newStatus === "approved") {
-        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, billId, remarks, approvedAmount);
+        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
+        if (disburseOnApprove) {
+          billInfo.voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, billInfo.bill_id, actorUser.id, voucherNo);
+        }
       } else if (newStatus === "rejected") {
-        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks);
+        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
       } else if (action === "approved" && approvedAmount != null) {
         // Approved on a NON-final step (e.g. the Supervisor auto-layer at
         // step 1 of a multi-step chain) with an Approved Amount edit — same
@@ -2705,6 +1300,65 @@ async function performApprovalAction(
       }
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Leave Application.");
+    }
+  } else if (request.source_type === "asset_requisition") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeAssetRequisitionApproval(Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectAssetRequisitionRecord(Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Asset Requisition.");
+    }
+    // Requisition history — the final approve/reject already alert the
+    // requester above, so only an intermediate Layer's approval notifies.
+    const layerLabel = `Layer ${actions[actions.length - 1].step_order} of ${request.total_steps}`;
+    await logAssetRequisitionEvent(queryDB, createAlert, {
+      requisitionId: Number(request.source_id),
+      actor: actorUser,
+      action: action === "rejected" ? "rejected" : newStatus === "approved" ? "approved" : "approved_step",
+      message:
+        action === "rejected"
+          ? `${actorUser.name} rejected the requisition (${layerLabel})${remarks ? `: ${remarks}` : "."}`
+          : newStatus === "approved"
+            ? `${actorUser.name} gave the final approval (${layerLabel})${remarks ? `: ${remarks}` : "."}`
+            : `${actorUser.name} approved ${layerLabel}${remarks ? `: ${remarks}` : ""} — now with the next approver.`,
+      details: remarks ? { remarks } : undefined,
+      notify: newStatus === "pending"
+    });
+  } else if (request.source_type === "vehicle_requisition") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeVehicleRequisitionApproval(Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectVehicleRequisitionRecord(Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Vehicle Requisition.");
+    }
+  } else if (request.source_type === "mobile_limit_request") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeMobileLimitRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectMobileLimitRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not change this SIM's limit.");
+    }
+  } else if (request.source_type === "advance_request") {
+    // With a Template the chain's final Approve lends the money; with only a
+    // Supervisor it's a recommendation and Payroll decides (LoanRequestRoutes.ts).
+    try {
+      if (newStatus === "approved") {
+        if (request.template_id) await finalizeAdvanceRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+        else await recommendAdvanceRequest(queryDB, createAlert, getAdminModules, Number(request.source_id), actorUser.name || "The approver");
+      } else if (newStatus === "rejected") {
+        await rejectAdvanceRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not create this loan.");
     }
   }
 
@@ -2776,6 +1430,9 @@ async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
           current_step: r.current_step,
           total_steps: r.total_steps,
           current_approver_name: currentApprovers.length > 0 ? currentApprovers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null,
+          // No Supervisor and no Template yet (getCurrentStepApprovers has
+          // already moved it if one exists now).
+          no_approver: r.status === "pending" && Number(r.awaiting_approver) === 1,
           actions
         }
       };
@@ -2821,6 +1478,7 @@ async function attachAttendanceCorrectionApproval(rows: any[]): Promise<any[]> {
           current_step: r.current_step,
           total_steps: r.total_steps,
           current_approver_name: currentApprovers.length > 0 ? currentApprovers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null,
+          no_approver: r.status === "pending" && Number(r.awaiting_approver) === 1,
           actions
         }
       };
@@ -2876,6 +1534,120 @@ async function rejectAttendanceCorrection(correctionId: number, rejectedBy: numb
   ]);
 }
 
+// Sets an Asset Requisition to 'approved' once every step of its Approval
+// Workflow has signed off (Layer 1 defaults to the requester's own
+// Supervisor per the Asset Management flowchart, Layer 2+ is whatever
+// Template a Superadmin built for request_type 'asset' — see
+// createTemplateApprovalRequest), or immediately on submit when neither a
+// Supervisor nor a Template resolve (autoApproved). Approving here does NOT
+// hand over an asset yet — IT/Admin still has to pick a specific inventory
+// item via POST /api/assets/requisitions/:id/fulfill. Shared by
+// performApprovalAction's 'asset_requisition' branch and the auto-approve
+// path on POST /api/assets/requisitions.
+async function finalizeAssetRequisitionApproval(requisitionId: number, approvedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  if (r.status !== "pending") throw new Error("This requisition has already been reviewed.");
+  await queryDB(
+    "UPDATE asset_requisitions SET status = 'approved', admin_decided_by = ?, admin_decided_at = NOW() WHERE id = ?",
+    [approvedBy, requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "asset_requisition",
+    title: "Requisition Approved",
+    message: `Your ${r.asset_category} request was approved and will be dispatched shortly.`,
+    relatedType: "asset_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Rejects an Asset Requisition at ANY step — never touches inventory.
+// Shared by the same two callers as finalizeAssetRequisitionApproval above.
+async function rejectAssetRequisitionRecord(requisitionId: number, rejectedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  await queryDB(
+    "UPDATE asset_requisitions SET status = 'rejected', admin_decided_by = ?, admin_decided_at = NOW(), rejection_reason = ? WHERE id = ?",
+    [rejectedBy, remarks || "Rejected", requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "asset_requisition",
+    title: "Requisition Rejected",
+    message: `Your ${r.asset_category} request was rejected.${remarks ? " Reason: " + remarks : ""}`,
+    relatedType: "asset_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Sets a Vehicle Requisition to 'approved' once its Approval Workflow's
+// single "HR/Admin Review" layer (the flowchart's only decision diamond —
+// see LAYER_NAMES in ApprovalTemplateManager.tsx / request_type 'vehicle')
+// signs off, or immediately on submit when no Template/Supervisor resolves
+// at all (autoApproved). Approving here does NOT assign a vehicle+driver
+// yet — IT/Admin still has to do that via PUT
+// /api/vehicles/requisitions/:id/assign (VehicleManagementRoutes.ts), same
+// two-step shape as finalizeAssetRequisitionApproval/POST .../fulfill above.
+// Shared by performApprovalAction's 'vehicle_requisition' branch and the
+// auto-approve path on POST /api/vehicles/requisitions.
+// Expires waiting ride requests whose start time + grace has passed (see
+// VehicleManagementRoutes.ts) — bound once the routes register; called
+// before any approval action on a ride so an expired one can't be approved.
+let expireOverdueRides: () => Promise<void> = async () => {};
+
+async function finalizeVehicleRequisitionApproval(requisitionId: number, approvedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  if (r.status !== "pending") throw new Error("This requisition has already been reviewed.");
+  // Every SET value is its own `?` placeholder (no NOW()/literal mixed in) —
+  // vehicle_requisitions is registered as a GENERIC_TABLES entry in
+  // memoryDbFallback.ts (see VehicleManagementRoutes.ts's own top comment),
+  // whose UPDATE simulator maps SET columns to params positionally; a
+  // literal value in the SET clause desyncs that mapping for every column
+  // after it (caught by the in-memory smoke test — see this function's
+  // commit message).
+  await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?", [
+    "approved",
+    approvedBy,
+    new Date(),
+    requisitionId
+  ]);
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "vehicle_requisition",
+    title: "Ride Request Approved",
+    message: `Your ride request (${r.pickup_location} → ${r.destination}) was approved — a vehicle and driver will be assigned shortly.`,
+    relatedType: "vehicle_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Rejects a Vehicle Requisition at ANY step (the flowchart's "গাড়ির
+// অ্যাভেইলেবিলিটি চেক -> না -> ক্যানসেল" branch) — never touches vehicle
+// inventory. Shared by the same two callers as
+// finalizeVehicleRequisitionApproval above.
+async function rejectVehicleRequisitionRecord(requisitionId: number, rejectedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  await queryDB(
+    "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, rejection_reason = ? WHERE id = ?",
+    ["rejected", rejectedBy, new Date(), remarks || "Rejected", requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "vehicle_requisition",
+    title: "Ride Request Rejected",
+    message: `Your ride request (${r.pickup_location} → ${r.destination}) was rejected.${remarks ? " Reason: " + remarks : ""}`,
+    relatedType: "vehicle_requisition",
+    relatedId: requisitionId
+  });
+}
+
 // Actually attaches an Approved User Claim onto a Conveyance Bill as a line item
 // (creating a new Bill for that User if billId isn't given) and flips the claim to
 // 'approved'. Shared by two callers: POST /api/user-claims/:id/decision (the
@@ -2908,9 +1680,7 @@ async function finalizeUserClaimApproval(
     if (!Number.isFinite(amt) || amt <= 0) {
       throw new Error("Approved Amount must be a positive number.");
     }
-    if (amt > Number(uc.amount)) {
-      throw new Error("Approved Amount can't be more than the Claim Amount.");
-    }
+    assertWithinApprovedCap(uc, amt);
     finalAmount = amt;
   }
 
@@ -2949,8 +1719,29 @@ async function finalizeUserClaimApproval(
     "UPDATE user_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
     [finalAmount, remarks, approvedBy, userClaimId]
   );
+  await notifyUserClaimDecision(uc, "approved", finalAmount, remarks);
 
-  return { bill_id: targetBillId, bill_item_id: item.insertId };
+  return { bill_id: Number(targetBillId), bill_item_id: Number(item.insertId) };
+}
+
+// Tells the claimant their Conveyance Bill Claim was approved or rejected.
+async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
+  try {
+    const amt = amount != null ? `\u09f3${Number(amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+    await createAlert(queryDB, {
+      userId: Number(uc.user_id),
+      type: "conveyance_claim",
+      title: decision === "approved" ? "Conveyance Bill Claim Approved" : "Conveyance Bill Claim Rejected",
+      message:
+        decision === "approved"
+          ? `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) has been approved${amt ? ` for ${amt}` : ""}.${remarks ? ` Remarks: ${remarks}` : ""}`
+          : `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
+      relatedType: "user_claim",
+      relatedId: Number(uc.id)
+    });
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the claimant for Conveyance Bill Claim #" + uc.id + ": " + err.message);
+  }
 }
 
 // Records an Approved Amount edit made at a NON-final step of a still-pending
@@ -2977,23 +1768,44 @@ async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedA
   if (!Number.isFinite(amt) || amt <= 0) {
     throw new Error("Approved Amount must be a positive number.");
   }
+  assertWithinApprovedCap(uc, amt);
+
+  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+}
+
+// A Layer may cut a claim's amount but never raise it: the ceiling is what the
+// previous Layer approved (user_claims.approved_amount, the running draft), or
+// the Claim Amount when no Layer has set one yet.
+function assertWithinApprovedCap(uc: any, amt: number) {
+  const prior = uc.approved_amount != null ? Number(uc.approved_amount) : null;
   if (amt > Number(uc.amount)) {
     throw new Error("Approved Amount can't be more than the Claim Amount.");
   }
-
-  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+  if (prior != null && amt > prior + 0.0001) {
+    throw new Error(
+      `Approved Amount can't be more than the \u09f3${prior.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} the previous Layer approved.`
+    );
+  }
 }
 
 // Rejects a User Claim — frees up any referenced check-in/out(s) (a rejected claim
 // never becomes a Bill line item, so there's no reason to keep them unavailable)
 // and marks the claim 'rejected'. Shared by the same two callers as
 // finalizeUserClaimApproval above.
-async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null) {
-  await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
+// allowReclaim: the approver ticked "Allow re-claim" — the employee may edit
+// and resubmit this same claim (its check-in/outs stay with it). Otherwise the
+// rejection is final: its check-in/outs are freed, its dates stay closed.
+async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
+  if (!allowReclaim) await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
   await queryDB(
-    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
-    [remarks, rejectedBy, userClaimId]
+    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
+    [remarks, rejectedBy, allowReclaim ? 1 : 0, userClaimId]
   );
+  await recordClaimHistory(queryDB, userClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
+  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  if (rows.length > 0) {
+    await notifyUserClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
+  }
 }
 
 // Approves a Leave Application (Part 5 of 5) — day_count was ALREADY deducted
@@ -3043,7 +1855,13 @@ async function getLeaveTypeLabel(leaveType: string): Promise<string> {
 // This account's current balance for a Leave Type — fixed types read the
 // matching leave_balances column; a custom category reads its
 // leave_category_balances row (0 if that account has never had one set).
+// Set once LeaveRoutes.ts is registered: gives an account that has never had
+// a leave balance its default one (the active Balance Workflows) — see
+// ensureDefaultLeaveBalances there. Called before any balance is read or moved.
+let ensureDefaultLeaveBalances: (userIds: number[]) => Promise<Set<number>> = async () => new Set();
+
 async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<number> {
+  await ensureDefaultLeaveBalances([userId]);
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
@@ -3064,10 +1882,11 @@ async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<n
 // approver-picked decision route), so a day_count is always moved the exact
 // same way regardless of which kind of Leave Type it's for.
 async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: number): Promise<void> {
+  await ensureDefaultLeaveBalances([userId]);
+  // One UPDATE that adds to what is stored, so two moves at once (two
+  // submissions, a refund during a submission) never overwrite each other.
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
-    // One UPDATE that adds to what is stored, so two moves at once (two
-    // submissions, a refund during a submission) never overwrite each other.
     const r: any = await queryDB(`UPDATE leave_balances SET ${balanceColumn} = ${balanceColumn} + ? WHERE user_id = ?`, [delta, userId]);
     if (typeof r?.affectedRows === "number" && r.affectedRows > 0) return;
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
@@ -3075,19 +1894,10 @@ async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: 
     const sick = Number(rows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? delta : 0);
     const lwp = Number(rows[0]?.leave_without_pay || 0) + (balanceColumn === "leave_without_pay" ? delta : 0);
     if (rows.length > 0) {
-      await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [
-        casual,
-        sick,
-        lwp,
-        userId
-      ]);
+      // The in-memory preview database (no affectedRows).
+      await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [casual, sick, lwp, userId]);
     } else {
-      await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [
-        userId,
-        casual,
-        sick,
-        lwp
-      ]);
+      await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [userId, casual, sick, lwp]);
     }
     return;
   }
@@ -3109,6 +1919,7 @@ async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: 
 // checked and taken in one UPDATE, so several applications sent at once can
 // never take the balance below zero. False when there isn't enough.
 async function deductLeaveTypeBalance(userId: number, leaveType: string, days: number): Promise<boolean> {
+  await ensureDefaultLeaveBalances([userId]);
   let r: any;
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
@@ -3151,6 +1962,26 @@ async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: num
     relatedType: "leave_application",
     relatedId: application.id
   });
+
+  // Days whose salary already went out as Absent are paid back next month
+  // (PayrollRoutes.ts arrearForLateLeave). Best-effort — never fails the approval.
+  try {
+    const arrears = await arrearForLateLeave(leaveId, approvedBy);
+    const tk = (n: number) => `\u09f3${n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const ml = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+    for (const a of arrears) {
+      await createAlert(queryDB, {
+        userId: application.user_id,
+        type: "leave_application",
+        title: "Salary Deduction Will Be Paid Back",
+        message: `${a.days} day${a.days === 1 ? "" : "s"} cut as Absent from your ${ml(a.for_month)} salary (${tk(a.amount)}) will be paid back with your ${ml(a.start_month)} salary as an Arrear.`,
+        relatedType: "leave_application",
+        relatedId: application.id
+      });
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not add the salary arrear for Leave #" + leaveId + ": " + err.message);
+  }
 }
 
 // Rejects a Leave Application at ANY step (Part 5 of 5) — refunds day_count
@@ -3193,6 +2024,37 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
 // itself would have if there'd been no Reliever at all — auto-approving via
 // finalizeLeaveApplicationApproval when the applicant has no Template
 // assigned, otherwise leaving it 'pending' on the Template's first Layer.
+// Tells whoever a just-routed Leave Application is now sitting with (the
+// Supervisor, or the Template's first Layer) that it's waiting on them —
+// same idea as the Conveyance Bill Claim submit alert. Best-effort.
+async function notifyLeaveFirstApprovers(leaveId: number) {
+  try {
+    const [appRows, requestRows] = await Promise.all([
+      queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]),
+      queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["leave_application"])
+    ]);
+    const application = appRows[0];
+    const request = requestRows.find((r: any) => Number(r.source_id) === Number(leaveId) && r.status === "pending");
+    if (!application || !request) return;
+    const applicantRows = await queryDB("SELECT id, name FROM users WHERE id = ?", [application.user_id]);
+    const applicantName = applicantRows[0]?.name || "An employee";
+    const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
+    const approvers = await getCurrentStepApprovers(request);
+    for (const approver of approvers) {
+      await createAlert(queryDB, {
+        userId: approver.user_id,
+        type: "leave_approval",
+        title: "Leave Application Awaiting Your Approval",
+        message: `${applicantName} applied for ${leaveTypeLabel} Leave (${toDateOnlyString(application.start_date)} to ${toDateOnlyString(application.end_date)}). Please review it.`,
+        relatedType: "leave_application",
+        relatedId: Number(leaveId)
+      });
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the approver(s) for Leave Application #" + leaveId + ": " + err.message);
+  }
+}
+
 async function approveLeaveApplicationReliever(leaveId: number, relieverUserId: number, remarks: string | null) {
   const rows = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
   if (rows.length === 0) throw new Error("Leave Application not found");
@@ -3218,6 +2080,7 @@ async function approveLeaveApplicationReliever(leaveId: number, relieverUserId: 
       relatedType: "leave_application",
       relatedId: application.id
     });
+    await notifyLeaveFirstApprovers(leaveId);
   }
 }
 
@@ -3276,6 +2139,11 @@ async function seedAdminFromEnv() {
       );
       console.log(`✅ Superadmin account synced from .env: ${adminEmail}`);
     }
+    // Multi-company: the .env account is the system owner — in the original
+    // (Credence) workspace and the one who manages every workspace.
+    await queryDB("UPDATE users SET group_id = 1, is_platform_admin = 1 WHERE email = ?", [adminEmail]).catch((err: any) =>
+      console.warn("⚠️ Could not mark the .env Superadmin as system owner: " + err.message)
+    );
   } else {
     const existing = memoryDb.users.find(u => u.email === adminEmail);
     if (!existing) {
@@ -3301,6 +2169,12 @@ async function seedAdminFromEnv() {
 // which can be several thousand rows) — far fewer round-trips than one INSERT per row.
 async function bulkInsert(table: string, columns: string[], rows: any[][], chunkSize = 500) {
   if (!dbPool || rows.length === 0) return;
+  // Multi-company: the rows belong to the active group / company.
+  const scope = scopeColumnsFor(table);
+  if (scope && !columns.includes(scope.col)) {
+    columns = [...columns, scope.col];
+    rows = rows.map((r) => [...r, scope.val]);
+  }
   const colList = columns.join(", ");
   const rowPlaceholder = `(${columns.map(() => "?").join(", ")})`;
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -3310,8 +2184,60 @@ async function bulkInsert(table: string, columns: string[], rows: any[][], chunk
   }
 }
 
+// PEPM (budgets, MPR entries, jobs, rate file…) is used only by the original
+// group (Credence); other workspaces never see it.
+const PEPM_GROUP_ID = 1;
+function pepmEnabled(groupId: number) {
+  return Number(groupId) === PEPM_GROUP_ID;
+}
+// Admin Dashboard (Quick View, attendance and leave figures) in the mother
+// company covers every company of its group: the dashboard asks for these
+// reads with "X-Company-Scope: group", honoured only while working in the
+// mother company, and only for a Superadmin or an account given "See all
+// companies (group view)" (users.can_view_group_dashboard, Module Access ->
+// under Admin Dashboard) that may open the Admin Dashboard. Each route still
+// applies its own module checks.
+const DASHBOARD_GROUP_SCOPE_PATHS = new Set(["/api/employee-directory", "/api/attendance/report/monthly", "/api/leave-applications/report"]);
+async function canViewGroupDashboard(userId: number, role: string): Promise<boolean> {
+  try {
+    const rows: any[] = (await queryDB("SELECT can_view_group_dashboard FROM users WHERE id = ?", [userId])) || [];
+    if (!Number(rows[0]?.can_view_group_dashboard || 0)) return false;
+    if (role === "admin") return true;
+    return role === "user" && (await getAdminModules(userId)).includes("admin_dashboard");
+  } catch {
+    return false;
+  }
+}
+
+const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status|mpr-dispatch|material-receive)(\/|$)/;
+
+// dbPool.execute with the same multi-company separation as queryDB.
+function scopedExecute(sql: string, params?: any[]) {
+  if (!dbPool) throw new Error("Database is not connected.");
+  return dbPool.execute(scopeSql(sql), params);
+}
+
+// One MySQL transaction on its own connection (unscoped — the caller picks
+// the rows).
+const withDbTransaction = async (fn: (q: (sql: string, params?: any[]) => Promise<any>) => Promise<void>) => {
+  if (!isMySQLConnected || !dbPool) throw Object.assign(new Error("Deleting needs the MySQL database."), { statusCode: 503 });
+  const conn = await dbPool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await fn(async (sql, params = []) => (await conn.query(sql, params))[0]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+};
+
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
   if (isMySQLConnected && dbPool) {
+    // Multi-company: keep each company's rows apart (companyScope.ts).
+    sql = scopeSql(sql);
     try {
       const [rows] = await dbPool.execute(sql, params);
       return rows;
@@ -3369,7 +2295,8 @@ async function startServer() {
   // ever comes to depend on it (rate limiting, audit logging, etc.). A
   // no-op when there's no reverse proxy in front (e.g. local `npm run dev`).
   app.set("trust proxy", 1);
-  app.use(cors());
+  // CORS (CORS_ORIGINS) and security headers (WebSecurity.ts).
+  installWebSecurity(app);
   // Gzips every response this server sends — HTML, JSON API responses, and
   // (most importantly for how long the APK/browser takes to first load) the
   // built JS/CSS bundle. Without this, the ~3MB main JS chunk was being sent
@@ -3390,15 +2317,19 @@ async function startServer() {
     if (!token) return res.status(401).json({ error: "Access token required" });
 
     jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
-      if (err) return res.status(403).json({ error: "Invalid or expired token" });
-      // A phone the Superadmin removed from this account is signed out
-      // (DeviceRoutes.ts).
+      // Out of date or not ours: the page signs out and says so (App.tsx).
+      if (err) {
+        res.setHeader("X-Session-Ended", "expired");
+        return res.status(401).json({ error: sessionEndMessage("expired"), code: "SESSION_ENDED" });
+      }
+      // A phone the Superadmin removed from this account is signed out.
       if (user?.dev && !(await deviceStillAllowed(queryDB, Number(user.dev)))) {
         res.setHeader("X-Device-Revoked", "1");
         return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
       }
-      // A blocked account (Admin Panel -> Users -> Block login) is signed out
-      // of every session it still has — and so is a deleted one.
+      // A blocked account (Admin Panel -> Users -> Block, or an approved
+      // Termination) is signed out of every session it still has — and so is
+      // a token whose account no longer exists (deleted, or a reset database).
       const state = user?.id ? await accountState(queryDB, Number(user.id)) : "ok";
       if (state === "blocked") {
         res.setHeader("X-Account-Blocked", "1");
@@ -3406,12 +2337,53 @@ async function startServer() {
       }
       if (state === "removed") {
         res.setHeader("X-Account-Blocked", "removed");
-        return res.status(401).json({ error: "This account no longer exists.", code: "ACCOUNT_REMOVED" });
+        return res.status(401).json({ error: "This account no longer exists. Sign in again.", code: "ACCOUNT_REMOVED" });
+      }
+      // A new joiner's temporary login (OnboardingSelfServiceRoutes.ts) may
+      // only reach its own onboarding page, its password/photo and sign-out.
+      // The token's claim or the account row — either one is enough.
+      const onboarding = !!user?.onb || (user?.id ? await accountOnboarding(queryDB, Number(user.id)) : false);
+      if (onboarding) {
+        user.onb = 1;
+        if (!onboardingPathAllowed(req.method, String(req.originalUrl || req.url || ""), Number(user.id))) {
+          return res.status(403).json({ error: "Finish your onboarding first — this account can only open My Onboarding.", code: "ONBOARDING_ONLY" });
+        }
+      }
+      // Logged out, signed out by a Superadmin, unused for too long, older
+      // than the lifetime now set, or the password changed since (SessionSecurity.ts).
+      const ended = await checkSession(queryDB, token, user, req);
+      if (ended) {
+        res.setHeader("X-Session-Ended", ended);
+        return res.status(401).json({ error: sessionEndMessage(ended), code: "SESSION_ENDED" });
       }
       req.user = user;
       // Admin Panel -> Active Users: this sign-in's IP, device and last use.
       touchSession(queryDB, req, token, user);
-      next();
+      // Multi-company: the rest of this request runs in the company the app
+      // asked for (X-Company-Id), if this account may enter it — see
+      // companyContext.ts / CompanyRoutes.ts.
+      let ctx: CompanyContext = { companyId: 1, groupId: 1 };
+      try {
+        ctx = await resolveCompanyContext(queryDB, user, req.headers["x-company-id"], req.headers["x-company-scope"]);
+      } catch {
+        // falls back to company 1, same as before multi-company
+      }
+      req.companyId = ctx.companyId;
+      req.groupId = ctx.groupId;
+      if (!pepmEnabled(ctx.groupId) && PEPM_API_RE.test(String(req.originalUrl || req.url || "").split("?")[0])) {
+        return res.status(403).json({ error: "PEPM is not available in this workspace." });
+      }
+      if (
+        req.method === "GET" &&
+        req.headers["x-company-scope"] === "group" &&
+        ctx.motherId &&
+        ctx.companyId === ctx.motherId &&
+        DASHBOARD_GROUP_SCOPE_PATHS.has(String(req.originalUrl || req.url || "").split("?")[0]) &&
+        (user.role === "superadmin" || (await canViewGroupDashboard(Number(user.id), user.role)))
+      ) {
+        ctx = { ...ctx, wholeGroup: true };
+      }
+      companyStore.run(ctx, () => next());
     });
   };
 
@@ -3423,7 +2395,7 @@ async function startServer() {
   // module for the route being called. A User with no grants at all is still
   // blocked here, same as before this feature existed.
   const requireAdmin = async (req: any, res: any, next: any) => {
-    if (!req.user) return res.status(403).json({ error: "Admin access required" });
+    if (!req.user || req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "admin" || req.user.role === "superadmin") return next();
     if (req.user.role === "user") {
       try {
@@ -3443,7 +2415,7 @@ async function startServer() {
   // through the API — only the .env-seeded account (see seedAdminFromEnv) is
   // ever a superadmin.
   const requireSuperAdmin = (req: any, res: any, next: any) => {
-    if (!req.user || req.user.role !== "superadmin") {
+    if (!req.user || req.user.role !== "superadmin" || req.user.onb) {
       return res.status(403).json({ error: "Superadmin access required" });
     }
     next();
@@ -3459,6 +2431,7 @@ async function startServer() {
   // Admin can only ever grant/revoke Module Access for a plain 'user' account.
   const requireModuleGrantAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       // The JWT payload only ever carries id/email/username/role/name (see
@@ -3477,16 +2450,28 @@ async function startServer() {
   // any admin route that belongs to one of the Admin Panel tabs, so the
   // Superadmin's per-account module grants (admin_module_permissions) are
   // actually enforced server-side, not just hidden in the UI.
+  // An Admin Panel module request works only on the active company's
+  // employees and their records (companyScope.ts "strict"): an HR Admin of one
+  // company can't open or change a sister company's employee, salary or
+  // request by its id. Self Service keeps finding one's own records anywhere
+  // in the group.
+  const adminScopeNext = (next: any) => {
+    const st = companyStore.getStore();
+    if (st) st.strict = true;
+    next();
+  };
+
   const requireModule = (moduleKey: AdminModuleKey) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
-    if (req.user.role === "superadmin") return next();
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
+    if (req.user.role === "superadmin") return adminScopeNext(next);
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
       const modules = await getAdminModules(req.user.id);
       if (!modules.includes(moduleKey)) {
         return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
       }
-      next();
+      adminScopeNext(next);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3499,14 +2484,15 @@ async function startServer() {
   // only has one of the two to also be granted the other.
   const requireAnyModule = (moduleKeys: AdminModuleKey[]) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
-    if (req.user.role === "superadmin") return next();
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
+    if (req.user.role === "superadmin") return adminScopeNext(next);
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
       const modules = await getAdminModules(req.user.id);
       if (!moduleKeys.some((k) => modules.includes(k))) {
         return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
       }
-      next();
+      adminScopeNext(next);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3526,32 +2512,41 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "dispatch_material" | "dispatch_all" | "po_import" | "block_account" | "employee_delete") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
-      if (req.user.role === "superadmin") return next();
+      if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
+      if (req.user.role === "superadmin") return adminScopeNext(next);
       if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
       try {
         const modules = await getAdminModules(req.user.id);
         if (!modules.includes(moduleKey)) {
           return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
         }
-        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
+        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return adminScopeNext(next);
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
-        const effectiveLayers: readonly string[] = grantedLayers.length > 0 ? grantedLayers : defaultLayersFor(moduleKey);
+        const effectiveLayers: string[] = grantedLayers.length > 0
+          ? grantedLayers
+          : moduleKey === "tracking"
+            ? [...TRACKING_DEFAULT_LAYERS]
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault"
+              ? ["read"]
+              : moduleKey === "mobile_bill"
+                ? [...MOBILE_BILL_LAYER_KEYS]
+                : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
-        next();
+        adminScopeNext(next);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
     };
 
   // Same rule as requireModuleLayer, as a yes/no for a page that shows or
-  // hides a control.
+  // hides a control (e.g. Payroll's salary month setting).
   const hasModuleLayer = async (user: any, moduleKey: AdminModuleKey, layer: string): Promise<boolean> => {
-    if (!user) return false;
+    if (!user || user.onb) return false;
     if (user.role === "superadmin") return true;
     if (user.role !== "admin" && user.role !== "user") return false;
     const modules = await getAdminModules(user.id);
@@ -3559,7 +2554,15 @@ async function startServer() {
     if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return true;
     const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
     if (granted.length > 0) return granted.includes(layer);
-    return defaultLayersFor(moduleKey).includes(layer);
+    const defaults: readonly string[] =
+      moduleKey === "tracking"
+        ? TRACKING_DEFAULT_LAYERS
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault"
+          ? ["read"]
+          : moduleKey === "mobile_bill"
+            ? MOBILE_BILL_LAYER_KEYS
+            : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+    return defaults.includes(layer);
   };
 
   // Personal Data / profile-photo routes — kept in their own file
@@ -3575,34 +2578,19 @@ async function startServer() {
   // gate: on by default for every account, not a Superadmin-granted module.
   registerAlertRoutes(app, { authenticateToken, queryDB });
 
-  // Admin Panel -> Device Access (Superadmin): which phones each account may
-  // use the app on (DeviceRoutes.ts).
-  await ensureDeviceSchema(queryDB).catch((err: any) => console.warn("⚠️ Device Access (schema): " + err.message));
-  registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
-
-  // PEPM -> Dispatch Material (Purchase) and Material Receive (the project)
-  // close the MPR cycle (MprDispatchRoutes.ts).
-  registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
-  registerPoImportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
-
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserAccessExtras(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
   registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
-  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
 
-  // Server Profiles (Admin Panel -> Servers) — kept in their own file
-  // (ServerProfileRoutes.ts), same reasoning as profileRoutes.ts/
-  // holidayRoutes.ts/Alerts.ts/UserManagement.ts above. Superadmin-only
-  // (requireSuperAdmin), not module-gated — this isn't a grantable Admin
-  // Panel module, same convention as User Management's promote/demote.
-  registerServerProfileRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
+  registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Self Service -> Leave Management: true for a Superadmin (implicit, every
   // account), or for an Admin/User the Superadmin has explicitly granted
@@ -3627,6 +2615,7 @@ async function startServer() {
   // admin_module_permissions.
   const requireMovementClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_movement_claims FROM users WHERE id = ?", [req.user.id]);
@@ -3639,12 +2628,16 @@ async function startServer() {
 
   // Conveyance Bill Claim self-service routes — same pattern as
   // requireMovementClaimAccess above, gated by can_view_conveyance_claims.
+  // Anyone holding the Bill Claim ("conveyance") Admin module also passes, so
+  // they file / see their own claims from Self Service like everyone else.
   const requireConveyanceClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return next();
+      if ((await getAdminModules(req.user.id)).includes("conveyance")) return next();
       return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3661,6 +2654,7 @@ async function startServer() {
   // the separately-gated Job Edit feature (can_job_edit) also depend on them.
   const requireBudgetModuleAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_budget_module FROM users WHERE id = ?", [req.user.id]);
@@ -3703,6 +2697,7 @@ async function startServer() {
   // exactly as before until a Superadmin explicitly narrows it.
   const requireLeaveManagerLayer = (layer: typeof LEAVE_MANAGE_LAYER_KEYS[number]) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
@@ -3710,7 +2705,7 @@ async function startServer() {
         return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
       }
       const grantedLayers = await getModulePermissionLayersForModule(req.user.id, "leave_manage");
-      const effectiveLayers = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_LAYER_KEYS;
+      const effectiveLayers: readonly string[] = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_DEFAULT_LAYERS;
       if (!effectiveLayers.includes(layer)) {
         return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
       }
@@ -3722,353 +2717,12 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // 1. Auth Routes
-  // Public self-registration is disabled — only the Admin can create user accounts
-  // (see POST /api/users below, Admin-only).
-  app.post("/api/auth/register", async (req, res) => {
-    res.status(403).json({ error: "Public registration is disabled. Please contact your Admin to get an account created." });
-  });
+  // Sign-in routes (/api/auth/*) live in AuthRoutes.ts.
+  registerAuthRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
+  registerFingerprintRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
 
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      // "identifier" is either the Admin/Email-based login (email + password) or the
-      // Project Name based login used by bulk-created users (Project Name, spaces
-      // ignored, + password) — accept either in the same field. "email" is still
-      // accepted for older frontend builds.
-      const identifierRaw = req.body.identifier ?? req.body.email;
-      const { password, latitude, longitude } = req.body;
-      if (!identifierRaw || !password) {
-        return res.status(400).json({ error: "Login ID and password are required" });
-      }
-      // Location is only required from the ANDROID APP build, not the web build —
-      // AuthScreen.tsx only requests location and sets this flag when running as
-      // a native Capacitor app (Capacitor.isNativePlatform()). A plain browser
-      // login never sends it and is never asked to.
-      const isAppClient = req.body.platform === "app";
-      const hasValidCoords =
-        typeof latitude === "number" && typeof longitude === "number" &&
-        Number.isFinite(latitude) && Number.isFinite(longitude);
-      if (isAppClient && !hasValidCoords) {
-        return res.status(400).json({ error: "Location permission is required to sign in. Please allow location access and try again." });
-      }
-      const identifier = String(identifierRaw).trim();
-      // Project Name login ignores spaces and case (matches how the username was
-      // derived from the Project Name at bulk-creation time).
-      const usernameCandidate = identifier.replace(/\s+/g, "").toLowerCase();
-
-      const users = await queryDB(
-        "SELECT * FROM users WHERE email = ? OR username = ?",
-        [identifier, usernameCandidate]
-      );
-      // Password guessing is stopped (LoginGuard.ts): 5 wrong tries lock the
-      // account for 15 minutes, 30 from one address make it wait. Unknown
-      // login IDs are counted the same way, so nothing tells them apart.
-      const ip = clientIp(req);
-      const knownId = users.length ? Number(users[0].id) : null;
-      const blocked = await loginBlocked(queryDB, ip, identifier, knownId);
-      if (blocked) return res.status(429).json({ error: blocked, code: "LOGIN_LOCKED" });
-      if (users.length === 0) {
-        await recordLogin(queryDB, ip, identifier, null, false);
-        return res.status(400).json({ error: "Invalid login ID or password" });
-      }
-
-      const user = users[0];
-      const validPassword = await bcrypt.compare(password, user.password_hash);
-      if (!validPassword) {
-        await recordLogin(queryDB, ip, identifier, knownId, false);
-        return res.status(400).json({ error: "Invalid login ID or password" });
-      }
-      await recordLogin(queryDB, ip, identifier, knownId, true);
-
-      // Admin Panel -> Users -> Block login.
-      if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
-        return res.status(403).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
-      }
-
-      // The app signs in on one phone per account unless a Superadmin allows
-      // more (DeviceRoutes.ts). The website isn't limited.
-      let deviceRowId: number | null = null;
-      if (isAppClient) {
-        const device = await checkAppDevice(queryDB, user, req.body);
-        if (!device.ok) {
-          const refused = device as Extract<typeof device, { ok: false }>;
-          return res.status(refused.status).json({ error: refused.error, code: refused.code });
-        }
-        deviceRowId = (device as Extract<typeof device, { ok: true }>).deviceRowId || null;
-      }
-
-      // Store only the latest login's coordinates (overwrites any previous value).
-      // Web logins don't send coordinates at all, so this is skipped for them —
-      // a web login never clears out the last known app-login location.
-      if (hasValidCoords) {
-        try {
-          await queryDB(
-            "UPDATE users SET last_login_lat = ?, last_login_lng = ?, last_login_at = NOW() WHERE id = ?",
-            [latitude, longitude, user.id]
-          );
-        } catch (locErr: any) {
-          // Never fail the login itself over a location-save error.
-          console.warn("⚠️ Could not save login location for user " + user.id + ": " + locErr.message);
-        }
-      }
-
-      const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, ...(deviceRowId ? { dev: deviceRowId } : {}) },
-        JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      res.json({
-        token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          username: user.username,
-          role: user.role,
-          can_edit_delivery_date: user.can_edit_delivery_date === undefined ? true : !!Number(user.can_edit_delivery_date),
-          can_job_edit: !!Number(user.can_job_edit),
-          // Superadmin-granted (or implicit for the Superadmin itself): shows the
-          // Remote Attendance Check In/Out card on THIS account's own Dashboard.
-          // OFF by default — separate from the "attendance" Admin Panel module,
-          // which is about reviewing everyone else's records, not this account's
-          // own check-in ability.
-          can_use_attendance: user.role === "superadmin" ? true : !!Number(user.can_use_attendance),
-          // Superadmin/Admin-granted (Admin Panel -> Users -> "Attend. Project"):
-          // pins this account to exactly one Project for Remote Attendance.
-          // Null/undefined for everyone unrestricted, and always null for
-          // 'superadmin' (never assigned one).
-          attendance_project_id: user.role === "superadmin" ? null : (user.attendance_project_id ?? null),
-          // Superadmin-granted (or implicit for the Superadmin itself): lets THIS
-          // account's APK send background location pings for Employee Tracking.
-          // OFF by default — separate from the "tracking" Admin Panel module,
-          // which is about VIEWING everyone's live location.
-          can_use_tracking: user.role === "superadmin" ? true : !!Number(user.can_use_tracking),
-          // A Superadmin always sees the "Last Login Location" column; a plain Admin
-          // only if the Superadmin has explicitly granted it (can_view_login_location).
-          can_view_login_location: user.role === "superadmin" ? true : !!Number(user.can_view_login_location),
-          // Superadmin-granted: lets this Admin ALSO use the User Panel (mark
-          // Attendance, submit Claims, enter Job/MPR data) alongside their Admin
-          // Panel. Always false for a plain User (irrelevant — they only ever see
-          // the User Panel) and for a Superadmin (routes to Admin Panel only).
-          can_access_user_panel: user.role === "admin" ? !!Number(user.can_access_user_panel) : false,
-          // Superadmin-granted (or implicit for the Superadmin itself): can this
-          // account edit OTHER accounts' Leave balances on Self Service -> Leave
-          // Management? Applies to both 'admin' and 'user' roles, unlike the
-          // Admin-only grant above.
-          can_manage_leave: user.role === "superadmin" ? true : !!Number(user.can_manage_leave),
-          // Superadmin-granted (or implicit for the Superadmin itself): can this
-          // account see/use the Movement Claim (GPS Check In/Out) and Conveyance
-          // Bill Claim sections on its own User Panel at all? Applies to both
-          // 'admin' and 'user' roles, same pattern as can_manage_leave above —
-          // OFF (hidden) until the Superadmin explicitly grants it.
-          can_view_movement_claims: user.role === "superadmin" ? true : !!Number(user.can_view_movement_claims),
-          can_view_conveyance_claims: user.role === "superadmin" ? true : !!Number(user.can_view_conveyance_claims),
-          // Superadmin-granted (or implicit for the Superadmin itself, and ON
-          // by default for everyone else — see the ALTER TABLE): can this
-          // account see/use "Select a Budget", "Jobs" and "Job Entry Details"
-          // on its own User Panel at all? Applies to both 'admin' and 'user'
-          // roles, same pattern as can_view_movement_claims above but ON
-          // unless a Superadmin has explicitly turned it off.
-          can_view_budget_module: user.role === "superadmin" ? true : user.can_view_budget_module === undefined ? true : !!Number(user.can_view_budget_module),
-          // Admin/Superadmin-granted (or implicit for the Superadmin itself):
-          // shows the Leave Summary card on THIS account's own Dashboard. OFF
-          // by default — same toggle pattern as can_use_attendance above.
-          can_view_leave_summary: user.role === "superadmin" ? true : !!Number(user.can_view_leave_summary),
-          // Superadmin-granted (or implicit for the Superadmin itself): can this
-          // account see/use Self Service -> Timesheet / Leave Application / My
-          // Leave at all? Applies to both 'admin' and 'user' roles, OFF by
-          // default — same pattern as can_view_movement_claims above.
-          can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
-          can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
-          can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
-          // PEPM Operation -> Material Receive (MprDispatchRoutes.ts), off by default.
-          can_receive_material: user.role === "superadmin" ? true : !!Number(user.can_receive_material || 0),
-          can_return_dispatch: user.role === "superadmin" ? true : !!Number(user.can_return_dispatch || 0),
-          // Credence Assistant: on unless switched off; report download and
-          // live support off by default.
-          can_use_ai_assistant: user.role === "superadmin" ? true : Number(user.can_use_ai_assistant ?? 1) !== 0,
-          can_use_chat: user.role === "superadmin" ? true : Number(user.can_use_chat ?? 1) !== 0,
-          can_export_assistant_reports: user.role === "superadmin" ? true : !!Number(user.can_export_assistant_reports || 0),
-          can_handle_assistant_support: user.role === "superadmin" ? true : !!Number(user.can_handle_assistant_support || 0),
-          // Superadmin-granted, only ever meaningful for role='admin': can this
-          // Admin ALSO set OTHER accounts' Module Access themselves (see the
-          // ALTER TABLE above for the full explanation and its 'user'-target-only
-          // restriction).
-          can_grant_module_access: user.role === "admin" ? !!Number(user.can_grant_module_access) : false,
-          // So the Admin Panel can show/hide tabs right after login, before any
-          // other fetch. Empty for Users and for Superadmin (who has every module
-          // implicitly, not through explicit grants).
-          module_permissions: (user.role === "admin" || user.role === "user") ? await getAdminModules(user.id) : [],
-          // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
-          module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
-        }
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Login failed" });
-    }
-  });
-
-  app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
-    try {
-      const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_return_dispatch, can_use_chat, can_use_ai_assistant, can_export_assistant_reports, can_handle_assistant_support, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
-        [req.user.id]
-      );
-      if (users.length === 0) return res.status(404).json({ error: "User not found" });
-      const u = users[0];
-      res.json({
-        ...u,
-        can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
-        can_job_edit: !!Number(u.can_job_edit),
-        can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
-        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
-        can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
-        can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
-        can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
-        can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
-        can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
-        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
-        can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
-        can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
-        can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
-        can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
-        can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
-        can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
-        can_return_dispatch: u.role === "superadmin" ? true : !!Number(u.can_return_dispatch || 0),
-        can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
-        can_use_chat: u.role === "superadmin" ? true : Number(u.can_use_chat ?? 1) !== 0,
-        can_export_assistant_reports: u.role === "superadmin" ? true : !!Number(u.can_export_assistant_reports || 0),
-        can_handle_assistant_support: u.role === "superadmin" ? true : !!Number(u.can_handle_assistant_support || 0),
-        can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
-        module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : [],
-        module_permission_layers: (u.role === "admin" || u.role === "user") ? await getAllModulePermissionLayers(u.id) : {}
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 2. Projects CRUD
-  // Admins see every project. Regular users only see the projects the Admin has
-  // explicitly granted them access to via user_project_permissions (Admin Panel ->
-  // Users -> Manage Projects). A user with no permissions granted sees none yet.
-  app.get("/api/projects", authenticateToken, async (req: any, res) => {
-    try {
-      const projects = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
-      if (req.user.role === "admin" || req.user.role === "superadmin") {
-        return res.json(projects);
-      }
-      const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [req.user.id]);
-      const allowedIds = new Set(perms.map((p: any) => p.project_id));
-      res.json(projects.filter((p: any) => allowedIds.has(p.id)));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Every Project, unfiltered by user_project_permissions — used only by
-  // Timesheet's "Correct Attendance" picker. A correction is always a request
-  // (POST /api/attendance/corrections never checks user_project_permissions
-  // either — see that handler), routed through the Approval Workflow same as
-  // any other attendance correction, so gating the Project dropdown by
-  // check-in permission just blocked Employees with no Project explicitly
-  // granted from ever submitting one — the dropdown looked empty ("no
-  // project select") even though the request would have gone through
-  // approval like normal. Any signed-in account may read this list.
-  app.get("/api/projects/all", authenticateToken, async (req: any, res) => {
-    try {
-      const projects = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
-      res.json(projects);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Location fields are optional — a project can be created/edited without ever
-  // marking a spot on the map. lat/lng are validated together (both-or-neither,
-  // both finite numbers in a real coordinate range) so a bad payload can't save a
-  // half-set pin; the free-text label is trimmed and capped, and dropped entirely
-  // if lat/lng are absent.
-  function parseProjectLocation(body: any): { lat: number | null; lng: number | null; label: string | null; radius: number | null } | { error: string } {
-    const hasLat = body.location_lat !== undefined && body.location_lat !== null && body.location_lat !== "";
-    const hasLng = body.location_lng !== undefined && body.location_lng !== null && body.location_lng !== "";
-    if (!hasLat && !hasLng) return { lat: null, lng: null, label: null, radius: null };
-    if (hasLat !== hasLng) return { error: "Both latitude and longitude are required to set a location" };
-    const lat = Number(body.location_lat);
-    const lng = Number(body.location_lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return { error: "Invalid map location coordinates" };
-    }
-    const label = typeof body.location_label === "string" ? body.location_label.trim().slice(0, 255) || null : null;
-
-    let radius: number | null = null;
-    const hasRadius = body.location_radius !== undefined && body.location_radius !== null && body.location_radius !== "";
-    if (hasRadius) {
-      const r = Number(body.location_radius);
-      if (!Number.isFinite(r) || r < 10 || r > 50000) {
-        return { error: "Radius must be between 10 and 50,000 meters" };
-      }
-      radius = Math.round(r);
-    }
-    return { lat, lng, label, radius };
-  }
-
-  app.post("/api/projects", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req: any, res) => {
-    try {
-      const { project_name } = req.body;
-      if (!project_name) return res.status(400).json({ error: "Project name is required" });
-      const location = parseProjectLocation(req.body);
-      if ("error" in location) return res.status(400).json({ error: location.error });
-
-      const result = await queryDB(
-        "INSERT INTO projects (project_name, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-        [project_name.trim(), location.lat, location.lng, location.label, location.radius, req.user.id]
-      );
-      res.json({
-        id: result.insertId,
-        project_name: project_name.trim(),
-        location_lat: location.lat,
-        location_lng: location.lng,
-        location_label: location.label,
-        location_radius: location.radius
-      });
-    } catch (err: any) {
-      if (err.code === "ER_DUP_ENTRY" || err.message?.includes("already exists")) {
-        return res.status(400).json({ error: "Project already exists" });
-      }
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { project_name } = req.body;
-      if (!project_name) return res.status(400).json({ error: "Project name is required" });
-      const location = parseProjectLocation(req.body);
-      if ("error" in location) return res.status(400).json({ error: location.error });
-
-      await queryDB(
-        "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
-        [project_name.trim(), location.lat, location.lng, location.label, location.radius, id]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "delete_trash"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      await queryDB("DELETE FROM user_project_permissions WHERE project_id = ?", [id]);
-      await queryDB("DELETE FROM projects WHERE id = ?", [id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Projects routes live in ProjectRoutes.ts.
+  registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer });
 
   // Remote Attendance (check-in/check-out, status, mine, corrections,
   // Admin list, and reports) now lives in AttendanceRoutes.ts — registered
@@ -4089,7 +2743,6 @@ async function startServer() {
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap,
     getAttendanceReportDeptScope
   });
 
@@ -4100,6 +2753,7 @@ async function startServer() {
   // the DB (an Admin can revoke mid-session).
   const requireTrackingAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_use_tracking FROM users WHERE id = ?", [req.user.id]);
@@ -4123,588 +2777,40 @@ async function startServer() {
     getIo: () => liveIo
   });
 
-  app.post("/api/tracking/ping", authenticateToken, requireTrackingAccess, async (req: any, res) => {
+  // A Notice was published (or brought back): open apps of its audience fetch
+  // /api/notices/active again and show the popup at once (Socket.IO), and a
+  // push notification reaches phones/browsers where the app isn't open —
+  // tapping it opens the app on the popup. "all" pings every open app (the
+  // fetch decides who actually sees it) and pushes to this company's users.
+  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number) {
     try {
-      const lat = Number(req.body.lat);
-      const lng = Number(req.body.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return res.status(400).json({ error: "lat/lng are required." });
+      if (liveIo) {
+        if (audience === "all") liveIo.emit("notices:changed");
+        else for (const uid of audience) liveIo.to(`user:${uid}`).emit("notices:changed");
       }
-      const accuracy_m = req.body.accuracy_m != null && Number.isFinite(Number(req.body.accuracy_m)) ? Math.round(Number(req.body.accuracy_m)) : null;
-      const battery_pct = req.body.battery_pct != null && Number.isFinite(Number(req.body.battery_pct)) ? Math.round(Number(req.body.battery_pct)) : null;
-      const recorded_at = req.body.recorded_at ? new Date(req.body.recorded_at) : new Date();
-      await queryDB(
-        "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
-        [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
+      const ids =
+        audience === "all" ? ((await queryDB("SELECT id FROM users", [])) || []).map((u: any) => Number(u.id)) : audience.map(Number);
+      if (ids.length === 0) return;
+      await sendPushToUserIds(
+        queryDB,
+        ids,
+        "New notice",
+        String(title || "").slice(0, 120),
+        { type: "notice", relatedType: "notice", relatedId: String(noticeId) },
+        senderId
       );
-      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at });
-      res.json({ success: true, live_until });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.warn("⚠️ Notice announce failed: " + err.message);
     }
-  });
-
-  // Live board (Admin Panel -> Employee Tracking): the SINGLE most recent ping
-  // per user, plus how long ago it was — this is the "where is everyone right
-  // now" map, not a history. Only users with at least one ping ever show up.
-  app.get("/api/tracking/live", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM location_pings", []);
-      const users = await queryDB("SELECT id, name, email, role FROM users", []);
-      const userMap = new Map<number, any>(users.map((u: any) => [u.id, u]));
-      const latestByUser = new Map<number, any>();
-      for (const r of rows) {
-        const existing = latestByUser.get(r.user_id);
-        if (!existing || new Date(r.recorded_at).getTime() > new Date(existing.recorded_at).getTime()) {
-          latestByUser.set(r.user_id, r);
-        }
-      }
-      const result = Array.from(latestByUser.values())
-        .map((r: any) => ({
-          ...r,
-          user_name: userMap.get(r.user_id)?.name || null,
-          user_email: userMap.get(r.user_id)?.email || null
-        }))
-        .sort((a: any, b: any) => (a.recorded_at < b.recorded_at ? 1 : -1));
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Employee Tracking -> "Currently Under Tracking" / "Currently Not Tracked"
-  // (and the same pair on the Admin Dashboard's quick card): every active
-  // employee of the company, split by whether their phone has sent a location
-  // in the last TRACKING_LIVE_MIN minutes (same 20 min the Live map uses
-  // before a dot turns grey). Anyone not tracked gets the reason.
-  const TRACKING_LIVE_MIN = 20;
-  const trackingStatusRows = async () => {
-    const employees: any[] = (await queryDB(
-      `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
-         FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
-        WHERE e.is_active = 1`,
-      []
-    )) || [];
-    const pings: any[] = (await queryDB(
-      `SELECT user_id, MAX(recorded_at) AS last_ping, TIMESTAMPDIFF(MINUTE, MAX(recorded_at), NOW()) AS minutes_ago
-         FROM location_pings GROUP BY user_id`,
-      []
-    )) || [];
-    const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
-    return employees.map((e) => {
-      const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
-      const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
-      const enabled = !!e.user_id && !!Number(e.can_use_tracking);
-      const tracked = enabled && minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
-      const reason = tracked
-        ? null
-        : !e.user_id
-        ? "No login account"
-        : !enabled
-        ? "Tracking not turned on"
-        : minutesAgo == null
-        ? "Never sent a location"
-        : "No location in the last 20 min";
-      return {
-        employee_pk: e.id,
-        employee_id: e.employee_id || "",
-        name: e.name,
-        designation: e.designation || "",
-        department: e.department || "Unassigned",
-        user_id: e.user_id || null,
-        tracking_enabled: enabled,
-        tracked,
-        last_ping: p?.last_ping || null,
-        minutes_ago: minutesAgo,
-        reason
-      };
-    });
-  };
-  // Sending a notice from the Not Tracked list needs the Notices module too.
-  const canSendTrackingNotice = async (user: any) =>
-    user.role === "superadmin" || (await getAdminModules(user.id)).includes("notices");
-
-  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
-    try {
-      const rows = await trackingStatusRows();
-      res.json({
-        live_minutes: TRACKING_LIVE_MIN,
-        tracked: rows.filter((r) => r.tracked).length,
-        not_tracked: rows.filter((r) => !r.tracked).length,
-        can_send_notice: await canSendTrackingNotice(req.user),
-        employees: rows
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Employee Tracking -> Currently Not Tracked -> Send Notice. Saved as an
-  // ordinary Notice for the picked accounts (Admin Panel -> Notices lists it,
-  // marked "Employee Tracking", with who has seen it), plus one
-  // tracking_notice_recipients row per person recording why they weren't
-  // tracked right then. Only people currently not tracked who have a login.
-  app.post("/api/tracking/notices", authenticateToken, requireAdmin, requireModule("tracking"), requireModule("notices"), async (req: any, res) => {
-    try {
-      const title = String(req.body?.title || "").trim();
-      const message = String(req.body?.message || "").trim();
-      if (!title) return res.status(400).json({ error: "Title is required." });
-      if (!message) return res.status(400).json({ error: "Message is required." });
-      const wanted = new Set<number>((Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0));
-      if (wanted.size === 0) return res.status(400).json({ error: "Pick at least one employee." });
-      const rows = (await trackingStatusRows()).filter((r) => !r.tracked && r.user_id && wanted.has(Number(r.user_id)));
-      if (rows.length === 0) return res.status(400).json({ error: "None of the picked employees is currently not tracked." });
-      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const html = message.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br/>")}</p>`).join("");
-      const result = await queryDB(
-        "INSERT INTO notices (title, content_html, target_type, is_active, created_by, source) VALUES (?, ?, 'specific', 1, ?, 'tracking')",
-        [title.slice(0, 200), html, req.user.id]
-      );
-      const noticeId = result.insertId;
-      for (const r of rows) {
-        await queryDB("INSERT IGNORE INTO notice_targets (notice_id, user_id) VALUES (?, ?)", [noticeId, r.user_id]);
-        await queryDB(
-          "INSERT INTO tracking_notice_recipients (notice_id, user_id, employee_pk, reason, last_ping, sent_by) VALUES (?, ?, ?, ?, ?, ?)",
-          [noticeId, r.user_id, r.employee_pk, r.reason, r.last_ping || null, req.user.id]
-        );
-      }
-      res.status(201).json({ id: noticeId, sent_to: rows.length, skipped: wanted.size - rows.length });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Month-end Tracking Notice Report: everyone sent a not-tracked notice in
-  // the month (YYYY-MM), how many times, when, why, and whether they opened it.
-  app.get("/api/tracking/notice-report", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
-    try {
-      const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : null;
-      if (!month) return res.status(400).json({ error: "month=YYYY-MM is required." });
-      const [y, m] = month.split("-").map(Number);
-      const from = `${month}-01 00:00:00`;
-      const next = m === 12 ? `${y + 1}-01-01 00:00:00` : `${y}-${String(m + 1).padStart(2, "0")}-01 00:00:00`;
-      const sends: any[] = (await queryDB(
-        `SELECT r.notice_id, r.user_id, r.employee_pk, r.reason, r.sent_at, n.title, s.name AS sent_by_name,
-                (SELECT d.dismissed_at FROM notice_dismissals d WHERE d.notice_id = r.notice_id AND d.user_id = r.user_id LIMIT 1) AS seen_at
-           FROM tracking_notice_recipients r
-           JOIN notices n ON n.id = r.notice_id
-           LEFT JOIN users s ON s.id = r.sent_by
-          WHERE r.sent_at >= ? AND r.sent_at < ?
-          ORDER BY r.sent_at`,
-        [from, next]
-      )) || [];
-      const employees: any[] = (await queryDB("SELECT id, employee_id, name, designation, department, user_id FROM all_employees", [])) || [];
-      const empByUser = new Map<number, any>(employees.filter((e) => e.user_id).map((e) => [Number(e.user_id), e]));
-      const users: any[] = (await queryDB("SELECT id, name FROM users", [])) || [];
-      const userName = new Map<number, string>(users.map((u) => [Number(u.id), u.name]));
-      const byUser = new Map<number, any>();
-      for (const s of sends) {
-        const uid = Number(s.user_id);
-        const e = empByUser.get(uid);
-        const row = byUser.get(uid) || {
-          user_id: uid,
-          employee_id: e?.employee_id || "",
-          name: e?.name || userName.get(uid) || "Unknown",
-          designation: e?.designation || "",
-          department: e?.department || "Unassigned",
-          notices: 0,
-          seen: 0,
-          sends: [] as any[]
-        };
-        row.notices += 1;
-        if (s.seen_at) row.seen += 1;
-        row.sends.push({ notice_id: s.notice_id, title: s.title, sent_at: s.sent_at, reason: s.reason, sent_by: s.sent_by_name || null, seen_at: s.seen_at || null });
-        byUser.set(uid, row);
-      }
-      const rows = Array.from(byUser.values()).sort((a, b) => b.notices - a.notices || a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
-      res.json({
-        month,
-        total_notices: new Set(sends.map((s) => s.notice_id)).size,
-        total_sends: sends.length,
-        employees: rows
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Path history for ONE user (Admin Panel -> Employee Tracking -> click a user
-  // -> "View path today"), optionally bounded by from/to — lets an Admin/
-  // Superadmin play back where that user actually went, not just their latest dot.
-  app.get("/api/tracking/history", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
-    try {
-      const user_id = req.query.user_id ? Number(req.query.user_id) : null;
-      if (!user_id) return res.status(400).json({ error: "user_id is required" });
-      const rows = await queryDB("SELECT * FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC", [user_id]);
-      const from = req.query.from ? String(req.query.from) : null;
-      const to = req.query.to ? String(req.query.to) : null;
-      // Time-of-day window (HH:MM, 24h), independent of the from/to DATE filter
-      // above — e.g. from=2026-09-01&to=2026-09-30&from_time=09:00&to_time=18:00
-      // narrows a report to "office hours" across that whole month, for
-      // "where was this employee between X and Y" style reports. from_time >
-      // to_time (e.g. 22:00 -> 06:00) is treated as an overnight window that
-      // wraps past midnight rather than an always-empty one.
-      const from_time = req.query.from_time ? String(req.query.from_time) : null;
-      const to_time = req.query.to_time ? String(req.query.to_time) : null;
-      const filtered = rows.filter((r: any) => {
-        // The ping's own wall-clock date/time (as the app shows it) — not
-        // toISOString(), which is UTC and moved a 09:00–18:00 window six
-        // hours on a server running on Bangladesh time.
-        const wm = wallMinutes(r.recorded_at);
-        const iso = wm != null ? new Date(wm * 60000).toISOString() : new Date(r.recorded_at).toISOString();
-        const day = iso.slice(0, 10);
-        if (from && day < from) return false;
-        if (to && day > to) return false;
-        if (from_time || to_time) {
-          const hm = iso.slice(11, 16); // "HH:MM"
-          if (from_time && to_time) {
-            const overnight = from_time > to_time;
-            const inWindow = overnight ? (hm >= from_time || hm <= to_time) : (hm >= from_time && hm <= to_time);
-            if (!inWindow) return false;
-          } else if (from_time && hm < from_time) {
-            return false;
-          } else if (to_time && hm > to_time) {
-            return false;
-          }
-        }
-        return true;
-      });
-      // Was capped at 500 — fine for a quick "view path today" playback, but a
-      // report spanning a wider date/time range shouldn't silently lose points.
-      // At one ping every 5-10 min, 5000 rows covers roughly a month before
-      // truncating.
-      res.json(filtered.slice(0, 5000));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 2b-2. Office Attendance (ZKTeco) — raw biometric punches pulled automatically
-  // off the office terminals by zkSync.ts every 5 minutes, kept in
-  // zk_attendance_logs and mapped to the company roster via
-  // all_employees.zk_device_pin. Deliberately separate from the project-based
-  // `attendance` (Remote Attendance) table above — no GPS/project involved here.
-  app.get("/api/zk-devices", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM zk_devices ORDER BY name", []);
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/zk-devices", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const { name, ip_address, port, serial_number } = req.body;
-      if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
-      const result: any = await queryDB(
-        "INSERT INTO zk_devices (name, ip_address, port, serial_number) VALUES (?, ?, ?, ?)",
-        [name, ip_address, port || 4370, serial_number || null]
-      );
-      res.json({ id: result.insertId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Edit a device's registry row (name/IP/port/serial, and is_active — a
-  // device can be paused without deleting its punch history, since deleting
-  // it would CASCADE-delete every zk_attendance_logs row tied to it).
-  app.put("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const { name, ip_address, port, serial_number, is_active } = req.body;
-      if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
-      await queryDB(
-        "UPDATE zk_devices SET name = ?, ip_address = ?, port = ?, serial_number = ?, is_active = ? WHERE id = ?",
-        [name, ip_address, port || 4370, serial_number || null, is_active ? 1 : 0, req.params.id]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      await queryDB("DELETE FROM zk_devices WHERE id = ?", [req.params.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Manual "Sync Now" button on the Office Attendance tab — pulls every active
-  // device immediately instead of waiting for the next 5-minute cron tick.
-  app.post("/api/zk-devices/sync-now", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const results = await syncAllZkDevices(dbPool);
-      res.json(results);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Manual "Sync" on a single device badge — pulls just that one device
-  // immediately, without waiting on (or blocking on) the others. Reuses the
-  // exact same syncZkDevice() the all-device sync-now uses per device, just
-  // called once instead of Promise.all'd across every active device.
-  app.post("/api/zk-devices/:id/sync-now", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const rows: any = await queryDB("SELECT * FROM zk_devices WHERE id = ?", [req.params.id]);
-      const device = rows[0];
-      if (!device) return res.status(404).json({ error: "Device not found" });
-      const result = await syncZkDevice(dbPool, device);
-      res.json({ device: device.name, ...result });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Map a roster employee to their ZKTeco device PIN (Admin Panel -> Employees).
-  app.put("/api/employees/:id/zk-pin", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const { zk_device_pin } = req.body;
-      await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zk_device_pin || null, req.params.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Office Attendance report — one row per employee per day: first punch of the
-  // day = Check In, last punch = Check Out, plus the raw punch count so an
-  // Admin can spot a likely missed punch (an odd count).
-  app.get("/api/office-attendance", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
-    try {
-      const dateFrom = req.query.from ? String(req.query.from) : todayInDhaka();
-      const dateTo = req.query.to ? String(req.query.to) : todayInDhaka();
-
-      // Raw punches for the range, one row per punch. Aggregation now
-      // happens below in JS (not in SQL) so the debounce logic is easy to
-      // read and adjust.
-      const rawRows = await queryDB(
-        `SELECT
-           e.id AS employee_id, e.name, e.designation, e.department,
-           DATE(l.punch_time) AS attendance_date,
-           l.punch_time
-         FROM zk_attendance_logs l
-         JOIN all_employees e ON e.zk_device_pin = l.device_user_pin
-         WHERE DATE(l.punch_time) BETWEEN ? AND ?
-         ORDER BY e.id, DATE(l.punch_time), l.punch_time`,
-        [dateFrom, dateTo]
-      );
-
-      // 2 minutes covers a slow/retried scan comfortably. Raise it if a
-      // particular device's sensor needs more attempts; lower it only if
-      // genuinely-quick legitimate in/out pairs are getting collapsed
-      // (unusual, but possible for someone stepping out very briefly).
-      const DEBOUNCE_SECONDS = 120;
-
-      const groups = new Map<string, { meta: any; kept: Date[] }>();
-      for (const row of rawRows as any[]) {
-        const key = `${row.employee_id}|${row.attendance_date}`;
-        let g = groups.get(key);
-        if (!g) {
-          g = { meta: row, kept: [] };
-          groups.set(key, g);
-        }
-        const t = new Date(row.punch_time);
-        const lastKept = g.kept[g.kept.length - 1];
-        if (!lastKept || (t.getTime() - lastKept.getTime()) / 1000 >= DEBOUNCE_SECONDS) {
-          g.kept.push(t);
-        }
-        // else: within the debounce window of the previous kept punch —
-        // same physical tap, skipped.
-      }
-
-      const rows = Array.from(groups.values())
-        .map(({ meta, kept }) => ({
-          employee_id: meta.employee_id,
-          name: meta.name,
-          designation: meta.designation,
-          department: meta.department,
-          attendance_date: meta.attendance_date,
-          // Same COUNT(*) > 1 guard as before: a day with only one KEPT tap
-          // so far (typically today, before the person has punched Out)
-          // must report check_out_at as NULL rather than repeating the
-          // Check In time.
-          check_in_at: kept[0] ?? null,
-          check_out_at: kept.length > 1 ? kept[kept.length - 1] : null,
-          punch_count: kept.length
-        }))
-        .sort((a, b) => {
-          const ad = new Date(a.attendance_date).getTime();
-          const bd = new Date(b.attendance_date).getTime();
-          if (ad !== bd) return bd - ad; // newest date first
-          return String(a.name).localeCompare(String(b.name));
-        });
-
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  // 2c. Movement Claims — a free-form (no fixed Project geofence) point A -> point
-  // B travel check-in/check-out: a User checks in with a Purpose (why/where
-  // they're heading out for office work), then later checks out once they reach
-  // or finish there. Used for TA/DA-style reimbursement review in the Admin
-  // Panel's Movement Claims tab (gated per-Admin like every other module — a
-  // Superadmin always sees it). Only ONE claim per User may be 'open' at a time.
-  function parseClaimCoords(body: any): { lat: number; lng: number; remarks: string | null } | { error: string } {
-    const lat = Number(body.latitude);
-    const lng = Number(body.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return { error: "Couldn't read your current location. Please allow location access and try again." };
-    }
-    const remarks = typeof body.remarks === "string" ? body.remarks.trim().slice(0, 1000) || null : null;
-    return { lat, lng, remarks };
   }
 
-  app.post("/api/claims/check-in", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
-    try {
-      const purpose = typeof req.body?.purpose === "string" ? req.body.purpose.trim().slice(0, 255) : "";
-      if (!purpose) return res.status(400).json({ error: "Please describe where/why you're going." });
-      const parsed = parseClaimCoords(req.body || {});
-      if ("error" in parsed) return res.status(400).json({ error: parsed.error });
-      const { lat, lng, remarks } = parsed;
+  // Employee Tracking routes live in EmployeeTrackingRoutes.ts.
+  registerEmployeeTrackingRoutes(app, { announceNotice, authenticateToken, getAdminModules, liveTracking, queryDB, requireAdmin, requireModule, requireModuleLayer, requireTrackingAccess });
 
-      const openExisting = await queryDB("SELECT * FROM claims WHERE user_id = ? AND status = 'open'", [req.user.id]);
-      if (openExisting.length > 0) {
-        return res.status(400).json({ error: "You already have an open claim — check out of it before starting a new one." });
-      }
-
-      const result = await queryDB(
-        "INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_lat, check_in_lng, check_in_remarks) VALUES (?, ?, 'open', NOW(), ?, ?, ?)",
-        [req.user.id, purpose, lat, lng, remarks]
-      );
-      // Movement Claims are never routed through the Approval Chain — a User's
-      // Check In/Out here needs no Admin/Approver sign-off (unlike Remote
-      // Attendance above, which still does). See attachApprovalStatuses: with no
-      // approval_requests row ever created for source_type 'claim', it always
-      // resolves check_in_approval/check_out_approval to null, and ApprovalBadge
-      // already renders nothing for a null approval — no UI change needed there.
-      res.status(201).json({ success: true, id: result.insertId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/claims/:id/check-out", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
-    try {
-      const { id } = req.params;
-      const parsed = parseClaimCoords(req.body || {});
-      if ("error" in parsed) return res.status(400).json({ error: parsed.error });
-      const { lat, lng, remarks } = parsed;
-
-      const rows = await queryDB("SELECT * FROM claims WHERE id = ?", [id]);
-      if (rows.length === 0) return res.status(404).json({ error: "Claim not found." });
-      const claim = rows[0];
-      if (Number(claim.user_id) !== Number(req.user.id)) {
-        return res.status(403).json({ error: "This claim doesn't belong to you." });
-      }
-      if (claim.status !== "open") {
-        return res.status(400).json({ error: "This claim has already been checked out." });
-      }
-
-      const distanceKm = Number(
-        (haversineMeters(Number(claim.check_in_lat), Number(claim.check_in_lng), lat, lng) / 1000).toFixed(2)
-      );
-
-      await queryDB(
-        "UPDATE claims SET status = 'completed', check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_remarks = ?, distance_km = ? WHERE id = ?",
-        [lat, lng, remarks, distanceKm, id]
-      );
-      // No Approval Chain for Movement Claims — see the matching note on check-in above.
-      res.json({ success: true, distance_km: distanceKm });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // The calling user's own currently-open claim (if any) — lets the User Panel
-  // show the right Check In / Check Out button state on load/refresh.
-  app.get("/api/claims/status", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM claims WHERE user_id = ? AND status = 'open'", [req.user.id]);
-      res.json(rows[0] || null);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // The calling user's own claim history, most recent first.
-  app.get("/api/claims/mine", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM claims WHERE user_id = ? ORDER BY id DESC", [req.user.id]);
-      res.json(rows.slice(0, 200));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // The calling user's own completed Movement Claims that haven't been referenced
-  // by a Conveyance Bill Claim yet (user_claim_references) and haven't already
-  // been pulled directly into an official Bill by an Admin either
-  // (conveyance_bill_items.claim_id) — powers the "Reference Check In/Out" picker
-  // in the New Conveyance Claim form. Each check-in/out can only ever be
-  // referenced/billed ONCE.
-  app.get("/api/claims/available", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
-    try {
-      const rows = await queryDB(
-        `SELECT c.* FROM claims c
-          WHERE c.user_id = ? AND c.status = 'completed'
-            AND NOT EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.claim_id = c.id)
-            AND NOT EXISTS (SELECT 1 FROM user_claim_references r WHERE r.claim_id = c.id)
-          ORDER BY c.check_in_at DESC`,
-        [req.user.id]
-      );
-      res.json(rows.map((r: any) => ({ ...r, distance_km: r.distance_km !== null ? Number(r.distance_km) : null })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // System-wide claim list for the Superadmin's (or a granted Admin's) Movement
-  // Claims tab — every User's check-ins/outs, filterable by user/date, for
-  // TA/DA-style reimbursement review.
-  app.get("/api/claims", authenticateToken, requireAdmin, requireModule("claims"), async (req: any, res) => {
-    try {
-      const rows = await queryDB(
-        "SELECT c.*, u.name AS user_name FROM claims c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.id DESC"
-      );
-      const user_id = req.query.user_id ? Number(req.query.user_id) : null;
-      const from = req.query.from ? String(req.query.from) : null;
-      const to = req.query.to ? String(req.query.to) : null;
-      const status = req.query.status ? String(req.query.status) : null;
-
-      const filtered = rows.filter((r: any) => {
-        if (user_id && Number(r.user_id) !== user_id) return false;
-        if (status && r.status !== status) return false;
-        const dateOnly = toDateOnlyString(r.check_in_at);
-        if (from && dateOnly && dateOnly < from) return false;
-        if (to && dateOnly && dateOnly > to) return false;
-        return true;
-      });
-
-      const withApprovals = filtered.slice(0, 1000);
-      res.json(withApprovals);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Admin cleanup — remove a mistaken/duplicate claim entirely (not a soft delete,
-  // since a claim carries no downstream data the way an MPR Entry does).
-  app.delete("/api/claims/:id", authenticateToken, requireAdmin, requireModule("claims"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const result = await queryDB("DELETE FROM claims WHERE id = ?", [id]);
-      if (result.affectedRows === 0) return res.status(404).json({ error: "Claim not found" });
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
+  registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
+  // Movement Claims routes live in MovementClaimRoutes.ts.
+  registerMovementClaimRoutes(app, { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString });
 
   // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — full
   // Salary Structure / Employee Advances / Payroll run workflow, kept in its
@@ -4714,11 +2820,40 @@ async function startServer() {
   // admin_module_permissions (Admin Panel -> Users -> Module Access);
   // requireAdmin is layered in front of it the same way every other
   // Admin-Panel-gated module route in this file does.
+  // Payroll -> Approval (HR -> Audit -> Accounts) and Activity Log. Registered
+  // before every other payroll route: its logger has to see each /api/payroll
+  // request, and its GET routes would otherwise be caught by GET /api/payroll/:id.
+  // Payroll's own gate: reading (GET, and the page's own visit log) is open to
+  // the "payroll_view" layer too; every change still needs "read".
+  const requirePayroll = (k: "payroll") => async (req: any, res: any, next: any) => {
+    const reading = req.method === "GET" || (req.method === "POST" && String(req.originalUrl || "").split("?")[0] === "/api/payroll/access-log");
+    if (reading && (await hasModuleLayer(req.user, k, "payroll_view").catch(() => false))) return next();
+    return requireModuleLayer(k, "read")(req, res, next);
+  };
+  registerPayrollApprovalRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule: requirePayroll,
+    requireModuleLayer,
+    hasModuleLayer,
+    queryDB,
+    createAlert
+  });
+  // Registered first: its /api/payroll/pay-items and /api/payroll/adjustments
+  // would otherwise be caught by PayrollRoutes' GET /api/payroll/:id.
+  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule: requirePayroll, queryDB });
+  // Every existing payroll route needs the module's "read" layer (on by
+  // default; "payroll_view" is enough to read); the salary month setting
+  // needs "salary_month" (ticked only).
   registerPayrollRoutes(app, {
     authenticateToken,
     requireAdmin,
-    requireModule,
-    queryDB
+    requireModule: requirePayroll,
+    requireModuleLayer,
+    hasModuleLayer,
+    getAdminModules,
+    queryDB,
+    getAttendanceReportDeptScope
   });
 
   // Asset Management (Employee Profile -> My Assets / New Requisition /
@@ -4734,7 +2869,42 @@ async function startServer() {
     requireAdmin,
     requireModule,
     queryDB,
-    createAlert
+    getAdminModules,
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    isAssetFulfillerStep,
+    finalizeAssetRequisitionApproval
+  });
+
+  // Vehicle Requisition & Management (Self Service -> Book a Ride / Ride
+  // Status, plus Admin Panel -> Vehicle Management) — kept in its own file,
+  // same reasoning as AssetManagementRoutes.ts above. Routed through the
+  // same Dynamic Approval Engine as Asset Requisition (request_type
+  // 'vehicle', a single "HR/Admin Review" Layer per the flowchart — see
+  // LAYER_NAMES in ApprovalTemplateManager.tsx); approve/reject happens from
+  // Admin Panel -> Approvals / "My Approvals" like every other module, and
+  // this file's own PUT .../assign is only the post-approval "assign a
+  // vehicle + driver" step (mirrors POST /api/assets/requisitions/:id/fulfill).
+  ({ expireOverdueRides } = registerVehicleManagementRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB,
+    getAdminModules,
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    isVehicleMaintainerStep,
+    finalizeVehicleRequisitionApproval,
+    rideChanged: (userIds: number[]) => liveTracking.rideChanged(userIds)
+  }));
+
+  // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning
+  // as AssetManagementRoutes.ts/PayrollRoutes.ts above.
+  registerErp360SsoRoutes(app, {
+    authenticateToken,
+    queryDB
   });
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
@@ -4745,22 +2915,76 @@ async function startServer() {
     authenticateToken,
     requireAdmin,
     requireModule,
-    queryDB
+    queryDB,
+    todayInDhaka
   });
 
   // World-class HRM extension modules (Exit/Offboarding, Performance
   // Management, Recruitment/ATS, Grievance & Disciplinary, HR Analytics,
   // Document Vault) — each its own AdminModuleKey, each in its own file,
   // same reasoning as every registerXRoutes call above.
-  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, getAdminModules, createAlert });
   registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
-  registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
-  registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
+  registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
+  // Targets: Self Service -> My Targets and Admin Panel -> Target Reports.
+  registerTargetRoutes(app, { authenticateToken, queryDB, hasModuleLayer, createAlert });
+  // Mobile Bill (company SIMs, limits, bills, reports) — limit raise requests
+  // ride the Dynamic Approval Engine (request_type 'mobile').
   // Employee Tracking -> Stay Report (time at each place, day by day).
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer });
+  // Self Service loan / salary advance requests — ride the Dynamic Approval
+  // Engine (request_type 'loan'); Payroll creates the loan.
+  registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  // E-Signature: signers in order, signature images, signed PDF, public /verify (ESignRoutes.ts).
+  registerESignRoutes(app, { authenticateToken, requireAdmin, requireModule, hasModuleLayer, getAdminModules, queryDB, createAlert });
+  // Self Service -> My Payslip (PayslipRoutes.ts, users.can_view_payslip).
+  registerPayslipRoutes(app, { authenticateToken, queryDB });
+  // Email a report PDF / Excel (ReportEmailRoutes.ts, users.can_email_reports).
+  registerReportEmailRoutes(app, { authenticateToken, queryDB });
+  registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  registerOnboardingRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
+  // HR reminders (probation / contract / document / retirement / increment
+  // dates) — alerts + push, hourly; HR Operations -> Dashboard lists them.
+  registerHrReminderRoutes(app, { authenticateToken, requireModule, requireModuleLayer, hasModuleLayer, queryDB, createAlert, todayInDhaka, schedule: !!(isMySQLConnected && dbPool) });
+  // Employee 360 (HR Operations -> Service Book): experience / education /
+  // family / training records + every other module's data for one Employee.
+  registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
+  // Employee Reports: every Employee's 360 facts in one table, saved and
+  // scheduled reports, previous-company name matching.
+  registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
+  // reports in one place (ReportsInsightsRoutes.ts).
+  // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
+  // claims and attendance history from an Excel/CSV sheet; each kind needs
+  // its own module (a Superadmin has them all).
+  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, hasModuleLayer, today: todayInDhaka, adjustLeaveTypeBalance, ensureDefaultLeaveBalances: (ids: number[]) => ensureDefaultLeaveBalances(ids) });
+
+  registerReportsInsightsRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    queryDB,
+    getAdminModules,
+    todayInDhaka,
+    getDeptScope: (kind, userId) =>
+      kind === "attendance"
+        ? getAttendanceReportDeptScope(userId)
+        : kind === "leave"
+          ? getLeaveApplicationDeptScope(userId)
+          : getConveyanceClaimDeptScope(userId)
+  });
+  // Information requests: ask employees for missing documents / nominee /
+  // emergency contact; HR approves each submission before it is recorded.
+  registerInfoRequestRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  // Site Attendance — supervisor muster roll for people who never use the app
+  // (SiteAttendanceRoutes.ts).
+  // Multi-company: companies, who may enter which (CompanyRoutes.ts).
+  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB, getAdminModules, withTransaction: withDbTransaction });
+  registerSiteAttendanceRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, haversineMeters, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as
@@ -4768,6 +2992,16 @@ async function startServer() {
   // requireModule-gated — every signed-in account can browse the roster; see
   // that file's own comment for why the SELECT stays limited to
   // directory-safe columns.
+  // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
+  registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, getCurrentStepApprovers });
+  // AI Assistant — floating chat helper for every account (AiAssistantRoutes.ts).
+  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  // Forgot password: email code / ask HR (Users layer "password_requests").
+  registerPasswordResetRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleLayer, queryDB, secret: JWT_SECRET, createAlert });
+  registerWebPushRoutes(app, { authenticateToken, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,
     queryDB
@@ -4783,6 +3017,8 @@ async function startServer() {
     requireModule,
     requireAnyModule,
     requireConveyanceClaimAccess,
+    requireModuleLayer,
+    hasModuleLayer,
     queryDB,
     createAlert,
     getAdminModules,
@@ -4794,16 +3030,22 @@ async function startServer() {
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES,
     getConveyanceClaimDeptScope
   });
+
+  // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireConveyanceClaimAccess, queryDB, getAdminModules, todayInDhaka });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template
   // Assignments) now lives in ApprovalRoutes.ts — registered below via
   // registerApprovalRoutes(). Leave's own reliever-decision route is
   // unaffected and still lives further down in this file.
+  // Requests that had no approver move on once one is set (every 10 minutes
+  // too, besides whenever an approvals list is opened).
+  setInterval(() => void rehomeAwaitingApprovals().catch(() => {}), 10 * 60 * 1000);
   registerApprovalRoutes(app, {
+    rehomeAwaitingApprovals,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
@@ -4813,1999 +3055,25 @@ async function startServer() {
     getApprovalChain,
     performApprovalAction,
     toDateOnlyString,
-    attachApprovalStatuses
+    attachApprovalStatuses,
+    getCurrentStepApprovers,
+    isVehicleMaintainerStep,
+    isAssetFulfillerStep,
+    isConveyanceDisburserStep,
+    createAlert
   });
 
-  // 2d. Notices — Superadmin/Admin composes a popup (title + text/HTML + an
-  // optional custom Lottie animation) that shows to a User right after they log
-  // in. Gated behind the "notices" Admin Panel module, same as every other tab.
-  const parseJsonBody = <T,>(value: any): T | null => {
-    if (value === null || value === undefined || value === "") return null;
-    if (typeof value === "object") return value as T;
-    try {
-      return JSON.parse(String(value));
-    } catch {
-      return null;
-    }
-  };
+  // Superadmin diagnostic routes live in DebugRoutes.ts.
+  registerDebugRoutes(app, { authenticateToken, queryDB, requireSuperAdmin, resolveSupervisorApprover });
 
-  // Minimal recipient list for the "Specific Users" target picker — every plain
-  // 'user' account (not Admins/Superadmins, who never see the popup). Deliberately
-  // its own lightweight route rather than reusing GET /api/users, so an Admin who
-  // only has the "notices" module (not "users") can still pick recipients.
-  app.get("/api/notices/recipients", authenticateToken, requireAdmin, requireModule("notices"), async (req, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM users");
-      res.json(
-        rows
-          .filter((u: any) => u.role === "user")
-          .map((u: any) => ({ id: u.id, name: u.name, email: u.email || null, username: u.username || null }))
-          .sort((a: any, b: any) => a.name.localeCompare(b.name))
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Employee Directory routes (Admin Panel -> Employees) live in EmployeeRoutes.ts.
+  registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
-  // Every Notice an Admin/Superadmin has created, newest first, with its target
-  // users (for 'specific' ones) and who created it — for the Admin Panel -> Notices
-  // management list.
-  app.get("/api/notices", authenticateToken, requireAdmin, requireModule("notices"), async (req, res) => {
-    try {
-      const notices = await queryDB("SELECT * FROM notices");
-      const targets = await queryDB("SELECT * FROM notice_targets");
-      const users = await queryDB("SELECT id, name FROM users");
-      const userMap = new Map<number, any>(users.map((u: any) => [u.id, u]));
+  // Notices routes live in NoticeRoutes.ts.
+  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });
 
-      const sorted = [...notices].sort((a: any, b: any) => (a.id < b.id ? 1 : -1));
-      res.json(
-        sorted.map((n: any) => {
-          const targetUserIds = targets.filter((t: any) => t.notice_id === n.id).map((t: any) => t.user_id);
-          return {
-            id: n.id,
-            title: n.title,
-            content_html: sanitizeNoticeHtml(n.content_html),
-            lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
-            lottie_url: safeLottieUrl(n.lottie_url),
-            target_type: n.target_type,
-            source: n.source || null,
-            is_active: !!Number(n.is_active),
-            created_by: n.created_by,
-            created_by_name: userMap.get(n.created_by)?.name || null,
-            created_at: n.created_at,
-            updated_at: n.updated_at,
-            target_user_ids: targetUserIds,
-            target_users: targetUserIds.map((id: number) => ({ id, name: userMap.get(id)?.name || "Unknown" }))
-          };
-        })
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/notices", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
-    try {
-      const { title, content_html, lottie_json, lottie_url, target_type, target_user_ids, is_active } = req.body;
-      if (!title || !String(title).trim()) return res.status(400).json({ error: "Title is required" });
-      if (!content_html || !String(content_html).trim()) return res.status(400).json({ error: "Notice content is required" });
-      const resolvedTargetType = target_type === "specific" ? "specific" : "all";
-      // A pasted Lottie animation must be valid JSON, or it silently fails to
-      // render for the User later — validated (and re-stringified) here rather
-      // than trusted straight from the client.
-      let lottieJsonStr: string | null = null;
-      if (lottie_json && String(lottie_json).trim()) {
-        const parsed = parseJsonBody(lottie_json);
-        if (!parsed) return res.status(400).json({ error: "The pasted Lottie animation isn't valid JSON." });
-        lottieJsonStr = safeLottieJson(parsed);
-      }
-      if (lottie_url && String(lottie_url).trim() && !safeLottieUrl(lottie_url)) {
-        return res.status(400).json({ error: "The Lottie animation link must be an http(s) address." });
-      }
-      const lottieUrlStr = safeLottieUrl(lottie_url);
-      // Only plain formatting is kept (NoticeSafety.ts).
-      const safeHtml = sanitizeNoticeHtml(content_html);
-      if (!safeHtml.trim()) return res.status(400).json({ error: "Notice content is required" });
-
-      const result = await queryDB(
-        "INSERT INTO notices (title, content_html, lottie_json, lottie_url, target_type, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, is_active === false ? 0 : 1, req.user.id]
-      );
-      const noticeId = result.insertId;
-
-      if (resolvedTargetType === "specific" && Array.isArray(target_user_ids)) {
-        for (const uid of target_user_ids) {
-          const userIdNum = Number(uid);
-          if (Number.isFinite(userIdNum)) {
-            await queryDB("INSERT INTO notice_targets (notice_id, user_id) VALUES (?, ?)", [noticeId, userIdNum]);
-          }
-        }
-      }
-
-      res.status(201).json({ id: noticeId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
-
-      const { title, content_html, lottie_json, lottie_url, target_type, target_user_ids } = req.body;
-      if (!title || !String(title).trim()) return res.status(400).json({ error: "Title is required" });
-      if (!content_html || !String(content_html).trim()) return res.status(400).json({ error: "Notice content is required" });
-      const resolvedTargetType = target_type === "specific" ? "specific" : "all";
-      let lottieJsonStr: string | null = null;
-      if (lottie_json && String(lottie_json).trim()) {
-        const parsed = parseJsonBody(lottie_json);
-        if (!parsed) return res.status(400).json({ error: "The pasted Lottie animation isn't valid JSON." });
-        lottieJsonStr = safeLottieJson(parsed);
-      }
-      if (lottie_url && String(lottie_url).trim() && !safeLottieUrl(lottie_url)) {
-        return res.status(400).json({ error: "The Lottie animation link must be an http(s) address." });
-      }
-      const lottieUrlStr = safeLottieUrl(lottie_url);
-      // Only plain formatting is kept (NoticeSafety.ts).
-      const safeHtml = sanitizeNoticeHtml(content_html);
-      if (!safeHtml.trim()) return res.status(400).json({ error: "Notice content is required" });
-
-      await queryDB(
-        "UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ? WHERE id = ?",
-        [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, id]
-      );
-      // Edited by a person: a later Budget import writes a new draft instead
-      // of overwriting these edits (BudgetNoticeDraft.ts).
-      await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
-
-      // Replace the target list wholesale rather than diffing — simplest correct
-      // behaviour for a form that always submits the full intended audience.
-      await queryDB("DELETE FROM notice_targets WHERE notice_id = ?", [id]);
-      if (resolvedTargetType === "specific" && Array.isArray(target_user_ids)) {
-        for (const uid of target_user_ids) {
-          const userIdNum = Number(uid);
-          if (Number.isFinite(userIdNum)) {
-            await queryDB("INSERT INTO notice_targets (notice_id, user_id) VALUES (?, ?)", [id, userIdNum]);
-          }
-        }
-      }
-
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Publish/unpublish toggle — pulls a Notice's popup down (or brings it back)
-  // without losing it or its dismissal history, unlike deleting it outright.
-  app.put("/api/notices/:id/active", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
-      await queryDB("UPDATE notices SET is_active = ? WHERE id = ?", [req.body.is_active ? 1 : 0, id]);
-      // A Budget-import draft that is published is no longer the draft the
-      // next import rewrites (BudgetNoticeDraft.ts).
-      if (req.body.is_active) await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
-      await queryDB("DELETE FROM notices WHERE id = ?", [id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Employee Directory (Admin Panel -> Employees) — plain hand-entered company
-  // roster, gated behind the "employees" AdminModuleKey like every other tab
-  // (a Superadmin always has it; an Admin/User only once the Superadmin grants
-  // it via PUT /api/users/:id/module-permissions). Not linked to login
-  // accounts (User rows) — most listed employees never get one.
-  app.get("/api/employees", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
-    try {
-      const rows = await queryDB("SELECT * FROM all_employees");
-      const sorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-      res.json(
-        sorted.map((e: any) => {
-          const out: Record<string, any> = {
-            id: e.id,
-            employee_id: e.employee_id || null,
-            name: e.name,
-            designation: e.designation || null,
-            department: e.department || null,
-            // The structured Department (Admin Panel -> Departments) this row
-            // is linked to, if any — `department` above stays a plain-text
-            // mirror of departments.name for every existing reader (Notices
-            // targeting, Attendance Reports, this panel's own search) that
-            // never learned about department_id.
-            department_id: e.department_id || null,
-            email: e.email || null,
-            phone: e.phone || null,
-            is_active: !!Number(e.is_active),
-            created_at: e.created_at,
-            user_id: e.user_id || null
-          };
-          for (const field of EMPLOYEE_EXT_FIELDS) {
-            out[field] = (EMPLOYEE_BOOL_FIELDS as readonly string[]).includes(field)
-              ? !!Number(e[field])
-              : e[field] ?? null;
-          }
-          return out;
-        })
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Users with no all_employees row pointing at them yet — the pool "Link
-  // Existing User" (below) can attach to an Employee that was added to the
-  // directory AFTER its login already existed (the reverse of create-login,
-  // which makes a brand-new login instead of reusing one). Scoped to the
-  // "employees" module, not "users", so an Admin who only has Employees
-  // access can still use this picker without also needing Users access.
-  app.get("/api/employees/unlinked-users", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const rows: any = await queryDB(
-        `SELECT id, name, email, username, role FROM users
-         WHERE id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`
-      );
-      // Same "plain Admin never sees the Superadmin account" rule as the
-      // Users list.
-      const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
-      res.json(visible.map((u: any) => ({ id: u.id, name: u.name, email: u.email || null, username: u.username || null, role: u.role })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Resolves a submitted department_id (Admin Panel -> Departments) into the
-  // pair actually written to all_employees — falls back to the legacy
-  // free-text `department` field when no department_id is given (old API
-  // callers/import scripts that predate the Departments table), and to
-  // null/null when neither is given. `department` is kept in sync with the
-  // Department's own name (mirrored, not dropped) so every existing reader
-  // that only ever knew about the free-text column — Notices targeting,
-  // Attendance Reports, this panel's own search/filter — keeps working
-  // unchanged; department_id is the new source of truth for the Supervisor/
-  // Approval Workflow wiring (see resolveDepartmentSupervisor).
-  async function resolveEmployeeDepartment(body: any): Promise<{ department_id: number | null; department_name: string | null }> {
-    const departmentId = body.department_id ? Number(body.department_id) : null;
-    if (departmentId) {
-      const rows = await queryDB("SELECT id, name FROM departments WHERE id = ?", [departmentId]);
-      if (rows.length > 0) return { department_id: Number(rows[0].id), department_name: rows[0].name };
-    }
-    const legacyText = body.department && String(body.department).trim() ? String(body.department).trim() : null;
-    return { department_id: null, department_name: legacyText };
-  }
-
-  // create_login (optional): when true, a users row is created in the SAME
-  // request as the all_employees row and linked via all_employees.user_id —
-  // this is how "adding an Employee" can also make them a User with their own
-  // login, instead of the two always being separate (see all_employees'
-  // schema.sql comment). login_email/login_username/login_password drive the
-  // new account; login_email falls back to the Employee's own `email` field
-  // when not given separately, since most companies log in with the same
-  // work email already on the directory row. Mirrors POST /api/users' own
-  // validation (password length, duplicate email/username) so a bad login
-  // request fails BEFORE the Employee row is ever inserted — never leaves a
-  // half-created Employee-with-broken-login behind.
-  //
-  // login_project_ids/login_module_keys (optional, only used when create_login
-  // is true): lets the same request that creates the login also grant Project
-  // Access (user_project_permissions — same table/shape PUT /api/users/:id/
-  // projects writes) and Admin Panel Module Access (admin_module_permissions —
-  // same table PUT /api/users/:id/module-permissions writes), instead of
-  // requiring a second trip to Admin Panel -> Users afterward. Module grants
-  // stay Superadmin-only, same as that dedicated endpoint — a plain Admin
-  // (even with the "employees" module) can still create the login and set
-  // Project Access, but login_module_keys is silently ignored for them.
-  app.post("/api/employees", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const { employee_id, name, designation, department, department_id, email, phone, is_active, create_login, login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
-      if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
-
-      let newUserId: number | null = null;
-      let grantedProjectIds: number[] = [];
-      let grantedModuleKeys: string[] = [];
-
-      if (create_login) {
-        const loginEmail = (login_email && String(login_email).trim()) || (email && String(email).trim()) || null;
-        const loginUsername = login_username && String(login_username).trim() ? String(login_username).trim() : null;
-        if (!loginEmail && !loginUsername) {
-          return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
-        }
-        if (!login_password || String(login_password).length < 6) {
-          return res.status(400).json({ error: "Login password must be at least 6 characters." });
-        }
-        if (loginEmail) {
-          const existingEmail = await queryDB("SELECT id FROM users WHERE email = ?", [loginEmail]);
-          if (existingEmail.length > 0) return res.status(400).json({ error: "That login email is already registered." });
-        }
-        if (loginUsername) {
-          const existingUsername = await queryDB("SELECT id FROM users WHERE username = ?", [loginUsername]);
-          if (existingUsername.length > 0) return res.status(400).json({ error: "That username is already taken." });
-        }
-
-        const password_hash = await bcrypt.hash(String(login_password), 10);
-        const userResult = await queryDB(
-          "INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, 'user')",
-          [String(name).trim(), loginEmail, loginUsername, password_hash]
-        );
-        newUserId = userResult.insertId;
-
-        // Project Access — open to any Admin who reached this endpoint (same
-        // rule PUT /api/users/:id/projects follows: requires the "employees"/
-        // "users" module, not Superadmin specifically).
-        if (Array.isArray(login_project_ids)) {
-          grantedProjectIds = Array.from(new Set(login_project_ids.map((pid: any) => Number(pid)).filter((pid: number) => Number.isFinite(pid))));
-          for (const pid of grantedProjectIds) {
-            await queryDB("INSERT INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [newUserId, pid]);
-          }
-        }
-
-        // Module Access — Superadmin-only grant, same gate PUT
-        // /api/users/:id/module-permissions enforces; quietly skipped for a
-        // plain Admin instead of failing the whole request.
-        if (req.user.role === "superadmin" && Array.isArray(login_module_keys)) {
-          grantedModuleKeys = login_module_keys.filter((m: any) => (ADMIN_MODULE_KEYS as readonly string[]).includes(m));
-          for (const moduleKey of grantedModuleKeys) {
-            await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [newUserId, moduleKey]);
-          }
-        }
-      }
-
-      // Employee Info / Status / Contact tab fields — all optional, all
-      // normalized the same way (trim to null, dates left as-is, booleans to
-      // 0/1). See EMPLOYEE_EXT_FIELDS.
-      const extColumns = EMPLOYEE_EXT_FIELDS;
-      const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
-      const dept = await resolveEmployeeDepartment(req.body);
-
-      const columns = ["employee_id", "name", "designation", "department", "department_id", "email", "phone", "is_active", "user_id", ...extColumns];
-      const placeholders = columns.map(() => "?").join(", ");
-      const values = [
-        employee_id && String(employee_id).trim() ? String(employee_id).trim() : null,
-        String(name).trim(),
-        designation && String(designation).trim() ? String(designation).trim() : null,
-        dept.department_name,
-        dept.department_id,
-        email && String(email).trim() ? String(email).trim() : null,
-        phone && String(phone).trim() ? String(phone).trim() : null,
-        is_active === false ? 0 : 1,
-        newUserId,
-        ...extValues
-      ];
-      const result = await queryDB(
-        `INSERT INTO all_employees (${columns.join(", ")}) VALUES (${placeholders})`,
-        values
-      );
-      res.status(201).json({ id: result.insertId, user_id: newUserId, project_ids: grantedProjectIds, module_keys: grantedModuleKeys });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/employees/:id", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
-
-      const { employee_id, name, designation, department, department_id, email, phone, is_active } = req.body;
-      if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
-
-      const extColumns = EMPLOYEE_EXT_FIELDS;
-      const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
-      const dept = await resolveEmployeeDepartment(req.body);
-      const setClause = ["employee_id = ?", "name = ?", "designation = ?", "department = ?", "department_id = ?", "email = ?", "phone = ?", "is_active = ?", ...extColumns.map((c) => `${c} = ?`)].join(", ");
-
-      await queryDB(
-        `UPDATE all_employees SET ${setClause} WHERE id = ?`,
-        [
-          employee_id && String(employee_id).trim() ? String(employee_id).trim() : null,
-          String(name).trim(),
-          designation && String(designation).trim() ? String(designation).trim() : null,
-          dept.department_name,
-          dept.department_id,
-          email && String(email).trim() ? String(email).trim() : null,
-          phone && String(phone).trim() ? String(phone).trim() : null,
-          is_active === false ? 0 : 1,
-          ...extValues,
-          id
-        ]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Only with the "Delete employee records" layer, and only an Employee with no
-  // pay / service records (EmployeeRecordsGuard.ts): someone who left is marked
-  // Resigned / Terminated instead, which keeps them.
-  app.delete("/api/employees/:id", authenticateToken, requireAdmin, requireModuleLayer("employees", "employee_delete"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
-      const kept = await keptRecordsOf(queryDB, id);
-      if (kept.length > 0) {
-        const list = kept.map((k) => `${k.count} ${k.label}${k.count === 1 ? "" : "s"}`).join(", ");
-        return res.status(409).json({
-          error: `${existing[0].name || "This employee"} has ${list}, which must be kept. Set their Job Status to Resigned or Terminated instead of deleting.`,
-          kept
-        });
-      }
-      await queryDB("DELETE FROM all_employees WHERE id = ?", [id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      if (err?.errno === 1451 || err?.code === "ER_ROW_IS_REFERENCED_2") {
-        return res.status(409).json({ error: "This employee has pay or service records that must be kept. Set their Job Status to Resigned or Terminated instead of deleting." });
-      }
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Supervisor tab (Admin Panel -> Employees -> Edit -> Supervisor). The
-  // Supervisor is always another row picked from the same all_employees
-  // list — never typed free-hand — so these endpoints only ever store
-  // supervisor_id, never a name. A given employee can be changed to a
-  // different supervisor, or have one added/removed, at any time.
-  app.get("/api/employees/:id/supervisors", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const rows = await queryDB(
-        `SELECT es.id, es.employee_id, es.supervisor_id, es.effective_date, es.is_direct,
-                s.name AS supervisor_name, s.employee_id AS supervisor_employee_code
-         FROM employee_supervisors es
-         JOIN all_employees s ON s.id = es.supervisor_id
-         WHERE es.employee_id = ?
-         ORDER BY es.effective_date DESC, es.id DESC`,
-        [id]
-      );
-      res.json(rows.map((r: any) => ({
-        id: r.id,
-        employee_id: r.employee_id,
-        supervisor_id: r.supervisor_id,
-        supervisor_name: r.supervisor_name,
-        supervisor_employee_code: r.supervisor_employee_code || null,
-        effective_date: r.effective_date,
-        is_direct: !!Number(r.is_direct)
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/employees/:id/supervisors", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const { supervisor_id, effective_date, is_direct } = req.body;
-      const supId = Number(supervisor_id);
-      if (!supId || !Number.isFinite(supId)) return res.status(400).json({ error: "Please select an employee as the Supervisor." });
-      if (supId === id) return res.status(400).json({ error: "An employee cannot be their own supervisor." });
-
-      const employeeExists = await queryDB("SELECT id FROM all_employees WHERE id = ?", [id]);
-      if (employeeExists.length === 0) return res.status(404).json({ error: "Employee not found" });
-      const supExists = await queryDB("SELECT id FROM all_employees WHERE id = ?", [supId]);
-      if (supExists.length === 0) return res.status(400).json({ error: "Selected supervisor was not found in the Employee list." });
-
-      const result = await queryDB(
-        "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, ?)",
-        [id, supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0]
-      );
-      res.status(201).json({ id: result.insertId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/employees/:id/supervisors/:supervisorRowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const rowId = Number(req.params.supervisorRowId);
-      const { supervisor_id, effective_date, is_direct } = req.body;
-      const supId = Number(supervisor_id);
-      if (!supId || !Number.isFinite(supId)) return res.status(400).json({ error: "Please select an employee as the Supervisor." });
-      if (supId === id) return res.status(400).json({ error: "An employee cannot be their own supervisor." });
-
-      const existing = await queryDB("SELECT id FROM employee_supervisors WHERE id = ? AND employee_id = ?", [rowId, id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Supervisor record not found" });
-
-      await queryDB(
-        "UPDATE employee_supervisors SET supervisor_id = ?, effective_date = ?, is_direct = ? WHERE id = ?",
-        [supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0, rowId]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/employees/:id/supervisors/:supervisorRowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const rowId = Number(req.params.supervisorRowId);
-      const existing = await queryDB("SELECT id FROM employee_supervisors WHERE id = ? AND employee_id = ?", [rowId, id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Supervisor record not found" });
-      await queryDB("DELETE FROM employee_supervisors WHERE id = ?", [rowId]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Gives an ALREADY-EXISTING Employee Directory row a login account after the
-  // fact — same validation/insert logic POST /api/employees' create_login
-  // branch uses, just for a row that was added before this feature existed (or
-  // added without the checkbox ticked at the time). No-ops with a 400 if this
-  // employee already has one (all_employees.user_id already set).
-  //
-  // login_project_ids/login_module_keys — same optional Project Access /
-  // Module Access grant POST /api/employees' create_login branch supports; see
-  // the comment there. Module grants stay Superadmin-only.
-  app.post("/api/employees/:id/create-login", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
-      const employee = existing[0];
-      if (employee.user_id) return res.status(400).json({ error: "This employee already has a login account." });
-
-      const { login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
-      const loginEmail = (login_email && String(login_email).trim()) || (employee.email && String(employee.email).trim()) || null;
-      const loginUsername = login_username && String(login_username).trim() ? String(login_username).trim() : null;
-      if (!loginEmail && !loginUsername) {
-        return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
-      }
-      if (!login_password || String(login_password).length < 6) {
-        return res.status(400).json({ error: "Login password must be at least 6 characters." });
-      }
-      if (loginEmail) {
-        const existingEmail = await queryDB("SELECT id FROM users WHERE email = ?", [loginEmail]);
-        if (existingEmail.length > 0) return res.status(400).json({ error: "That login email is already registered." });
-      }
-      if (loginUsername) {
-        const existingUsername = await queryDB("SELECT id FROM users WHERE username = ?", [loginUsername]);
-        if (existingUsername.length > 0) return res.status(400).json({ error: "That username is already taken." });
-      }
-
-      const password_hash = await bcrypt.hash(String(login_password), 10);
-      const userResult = await queryDB(
-        "INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, 'user')",
-        [employee.name, loginEmail, loginUsername, password_hash]
-      );
-      const newUserId = userResult.insertId;
-      await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [newUserId, id]);
-
-      let grantedProjectIds: number[] = [];
-      if (Array.isArray(login_project_ids)) {
-        grantedProjectIds = Array.from(new Set(login_project_ids.map((pid: any) => Number(pid)).filter((pid: number) => Number.isFinite(pid))));
-        for (const pid of grantedProjectIds) {
-          await queryDB("INSERT INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [newUserId, pid]);
-        }
-      }
-
-      let grantedModuleKeys: string[] = [];
-      if (req.user.role === "superadmin" && Array.isArray(login_module_keys)) {
-        grantedModuleKeys = login_module_keys.filter((m: any) => (ADMIN_MODULE_KEYS as readonly string[]).includes(m));
-        for (const moduleKey of grantedModuleKeys) {
-          await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [newUserId, moduleKey]);
-        }
-      }
-
-      res.status(201).json({ success: true, user_id: newUserId, project_ids: grantedProjectIds, module_keys: grantedModuleKeys });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Links an EXISTING login account to an existing Employee row — the reverse
-  // situation from create-login above: the User was created first (or on its
-  // own) and the matching Employee directory entry only got added afterward,
-  // so the two ended up as separate, unlinked records. Sets all_employees.
-  // user_id directly instead of inserting a new users row. One user can only
-  // ever be linked to one Employee row, same as create-login's own 1:1
-  // assumption.
-  app.put("/api/employees/:id/link-user", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
-      if (existing[0].user_id) return res.status(400).json({ error: "This employee already has a linked login account." });
-
-      const userId = Number(req.body?.user_id);
-      if (!Number.isFinite(userId)) return res.status(400).json({ error: "Select a user account to link." });
-
-      const userRows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [userId]);
-      if (userRows.length === 0) return res.status(404).json({ error: "User not found" });
-      // A plain Admin must never be able to link the Superadmin's own account,
-      // even by guessing its id directly — same rule as every other per-user
-      // Admin action.
-      if (userRows[0].role === "superadmin" && req.user.role !== "superadmin") {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      const alreadyLinked: any = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [userId]);
-      if (alreadyLinked.length > 0) {
-        return res.status(400).json({ error: "This user account is already linked to another employee." });
-      }
-
-      await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [userId, id]);
-      res.json({ success: true, user_id: userId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Undoes a link (either from create-login or link-user above) — in case the
-  // wrong account got attached. The Employee row goes back to having no
-  // user_id; the users row itself is left untouched either way.
-  app.delete("/api/employees/:id/link-user", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
-      if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
-      if (!existing[0].user_id) return res.status(400).json({ error: "This employee has no linked login account." });
-
-      await queryDB("UPDATE all_employees SET user_id = NULL WHERE id = ?", [id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Active, targeted, not-yet-dismissed Notices for the CALLING user — polled by
-  // the User Panel right after login to decide whether to pop the Notice modal up.
-  // Oldest-first, so a User who has several queued sees them in the order they were
-  // published rather than newest-first.
-  app.get("/api/notices/active", authenticateToken, async (req: any, res) => {
-    try {
-      const notices = await queryDB("SELECT * FROM notices");
-      const active = notices.filter((n: any) => !!Number(n.is_active));
-      if (active.length === 0) return res.json([]);
-
-      const dismissals = await queryDB("SELECT * FROM notice_dismissals WHERE user_id = ?", [req.user.id]);
-      const dismissedIds = new Set(dismissals.map((d: any) => Number(d.notice_id)));
-
-      const targets = await queryDB("SELECT * FROM notice_targets");
-
-      const visible = active.filter((n: any) => {
-        if (dismissedIds.has(Number(n.id))) return false;
-        if (n.target_type === "all") return true;
-        return targets.some((t: any) => Number(t.notice_id) === Number(n.id) && Number(t.user_id) === Number(req.user.id));
-      });
-
-      visible.sort((a: any, b: any) => (a.id > b.id ? 1 : -1));
-
-      res.json(
-        visible.map((n: any) => ({
-          id: n.id,
-          title: n.title,
-          content_html: sanitizeNoticeHtml(n.content_html),
-          lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
-          lottie_url: safeLottieUrl(n.lottie_url),
-          source: n.source || null,
-          created_at: n.created_at
-        }))
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Every Notice currently posted for this account — same active + targeting
-  // rules as /api/notices/active above, but WITHOUT its dismissal filter, and
-  // newest first.
-  //
-  // Dismissing is meant to stop the login popup from putting a notice in front
-  // of someone again, not to erase it: NoticeBoard.tsx has always described
-  // itself as "somewhere to come back and re-read a notice later", but it
-  // couldn't be while it read the popup's endpoint — one dismissal and the
-  // notice was gone from the board too, with nothing left anywhere in the app
-  // to say it had ever been posted. This is the endpoint the Notice Board and
-  // the Dashboard's notice preview read instead.
-  app.get("/api/notices/board", authenticateToken, async (req: any, res) => {
-    try {
-      const notices = await queryDB("SELECT * FROM notices");
-      const active = notices.filter((n: any) => !!Number(n.is_active));
-      if (active.length === 0) return res.json([]);
-
-      const targets = await queryDB("SELECT * FROM notice_targets");
-      const visible = active.filter((n: any) => {
-        if (n.target_type === "all") return true;
-        return targets.some((t: any) => Number(t.notice_id) === Number(n.id) && Number(t.user_id) === Number(req.user.id));
-      });
-
-      visible.sort((a: any, b: any) => Number(b.id) - Number(a.id));
-
-      res.json(
-        visible.map((n: any) => ({
-          id: n.id,
-          title: n.title,
-          content_html: sanitizeNoticeHtml(n.content_html),
-          lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
-          lottie_url: safeLottieUrl(n.lottie_url),
-          created_at: n.created_at
-        }))
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Marks one Notice as seen/closed for the calling user — it stops appearing for
-  // them (but keeps showing to anyone else it's targeted at who hasn't dismissed it).
-  app.post("/api/notices/:id/dismiss", authenticateToken, async (req: any, res) => {
-    try {
-      const id = Number(req.params.id);
-      await queryDB("INSERT INTO notice_dismissals (notice_id, user_id) VALUES (?, ?)", [id, req.user.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 3. MPR Numbers CRUD
-  app.get("/api/mpr-numbers", authenticateToken, async (req, res) => {
-    try {
-      const mprs = await queryDB("SELECT * FROM mpr_numbers ORDER BY mpr_no ASC");
-      res.json(mprs);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/mpr-numbers", authenticateToken, requireAdmin, requireModule("mprs"), async (req: any, res) => {
-    try {
-      const { mpr_no } = req.body;
-      if (!mpr_no) return res.status(400).json({ error: "MPR number is required" });
-
-      const result = await queryDB("INSERT INTO mpr_numbers (mpr_no, created_by) VALUES (?, ?)", [
-        mpr_no.trim(),
-        req.user.id
-      ]);
-      res.json({ id: result.insertId, mpr_no: mpr_no.trim() });
-    } catch (err: any) {
-      if (err.code === "ER_DUP_ENTRY" || err.message?.includes("already exists")) {
-        return res.status(400).json({ error: "MPR number already exists" });
-      }
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/mpr-numbers/:id", authenticateToken, requireAdmin, requireModule("mprs"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { mpr_no } = req.body;
-      if (!mpr_no) return res.status(400).json({ error: "MPR number is required" });
-
-      await queryDB("UPDATE mpr_numbers SET mpr_no = ? WHERE id = ?", [mpr_no.trim(), id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/mpr-numbers/:id", authenticateToken, requireAdmin, requireModule("mprs"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      await queryDB("DELETE FROM mpr_numbers WHERE id = ?", [id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 3b. Budgets — created by the Admin, then an Excel sheet of line items is imported
-  // into them. Importing auto-adds every MRF No to the Approved MPR list and every
-  // Project Name to the Approved Project list, if they don't already exist.
-  // Listing is open to any authenticated user (not admin-only): Users must browse the
-  // Budgets the Admin has created & imported before they're allowed to start a new MPR
-  // Entry — clicking a Budget is now the entry point into the Entry form.
-  app.get("/api/budgets", authenticateToken, async (req, res) => {
-    try {
-      // Explicit columns (not SELECT *) so the potentially large file_data blob is
-      // never sent down for the list view — only whether a file exists (has_file).
-      const budgets = await queryDB(
-        "SELECT id, budget_name, created_by, created_at, original_filename, delivery_date_from, delivery_date_to, rate_approved_at, rate_approved_by, is_published, published_at, (file_data IS NOT NULL) AS has_file FROM budgets ORDER BY created_at DESC"
-      );
-      const counts = await queryDB("SELECT budget_id, COUNT(*) as cnt FROM budget_items GROUP BY budget_id");
-      const countMap: Record<number, number> = {};
-      for (const c of counts) countMap[c.budget_id] = Number(c.cnt);
-      // Which of these Budgets has THIS user already submitted (and is therefore
-      // locked from further entries)? Scoped to req.user.id, not global.
-      const submittedRows = await queryDB("SELECT budget_id FROM budget_submissions WHERE user_id = ?", [
-        (req as any).user.id
-      ]);
-      const submittedSet = new Set(submittedRows.map((r: any) => Number(r.budget_id)));
-      const isAdmin = (req as any).user.role === "admin" || (req as any).user.role === "superadmin";
-      const mapped = budgets.map((b: any) => ({
-        ...b,
-        has_file: !!Number(b.has_file),
-        delivery_date_from: toDateOnlyString(b.delivery_date_from),
-        delivery_date_to: toDateOnlyString(b.delivery_date_to),
-        item_count: countMap[b.id] || 0,
-        is_published: !!Number(b.is_published),
-        submitted: submittedSet.has(Number(b.id))
-      }));
-      // Non-admin Users only ever see Budgets the Admin has explicitly Submitted
-      // (is_published) from the Import Rate File / Import Budget from Excel page —
-      // a Budget that's still being imported/reviewed stays invisible to them.
-      // Admins always see every Budget, published or not, so they can manage it.
-      res.json(isAdmin ? mapped : mapped.filter((b: any) => b.is_published));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Download/view the original Excel file that was imported into this Budget.
-  app.get("/api/budgets/:id/file", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const rows = await queryDB(
-        "SELECT id, original_filename, file_mimetype, file_data FROM budgets WHERE id = ?",
-        [budgetId]
-      );
-      if (rows.length === 0) return res.status(404).json({ error: "Budget not found" });
-      const b = rows[0];
-      if (!b.file_data) return res.status(404).json({ error: "No Excel file has been saved for this budget yet" });
-
-      const buffer: Buffer = Buffer.isBuffer(b.file_data) ? b.file_data : Buffer.from(b.file_data);
-      res.setHeader("Content-Type", b.file_mimetype || "application/octet-stream");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${encodeURIComponent(b.original_filename || `budget_${budgetId}.xlsx`)}"`
-      );
-      res.send(buffer);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/budgets", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const { budget_name } = req.body;
-      if (!budget_name || !String(budget_name).trim()) {
-        return res.status(400).json({ error: "Budget Name is required" });
-      }
-      const result = await queryDB("INSERT INTO budgets (budget_name, created_by) VALUES (?, ?)", [
-        String(budget_name).trim(),
-        req.user.id
-      ]);
-      res.json({ id: result.insertId, budget_name: String(budget_name).trim() });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to create budget" });
-    }
-  });
-
-  // "Submit" a Budget (Admin-only): flips is_published on, which is what makes it
-  // show up in GET /api/budgets for ordinary Users — until this is called, the Budget
-  // only exists on the Admin's Data Import page. Body { published: false } lets the
-  // Admin pull a Budget back to Draft (e.g. it was submitted by mistake, or needs more
-  // rows imported first) without deleting anything already saved on it.
-  app.post("/api/budgets/:id/publish", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const budgetRows = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      const publish = req.body?.published !== false; // default: publish
-      await queryDB("UPDATE budgets SET is_published = ?, published_at = ? WHERE id = ?", [
-        publish ? 1 : 0,
-        publish ? new Date() : null,
-        budgetId
-      ]);
-      res.json({ success: true, is_published: publish });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to update Budget submission status" });
-    }
-  });
-
-  // Open to any authenticated user (not admin-only): once a User picks a Budget from
-  // the list, the Entry Form calls this to know exactly which Project(s) and MPR/MRF
-  // Nos were imported into that Budget, so only those can be picked for a new entry.
-  app.get("/api/budgets/:id/items", authenticateToken, async (req: any, res) => {
-    try {
-      // requisitioned_by_me: how much of THIS item's Qty the CALLING user has already
-      // put into their own active entries — lets the User Entry Form show/cap the
-      // remaining Requisitioned Qty available to them for each item (req_qty is the
-      // item's total from the imported Excel, shared across the sheet; consumption is
-      // tracked per user, per the app's Requisitioned Qty splitting feature).
-      const items = await queryDB(
-        `SELECT bi.*,
-           (SELECT COALESCE(SUM(e.requisitioned_qty), 0) FROM entries e
-              WHERE e.budget_item_id = bi.id AND e.created_by = ? AND e.deleted_at IS NULL) AS requisitioned_by_me
-         FROM budget_items bi WHERE bi.budget_id = ? ORDER BY bi.id ASC`,
-        [req.user.id, req.params.id]
-      );
-      res.json(items);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Look up the imported "Description of Materials" for a given MRF/MPR No, so the User
-  // Entry Form can auto-fill Item Name the moment an MPR No is selected. Open to any
-  // authenticated user (not admin-only) since this is used from the User Entry Form.
-  // If the same MRF No was imported more than once, the most recently imported row wins.
-  app.get("/api/budget-items/lookup", authenticateToken, async (req, res) => {
-    try {
-      const mprNo = String(req.query.mpr_no || "").trim();
-      if (!mprNo) return res.json({ description: null });
-      const rows = await queryDB(
-        "SELECT description FROM budget_items WHERE LOWER(mrf_no) = LOWER(?) ORDER BY id DESC LIMIT 1",
-        [mprNo]
-      );
-      res.json({ description: rows.length > 0 ? rows[0].description : null });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // "Submit Budget" — a User marks a Budget as finished once they've entered every Job
-  // they intend to under it. Recorded per (budget_id, user_id): after this, POST
-  // /api/entries rejects any further entries from THIS user under THIS budget. It does
-  // not affect other users still working on the same Budget, and it's irreversible from
-  // the User side (only an Admin deleting the Budget clears it).
-  app.post("/api/budgets/:id/submit", authenticateToken, requireBudgetModuleAccess, async (req: any, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      const already = await queryDB("SELECT * FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [
-        budgetId,
-        req.user.id
-      ]);
-      if (already.length > 0) {
-        return res.json({ success: true, already_submitted: true });
-      }
-
-      // Block submitting an empty Budget as "finished" — this user must have created
-      // at least one entry under this Budget first. Enforced here too (not just a
-      // disabled button in the UI) so it can't be bypassed via a direct API call.
-      const ownEntryRows = await queryDB("SELECT id FROM entries WHERE budget_id = ? AND created_by = ? LIMIT 1", [
-        budgetId,
-        req.user.id
-      ]);
-      if (ownEntryRows.length === 0) {
-        return res.status(400).json({
-          error: "You haven't added any entries to this Budget yet. Add at least one MPR entry before submitting."
-        });
-      }
-
-      await queryDB("INSERT INTO budget_submissions (budget_id, user_id) VALUES (?, ?)", [budgetId, req.user.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to submit budget" });
-    }
-  });
-
-  // Final Submit ONE Job — only that Job's entries lock for this user; the
-  // Budget's other Jobs stay open. Needs at least one of the user's own active
-  // entries in the Job.
-  app.post("/api/jobs/:id/submit", authenticateToken, requireBudgetModuleAccess, async (req: any, res) => {
-    try {
-      const jobId = Number(req.params.id);
-      const jobs = await queryDB("SELECT id, budget_id, job_no FROM jobs WHERE id = ?", [jobId]);
-      if (jobs.length === 0) return res.status(404).json({ error: "Job not found" });
-      const job = jobs[0];
-      const own = await queryDB("SELECT id FROM entries WHERE job_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1", [
-        jobId,
-        req.user.id
-      ]);
-      if (own.length === 0) return res.status(400).json({ error: "You have no entries in this Job to submit." });
-      const budgetDone = job.budget_id
-        ? await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [job.budget_id, req.user.id])
-        : [];
-      const already = await queryDB("SELECT id FROM job_submissions WHERE job_id = ? AND user_id = ?", [jobId, req.user.id]);
-      if (budgetDone.length > 0 || already.length > 0) return res.json({ success: true, already_submitted: true });
-      await queryDB("INSERT INTO job_submissions (job_id, budget_id, user_id) VALUES (?, ?, ?)", [jobId, job.budget_id || null, req.user.id]);
-      res.json({ success: true, job_no: job.job_no });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to submit the Job" });
-    }
-  });
-
-  // List everyone who has Final Submitted a given Budget (Admin-only) — feeds the
-  // "Submissions" panel on the Data Import page, which is where the manual unlock
-  // button below lives. active_entry_count is shown alongside each name so the
-  // Admin can see at a glance whether a user's submission still has entries behind
-  // it (normal) or is already empty (would auto-unlock the moment any of their
-  // entries got deleted — see unlockBudgetSubmissionIfEmpty in EntriesRoutes.ts —
-  // but isn't wrong to leave alone either, hence the manual override existing too).
-  app.get(
-    "/api/budgets/:id/submissions",
-    authenticateToken,
-    requireAdmin,
-    requireModule("imports"),
-    async (req, res) => {
-      try {
-        const budgetId = Number(req.params.id);
-        const rows = await queryDB(
-          `SELECT bs.user_id, bs.submitted_at, u.name AS user_name,
-             (SELECT COUNT(*) FROM entries e
-                WHERE e.budget_id = bs.budget_id AND e.created_by = bs.user_id AND e.deleted_at IS NULL
-             ) AS active_entry_count
-           FROM budget_submissions bs
-           JOIN users u ON u.id = bs.user_id
-           WHERE bs.budget_id = ?
-           ORDER BY bs.submitted_at DESC`,
-          [budgetId]
-        );
-        const jobRows = await queryDB(
-          `SELECT js.user_id, js.job_id, js.submitted_at, u.name AS user_name, j.job_no,
-             (SELECT COUNT(*) FROM entries e
-                WHERE e.job_id = js.job_id AND e.created_by = js.user_id AND e.deleted_at IS NULL
-             ) AS active_entry_count
-           FROM job_submissions js
-           JOIN users u ON u.id = js.user_id
-           JOIN jobs j ON j.id = js.job_id
-           WHERE js.budget_id = ?
-           ORDER BY js.submitted_at DESC`,
-          [budgetId]
-        );
-        res.json([
-          ...rows.map((r: any) => ({ ...r, kind: "budget", job_id: null, job_no: null, active_entry_count: Number(r.active_entry_count) })),
-          ...jobRows.map((r: any) => ({ ...r, kind: "job", active_entry_count: Number(r.active_entry_count) }))
-        ]);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message || "Failed to load Budget submissions" });
-      }
-    }
-  );
-
-  // Manual "Unlock Submission" (Admin-only) — lifts a single user's Final Submit
-  // lock on this Budget regardless of whether they still have active entries under
-  // it, for whenever the Admin wants to let someone back in to add/fix entries
-  // without waiting on (or instead of) the automatic unlock above. Same effect as
-  // that automatic path: just removing the budget_submissions row.
-  app.delete(
-    "/api/budgets/:id/submissions/:userId",
-    authenticateToken,
-    requireAdmin,
-    requireModule("imports"),
-    async (req, res) => {
-      try {
-        const budgetId = Number(req.params.id);
-        const userId = Number(req.params.userId);
-        // ?job_id= unlocks that one Job's Final Submit; without it, the whole Budget's.
-        const jobId = Number(req.query.job_id) || null;
-        if (jobId) await queryDB("DELETE FROM job_submissions WHERE job_id = ? AND user_id = ? AND budget_id = ?", [jobId, userId, budgetId]);
-        else await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message || "Failed to unlock this Budget submission" });
-      }
-    }
-  );
-
-  // "Approve & Calculate" — Admin action per Budget. Matches every one of this Budget's
-  // MPR entries against the Rate File (Item Name + Specification -> Rate, Item Name ->
-  // Materials Category), computes Amount = Rate x Req. Qty, and writes the result onto
-  // each entry. Re-runnable any time (e.g. after the Admin updates the Rate File to fill
-  // in previously-missing items) — it always recomputes from scratch using whatever is
-  // currently in rate_list / material_categories, it never merges with old values.
-  app.post("/api/budgets/:id/approve", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const budgetRows = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      // Blank-ish placeholder text ("NONE", "N/A", "-", etc. — common in these Excel
-      // sheets where a real Excel-blank wasn't used) normalizes to the SAME empty
-      // string as an actual blank cell, so "Specification: NONE" matches a Rate row
-      // whose Specification cell is genuinely empty.
-      const BLANK_SPEC_WORDS = new Set(["none", "n/a", "na", "n.a", "n.a.", "nil", "-", "--", "nill"]);
-      const norm = (v: any) => {
-        if (v === null || v === undefined) return "";
-        const s = String(v).trim().toLowerCase().replace(/\s+/g, " ");
-        return BLANK_SPEC_WORDS.has(s) ? "" : s;
-      };
-
-      let entryRows: any[];
-      let rateRows: any[];
-      let categoryRows: any[];
-
-      if (isMySQLConnected && dbPool) {
-        // Resolve each entry back to its source Budget Excel row the same way GET
-        // /api/entries does: prefer budget_item_id, fall back to an MRF No +
-        // Description text match for entries created before that column existed.
-        const [rows]: any = await dbPool.execute(
-          `
-          SELECT e.id, e.item_name,
-            bi.description AS bi_description, bi.specification AS bi_specification, bi.req_qty AS bi_req_qty
-          FROM entries e
-          JOIN mpr_numbers m ON e.mpr_id = m.id
-          LEFT JOIN budget_items bi ON bi.id = COALESCE(
-            e.budget_item_id,
-            (
-              SELECT bi2.id FROM budget_items bi2
-              WHERE bi2.budget_id = e.budget_id AND LOWER(TRIM(bi2.mrf_no)) = LOWER(TRIM(m.mpr_no))
-                AND LOWER(TRIM(bi2.description)) = LOWER(TRIM(e.item_name))
-              ORDER BY bi2.id ASC LIMIT 1
-            )
-          )
-          WHERE e.budget_id = ? AND e.deleted_at IS NULL
-          `,
-          [budgetId]
-        );
-        entryRows = rows;
-        const [r]: any = await dbPool.execute("SELECT materials_name, unit, rate, specification FROM rate_list");
-        rateRows = r;
-        const [c]: any = await dbPool.execute("SELECT head, sub1, sub2, sub3, details, sector FROM material_categories");
-        categoryRows = c;
-      } else {
-        const budgetItemsById = new Map(memoryDb.budget_items.map((bi: any) => [bi.id, bi]));
-        entryRows = memoryDb.entries
-          .filter((e: any) => e.budget_id === budgetId && !e.deleted_at)
-          .map((e: any) => {
-            const bi = e.budget_item_id ? budgetItemsById.get(e.budget_item_id) : null;
-            return { id: e.id, item_name: e.item_name, bi_description: bi?.description, bi_specification: bi?.specification, bi_req_qty: bi?.req_qty };
-          });
-        rateRows = memoryDb.rate_list;
-        categoryRows = memoryDb.material_categories;
-      }
-
-      if (entryRows.length === 0) {
-        return res.status(400).json({ error: "This Budget has no MPR entries to calculate yet." });
-      }
-
-      // Keyed by normalized Item Name -> every {specification, rate} row for that name,
-      // so an unambiguous single match can be told apart from one that genuinely needs
-      // an exact Specification match (see the loop below).
-      const rateByName = new Map<string, { specification: string; rate: number }[]>();
-      for (const r of rateRows) {
-        const key = norm(r.materials_name);
-        if (!key) continue;
-        const list = rateByName.get(key) || [];
-        list.push({ specification: norm(r.specification), rate: Number(r.rate) });
-        rateByName.set(key, list);
-      }
-
-      const categoryByDetails = new Map<string, { head: string; sub1: string; sub2: string; sub3: string; sector: string }>();
-      for (const c of categoryRows) {
-        const key = norm(c.details);
-        if (!key || categoryByDetails.has(key)) continue; // first row wins on duplicate Details
-        categoryByDetails.set(key, { head: c.head, sub1: c.sub1, sub2: c.sub2, sub3: c.sub3, sector: c.sector });
-      }
-
-      const missingRateItems = new Map<string, { item_name: string; specification: string }>();
-      const missingCategoryItems = new Map<string, string>();
-      let matchedCount = 0;
-      const updates: { id: number; matchedRate: number | null; amount: number | null; category: any }[] = [];
-
-      for (const row of entryRows) {
-        const itemName = row.bi_description || row.item_name;
-        const spec = row.bi_specification;
-        const reqQty =
-          row.bi_req_qty !== null && row.bi_req_qty !== undefined && String(row.bi_req_qty).trim() !== ""
-            ? Number(row.bi_req_qty)
-            : null;
-
-        const nameKey = norm(itemName);
-        const specKey = norm(spec);
-        const candidates = rateByName.get(nameKey) || [];
-        // Exact Item Name + Specification match only. If the Specification doesn't
-        // match any row for this Item Name — even if other rows share the same
-        // Item Name with a DIFFERENT Specification/Rate — this is treated as "not
-        // found" and goes to the Missing Rate list, never guessed from an unrelated
-        // Specification's rate (several items in the real Rate File have wildly
-        // different rates per Specification for the same Item Name).
-        //
-        // If MORE THAN ONE Rate row shares this exact Item Name + Specification (a
-        // duplicate/undifferentiated entry in the Rate sheet itself, e.g. two "Local
-        // Sand" rows both with a blank Specification but different Rates), that's
-        // just as unresolvable as no match at all — silently picking the first one
-        // would be an arbitrary guess, so this also goes to Missing Rate for the
-        // Admin to de-duplicate in the Rate File.
-        const matchingSpecRows = candidates.filter((c) => c.specification === specKey);
-        const matchedRate = matchingSpecRows.length === 1 ? matchingSpecRows[0].rate : null;
-        const category = categoryByDetails.get(nameKey) || null;
-        const amount = matchedRate !== null && reqQty !== null && Number.isFinite(reqQty) ? matchedRate * reqQty : null;
-
-        if (matchedRate === null) {
-          const dedupeKey = `${nameKey}|||${specKey}`;
-          if (!missingRateItems.has(dedupeKey)) {
-            missingRateItems.set(dedupeKey, { item_name: itemName || "(blank)", specification: spec || "" });
-          }
-        } else {
-          matchedCount++;
-        }
-        if (!category && !missingCategoryItems.has(nameKey)) {
-          missingCategoryItems.set(nameKey, itemName || "(blank)");
-        }
-
-        updates.push({ id: row.id, matchedRate, amount, category });
-      }
-
-      if (isMySQLConnected && dbPool) {
-        for (const u of updates) {
-          await dbPool.execute(
-            `UPDATE entries SET matched_rate = ?, computed_amount = ?, category_head = ?, category_sub1 = ?, category_sub2 = ?, category_sub3 = ?, category_sector = ?, rate_calculated_at = NOW() WHERE id = ?`,
-            [
-              u.matchedRate,
-              u.amount,
-              u.category?.head || null,
-              u.category?.sub1 || null,
-              u.category?.sub2 || null,
-              u.category?.sub3 || null,
-              u.category?.sector || null,
-              u.id
-            ]
-          );
-        }
-        await dbPool.execute(`UPDATE budgets SET rate_approved_at = NOW(), rate_approved_by = ? WHERE id = ?`, [
-          req.user.id,
-          budgetId
-        ]);
-      } else {
-        const updateById = new Map(updates.map((u) => [u.id, u]));
-        memoryDb.entries = memoryDb.entries.map((e: any) => {
-          const u = updateById.get(e.id);
-          if (!u) return e;
-          return {
-            ...e,
-            matched_rate: u.matchedRate,
-            computed_amount: u.amount,
-            category_head: u.category?.head || null,
-            category_sub1: u.category?.sub1 || null,
-            category_sub2: u.category?.sub2 || null,
-            category_sub3: u.category?.sub3 || null,
-            category_sector: u.category?.sector || null,
-            rate_calculated_at: new Date()
-          };
-        });
-        const b = memoryDb.budgets.find((x: any) => x.id === budgetId);
-        if (b) {
-          b.rate_approved_at = new Date();
-          b.rate_approved_by = req.user.id;
-        }
-      }
-
-      res.json({
-        success: true,
-        total_entries: entryRows.length,
-        matched_rate_count: matchedCount,
-        missing_rate: Array.from(missingRateItems.values()),
-        missing_category: Array.from(missingCategoryItems.values())
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to approve & calculate this Budget" });
-    }
-  });
-
-  // "Remove Unused Rows" — a separate, non-destructive action alongside the
-  // real Delete Budget below: it only removes this Budget's UNUSED imported
-  // Excel rows (budget_items with zero entries pointing at them), never the
-  // Budget itself or any row a User has already submitted an MPR Entry
-  // against. A row is "used" iff at least one still-active (not soft-
-  // deleted, Job Recycle) entries row has budget_item_id pointing at it —
-  // every entry created since budget_item_id existed sets this
-  // (EntriesRoutes.ts), so this is an exact per-row check, not a heuristic.
-  // budget_submissions (the per-user Final Submit lock) is left untouched
-  // too; an Admin can always come back and "Import more rows into this
-  // budget" again later — see POST /api/budgets/:id/import's merge-on-match
-  // logic for how a re-import avoids creating duplicates of what's kept here.
-  //
-  // The Approved MPR Numbers List (mpr_numbers) is NOT touched for an MRF No
-  // that's still on a kept (used) row, or still imported into ANY other
-  // Budget, or still referenced by any entry anywhere in the system — mpr_no
-  // is globally unique and legitimately reused across Budgets/periods.
-  app.post("/api/budgets/:id/remove-unused-items", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      const budgetId = req.params.id;
-      const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      const items = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
-
-      const deletedIds: number[] = [];
-      const keptIds: number[] = [];
-      for (const item of items) {
-        const usageRows = await queryDB(
-          "SELECT COUNT(*) as cnt FROM entries WHERE budget_item_id = ? AND deleted_at IS NULL",
-          [item.id]
-        );
-        if ((usageRows[0]?.cnt || 0) > 0) {
-          keptIds.push(item.id);
-        } else {
-          deletedIds.push(item.id);
-        }
-      }
-
-      // Snapshot which MPR Numbers the rows actually being removed touch,
-      // BEFORE those budget_items rows are deleted — this is the candidate
-      // list to clean up afterwards (only the ones that turn out orphaned).
-      // An MRF No that also appears on a KEPT row is never a candidate.
-      const keptMrfNos = new Set(
-        items.filter((it: any) => keptIds.includes(it.id) && it.mrf_no).map((it: any) => String(it.mrf_no).trim().toLowerCase())
-      );
-      const candidateMrfNos = Array.from(
-        new Set(
-          items
-            .filter((it: any) => deletedIds.includes(it.id) && it.mrf_no)
-            .map((it: any) => String(it.mrf_no).trim().toLowerCase())
-        )
-      ).filter((mrfNo) => !keptMrfNos.has(mrfNo));
-
-      for (const id of deletedIds) {
-        await queryDB("DELETE FROM budget_items WHERE id = ?", [id]);
-      }
-
-      // Remove each candidate MPR No from the Approved list ONLY if nothing
-      // else in the system still points to it — another Budget's
-      // budget_items, or an entry (active or still sitting in the Job
-      // Recycle bin) under any Budget.
-      for (const mrfNo of candidateMrfNos) {
-        const stillInBudgetItems = await queryDB(
-          "SELECT COUNT(*) as cnt FROM budget_items WHERE LOWER(mrf_no) = LOWER(?)",
-          [mrfNo]
-        );
-        if ((stillInBudgetItems[0]?.cnt || 0) > 0) continue;
-
-        const mprRows = await queryDB("SELECT id FROM mpr_numbers WHERE LOWER(mpr_no) = LOWER(?)", [mrfNo]);
-        if (mprRows.length === 0) continue;
-        const mprId = mprRows[0].id;
-
-        const stillInEntries = await queryDB("SELECT COUNT(*) as cnt FROM entries WHERE mpr_id = ?", [mprId]);
-        if ((stillInEntries[0]?.cnt || 0) > 0) continue;
-
-        await queryDB("DELETE FROM mpr_numbers WHERE id = ?", [mprId]);
-      }
-
-      res.json({ success: true, deleted_count: deletedIds.length, kept_count: keptIds.length });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Deleting a Budget wipes out EVERYTHING created under it — not just the imported
-  // Budget Excel rows (budget_items) but every MPR Entry and Job a User submitted
-  // against it too. Without this, those entries/jobs used to survive with budget_id
-  // set to NULL (orphaned but still visible in Job Entry Details / Admin reports) —
-  // deleting the Budget is meant to be a full, permanent wipe of that relation. This
-  // is deliberately separate from POST /api/budgets/:id/remove-unused-items above
-  // (a non-destructive cleanup an Admin reaches for first) — this is the real,
-  // no-going-back delete, its own separate button in the Admin UI.
-  //
-  // The Approved MPR Numbers List (mpr_numbers) is NOT simply wiped alongside it,
-  // though — that table has no budget_id column at all: mpr_no is GLOBALLY unique,
-  // and the same MRF No can legitimately be imported into more than one Budget's
-  // Excel (re-used across periods). So after the cascade above, we only remove the
-  // MPR Numbers that came in from THIS Budget's import AND are not referenced by any
-  // other Budget's imported rows or any other entry left in the system — an MRF No
-  // still in use elsewhere is left alone.
-  app.delete("/api/budgets/:id", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      const budgetId = req.params.id;
-      const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      // Snapshot which MPR Numbers this Budget's imported Excel rows touch, BEFORE
-      // those budget_items rows are deleted below — this is the candidate list to
-      // clean up afterwards (only the ones that turn out to be orphaned).
-      const mrfRows = await queryDB(
-        "SELECT mrf_no FROM budget_items WHERE budget_id = ? AND mrf_no IS NOT NULL AND mrf_no <> ''",
-        [budgetId]
-      );
-      const candidateMrfNos = Array.from(
-        new Set(mrfRows.map((r: any) => String(r.mrf_no).trim().toLowerCase()).filter(Boolean))
-      );
-
-      // Order matters: entries reference jobs/budget_items/budgets, so entries go
-      // first, then jobs, then the imported Excel rows, then the submission locks,
-      // and finally the Budget itself.
-      await queryDB("DELETE FROM entries WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM job_submissions WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM jobs WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budget_items WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budget_submissions WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budgets WHERE id = ?", [budgetId]);
-
-      // Now that this Budget's own rows are gone, remove each candidate MPR No from
-      // the Approved list ONLY if nothing else in the system still points to it —
-      // another Budget's budget_items, or an entry (active or still sitting in the
-      // Job Recycle bin) under a different Budget.
-      for (const mrfNo of candidateMrfNos) {
-        const stillInBudgetItems = await queryDB(
-          "SELECT COUNT(*) as cnt FROM budget_items WHERE LOWER(mrf_no) = LOWER(?)",
-          [mrfNo]
-        );
-        if ((stillInBudgetItems[0]?.cnt || 0) > 0) continue;
-
-        const mprRows = await queryDB("SELECT id FROM mpr_numbers WHERE LOWER(mpr_no) = LOWER(?)", [mrfNo]);
-        if (mprRows.length === 0) continue;
-        const mprId = mprRows[0].id;
-
-        const stillInEntries = await queryDB("SELECT COUNT(*) as cnt FROM entries WHERE mpr_id = ?", [mprId]);
-        if ((stillInEntries[0]?.cnt || 0) > 0) continue;
-
-        await queryDB("DELETE FROM mpr_numbers WHERE id = ?", [mprId]);
-      }
-
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Import the Rate File — a reference/lookup Excel with two sheets: "Rate" (materials
-  // price list) and "Materials Category" (Head/Sub-1/Sub-2/Sub-3 classification tree).
-  // The client parses both sheets and posts the already-mapped rows here. Each
-  // import fully REPLACES the previous data (delete-then-insert) rather than merging,
-  // since this is always re-uploaded as a complete sheet, not edited row-by-row.
-  app.post("/api/rate-file/import", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const { rate_rows, category_rows, file_base64, file_name, file_mimetype } = req.body;
-      if ((!Array.isArray(rate_rows) || rate_rows.length === 0) && (!Array.isArray(category_rows) || category_rows.length === 0)) {
-        return res.status(400).json({ error: "No rows found in either sheet of the uploaded Excel file." });
-      }
-
-      const field = (v: any) => (v !== undefined && v !== null && String(v).trim() !== "" ? String(v).trim() : null);
-      const numOrNull = (v: any) => {
-        if (v === undefined || v === null || String(v).trim() === "") return null;
-        const n = Number(v);
-        return Number.isFinite(n) ? n : null;
-      };
-
-      const rateRecords = (rate_rows || [])
-        .map((r: any) => ({
-          materials_name: field(r.materials_name),
-          unit: field(r.unit),
-          rate: numOrNull(r.rate),
-          specification: field(r.specification),
-          assigned_person: field(r.assigned_person),
-          remarks: field(r.remarks)
-        }))
-        .filter((r: any) => r.materials_name); // Materials Name is the only required field in this sheet
-
-      const categoryRecords = (category_rows || [])
-        .map((r: any) => ({
-          sl_no: numOrNull(r.sl_no),
-          head: field(r.head),
-          sub1: field(r.sub1),
-          sub2: field(r.sub2),
-          sub3: field(r.sub3),
-          details: field(r.details),
-          sector: field(r.sector)
-        }))
-        .filter((r: any) => r.head || r.sub1 || r.sub2 || r.sub3 || r.details); // skip fully blank rows
-
-      if (isMySQLConnected && dbPool) {
-        // Only replace rows that came from a previous Excel import — a manually
-        // entered rate (is_manual = 1, added via "No rate match" -> manual entry)
-        // survives this re-import instead of being wiped out.
-        await dbPool.execute("DELETE FROM rate_list WHERE is_manual = 0");
-        await bulkInsert(
-          "rate_list",
-          ["materials_name", "unit", "rate", "specification", "assigned_person", "remarks"],
-          rateRecords.map((r: any) => [r.materials_name, r.unit, r.rate, r.specification, r.assigned_person, r.remarks])
-        );
-
-        await dbPool.execute("DELETE FROM material_categories");
-        await bulkInsert(
-          "material_categories",
-          ["sl_no", "head", "sub1", "sub2", "sub3", "details", "sector"],
-          categoryRecords.map((r: any) => [r.sl_no, r.head, r.sub1, r.sub2, r.sub3, r.details, r.sector])
-        );
-
-        if (file_base64 && typeof file_base64 === "string") {
-          try {
-            const fileBuffer = Buffer.from(file_base64, "base64");
-            await dbPool.execute(
-              `INSERT INTO rate_file_meta (id, original_filename, file_mimetype, file_data, imported_at)
-               VALUES (1, ?, ?, ?, NOW())
-               ON DUPLICATE KEY UPDATE original_filename = VALUES(original_filename),
-                 file_mimetype = VALUES(file_mimetype), file_data = VALUES(file_data), imported_at = NOW()`,
-              [
-                String(file_name || "Rate_File.xlsx").slice(0, 255),
-                String(file_mimetype || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-                fileBuffer
-              ]
-            );
-          } catch (fileErr: any) {
-            console.warn("Failed to save original Rate File: " + fileErr.message);
-          }
-        }
-      } else {
-        const manualRows = memoryDb.rate_list.filter((r: any) => r.is_manual);
-        memoryDb.rate_list = [...manualRows, ...rateRecords.map((r: any, i: number) => ({ id: manualRows.length + i + 1, is_manual: false, ...r }))];
-        memoryDb.material_categories = categoryRecords.map((r: any, i: number) => ({ id: i + 1, ...r }));
-        if (file_base64) {
-          memoryDb.rate_file_meta = {
-            original_filename: file_name || "Rate_File.xlsx",
-            file_mimetype: file_mimetype || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            imported_at: new Date()
-          };
-        }
-      }
-
-      res.json({
-        success: true,
-        rate_inserted: rateRecords.length,
-        category_inserted: categoryRecords.length
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to import the Rate file" });
-    }
-  });
-
-  // Current Rate File status — row counts + last-imported filename/date — so the Admin
-  // Panel can show what's already saved without re-importing.
-  app.get("/api/rate-file/summary", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      if (isMySQLConnected && dbPool) {
-        const [rateCountRows]: any = await dbPool.execute("SELECT COUNT(*) as cnt FROM rate_list");
-        const [catCountRows]: any = await dbPool.execute("SELECT COUNT(*) as cnt FROM material_categories");
-        const [metaRows]: any = await dbPool.execute(
-          "SELECT original_filename, imported_at FROM rate_file_meta WHERE id = 1"
-        );
-        res.json({
-          rate_count: rateCountRows[0]?.cnt || 0,
-          category_count: catCountRows[0]?.cnt || 0,
-          original_filename: metaRows[0]?.original_filename || null,
-          imported_at: metaRows[0]?.imported_at || null
-        });
-      } else {
-        res.json({
-          rate_count: memoryDb.rate_list.length,
-          category_count: memoryDb.material_categories.length,
-          original_filename: memoryDb.rate_file_meta?.original_filename || null,
-          imported_at: memoryDb.rate_file_meta?.imported_at || null
-        });
-      }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load Rate File summary" });
-    }
-  });
-
-  // Full Rate list (materials price list) — for the Admin "View" modal.
-  app.get("/api/rate-file/rate-list", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      if (isMySQLConnected && dbPool) {
-        const rows = await queryDB("SELECT * FROM rate_list ORDER BY id ASC");
-        res.json(rows);
-      } else {
-        res.json(memoryDb.rate_list);
-      }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load the Rate list" });
-    }
-  });
-
-  // Manually add/update a Rate — used from the "Approve & Calculate" -> Missing Rate
-  // review list, so the Admin can fix a "No rate match" right there in the app instead
-  // of always having to go edit the Excel and re-import. Upserts on exact Item Name +
-  // Specification (case/whitespace-insensitive) so re-saving the same item just updates
-  // its rate rather than piling up duplicate rows. Marked is_manual so a future Rate
-  // File re-import never wipes it out.
-  app.post("/api/rate-list/manual", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const materials_name = String(req.body.materials_name || "").trim();
-      const specification = req.body.specification !== undefined && req.body.specification !== null
-        ? String(req.body.specification).trim()
-        : "";
-      const rate = Number(req.body.rate);
-
-      if (!materials_name) return res.status(400).json({ error: "Item Name is required." });
-      if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: "A valid, non-negative Rate is required." });
-
-      const norm = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
-      const nameKey = norm(materials_name);
-      const specKey = norm(specification);
-
-      if (isMySQLConnected && dbPool) {
-        const [existingRows]: any = await dbPool.execute(
-          "SELECT id FROM rate_list WHERE LOWER(TRIM(materials_name)) = ? AND LOWER(TRIM(COALESCE(specification, ''))) = ? AND is_manual = 1",
-          [nameKey, specKey]
-        );
-        if (existingRows.length > 0) {
-          await dbPool.execute("UPDATE rate_list SET rate = ?, added_by = ? WHERE id = ?", [
-            rate,
-            req.user.id,
-            existingRows[0].id
-          ]);
-        } else {
-          await dbPool.execute(
-            "INSERT INTO rate_list (materials_name, unit, rate, specification, assigned_person, remarks, is_manual, added_by) VALUES (?, NULL, ?, ?, NULL, 'Manually entered by Admin', 1, ?)",
-            [materials_name, rate, specification || null, req.user.id]
-          );
-        }
-      } else {
-        const existing = memoryDb.rate_list.find(
-          (r: any) => r.is_manual && norm(String(r.materials_name || "")) === nameKey && norm(String(r.specification || "")) === specKey
-        );
-        if (existing) {
-          existing.rate = rate;
-          existing.added_by = req.user.id;
-        } else {
-          memoryDb.rate_list.push({
-            id: (memoryDb.rate_list.reduce((max: number, r: any) => Math.max(max, r.id || 0), 0)) + 1,
-            materials_name,
-            unit: null,
-            rate,
-            specification: specification || null,
-            assigned_person: null,
-            remarks: "Manually entered by Admin",
-            is_manual: true,
-            added_by: req.user.id
-          });
-        }
-      }
-
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to save the manual rate" });
-    }
-  });
-
-  // Full Materials Category tree — for the Admin "View" modal.
-  app.get("/api/rate-file/categories", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      if (isMySQLConnected && dbPool) {
-        const rows = await queryDB("SELECT * FROM material_categories ORDER BY id ASC");
-        res.json(rows);
-      } else {
-        res.json(memoryDb.material_categories);
-      }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load Materials Categories" });
-    }
-  });
-
-  // Import parsed Excel rows into a Budget.
-  // Expected Excel header: Sl.No. | Project Name | Req. No. | MRF No | Date |
-  // Description of Materials | Unit | Specification | Req. Qty | Purchase Order Qty |
-  // Received Qty | Balance Qty | Entry User | Aproved Date | App. User | Site Sup. Date
-  // (the client parses the .xlsx and posts already-mapped row objects here)
-  app.post("/api/budgets/:id/import", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const budgetRows = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      const { rows, file_base64, file_name, file_mimetype } = req.body;
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(400).json({ error: "No rows found in the uploaded Excel file" });
-      }
-
-      // Save the original Excel file itself against this Budget (overwrites any
-      // previously saved file, so it always reflects the most recently imported sheet).
-      if (file_base64 && typeof file_base64 === "string") {
-        try {
-          const fileBuffer = Buffer.from(file_base64, "base64");
-          await queryDB(
-            "UPDATE budgets SET original_filename = ?, file_mimetype = ?, file_data = ? WHERE id = ?",
-            [
-              String(file_name || `budget_${budgetId}.xlsx`).slice(0, 255),
-              String(file_mimetype || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-              fileBuffer,
-              budgetId
-            ]
-          );
-        } catch (fileErr: any) {
-          console.warn("Failed to save original Excel file for budget " + budgetId + ": " + fileErr.message);
-        }
-      }
-
-      let itemsInserted = 0;
-      let itemsReplaced = 0;
-      let mprAdded = 0;
-      let mprAlreadyExisting = 0;
-      let projectsAdded = 0;
-      let projectsAlreadyExisting = 0;
-
-      // Re-importing into an already-Published Budget (the "Import more rows
-      // into this budget" button — this route has no is_published guard) must
-      // not create duplicate rows for the same real-world line item, and must
-      // not orphan any MPR Entry already submitted against an existing row.
-      // So: match each incoming row against this Budget's EXISTING rows on
-      // (Project Name, MRF No, Description of Materials, Specification) —
-      // case/whitespace-insensitive — and UPDATE that row IN PLACE (same id,
-      // so entries.budget_item_id pointing at it stays valid) instead of
-      // inserting a second copy. Only a row with no match on all four fields
-      // is a genuinely new line item and gets INSERTed.
-      const matchKey = (project_name: string, mrf_no: string, description: string, specification: string) =>
-        `${project_name.toLowerCase()}|${mrf_no.toLowerCase()}|${description.toLowerCase()}|${specification.toLowerCase()}`;
-      const existingItems = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
-      const existingByKey = new Map<string, any>(
-        existingItems.map((it: any) => [
-          matchKey(String(it.project_name || ""), String(it.mrf_no || ""), String(it.description || ""), String(it.specification || "")),
-          it
-        ])
-      );
-
-      for (const r of rows) {
-        const field = (v: any) => (v != null ? String(v).trim() : "");
-        const sl_no = field(r.sl_no);
-        const project_name = field(r.project_name);
-        const req_no = field(r.req_no);
-        const mrf_no = field(r.mrf_no);
-        const item_date = field(r.item_date);
-        const description = field(r.description);
-        const unit = field(r.unit);
-        const specification = field(r.specification);
-        const req_qty = field(r.req_qty);
-        const po_qty = field(r.po_qty);
-        const received_qty = field(r.received_qty);
-        const balance_qty = field(r.balance_qty);
-        const entry_user = field(r.entry_user);
-        const approved_date = field(r.approved_date);
-        const app_user = field(r.app_user);
-        const site_sup_date = field(r.site_sup_date);
-
-        // Skip fully blank rows
-        if (!project_name && !req_no && !mrf_no && !description) continue;
-
-        const key = matchKey(project_name, mrf_no, description, specification);
-        const existing = existingByKey.get(key);
-        if (existing) {
-          await queryDB(
-            `UPDATE budget_items
-                SET sl_no = ?, project_name = ?, req_no = ?, mrf_no = ?, item_date = ?, description = ?, unit = ?, specification = ?,
-                    req_qty = ?, po_qty = ?, received_qty = ?, balance_qty = ?, entry_user = ?, approved_date = ?, app_user = ?, site_sup_date = ?
-              WHERE id = ?`,
-            [
-              sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
-              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date,
-              existing.id
-            ]
-          );
-          itemsReplaced++;
-        } else {
-          const result = await queryDB(
-            `INSERT INTO budget_items
-             (budget_id, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
-              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              budgetId, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
-              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date
-            ]
-          );
-          itemsInserted++;
-          // Same file can list the same line item twice (or a later row can
-          // match an earlier row just inserted this batch) — keep the map
-          // current so later rows in THIS import still match it instead of
-          // creating a second duplicate.
-          existingByKey.set(key, { id: result.insertId });
-        }
-
-        if (project_name) {
-          const pr = await findOrCreateProject(project_name, req.user.id);
-          if (pr.created) projectsAdded++;
-          else if (pr.id) projectsAlreadyExisting++;
-        }
-        if (mrf_no) {
-          const mr = await findOrCreateMpr(mrf_no, req.user.id);
-          if (mr.created) mprAdded++;
-          else if (mr.id) mprAlreadyExisting++;
-        }
-      }
-
-      // "<Budget> - MPR Updated up to <date>" as a draft notice, opened for
-      // editing on the import page (BudgetNoticeDraft.ts) — never fails the import.
-      const noticeDraft = itemsInserted + itemsReplaced
-        ? await draftBudgetNotice(queryDB, createAlert, { budgetId, actorId: Number(req.user.id), today: todayInDhaka() }).catch((err: any) => {
-            console.warn("⚠️ Budget draft notice: " + err.message);
-            return null;
-          })
-        : null;
-      res.json({
-        success: true,
-        notice_draft: noticeDraft,
-        items_inserted: itemsInserted,
-        items_replaced: itemsReplaced,
-        mpr_added: mprAdded,
-        mpr_already_existing: mprAlreadyExisting,
-        projects_added: projectsAdded,
-        projects_already_existing: projectsAlreadyExisting
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to import Excel data" });
-    }
-  });
-
-  // Admin sets (or clears) the allowed Delivery Date window for a Budget, after it's
-  // been imported. Once set, every MPR Entry created/edited under this Budget must
-  // have a Delivery Date inside [delivery_date_from, delivery_date_to] (both inclusive)
-  // — enforced here on write, and in POST/PUT /api/entries so it can't be bypassed via
-  // a direct API call. Passing both as null/empty clears the restriction.
-  app.put("/api/budgets/:id/delivery-range", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const budgetId = Number(req.params.id);
-      const budgetRows = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
-      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
-
-      let { delivery_date_from, delivery_date_to } = req.body;
-      delivery_date_from = delivery_date_from ? String(delivery_date_from).trim() : null;
-      delivery_date_to = delivery_date_to ? String(delivery_date_to).trim() : null;
-
-      const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-      if (delivery_date_from && !dateRe.test(delivery_date_from)) {
-        return res.status(400).json({ error: "Invalid Delivery Date From." });
-      }
-      if (delivery_date_to && !dateRe.test(delivery_date_to)) {
-        return res.status(400).json({ error: "Invalid Delivery Date To." });
-      }
-      if (delivery_date_from && delivery_date_to && delivery_date_from > delivery_date_to) {
-        return res.status(400).json({ error: "Delivery Date From must be on or before Delivery Date To." });
-      }
-
-      await queryDB("UPDATE budgets SET delivery_date_from = ?, delivery_date_to = ? WHERE id = ?", [
-        delivery_date_from,
-        delivery_date_to,
-        budgetId
-      ]);
-
-      res.json({ success: true, delivery_date_from, delivery_date_to });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to set Delivery Date range" });
-    }
-  });
-
-  // --- Delivery Date Conditions ("minimum lead time" rule) ---
-  // Admin Panel -> PEPM Manage -> Data Import -> Condition Set. See
-  // deliveryDateConditions.ts for the resolver used by EntriesRoutes.ts's
-  // actual enforcement; these are just the CRUD/read endpoints behind the
-  // admin UI, plus one unrestricted read (below the admin-only block) that
-  // any authenticated account uses to grey out blocked dates on its own
-  // Delivery Date pickers.
-  app.get("/api/delivery-date-conditions", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      const rows = await queryDB(
-        `SELECT c.*,
-                CASE WHEN c.scope = 'project' THEN p.project_name
-                     WHEN c.scope = 'budget' THEN b.budget_name
-                     ELSE NULL END AS scope_name
-         FROM delivery_date_conditions c
-         LEFT JOIN projects p ON c.scope = 'project' AND p.id = c.scope_id
-         LEFT JOIN budgets b ON c.scope = 'budget' AND b.id = c.scope_id
-         ORDER BY c.condition_type, c.scope = 'global' DESC, c.scope, c.scope_id`
-      );
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Upserts the ONE Global row for a condition_type — always exists already
-  // (seeded in initDB()), so this is always an UPDATE in practice; INSERT ...
-  // ON DUPLICATE KEY covers a fresh/self-healed table too.
-  app.put("/api/delivery-date-conditions/global", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const { condition_type, enabled, min_lead_days, apply_to_admins } = req.body;
-      if (condition_type !== "entry" && condition_type !== "job_edit") {
-        return res.status(400).json({ error: "condition_type must be 'entry' or 'job_edit'" });
-      }
-      const days = Number(min_lead_days);
-      if (!Number.isInteger(days) || days < 0) {
-        return res.status(400).json({ error: "min_lead_days must be a non-negative whole number" });
-      }
-      await queryDB(
-        `INSERT INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled, updated_by)
-         VALUES (?, 'global', 0, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE min_lead_days = VALUES(min_lead_days), apply_to_admins = VALUES(apply_to_admins),
-           enabled = VALUES(enabled), updated_by = VALUES(updated_by)`,
-        [condition_type, days, apply_to_admins ? 1 : 0, enabled ? 1 : 0, req.user.id]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Creates/updates a Project or Budget override row (upsert on the same
-  // unique key the Global row above uses).
-  app.post("/api/delivery-date-conditions/override", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
-    try {
-      const { condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled } = req.body;
-      if (condition_type !== "entry" && condition_type !== "job_edit") {
-        return res.status(400).json({ error: "condition_type must be 'entry' or 'job_edit'" });
-      }
-      if (scope !== "project" && scope !== "budget") {
-        return res.status(400).json({ error: "scope must be 'project' or 'budget'" });
-      }
-      const id = Number(scope_id);
-      if (!id) return res.status(400).json({ error: "A Project/Budget must be selected" });
-      const days = Number(min_lead_days);
-      if (!Number.isInteger(days) || days < 0) {
-        return res.status(400).json({ error: "min_lead_days must be a non-negative whole number" });
-      }
-      const table = scope === "project" ? "projects" : "budgets";
-      const existsRows = await queryDB(`SELECT id FROM ${table} WHERE id = ?`, [id]);
-      if (existsRows.length === 0) {
-        return res.status(400).json({ error: `Selected ${scope === "project" ? "Project" : "Budget"} not found` });
-      }
-      await queryDB(
-        `INSERT INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE min_lead_days = VALUES(min_lead_days), apply_to_admins = VALUES(apply_to_admins),
-           enabled = VALUES(enabled), updated_by = VALUES(updated_by)`,
-        [condition_type, scope, id, days, apply_to_admins ? 1 : 0, enabled === false ? 0 : 1, req.user.id]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Removes a Project/Budget override entirely (a Global row can only ever be
-  // disabled/re-enabled above — deleting it isn't offered, since the resolver
-  // and this admin UI both assume exactly one Global row per condition_type
-  // always exists).
-  app.delete("/api/delivery-date-conditions/:id", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
-    try {
-      await queryDB("DELETE FROM delivery_date_conditions WHERE id = ? AND scope <> 'global'", [req.params.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Unrestricted (any authenticated account, no admin/module gate) — lets a
-  // Delivery Date picker on the New Job Entry / Add MPR / Job Edit forms
-  // grey out blocked dates for THIS account before it even attempts a
-  // submit, using the exact same resolver the server enforces with.
-  app.get("/api/delivery-date-conditions/effective", authenticateToken, async (req: any, res) => {
-    try {
-      const conditionType = req.query.type as DeliveryConditionType;
-      if (conditionType !== "entry" && conditionType !== "job_edit") {
-        return res.status(400).json({ error: "type must be 'entry' or 'job_edit'" });
-      }
-      const projectId = req.query.project_id ? Number(req.query.project_id) : null;
-      const budgetId = req.query.budget_id ? Number(req.query.budget_id) : null;
-      const minLeadDays = await resolveMinLeadDays(queryDB, conditionType, {
-        projectId,
-        budgetId,
-        userRole: req.user.role
-      });
-      res.json({
-        min_lead_days: minLeadDays,
-        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 4. Jobs & Duration
-  app.get("/api/jobs", authenticateToken, async (req, res) => {
-    try {
-      const jobs = await queryDB("SELECT * FROM jobs ORDER BY job_no ASC");
-      res.json(jobs);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/jobs/check/:jobNo", authenticateToken, async (req, res) => {
-    try {
-      const { jobNo } = req.params;
-      const jobs = await queryDB("SELECT * FROM jobs WHERE job_no = ?", [jobNo.trim()]);
-      if (jobs.length > 0) {
-        res.json({ exists: true, job: jobs[0] });
-      } else {
-        res.json({ exists: false });
-      }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
+  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/
@@ -6829,7 +3097,7 @@ async function startServer() {
   // file (LeaveRoutes.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts/UserManagement.ts/ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts
   // above.
-  registerLeaveRoutes(app, {
+  ({ ensureDefaultLeaveBalances } = registerLeaveRoutes(app, {
     authenticateToken,
     queryDB,
     requireAdmin,
@@ -6848,8 +3116,9 @@ async function startServer() {
     adjustLeaveTypeBalance,
     deductLeaveTypeBalance,
     createTemplateApprovalRequest,
-    finalizeLeaveApplicationApproval
-  });
+    finalizeLeaveApplicationApproval,
+    notifyLeaveFirstApprovers
+  }));
 
   // --- Vite Middleware / Static Serving ---
   // Node http.Server created up front (not app.listen yet) so Vite's HMR
@@ -6869,8 +3138,9 @@ async function startServer() {
   // over a LAN IP). REST endpoints (room/message history, attachments,
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
-  const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  const io = new SocketIOServer(httpServer, { cors: { origin: socketCorsOrigin() } });
   liveIo = io;
+  setAlertsIo(io);
 
   // Step 1 of making this app safe to run as more than one server process
   // behind a load balancer (needed once usage grows past what a single
@@ -6885,40 +3155,115 @@ async function startServer() {
   // deployment), Socket.IO keeps using its default in-memory adapter
   // exactly as before, so this is a no-op until REDIS_URL is actually
   // configured on a multi-instance deployment.
-  // Known follow-up once this is enabled: ChatRoutes.ts's setupChatSocket
-  // still tracks "is this user online" in a local, per-process Map
-  // (onlineSockets) — accurate within one instance, but a user connected
-  // to instance A and instance B independently won't be seen as online by
-  // both. Fine for now; move that to Redis too when multi-instance
-  // presence accuracy actually matters.
+  // With it on, presence (ChatRoutes.ts) and calls (CallRoutes.ts) work
+  // across workers too, and background jobs run in one worker only
+  // (jobRunner.ts).
   if (process.env.REDIS_URL) {
+    // Redis must answer within a few seconds at startup; if it doesn't (not
+    // installed / not running / wrong REDIS_URL) the app starts WITHOUT it,
+    // with one clear warning, instead of retrying for ever — which used to
+    // keep the server from starting at all and fill the log with
+    // ECONNREFUSED. Once connected, a Redis restart is retried with a
+    // back-off, and its errors are logged at most once a minute.
+    let adapterReady = false;
+    const lastLogged: Record<string, number> = {};
+    const logRedisError = (which: string, err: any) => {
+      if (!adapterReady) return; // startup failure is reported once below
+      const now = Date.now();
+      if (now - (lastLogged[which] || 0) < 60_000) return;
+      lastLogged[which] = now;
+      console.error(`Socket.IO Redis ${which} client error (retrying): ${err?.code || err?.message || err}`);
+    };
+    let pubClient: any = null;
+    let subClient: any = null;
+    // While Redis is down (restart, network blip) the adapter's own pending
+    // publishes fail with nobody awaiting them; Node would end the whole
+    // server on that unhandled rejection. Only those Redis connection
+    // errors are caught here — anything else still ends the process as
+    // before (PM2 restarts it).
+    let redisDown = false;
+    const REDIS_CONN_ERR = /EPIPE|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ClientClosed|SocketClosed|Connection ?Timeout|The client is closed|Socket closed/i;
+    process.on("unhandledRejection", (reason: any) => {
+      const text = `${reason?.name || ""} ${reason?.code || ""} ${reason?.message || reason}`;
+      if (adapterReady && REDIS_CONN_ERR.test(text)) {
+        logRedisError("connection", reason);
+        return;
+      }
+      throw reason;
+    });
     try {
       const { createAdapter } = await import("@socket.io/redis-adapter");
       const { createClient } = await import("redis");
-      const pubClient = createClient({ url: process.env.REDIS_URL });
-      const subClient = pubClient.duplicate();
-      pubClient.on("error", (err) => console.error("Socket.IO Redis pub client error:", err));
-      subClient.on("error", (err) => console.error("Socket.IO Redis sub client error:", err));
-      await Promise.all([pubClient.connect(), subClient.connect()]);
+      pubClient = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          connectTimeout: 5000,
+          // false = give up (only before the first successful connect).
+          reconnectStrategy: (retries: number) => (adapterReady ? Math.min(500 * (retries + 1), 10_000) : false)
+        }
+      });
+      subClient = pubClient.duplicate();
+      for (const [c, which] of [[pubClient, "pub"], [subClient, "sub"]] as const) {
+        c.on("error", (err: any) => {
+          redisDown = true;
+          logRedisError(which, err);
+        });
+        c.on("ready", () => {
+          if (redisDown && adapterReady) console.log(` Socket.IO Redis ${which} client reconnected.`);
+          redisDown = false;
+        });
+      }
+      await Promise.race([
+        Promise.all([pubClient.connect(), subClient.connect()]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("no answer within 6 seconds")), 6000))
+      ]);
       io.adapter(createAdapter(pubClient, subClient));
+      adapterReady = true;
       console.log(" Socket.IO Redis adapter connected — ready for multi-instance deployment.");
-    } catch (err) {
-      console.error(
-        "Failed to attach Socket.IO Redis adapter (falling back to the default in-memory adapter — chat will only broadcast within this one process):",
-        err
+    } catch (err: any) {
+      for (const c of [pubClient, subClient]) {
+        try {
+          await c?.disconnect();
+        } catch {
+          // already closed
+        }
+      }
+      console.warn(
+        `⚠️ Redis not reachable at ${process.env.REDIS_URL} (${err?.code || err?.message || err}) — running WITHOUT it. ` +
+          "Fine for a single process; with several PM2 workers chat, notifications, presence and calls between workers will not work until Redis is running and the app is restarted."
       );
     }
   }
 
   registerChatRoutes(app, io, { authenticateToken, queryDB });
-  // Credence Assistant (AiAssistantRoutes.ts) and its live support with a
-  // real person (AssistantSupportRoutes.ts, over the same sockets as Chat).
-  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  // Assistant live support — a human answers inside the Assistant (AssistantSupportRoutes.ts).
   registerAssistantSupportRoutes(app, { authenticateToken, queryDB, io });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
+  // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
+  registerCallRoutes(app, { authenticateToken, queryDB });
+  setupCallSocket(io, { queryDB });
+  // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
+  registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
+  // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
+  registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
+  registerPoImportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
+  // Break Time (Self Service + Admin Panel module "break_time").
+  registerBreakRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
+  // SIM & ID card requisitions: Self Service, My Onboarding, HR Operations.
+  registerRequisitionRoutes(app, { authenticateToken, requireModuleLayer, hasModuleLayer, queryDB });
+
+  // Self Service -> Give feedback; Admin Panel -> User Feedback (FeedbackRoutes.ts).
+  registerFeedbackRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB });
 
   // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
   // JSON too (ApiErrors.ts). After every route, before the web app.
+  // The Android app on the login page and its version for the app's update
+  // popup (AndroidApkRoute.ts) — ahead of the API's 404 and of the web
+  // app, whose catch-all would otherwise answer a missing APK with
+  // index.html.
+  registerApkDownload(app);
+
   apiNotFoundAndErrors(app);
 
   if (process.env.NODE_ENV !== "production") {
@@ -6951,7 +3296,10 @@ async function startServer() {
         }
       })
     );
-    app.get("*all", (req, res) => {
+    // Every other address is the app itself (index.html). A regular
+    // expression, because the Express 4 this app runs on reads "*all" as
+    // "any path ending in all" — / and /admin/... got "Cannot GET".
+    app.get(/^(?!\/api\/|\/assets\/).*/, (req, res) => {
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Wallet, Plus, ChevronRight, Inbox, Paperclip } from 'lucide-react';
@@ -25,6 +26,14 @@ interface ConveyanceClaimCardProps {
 
 type ClaimTab = UserClaimStatus;
 
+// One line under a claim in the list when it's back with the employee.
+const ClaimEditNote: React.FC<{ claim: UserClaim }> = ({ claim }) =>
+  claim.edit_mode === 'returned' ? (
+    <div className="text-[11px] font-semibold text-amber-700 mt-0.5">Returned for correction — tap to edit</div>
+  ) : claim.edit_mode === 'reclaim' ? (
+    <div className="text-[11px] font-semibold text-amber-700 mt-0.5">You may correct it and resubmit</div>
+  ) : null;
+
 const TABS: { key: ClaimTab; label: string }[] = [
   { key: 'pending', label: 'Review' },
   { key: 'approved', label: 'Approved' },
@@ -38,7 +47,7 @@ const TABS: { key: ClaimTab; label: string }[] = [
 // submission history with status badges. Top header carries the "+ New Claim"
 // action; the body is the "My Conveyance Claims" history list.
 export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token, onBack }) => {
-  // Same isNativeApp split as Timesheet.tsx/LeaveApplication.tsx — the
+  // Same isNativeApp split as Timesheet.tsx/LeaveManage.tsx — the
   // "Main / Conveyance Bill Claim" module-path breadcrumb is a web-only
   // affordance (native app users navigate this same page via the mobile
   // tile menu/bottom nav, so a breadcrumb trail above it is redundant there).
@@ -47,14 +56,23 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
   const [loading, setLoading] = useState(true);
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [viewingClaim, setViewingClaim] = useState<UserClaim | null>(null);
+  // The claim open in the form for editing / resubmitting.
+  const [editingClaim, setEditingClaim] = useState<UserClaim | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<ClaimTab>('pending');
+  // In the phone app the server sends the last 3 months only (X-History-Limited).
+  const [limited, setLimited] = useState(false);
 
-  const fetchClaims = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => fetchClaims(true));
+  const fetchClaims = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/user-claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setClaims(await res.json());
+      if (res.ok) {
+        setLimited(res.headers.get('X-History-Limited') === '3-months');
+        setClaims(await res.json());
+      }
     } catch {
       // Offline/unreachable — just show the empty state below.
     } finally {
@@ -69,7 +87,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
   const handleSubmitted = () => {
     setShowNewClaim(false);
-    setMessage('Claim submitted — it\u2019s now pending Admin review.');
+    setMessage(editingClaim ? 'Claim saved — it\u2019s waiting for approval again.' : 'Claim submitted — it\u2019s now waiting for approval.');
+    setEditingClaim(null);
     fetchClaims();
     setTimeout(() => setMessage(null), 4000);
   };
@@ -86,7 +105,7 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
     <>
       {!isNativeApp && (
         <div className="px-2 sm:px-0">
-          <ModulePath path={['Main', 'Conveyance Bill Claim']} />
+          <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Conveyance Bill Claim']} />
         </div>
       )}
     <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
@@ -120,6 +139,7 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
           so this doesn't sit flush against the card's rounded top edge. */}
       <div className="px-4 pt-5 md:pt-2 pb-1">
         <div className="text-xs font-semibold text-slate-500">My Conveyance Claims</div>
+        {limited && <p className="mt-0.5 text-[11px] text-slate-400">Showing the last 3 months here. Open CredenceHR on the website to see everything.</p>}
       </div>
 
       {/* Review / Approved / Rejected — rounded-pill segmented control
@@ -189,7 +209,11 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
                     <div className="text-xs text-slate-500 mt-0.5">
                       {c.category} &middot; ৳{Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    {c.status === 'pending' && c.approval?.current_approver_name && (
+                    <ClaimEditNote claim={c} />
+                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
+                      <div className="text-[11px] text-amber-700 mt-0.5">No approver set yet — tell HR</div>
+                    )}
+                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                       <div className="text-[11px] text-amber-600 mt-0.5">
                         Waiting on {c.approval.current_approver_name}
                         {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
@@ -242,7 +266,11 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
                       <div className="flex items-center gap-1.5">
                         <UserClaimStatusBadge status={c.status} />
                       </div>
-                      {c.status === 'pending' && c.approval?.current_approver_name && (
+                      <ClaimEditNote claim={c} />
+                      {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
+                        <div className="text-[10px] text-amber-700 mt-0.5">No approver set yet — tell HR</div>
+                      )}
+                      {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                         <div className="text-[10px] text-amber-600 mt-0.5">
                           Waiting on {c.approval.current_approver_name}
                           {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
@@ -287,10 +315,36 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
         <Plus className="w-3.5 h-3.5" /> New Claim
       </button>
 
-      {showNewClaim && (
-        <NewConveyanceClaimModal token={token} onClose={() => setShowNewClaim(false)} onSubmitted={handleSubmitted} />
+      {(showNewClaim || editingClaim) && (
+        <NewConveyanceClaimModal
+          key={editingClaim ? `edit-${editingClaim.id}` : 'new'}
+          token={token}
+          editClaim={editingClaim}
+          onEditExisting={(id) => {
+            const c = claims.find((x) => x.id === id);
+            if (!c) return;
+            setShowNewClaim(false);
+            if (c.editable) setEditingClaim(c);
+            else setViewingClaim(c);
+          }}
+          onClose={() => {
+            setShowNewClaim(false);
+            setEditingClaim(null);
+          }}
+          onSubmitted={handleSubmitted}
+        />
       )}
-      {viewingClaim && <ConveyanceClaimDetailModal claim={viewingClaim} onClose={() => setViewingClaim(null)} />}
+      {viewingClaim && (
+        <ConveyanceClaimDetailModal
+          claim={viewingClaim}
+          token={token}
+          onClose={() => setViewingClaim(null)}
+          onEdit={() => {
+            setEditingClaim(viewingClaim);
+            setViewingClaim(null);
+          }}
+        />
+      )}
     </>
   );
 };

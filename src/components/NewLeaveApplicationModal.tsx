@@ -13,6 +13,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { LeaveDurationCalendar } from './LeaveDurationCalendar';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface NewLeaveApplicationModalProps {
   token: string;
   onClose: () => void;
@@ -140,7 +141,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const dayCount = useMemo(() => calcDayCount(startDate, endDate, isHalfDay), [startDate, endDate, isHalfDay]);
+  const calendarDayCount = useMemo(() => calcDayCount(startDate, endDate, isHalfDay), [startDate, endDate, isHalfDay]);
 
   // Fixed 3 + every custom Leave Category (GET /api/leave-categories) —
   // what actually populates the Leave Type dropdown below. This is the fix:
@@ -181,11 +182,48 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     [policies, leaveType]
   );
 
+  // When this Leave Type's policy leaves weekends and holidays out, only the
+  // server knows this person's calendar (branch group + Duty Roster), so the
+  // Day Count comes from GET /api/leave-applications/day-count — the same
+  // number the submit will deduct.
+  const skipsOffDays = selectedPolicy.count_off_days === false;
+  const countKey = `${leaveType}|${startDate}|${endDate}|${isHalfDay ? 1 : 0}`;
+  const [workingCount, setWorkingCount] = useState<{ key: string; day_count: number; off_days: string[] } | null>(null);
+  useEffect(() => {
+    if (!skipsOffDays || !leaveType || !startDate || !endDate || endDate < startDate) return;
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      try {
+        const q = new URLSearchParams({ leave_type: leaveType, start_date: startDate, end_date: endDate, is_half_day: isHalfDay ? '1' : '0' });
+        const res = await fetch(apiUrl(`/api/leave-applications/day-count?${q}`), { headers: authHeaders });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) setWorkingCount({ key: countKey, day_count: Number(data.day_count) || 0, off_days: Array.isArray(data.off_days) ? data.off_days : [] });
+      } catch {
+        // Offline — the submit still counts it on the server.
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipsOffDays, countKey]);
+  const countReady = !skipsOffDays || workingCount?.key === countKey;
+  const dayCount = skipsOffDays ? (workingCount?.key === countKey ? workingCount.day_count : 0) : calendarDayCount;
+  const skippedOffDays = skipsOffDays && workingCount?.key === countKey ? workingCount.off_days.length : 0;
+
+  // Sick Leave, and a backdated application (starting before today), never
+  // need a Reliever — there's no hand-over to arrange for either. Same rule
+  // as POST /api/leave-applications.
+  const isBackdated = !!startDate && startDate < today;
+  const needsReliever = !!selectedPolicy.reliever_required && leaveType !== 'sick' && !isBackdated;
+
   const validate = (): string | null => {
     if (!leaveType) return 'Select a Leave Type.';
     if (!startDate || !endDate) return 'Start Date and End Date are required.';
     if (endDate < startDate) return "End Date can't be before Start Date.";
-    if (dayCount <= 0) return 'Day Count must be greater than 0.';
+    if (!countReady) return 'Counting the days — try again in a moment.';
+    if (dayCount <= 0) return skipsOffDays ? 'Every day you picked is a weekend or holiday, so no leave is needed for them.' : 'Day Count must be greater than 0.';
     if (selectedPolicy.min_advance_notice_days > 0) {
       const noticeDays = Math.round((new Date(`${startDate}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / (1000 * 60 * 60 * 24));
       if (noticeDays < selectedPolicy.min_advance_notice_days) {
@@ -199,7 +237,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
       return `Day Count (${dayCount}) exceeds your remaining balance (${availableBalance}) for this Leave Type.`;
     }
     if (!purpose.trim()) return 'Purpose is required.';
-    if (selectedPolicy.reliever_required && !relieverId) return 'Select a Reliever.';
+    if (needsReliever && !relieverId) return 'Select a Reliever.';
     return null;
   };
 
@@ -224,7 +262,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           include_extra_work_dates: includeExtraWorkDates,
           is_foreign_leave: isForeignLeave,
           purpose: purpose.trim(),
-          reliever_id: relieverId ? Number(relieverId) : null
+          reliever_id: needsReliever && relieverId ? Number(relieverId) : null
         })
       });
       const data = await res.json();
@@ -331,9 +369,14 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                 type="text"
                 readOnly
                 value={dayCount > 0 ? dayCount : ''}
-                placeholder="—"
+                placeholder={countReady ? '—' : '…'}
                 className="w-full text-sm px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-600"
               />
+              {skippedOffDays > 0 && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {skippedOffDays} weekend/holiday day{skippedOffDays === 1 ? '' : 's'} inside not counted.
+                </p>
+              )}
             </div>
             <div className="flex flex-col justify-center gap-2 sm:pt-5">
               <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
@@ -384,12 +427,12 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               the Template-driven Approval Workflow below. When this Leave
               Type's policy doesn't require one, the field is hidden entirely
               and the application skips straight to that Approval Workflow. */}
-          {selectedPolicy.reliever_required && (
+          {needsReliever && (
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                 Reliever <span className="text-rose-500">*</span>
               </label>
-              <select
+              <SearchSelect
                 value={relieverId}
                 onChange={(e) => setRelieverId(e.target.value)}
                 className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -400,7 +443,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                     {r.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <p className="text-[11px] text-slate-400 mt-1">
                 Whoever will cover your work while you're away — they review this first, before it goes to your approver(s).
               </p>
@@ -427,8 +470,10 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
             <UserCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-600" />
             <span>
-              {selectedPolicy.reliever_required
+              {needsReliever
                 ? "Your Reliever reviews this first. Once they approve, it's routed automatically to your approver(s) — no need to pick anyone else."
+                : selectedPolicy.reliever_required
+                ? `No Reliever needed for ${leaveType === 'sick' ? 'Sick Leave' : 'a backdated application'} — it's routed automatically to your approver(s) once submitted.`
                 : "This Leave Type doesn't require a Reliever — it's routed automatically to your approver(s) once submitted."}
             </span>
           </div>

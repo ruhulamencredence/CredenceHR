@@ -1,0 +1,262 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>সূচি — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="on" href="index.html">সূচি</a><a class="" href="database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="database/data-dictionary.html">Data Dictionary</a><a class="" href="02-application-workflow.html">Application Workflow</a><a class="" href="03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="04-security.html">Security</a><a class="" href="security/access-control-matrix.html">Access Matrix</a><a class="" href="05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="credencehr-architecture-security">CredenceHR — Architecture ও Security ডকুমেন্টেশন</h1>
+<blockquote>
+<p>তৈরি: ২৫ অক্টোবর ২০২৬। ভিত্তি: কোড, চালু ডাটাবেস ও স্বয়ংক্রিয় টেস্ট। <strong>ইন্টারনেট ছাড়া দেখতে <code>index.html</code> ব্রাউজারে খুলুন</strong> (সব ডায়াগ্রামসহ)।</p>
+</blockquote>
+<h2 id="_1">কী কোথায়</h2>
+<table>
+<thead>
+<tr>
+<th>আপনার প্রয়োজন</th>
+<th>ফাইল</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ডাটাবেস ডায়াগ্রাম</strong> (<!--n:tables-->২১৬<!--/n--> টেবিল, ১৩ মডিউলে ভাগ)</td>
+<td><a href="database/README.html"><code>database/README.md</code></a> ও <strong><a href="database/full-diagram.html"><code>database/full-diagram.html</code></a> (পুরো ২১২ টেবিল এক ছবিতে)</strong></td>
+</tr>
+<tr>
+<td>ডাটাবেসের প্রতিটি টেবিল-কলামের তালিকা</td>
+<td><a href="database/data-dictionary.html"><code>database/data-dictionary.md</code></a></td>
+</tr>
+<tr>
+<td><strong>পুরো application workflow</strong> (architecture, লগইন, অনুমতি, ছুটি, বেতন, ক্লেইম, ই-স্বাক্ষর, কর্মীর জীবনচক্র…)</td>
+<td><a href="02-application-workflow.html"><code>02-application-workflow.md</code></a></td>
+</tr>
+<tr>
+<td><strong>কোথায় কোন লাইব্রেরি, কেন, কী সুবিধা</strong></td>
+<td><a href="03-technology-and-libraries.html"><code>03-technology-and-libraries.md</code></a></td>
+</tr>
+<tr>
+<td>লাইব্রেরির পূর্ণ তালিকা ও লাইসেন্স (৭২৬টি)</td>
+<td><a href="dependency-sbom.csv"><code>dependency-sbom.csv</code></a></td>
+</tr>
+<tr>
+<td><strong>Application Security</strong> (দাবি + প্রমাণ + সৎ সীমাবদ্ধতা)</td>
+<td><a href="04-security.html"><code>04-security.md</code></a></td>
+</tr>
+<tr>
+<td>কে কোন মডিউলে কী করতে পারে (অনুমতি তালিকা)</td>
+<td><a href="security/access-control-matrix.html"><code>security/access-control-matrix.md</code></a></td>
+</tr>
+<tr>
+<td><strong>নিরাপত্তা প্রশ্ন করলে উত্তর</strong> (প্রশ্ন-উত্তর, প্রমাণসহ)</td>
+<td><a href="05-security-questions-and-answers.html"><code>05-security-questions-and-answers.md</code></a></td>
+</tr>
+<tr>
+<td>টেস্টের ফল ও লগ</td>
+<td><a href="../HR-Review-and-Test-Log-2026-10-19.md"><code>../HR-Review-and-Test-Log-2026-10-19.md</code></a>, <a href="../HR-Review-Retest-2026-10-25.md"><code>../HR-Review-Retest-2026-10-25.md</code></a>, <a href="../test-logs/"><code>../test-logs/</code></a></td>
+</tr>
+<tr>
+<td>কোড কাঠামো (Laravel/MVC তুলনায়)</td>
+<td><a href="../CredenceHR-Code-Guide-for-Laravel-Developers-BN.md"><code>../CredenceHR-Code-Guide-for-Laravel-Developers-BN.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_2">ডকুমেন্ট প্রস্তুতি: প্রশ্ন করলে দেখানোর মতো কী আছে, কী নেই</h2>
+<h3 id="_3">✅ প্রস্তুত (দেখানো যায়)</h3>
+<table>
+<thead>
+<tr>
+<th>ডকুমেন্ট</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ডাটাবেস ডায়াগ্রাম ও data dictionary</td>
+<td>✅ নতুন (এই ফোল্ডার)</td>
+</tr>
+<tr>
+<td>Application workflow ও architecture</td>
+<td>✅ নতুন</td>
+</tr>
+<tr>
+<td>প্রযুক্তি ও লাইব্রেরি তালিকা + লাইসেন্স (SBOM)</td>
+<td>✅ নতুন</td>
+</tr>
+<tr>
+<td>Security বিবরণ + Access control matrix</td>
+<td>✅ নতুন</td>
+</tr>
+<tr>
+<td>নিরাপত্তা প্রশ্ন-উত্তর</td>
+<td>✅ নতুন</td>
+</tr>
+<tr>
+<td>টেস্ট রিপোর্ট ও লগ (২ বছর/৫ বছর সিমুলেশন, ভাঙার চেষ্টা, UI স্মোক)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>ব্যবহারকারী নির্দেশিকা (বাংলা, ৩৩ পাতা PDF)</td>
+<td>✅ <code>docs/CredenceHR-User-Manual-Bangla.pdf</code></td>
+</tr>
+<tr>
+<td>প্রজেক্ট README (ইনস্টল, চালানো, APK)</td>
+<td>✅ <code>README.md</code></td>
+</tr>
+<tr>
+<td>ফিচারের পরিবর্তন লগ</td>
+<td>✅ <code>CHANGES*.md</code>, git ইতিহাস</td>
+</tr>
+<tr>
+<td>Credence Mail পরিকল্পনা</td>
+<td>✅ <code>docs/CREDENCE_MAIL_PLAN.md</code></td>
+</tr>
+<tr>
+<td>ডিপ্লয়ের নমুনা (Nginx)</td>
+<td>✅ <code>deploy/nginx.conf.example</code>, <code>ecosystem.config.cjs</code></td>
+</tr>
+<tr>
+<td>উন্নয়ন নিয়ম (অনুমতি, popup)</td>
+<td>✅ <code>CLAUDE.md</code></td>
+</tr>
+<tr>
+<td>Privacy Policy (অ্যাপে পেজ)</td>
+<td>⚠️ আছে; আইনজীবীকে দিয়ে মেলান</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_4">❌ নেই বা অসম্পূর্ণ (প্রশ্ন এলে এগুলোর অভাবই ধরা পড়বে)</h3>
+<table>
+<thead>
+<tr>
+<th>ডকুমেন্ট/কাজ</th>
+<th>গুরুত্ব</th>
+<th>কে করবে</th>
+<th>মন্তব্য</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ব্যাকআপ ও ডিজাস্টার রিকভারি পরিকল্পনা</strong> (কত পরপর, কোথায়, কে পুনরুদ্ধার করবে, একবার পরীক্ষা)</td>
+<td>🔴 উচ্চ</td>
+<td>IT/হোস্টিং</td>
+<td>ফাইলও ডাটাবেসে, তাই MySQL ব্যাকআপই সব। সফটওয়্যারে স্বয়ংক্রিয় ব্যাকআপ নেই</td>
+</tr>
+<tr>
+<td><strong>নিরাপত্তা-ঘটনার প্রতিক্রিয়া পরিকল্পনা</strong> (কে কাকে জানাবে, কী করবে)</td>
+<td>🔴 উচ্চ</td>
+<td>IT + ম্যানেজমেন্ট</td>
+<td>প্রযুক্তিগত হাতিয়ার আছে (<code>04-security.md</code> §১২), প্রক্রিয়া লিখতে হবে</td>
+</tr>
+<tr>
+<td><strong>বাইরের Penetration Test রিপোর্ট</strong></td>
+<td>🔴 উচ্চ</td>
+<td>বাইরের প্রতিষ্ঠান</td>
+<td>আমাদের টেস্ট বাইরের পরীক্ষার বদলি নয়</td>
+</tr>
+<tr>
+<td><strong>ডাটা সংরক্ষণ ও মোছার নীতি</strong> (কোন তথ্য কত বছর)</td>
+<td>🟠 মাঝারি</td>
+<td>HR + আইন</td>
+<td>শ্রম আইন অনুযায়ী বেতন/সেবা-রেকর্ড কত বছর, অ্যাকাউন্ট বন্ধের পর কী</td>
+</tr>
+<tr>
+<td><strong>ডাটা শ্রেণিবিন্যাস</strong> (কোনটি গোপনীয়: বেতন, NID, লোকেশন)</td>
+<td>🟠 মাঝারি</td>
+<td>HR + IT</td>
+<td>কে NID/ফোন দেখবে সিদ্ধান্তসহ</td>
+</tr>
+<tr>
+<td><strong>ইনফরমেশন সিকিউরিটি নীতি</strong> (পাসওয়ার্ড, ডিভাইস, অ্যাক্সেস, কর্মী-দায়িত্ব)</td>
+<td>🟠 মাঝারি</td>
+<td>IT + ম্যানেজমেন্ট</td>
+<td>সফটওয়্যারের কড়াকড়ি নীতির সাথে মেলাতে হবে</td>
+</tr>
+<tr>
+<td><strong>অ্যাক্সেস পর্যালোচনা প্রক্রিয়া</strong> (কে কোন Admin অনুমতি পেয়েছে, প্রতি ৩/৬ মাসে দেখা)</td>
+<td>🟠 মাঝারি</td>
+<td>HR + Superadmin</td>
+<td><code>access-control-matrix.md</code> ভিত্তি; Module Access-এ রিপোর্ট নেই</td>
+</tr>
+<tr>
+<td>লাইব্রেরি হালনাগাদ ও <code>npm audit</code> প্রক্রিয়া</td>
+<td>🟡 নিম্ন–মাঝারি</td>
+<td>ডেভেলপার</td>
+<td>মাসে একবার, লিখিত</td>
+</tr>
+<tr>
+<td>হোস্টিং ও নেটওয়ার্ক নিরাপত্তা নথি (ফায়ারওয়াল, TLS, ডিস্ক এনক্রিপশন, SSH)</td>
+<td>🟠 মাঝারি</td>
+<td>হোস্টিং/IT</td>
+<td>সফটওয়্যারের বাইরে</td>
+</tr>
+<tr>
+<td>API ডকুমেন্টেশন (OpenAPI)</td>
+<td>🟡 নিম্ন</td>
+<td>ডেভেলপার</td>
+<td>৭০০+ route; এখন প্রতি ফাইলের শুরুর মন্তব্য</td>
+</tr>
+<tr>
+<td>ডাটা প্রবাহ ডায়াগ্রাম (ব্যক্তিগত তথ্য কোথা দিয়ে যায়, বাইরের সেবাসহ)</td>
+<td>🟡 নিম্ন–মাঝারি</td>
+<td>ডেভেলপার</td>
+<td><code>04-security.md</code>-র তৃতীয়-পক্ষ তালিকা ভিত্তি</td>
+</tr>
+<tr>
+<td>ISO 27001 / SOC 2 ইত্যাদি সার্টিফিকেশন</td>
+<td>🟡 নিম্ন</td>
+<td>ম্যানেজমেন্ট</td>
+<td>ক্লায়েন্ট চাইলে</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_5">কয়েকটি দ্রুত কাজ যা প্রশ্নের উত্তর বদলে দেয়</h3>
+<ol>
+<li>লাইভের <code>.env</code>-এ <code>CORS_ORIGINS</code> সেট করা। 2. পাসওয়ার্ডের নীতি ৮+ অক্ষর ও সাধারণ পাসওয়ার্ড বাদ। 3. ✅ অব্যবহৃত লাইব্রেরি বাদ — GPL-3.0 <code>@mlightcad/libredwg-web</code>, <code>dxf-parser</code>, <code>motion</code> (২৫ অক্টোবর ২০২৬)। 4. ডাটাবেস ব্যাকআপ চালু করে <strong>একবার পুনরুদ্ধার পরীক্ষা</strong>। 5. Penetration test বুক।</li>
+</ol>
+<hr />
+<h2 id="_6">ডকুমেন্ট হালনাগাদ রাখার নিয়ম (স্বয়ংক্রিয় আপডেট)</h2>
+<p><strong>নিজে থেকে যা হয়:</strong> <code>main</code> বা <code>claude/nice-fermi-0tale9</code>-এ কোড, <code>schema.sql</code>, <code>package.json</code> বা এই ফোল্ডারে কিছু push হলেই GitHub-এর <strong>Docs sync</strong> কাজটি (<code>.github/workflows/docs-sync.yml</code>) চলে। এটি:</p>
+<ol>
+<li>খালি MariaDB-তে সার্ভার একবার চালিয়ে সব টেবিল বানায়, তারপর <code>information_schema</code> পড়ে।</li>
+<li>নতুন করে বানায়: <code>database/README.md</code>-এর সংখ্যা ও মডিউল অংশ, <code>data-dictionary.md</code>, সব মডিউল ডায়াগ্রাম (<code>.mmd/.svg/.png</code>), পুরো ডাটাবেসের ছবি (SVG ও <code>full-diagram.html</code>; বড় PNG/PDF শুধু artifact-এ), <code>credencehr-database.drawio</code>।</li>
+<li><code>security/access-control-matrix.md</code> (<code>src/types.ts</code> থেকে) আর <code>dependency-sbom.csv</code> (<code>package-lock.json</code> থেকে) বানায়।</li>
+<li>সব HTML বানায়, এক-ফাইলের <code>CredenceHR-Documentation.html</code> ও <code>CredenceHR-Full-Workflow.html</code>-সহ।</li>
+<li>বদল থাকলে একই ব্রাঞ্চে <code>docs: auto-sync ...</code> নামে কমিট করে।</li>
+<li>এক-ফাইলের দুটো HTML আর পুরো ডাটাবেসের PNG/PDF <strong>repo-তে commit করে না</strong> (প্রতিবার ~১৩MB করে repo বাড়াত)। এগুলো রানের <strong>Artifacts → <code>CredenceHR-documentation</code></strong>-এ থাকে (৯০ দিন), আর নিজের কম্পিউটারে <code>npm run docs:sync</code> / <code>docs:db</code> চালালে <code>docs/architecture</code>-তেই তৈরি হয়। ব্রাউজারে পড়তে repo-র <code>docs/architecture/index.html</code> খুলুন (ইন্টারনেট লাগে না)।</li>
+</ol>
+<p>একই push-এ <strong>QA tests</strong> কাজটিও (<code>.github/workflows/qa-tests.yml</code>) চলে: unit টেস্ট, একসাথে দুবার চাপ, কোম্পানি আলাদা রাখা, তারিখের কিনারা, approval chain, আসল ব্রাউজারে ফর্ম পূরণ, বাংলা PDF/Excel ও ২০০০ কর্মীর গতি — প্রতিটা নতুন খালি ডাটাবেসে (<code>tests/qa/run-all.sh</code>)। কোনো টেস্ট ফেল করলে রান লাল হয়; ফল, PDF ও ফেল করা ধাপের ছবি Actions-এর "qa-results"-এ থাকে। নিজের কম্পিউটারে: <code>bash tests/qa/run-all.sh</code> (ডাটাবেস <code>mpr_tracker_db</code> মুছে নতুন বানায় — আসল ডাটার সার্ভারে চালাবেন না)।</p>
+<p>নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (<code>tools/db/groups.json</code>)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।</p>
+<p><strong>হাতে যা লিখতে হয়</strong> (Docs sync রানের Summary-তে ও <code>npm run docs:check</code>-এ সতর্কবার্তা আসে):
+- নতুন লাইব্রেরি হলে: <code>03-technology-and-libraries.md</code>-এ এক সারি (কেন, কী সুবিধা)।
+- নতুন workflow বা অনুমোদনের নিয়ম বদলালে: <code>02-application-workflow.md</code>।
+- নিরাপত্তায় বদল হলে: <code>04-security.md</code> ও <code>05-security-questions-and-answers.md</code>।
+- নতুন মডিউলের বর্ণনা: <code>tools/db/module-notes.json</code>।</p>
+<p><strong>নিজের কম্পিউটারে চালাতে:</strong></p>
+<table>
+<thead>
+<tr>
+<th>কমান্ড</th>
+<th>কী করে</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>npm run docs:check</code></td>
+<td>কিছু না বদলে দেখায় কী পুরনো হয়েছে</td>
+</tr>
+<tr>
+<td><code>npm run docs:sync</code></td>
+<td>Access Matrix, SBOM ও সব HTML (ডাটাবেস লাগে না)</td>
+</tr>
+<tr>
+<td><code>npm run docs:db</code></td>
+<td>সাথে ডাটাবেসের সবকিছু। <code>DB_*</code> env-এ একটা <strong>খালি</strong> ডাটাবেস দিন, লাগবে python3 (<code>pip install markdown</code>) ও Playwright Chromium</td>
+</tr>
+</tbody>
+</table>
+<p><code>README.md</code>-এর <code>&lt;!-- AUTO:... --&gt;</code> ও <code>&lt;!--n:...--&gt;</code> চিহ্নের ভেতরের লেখা স্ক্রিপ্ট লেখে, হাতে বদলাবেন না। বাকি সব লেখা হাতে লেখা এবং স্ক্রিপ্ট সেগুলো ছোঁয় না।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

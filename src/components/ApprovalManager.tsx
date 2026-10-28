@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle
@@ -6,7 +7,11 @@ import { ApprovalRequest, ApprovalChainStep, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { ClaimChangesNotice, ReclaimTick, ReturnButton } from './ClaimReviewBits';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface ApprovalManagerProps {
   token: string;
   user: User;
@@ -19,6 +24,13 @@ const StatusPill: React.FC<{ status: ApprovalRequest['status'] }> = ({ status })
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
         <CheckCircle2 className="w-3 h-3" /> Approved
+      </span>
+    );
+  }
+  if (status === 'returned') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-800">
+        <Clock className="w-3 h-3" /> Returned to employee
       </span>
     );
   }
@@ -53,6 +65,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const isSuperAdmin = user.role === 'superadmin';
 
   const [chain, setChain] = useState<ApprovalChainStep[]>([]);
+  // Set once the chain has loaded, so "No approval chain configured yet"
+  // doesn't flash up while it's still being fetched.
+  const [chainLoaded, setChainLoaded] = useState(false);
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'mine' | 'all'>('mine');
@@ -64,6 +79,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   // Conveyance Bill (for that same User) to attach it to on Approve. Left blank
   // to auto-create a new Bill, same default POST /api/approvals/:id/act uses.
   const [billChoice, setBillChoice] = useState<Record<number, string>>({});
+  const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [userBillsCache, setUserBillsCache] = useState<Record<number, { id: number; bill_date: string }[]>>({});
   // Approved Amount draft for a 'user_claim' request's LAST step — pre-filled
   // with the full Claim Amount (default = approve as claimed) the first time
@@ -86,6 +102,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
       if (res.ok) setChain(await res.json());
     } catch (err) {
       console.error('Failed to load approval chain', err);
+    } finally {
+      setChainLoaded(true);
     }
   };
 
@@ -115,8 +133,11 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   }, [view, statusFilter]);
 
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
+  // The three amount columns only mean anything for a Conveyance Bill Claim —
+  // left out when none is listed, so Remote Attendance rows aren't squeezed.
+  const hasClaims = requests.some((r) => r.source_type === 'user_claim');
   // Only Admins/Superadmins are eligible to be added to the chain.
-  const eligibleApprovers = users.filter((u) => u.role === 'admin' || u.role === 'superadmin');
+  const eligibleApprovers = activePeople(users.filter((u) => u.role === 'admin' || u.role === 'superadmin'));
 
   const openChainModal = () => {
     setChainDraft(chain.map((s) => s.user_id));
@@ -173,24 +194,41 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
     }
   };
 
-  const handleAct = async (id: number, action: 'approved' | 'rejected', approvedAmount?: number) => {
+  // Reject with "Allow re-claim" ticked, per request.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<number, boolean>>({});
+
+  const handleAct = async (id: number, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
+    const target = requests.find((r) => r.id === id);
+    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    if (target?.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
       const bill_id = billChoice[id] ? Number(billChoice[id]) : undefined;
+      // On a Conveyance Disburser Layer the same field holds the voucher no.
+      const disburse = requests.some((r) => r.id === id && r.conveyance_disburser_step);
       const res = await fetch(apiUrl(`/api/approvals/${id}/act`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           action,
           remarks: remarksDraft[id] || undefined,
-          bill_id,
-          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
+          bill_id: disburse ? undefined : bill_id,
+          voucher_no: disburse && action === 'approved' ? voucherDraft[id] || undefined : undefined,
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          claim_version: target?.source_type === 'user_claim' ? target.claim_version : undefined,
+          allow_reclaim: target?.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setBillChoice((prev) => ({ ...prev, [id]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
@@ -227,9 +265,10 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               <ShieldCheck className="w-4 h-4 text-blue-600" /> Approval Workflow
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Every Check In / Check Out for Remote Attendance is recorded right away — this is a
-              non-blocking review trail on top of that. A Conveyance Bill Claim is different: it only becomes a real
-              Bill once the last step here Approves it. Movement Claims don't route through here at all.
+              The Global Chain below reviews Remote Attendance Check In / Check Out — each one is recorded
+              right away, this is a non-blocking review trail on top of that. Conveyance Bill Claim, Leave,
+              Timesheet, Asset and Vehicle requests follow their own Templates (Templates tab); they're
+              listed here too under "All requests".
             </p>
           </div>
           {isSuperAdmin && (
@@ -245,7 +284,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
         {/* Chain preview */}
         <div className="flex flex-wrap items-center gap-2">
-          {chain.length === 0 ? (
+          {!chainLoaded ? null : chain.length === 0 ? (
             <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               No approval chain configured yet — check-ins/outs are being recorded but not routed to anyone.
@@ -316,9 +355,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
       <div className="overflow-x-auto">
         {loading ? (
-          <div className="p-10 flex justify-center">
-            <Spinner size={20} className="text-slate-400" />
-          </div>
+          <LoadingBlock />
         ) : requests.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate-400">
             {view === 'mine' ? "Nothing is waiting on you right now." : 'No approval requests yet.'}
@@ -328,9 +365,13 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Event</th>
-                <th className="text-left px-4 py-3 font-semibold">Claim Amount</th>
-                <th className="text-left px-4 py-3 font-semibold">Approved Amount</th>
-                <th className="text-left px-4 py-3 font-semibold">Remaining Amount</th>
+                {hasClaims && (
+                  <>
+                    <th className="text-left px-4 py-3 font-semibold">Claim Amount</th>
+                    <th className="text-left px-4 py-3 font-semibold">Approved Amount</th>
+                    <th className="text-left px-4 py-3 font-semibold">Remaining Amount</th>
+                  </>
+                )}
                 <th className="text-left px-4 py-3 font-semibold">Requested By</th>
                 <th className="text-left px-4 py-3 font-semibold">Progress</th>
                 <th className="text-left px-4 py-3 font-semibold">Status</th>
@@ -353,9 +394,17 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           ? 'Attendance Correction'
                           : r.source_type === 'leave_application'
                           ? 'Leave Application'
+                          : r.source_type === 'asset_requisition'
+                          ? 'Asset Requisition'
+                          : r.source_type === 'vehicle_requisition'
+                          ? 'Vehicle Requisition'
+                          : r.source_type === 'mobile_limit_request'
+                          ? 'Mobile Limit Request'
+                          : r.source_type === 'advance_request'
+                          ? 'Loan / Advance Request'
                           : 'Movement Claim'}
                         {' — '}
-                        {r.source_type === 'attendance_correction' || r.source_type === 'leave_application'
+                        {r.source_type === 'attendance_correction' || r.source_type === 'leave_application' || r.source_type === 'asset_requisition' || r.source_type === 'vehicle_requisition' || r.source_type === 'mobile_limit_request' || r.source_type === 'advance_request'
                           ? 'Requested'
                           : r.event_type === 'check_in'
                           ? 'Check In'
@@ -368,7 +417,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         <div className="text-xs text-slate-500">{r.source_category}</div>
                       )}
                     </td>
-                    {(() => {
+                    {hasClaims && (() => {
                       // Only a 'user_claim' request finishing its LAST step is
                       // where an Approve actually finalizes an Approved Amount
                       // (see finalizeUserClaimApproval) — that's the only case
@@ -379,13 +428,15 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       const isLastStep = Number(r.current_step) === Number(r.total_steps);
                       const editable = isUserClaim && canAct && r.status === 'pending' && isLastStep;
                       const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
+                      // An earlier Layer may already have cut the amount — start from that.
+                      const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
                       const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
                       let approvedAmount: number | null = null;
                       if (r.status === 'approved') {
                         approvedAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
                       } else if (editable) {
                         const draft = approvedAmountDraft[r.id];
-                        const parsed = Number(draft != null && draft !== '' ? draft : claimAmount);
+                        const parsed = Number(draft != null && draft !== '' ? draft : startAmount);
                         approvedAmount = Number.isFinite(parsed) ? parsed : null;
                       }
                       const remainingAmount = claimAmount != null && approvedAmount != null ? claimAmount - approvedAmount : null;
@@ -400,8 +451,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                 type="number"
                                 step="0.01"
                                 min={0}
-                                max={claimAmount ?? undefined}
-                                value={approvedAmountDraft[r.id] ?? (claimAmount != null ? String(claimAmount) : '')}
+                                max={startAmount ?? undefined}
+                                value={approvedAmountDraft[r.id] ?? (startAmount != null ? String(startAmount) : '')}
                                 onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                                 className="w-28 text-xs px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                               />
@@ -420,6 +471,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                     <td className="px-4 py-3 text-slate-700">{r.requested_by_name || `User #${r.requested_by}`}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       Step {r.current_step} of {r.total_steps}
+                      {r.status === 'pending' && Number(r.awaiting_approver) === 1 && (
+                        <div className="text-amber-700 font-medium">No approver set yet — set a Supervisor or Approval Template (or decide it as Superadmin)</div>
+                      )}
                       {r.status === 'pending' && r.current_approver_name && (
                         <div className="text-slate-400">Waiting on {r.current_approver_name}</div>
                       )}
@@ -427,7 +481,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         <div className="mt-1 space-y-0.5">
                           {r.actions.map((a, i) => (
                             <div key={i} className={a.action === 'approved' ? 'text-emerald-600' : 'text-rose-600'}>
-                              {a.approver_name} {a.action === 'approved' ? 'approved' : 'rejected'}
+                              {a.approver_name}{' '}
+                              {a.action === 'approved' ? 'approved' : a.action === 'returned' ? 'returned it for correction' : a.action === 'resubmitted' ? 'resubmitted it' : 'rejected'}
                               {a.remarks ? ` — "${a.remarks}"` : ''}
                             </div>
                           ))}
@@ -441,8 +496,18 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                     <td className="px-4 py-3">
                       {canAct ? (
                         <div className="flex flex-col items-end gap-1.5">
-                          {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && (
-                            <select
+                          {r.conveyance_disburser_step && (
+                            <input
+                              type="text"
+                              placeholder="Voucher no (auto if blank)"
+                              title="Disburse approves this claim, puts it on its own Bill and records this voucher"
+                              value={voucherDraft[r.id] || ''}
+                              onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                              className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            />
+                          )}
+                          {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && !r.conveyance_disburser_step && (
+                            <SearchSelect
                               value={billChoice[r.id] || ''}
                               onFocus={() => ensureUserBillsLoaded(r.requested_by)}
                               onChange={(e) => setBillChoice((prev) => ({ ...prev, [r.id]: e.target.value }))}
@@ -454,15 +519,20 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                   Bill #{b.id} — {formatDate(b.bill_date)}
                                 </option>
                               ))}
-                            </select>
+                            </SearchSelect>
                           )}
+                          {r.source_type === 'user_claim' && <ClaimChangesNotice item={r} className="w-full" />}
                           <input
                             type="text"
-                            placeholder="Remarks (optional)"
+                            aria-label="Remarks"
+                            placeholder={r.source_type === 'user_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
                             value={remarksDraft[r.id] || ''}
                             onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                             className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           />
+                          {r.source_type === 'user_claim' && (
+                            <ReclaimTick item={r} checked={!!reclaimDraft[r.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [r.id]: v }))} />
+                          )}
                           <div className="flex gap-1.5">
                             <button
                               type="button"
@@ -472,22 +542,42 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                             >
                               Reject
                             </button>
+                            {r.source_type === 'user_claim' && (
+                              <ReturnButton item={r} compact disabled={actingId === r.id} onClick={() => handleAct(r.id, 'returned')} />
+                            )}
                             <button
                               type="button"
                               disabled={actingId === r.id}
-                              onClick={() => {
+                              onClick={async () => {
                                 if (r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps)) {
                                   const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
                                   const draft = approvedAmountDraft[r.id];
-                                  const approvedAmount = Number(draft != null && draft !== '' ? draft : claimAmount);
+                                  const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
+                                  const approvedAmount = Number(draft != null && draft !== '' ? draft : startAmount);
                                   if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) {
                                     setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
                                     return;
                                   }
-                                  if (claimAmount != null && approvedAmount > claimAmount) {
-                                    setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
+                                  // A Layer may cut the amount but never raise it above what the previous Layer approved.
+                                  const cap = startAmount != null ? Number(startAmount) : null;
+                                  if (cap != null && approvedAmount > cap) {
+                                    setMessage({
+                                      type: 'error',
+                                      text:
+                                        r.source_approved_amount != null
+                                          ? `Approved Amount can't be more than ৳${cap.toLocaleString('en-BD')} — the amount the previous Layer approved.`
+                                          : "Approved Amount can't be more than the Claim Amount."
+                                    });
                                     return;
                                   }
+                                  if (
+                                    r.conveyance_disburser_step &&
+                                    !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${r.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+                                      title: 'Disburse conveyance',
+                                      confirmLabel: 'Disburse'
+                                    }))
+                                  )
+                                    return;
                                   handleAct(r.id, 'approved', approvedAmount);
                                 } else {
                                   handleAct(r.id, 'approved');
@@ -496,7 +586,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                               className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-1"
                             >
                               {actingId === r.id ? <Spinner size={12} /> : null}
-                              Approve
+                              {r.conveyance_disburser_step ? 'Disburse' : 'Approve'}
                             </button>
                           </div>
                         </div>
@@ -570,7 +660,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               })}
 
               <div className="flex gap-2 pt-2">
-                <select
+                <SearchSelect
                   value={addApproverId}
                   onChange={(e) => setAddApproverId(e.target.value)}
                   className="flex-1 text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -583,7 +673,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         {u.name} ({u.role})
                       </option>
                     ))}
-                </select>
+                </SearchSelect>
                 <button
                   type="button"
                   onClick={addToChainDraft}

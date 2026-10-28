@@ -1,0 +1,300 @@
+erDiagram
+  app_feedback {
+    int id PK
+    int user_id FK
+    tinyint rating
+    varchar kind
+    varchar module
+    text message
+    varchar screenshot_mimetype
+  }
+  assistant_learned {
+    int id PK
+    varchar question
+    varchar tool
+    varchar help_id
+    varchar args
+    int hits
+  }
+  assistant_support_messages {
+    int id PK
+    int session_id
+    int sender_id
+    varchar kind
+    text body
+  }
+  assistant_support_sessions {
+    int id PK
+    int user_id FK
+    int group_id
+    int company_id
+    int agent_id
+    varchar status
+    varchar topic
+  }
+  chat_message_hidden {
+    int message_id PK,FK
+    int user_id PK,FK
+  }
+  chat_message_reactions {
+    int message_id PK,FK
+    int user_id PK,FK
+    varchar emoji
+  }
+  chat_messages {
+    int id PK
+    int room_id FK
+    int sender_id FK
+    int reply_to_id FK
+    enum message_type
+    text content
+    varchar attachment_filename
+  }
+  chat_pinned_messages {
+    int message_id PK,FK
+    int room_id FK
+    int pinned_by
+    timestamp pinned_at
+    timestamp expires_at
+  }
+  chat_push_tokens {
+    int id PK
+    int user_id FK
+    varchar platform
+  }
+  chat_room_members {
+    int id PK
+    int room_id FK
+    int user_id FK
+    enum role
+    timestamp joined_at
+  }
+  chat_room_reads {
+    int room_id PK,FK
+    int user_id PK,FK
+    int last_read_message_id
+  }
+  chat_rooms {
+    int id PK
+    int parent_room_id FK
+    enum type
+    varchar title
+    varchar avatar_mimetype
+    longblob avatar_data
+    int group_id
+  }
+  chat_wallpapers {
+    int user_id PK,FK
+    int room_id PK,FK
+    varchar wallpaper
+  }
+  feedback_prompts {
+    int user_id PK,FK
+    timestamp first_seen_at
+    timestamp next_ask_at
+    tinyint never_ask
+  }
+  feedback_settings {
+    int id PK
+    tinyint prompt_enabled
+    int prompt_after_days
+  }
+  mail_accounts {
+    int id PK
+    int user_id FK
+    int employee_id FK
+    varchar email
+    varchar display_name
+    varchar provider
+    varchar imap_host
+  }
+  mail_admin_log {
+    bigint id PK
+    int actor_user_id
+    int target_user_id
+    int account_id
+    varchar action
+    varchar ip
+  }
+  mail_blobs {
+    bigint id PK
+    char sha256
+    int size
+    longblob data
+  }
+  mail_contacts {
+    int id PK
+    int user_id FK
+    varchar name
+    varchar email
+    varchar phone
+    varchar company
+    text notes
+  }
+  mail_events {
+    int id PK
+    int user_id FK
+    varchar title
+    varchar start_at
+    varchar end_at
+    text description
+    varchar location
+  }
+  mail_files {
+    bigint id PK
+    bigint message_id
+    int idx
+    varchar name
+    varchar mime
+    int size
+    longblob data
+  }
+  mail_filters {
+    int id PK
+    int user_id FK
+    varchar name
+    text conditions_json
+    text actions_json
+    tinyint is_active
+  }
+  mail_folder_state {
+    int account_id PK
+    varchar role PK
+    varchar path
+    bigint uidvalidity
+    bigint last_uid
+  }
+  mail_groups {
+    int id PK
+    varchar email
+    varchar name
+    varchar description
+    mediumtext members_json
+    tinyint all_employees
+    text departments_json
+  }
+  mail_messages {
+    bigint id PK
+    int user_id FK
+    int account_id
+    varchar folder_role
+    bigint uid
+    varchar message_id
+    varchar in_reply_to
+  }
+  mail_personal_groups {
+    int id PK
+    int user_id FK
+    varchar name
+    mediumtext members_json
+  }
+  mail_settings {
+    int user_id PK,FK
+    mediumtext signatures_json
+    text vacation_json
+    text blocked_json
+    text layout_json
+    varchar language
+    varchar timezone
+  }
+  mail_signature_images {
+    int id PK
+    int user_id FK
+    varchar mime
+    mediumblob data
+  }
+  mail_system_settings {
+    int id PK
+    tinyint internal_delivery
+    varchar internal_domains
+  }
+  mail_tasks {
+    int id PK
+    int user_id FK
+    varchar title
+    varchar due_date
+    tinyint completed
+    bigint email_id
+    varchar email_subject
+  }
+  mail_templates {
+    int id PK
+    int user_id FK
+    varchar title
+    varchar subject
+    mediumtext body
+  }
+  mail_vacation_log {
+    int account_id PK
+    varchar sender PK
+    datetime sent_at
+  }
+  notice_dismissals {
+    int id PK
+    int notice_id FK
+    int user_id FK
+    timestamp dismissed_at
+  }
+  notice_targets {
+    int id PK
+    int notice_id FK
+    int user_id FK
+  }
+  notices {
+    int id PK
+    varchar title
+    mediumtext content_html
+    mediumtext lottie_json
+    varchar lottie_url
+    enum target_type
+    tinyint is_active
+  }
+  report_email_log {
+    int id PK
+    int company_id
+    varchar report_title
+    varchar file_name
+    text recipients_json
+    text failed_json
+  }
+  all_employees {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  users ||--o{ app_feedback : "user_id"
+  users ||..o{ assistant_support_sessions : "user_id"
+  chat_messages ||--o{ chat_message_hidden : "message_id"
+  users ||--o{ chat_message_hidden : "user_id"
+  chat_messages ||--o{ chat_message_reactions : "message_id"
+  users ||--o{ chat_message_reactions : "user_id"
+  chat_messages ||--o{ chat_messages : "reply_to_id"
+  chat_rooms ||--o{ chat_messages : "room_id"
+  users ||--o{ chat_messages : "sender_id"
+  chat_messages ||--o{ chat_pinned_messages : "message_id"
+  chat_rooms ||--o{ chat_pinned_messages : "room_id"
+  users ||--o{ chat_push_tokens : "user_id"
+  chat_rooms ||--o{ chat_room_members : "room_id"
+  users ||--o{ chat_room_members : "user_id"
+  chat_rooms ||--o{ chat_room_reads : "room_id"
+  users ||--o{ chat_room_reads : "user_id"
+  chat_rooms ||--o{ chat_rooms : "parent_room_id"
+  users ||--o{ chat_wallpapers : "user_id"
+  chat_rooms ||..o{ chat_wallpapers : "room_id"
+  users ||--o{ feedback_prompts : "user_id"
+  users ||..o{ mail_accounts : "user_id"
+  all_employees ||..o{ mail_accounts : "employee_id"
+  users ||..o{ mail_contacts : "user_id"
+  users ||..o{ mail_events : "user_id"
+  users ||..o{ mail_filters : "user_id"
+  users ||..o{ mail_messages : "user_id"
+  users ||..o{ mail_personal_groups : "user_id"
+  users ||..o{ mail_settings : "user_id"
+  users ||..o{ mail_signature_images : "user_id"
+  users ||..o{ mail_tasks : "user_id"
+  users ||..o{ mail_templates : "user_id"
+  notices ||--o{ notice_dismissals : "notice_id"
+  users ||--o{ notice_dismissals : "user_id"
+  notices ||--o{ notice_targets : "notice_id"
+  users ||--o{ notice_targets : "user_id"

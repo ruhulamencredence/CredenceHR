@@ -46,9 +46,11 @@
 // `room:<id>`, via the one shared insertChatMessage() helper below.
 
 import type { Express } from "express";
+import { checkSession } from "./SessionSecurity";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
+import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -64,7 +66,7 @@ interface ChatRouteDeps {
 // 'send_message' handler right after a message is persisted+broadcast —
 // never awaited there, so a slow/failed push never delays message delivery
 // to the people actually online.
-async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
+export async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
   try {
     const roomRows = await queryDB("SELECT type, title FROM chat_rooms WHERE id = ?", [message.room_id]);
     const room = roomRows[0];
@@ -206,9 +208,7 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
       ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
       // "Forward": a copy sent on to other chats shows "Forwarded".
       ["ALTER TABLE chat_messages ADD COLUMN is_forwarded TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
-      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"],
-      // Module Access -> Chat: ON for every account, as Chat was before it got a switch.
-      ["ALTER TABLE users ADD COLUMN can_use_chat TINYINT(1) NOT NULL DEFAULT 1", "ER_DUP_FIELDNAME"]
+      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"]
     ] as [string, string][]) {
       await dbPool.query(sql).catch((err: any) => {
         if (err?.code !== ignore) console.warn("⚠️ Chat: " + err.message);
@@ -301,7 +301,7 @@ async function findOrCreateDirectRoom(queryDB: ChatRouteDeps["queryDB"], userAId
 // Shared by the REST POST /messages route and the socket 'send_message'
 // handler — see the module comment above for why text vs attachment
 // messages take different transports to get here.
-async function insertChatMessage(
+export async function insertChatMessage(
   queryDB: ChatRouteDeps["queryDB"],
   params: {
     roomId: number;
@@ -1161,7 +1161,8 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
   // Presence is read from Socket.IO itself (fetchSockets), not a list kept
   // in this process: with several PM2 workers + the Redis adapter it asks
   // every worker, so someone connected to another worker still shows as
-  // online. "online"/"offline" only flips on a user's first connect / last
+  // online; with one process it is the same local answer as before.
+  // "online"/"offline" only flips on a user's first connect / last
   // disconnect (several tabs/devices can be connected at once).
   const socketsOfUser = async (userId: number) => {
     try {
@@ -1171,11 +1172,15 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
     }
   };
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = (socket.handshake.auth as any)?.token as string | undefined;
       if (!token) return next(new Error("Authentication required"));
       const payload: any = jwt.verify(token, jwtSecret);
+      // Same rule as every request (logged out, ended, unused too long).
+      if (await checkSession(queryDB, token, payload)) return next(new Error("Session ended"));
+      // A new joiner's temporary login has no chat or calls (OnboardingSelfServiceRoutes.ts).
+      if (payload?.onb || (await accountOnboarding(queryDB, Number(payload?.id)))) return next(new Error("Not available during onboarding"));
       (socket.data as any).user = payload;
       next();
     } catch {

@@ -1,0 +1,518 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Security — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="index.html">সূচি</a><a class="" href="database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="database/data-dictionary.html">Data Dictionary</a><a class="" href="02-application-workflow.html">Application Workflow</a><a class="" href="03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="on" href="04-security.html">Security</a><a class="" href="security/access-control-matrix.html">Access Matrix</a><a class="" href="05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="credencehr-application-security">CredenceHR — Application Security (নিরাপত্তা ব্যবস্থা)</h1>
+<blockquote>
+<p><strong>এই ডকুমেন্ট কী:</strong> কেউ নিরাপত্তা নিয়ে প্রশ্ন করলে (ক্লায়েন্ট, অডিটর, ম্যানেজমেন্ট, IT) দেখানোর জন্য।
+<strong>কীভাবে লেখা:</strong> প্রতিটি দাবির পাশে <strong>প্রমাণ</strong> (কোড-ফাইল বা চালানো টেস্ট) দেওয়া আছে। যা এখনও ঠিক হয়নি তা <strong>খোলাখুলি</strong> "জানা সীমাবদ্ধতা" অংশে আছে।
+<strong>ভিত্তি:</strong> কোড ও পরীক্ষা, ২৫ অক্টোবর ২০২৬ (branch <code>claude/nice-fermi-0tale9</code>)।
+<strong>যা এখানে নেই:</strong> সার্ভার/নেটওয়ার্ক/ব্যাকআপ/অফিসের নীতি (হোস্টিং ও প্রতিষ্ঠানের ব্যাপার), বাইরের penetration test। এগুলোর অবস্থা <code>README.md</code>-র "ডকুমেন্ট প্রস্তুতি" তালিকায়।</p>
+</blockquote>
+<hr />
+<h2 id="_1">১. এক পাতার সারাংশ</h2>
+<table>
+<thead>
+<tr>
+<th>ক্ষেত্র</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>পাসওয়ার্ড রাখা</td>
+<td>bcrypt hash (cost 10); সরল পাঠ কোথাও নেই</td>
+</tr>
+<tr>
+<td>লগইন সুরক্ষা</td>
+<td>৫ ভুলে ১৫ মিনিট লক; এক IP থেকে ৩০ ভুলে অপেক্ষা; সব চেষ্টা লগে</td>
+</tr>
+<tr>
+<td>সেশন</td>
+<td>JWT, ওয়েব ১২ ঘণ্টা/৬০ মিনিট নিষ্ক্রিয়তা, অ্যাপ ৭ দিন; যেকোনো সময় বাতিল করা যায়; পাসওয়ার্ড বদলালে বাকি সব সেশন বন্ধ</td>
+</tr>
+<tr>
+<td>অনুমতি</td>
+<td>role (superadmin/admin/user) + মডিউল + layer + বিভাগ-সীমা + কোম্পানি-সীমা; <strong>UI লুকানো ও API বন্ধ দুটোই</strong></td>
+</tr>
+<tr>
+<td>ডাটাবেস</td>
+<td>সব query prepared statement (<code>?</code>); কোম্পানি-ফিল্টার স্বয়ংক্রিয়; বেতন/সেবা-রেকর্ড মোছা ডাটাবেসই আটকায়</td>
+</tr>
+<tr>
+<td>XSS</td>
+<td>Notice সার্ভারে ও ব্রাউজারে পরিষ্কার; React নিজে escape করে; Mail বডি DOMPurify</td>
+</tr>
+<tr>
+<td>ডিজিটাল স্বাক্ষর</td>
+<td>OTP, SHA-256 tamper-check, QR যাচাই, PKCS#7 সার্টিফিকেট স্বাক্ষর</td>
+</tr>
+<tr>
+<td>মেইল পাসওয়ার্ড</td>
+<td>AES-256-GCM (চাবি <code>.env</code>-এ, কোডে নেই)</td>
+</tr>
+<tr>
+<td>নিরীক্ষা (audit)</td>
+<td>লগইন চেষ্টা, পাসওয়ার্ড রিসেট, payroll-এ কে কী করল, কর্মীর তথ্য বদল, অ্যাক্সেস বদল, ই-স্বাক্ষর ঘটনা</td>
+</tr>
+<tr>
+<td>জানা সীমাবদ্ধতা</td>
+<td>নিচে ১০ নম্বর অংশে <strong>১১টি</strong>, সৎভাবে লেখা</td>
+</tr>
+<tr>
+<td>বাইরের পরীক্ষা</td>
+<td>❌ এখনও হয়নি (Penetration test)। আমাদের নিজস্ব স্বয়ংক্রিয় টেস্ট আছে (১১ নম্বর অংশ)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="authentication">২. Authentication (কে লগইন করছে তা প্রমাণ)</h2>
+<table>
+<thead>
+<tr>
+<th>নিয়ন্ত্রণ</th>
+<th>বিবরণ</th>
+<th>প্রমাণ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Login ID</td>
+<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো</td>
+<td><code>EmployeeLoginId.ts</code>, <code>EmployeeRoutes.ts</code>, <code>DataImportRoutes.ts</code></td>
+</tr>
+<tr>
+<td>কেউ নিজে অ্যাকাউন্ট খুলতে পারে না</td>
+<td>Public registration বন্ধ; শুধু Admin/HR অ্যাকাউন্ট বানায়</td>
+<td><code>AuthRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Superadmin</td>
+<td><code>.env</code>-এর <code>ADMIN_EMAIL/PASSWORD</code> থেকে তৈরি; API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role <code>user</code> হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না</td>
+<td><code>server.ts</code> <code>seedAdminFromEnv</code>, <code>AccountBlock.ts</code>, টেস্ট</td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড hash</td>
+<td>bcryptjs, cost 10</td>
+<td><code>UserManagement.ts</code>, <code>AuthRoutes.ts</code></td>
+</tr>
+<tr>
+<td>ভুল পাসওয়ার্ড</td>
+<td>অ্যাকাউন্টে ৫ বার ভুলে ১৫ মিনিট লক (সঠিক পাসওয়ার্ডও তখন চলে না); এক IP-তে ৩০ বার ভুলে অপেক্ষা; অচেনা ID-ও একইভাবে গোনা হয়</td>
+<td><code>LoginGuard.ts</code>, টেস্ট (২৫ ভুলের পর আটকায়)</td>
+</tr>
+<tr>
+<td>অ্যাকাউন্ট আন্দাজ</td>
+<td>ভুল ID ও ভুল পাসওয়ার্ড, দুটোতে একই বার্তা; Forgot-password-এ ID আছে কি না বোঝা যায় না</td>
+<td>টেস্ট <code>SEC-02</code>, <code>PasswordResetRoutes.ts</code></td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড নীতি</td>
+<td><strong>কোম্পানির সিদ্ধান্তে যেকোনো পাসওয়ার্ড চলে</strong> (যেমন <code>1234</code>), শুধু ফাঁকা নয় ও ১২৮ অক্ষরের বেশি নয়। ব্যবহারকারীদের সুবিধার জন্য ইচ্ছাকৃত। সুরক্ষা আসে অন্য স্তর থেকে: ভুল পাসওয়ার্ডে লগইন আটকানো (LoginGuard), এক-ফোন নিয়ম, পাসওয়ার্ড বদলালে অন্য সব সেশন বন্ধ, bcrypt hash। সব জায়গায় একই নিয়ম এক ফাইলে</td>
+<td><code>src/lib/passwordPolicy.ts</code></td>
+</tr>
+<tr>
+<td>Forgot password</td>
+<td>(ক) ইমেইলে ৬ অঙ্কের কোড: ১৫ মিনিট, ৫ চেষ্টা, কোড hash করে রাখা, timing-safe তুলনা, একবার ব্যবহার; (খ) HR-কে অনুরোধ: HR অস্থায়ী পাসওয়ার্ড দেয়, কর্মী পরের লগইনে নিজেরটা দিতে বাধ্য। দুটোতেই পুরোনো সব সেশন বন্ধ; IP ও অ্যাকাউন্টভিত্তিক রেট লিমিট</td>
+<td><code>PasswordResetRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Fingerprint / Passkey</td>
+<td>অ্যাপ: ফোনের Keystore/Keychain-এ সিক্রেট (সার্ভারে শুধু SHA-256); ওয়েব: WebAuthn passkey (সার্ভারে শুধু public key)। পাসওয়ার্ড বদলালে/ডিভাইস সরালে/সুইচ বন্ধ হলে অচল। ভুল চেষ্টা লগইন-লকে গোনা হয়</td>
+<td><code>FingerprintRoutes.ts</code></td>
+</tr>
+<tr>
+<td>একটি ফোন নিয়ম (অ্যাপ)</td>
+<td>নতুন ফোনে লগইন Superadmin-এর অনুমতির অপেক্ষায়; ফোন সরালে ওই ফোনের সেশন বন্ধ</td>
+<td><code>DeviceRoutes.ts</code></td>
+</tr>
+<tr>
+<td>onboarding লগইন</td>
+<td>নতুন কর্মীর অস্থায়ী লগইন শুধু "My Onboarding" পেজে সীমিত, মেয়াদ শেষে বাতিল</td>
+<td><code>OnboardingSelfServiceRoutes.ts</code></td>
+</tr>
+<tr>
+<td>ব্লক</td>
+<td>HR ব্লক করলে বা পদত্যাগ/বরখাস্ত কার্যকর হলে সব সেশন সঙ্গে সঙ্গে বন্ধ (প্রতি রিকোয়েস্টে যাচাই)</td>
+<td><code>AccountBlock.ts</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="session-token">৩. Session ও Token</h2>
+<ul>
+<li><strong>Token:</strong> JWT (HS256), কোম্পানি/ডিভাইস/সময়সহ। সই করার চাবি <strong>কোডে লেখা নেই</strong>: <code>.env</code>-এর <code>JWT_SECRET</code> (৩২+ অক্ষর) নইলে প্রথম চালুতে এলোমেলো চাবি <code>.jwt-secret</code> ফাইলে (git-এ নেই)। একাধিক সার্ভার হলে সবগুলোয় একই <code>JWT_SECRET</code> দিতে হবে (<code>JwtSecret.ts</code>)।</li>
+<li><strong>মেয়াদ (Superadmin বদলাতে পারে):</strong> ওয়েব ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয়; অ্যাপ ৭ দিন বা ৩ দিন না খুললে (<code>SessionSecurity.ts</code>)।</li>
+<li><strong>বাতিল করা:</strong> <code>user_sessions</code> টেবিলে token-এর <strong>hash</strong> থাকে (token নিজে নয়)। Logout, Superadmin-এর "Active Users" থেকে বের করা, পাসওয়ার্ড বদল (যে সেশন থেকে বদলানো সেটা বাদে), অ্যাকাউন্ট ব্লক।</li>
+<li><strong>কোথায় থাকে:</strong> ওয়েবে <code>localStorage</code>; অ্যাপে অ্যাপের স্টোরেজ। (কুকি নয়, তাই CSRF প্রযোজ্য নয়; তবে XSS হলে token ঝুঁকিতে, তাই XSS রোধ কড়া, ৬ নম্বর)।</li>
+</ul>
+<hr />
+<h2 id="authorization">৪. Authorization (কে কী করতে পারবে)</h2>
+<p>পুরো ছবি: <code>02-application-workflow.md</code> §৪। তালিকা: <a href="security/access-control-matrix.html"><code>security/access-control-matrix.md</code></a> (৪০টি Admin মডিউল ও তাদের layer)।</p>
+<ol>
+<li><strong>Role:</strong> <code>superadmin</code> (সব), <code>admin</code> (শুধু যে মডিউল দেওয়া), <code>user</code> (কর্মী: শুধু নিজের তথ্য + চালু সুইচ)।</li>
+<li><strong>মডিউল অনুমতি:</strong> <code>requireModule("payroll")</code>; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট <code>AUTHZ-04</code>)।</li>
+<li><strong>Layer:</strong> মডিউলের ভেতরের সূক্ষ্ম ধাপ (<code>requireModuleLayer</code>)। <strong>🔒 layer</strong> ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: <code>salary_hold</code>, <code>audit_approve</code>, <code>accounts_pay</code>, <code>permanent_delete</code>, <code>mail_password</code>, <code>block_account</code>।</li>
+<li><strong>বিভাগ-সীমা:</strong> Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।</li>
+<li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। <strong>Admin Panel-এর কাজে (strict scope)</strong> — <code>requireModule</code>/<code>requireModuleLayer</code> পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট <code>qa-companies.mjs</code> CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)। মাদার কোম্পানির HR-কে Superadmin sister company-র প্রবেশাধিকার ও সেখানকার Module Access দিলে তিনি company switcher-এ ওই কোম্পানিতে গিয়ে পুরো HR কাজ করেন — কর্মী, ব্যাংক অ্যাকাউন্ট, বেতন, payroll (টেস্ট <code>qa-group-hr.mjs</code> GH-01..09)। <strong>All companies mode</strong> (<code>users.can_work_all_companies</code>, ডিফল্টে বন্ধ, শুধু Superadmin দিতে পারেন, বদল <code>user_access_audit</code>-এ): request-এ <code>X-Company-Scope: all</code> থাকলে সার্ভার শুধু অনুমতি থাকলে মানে, এবং শুধু সেই কোম্পানিগুলো খোলে যেগুলোতে ওই অ্যাকাউন্টের প্রবেশাধিকার আছে; অনুমতি না থাকলে header কিছুই বদলায় না। Settings, Module Access ও নতুন রেকর্ড বাছা কোম্পানির থাকে; payroll চালানো প্রতি কোম্পানিতে আলাদা (টেস্ট GH-10..21)। একদম নতুন ডাটাবেসে প্রথম চালুতে <code>departments</code>, Module Access layer, <code>access_templates</code> ও <code>zk_devices</code>-এ <code>company_id</code> আসত না (তাই নতুন কর্মী যোগ ভেঙে যেত); এখন প্রথম চালুতেই আসে (QA tests workflow এটা প্রতিবার খালি ডাটাবেসে পরীক্ষা করে)।</li>
+<li><strong>Self-service সুইচ:</strong> Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant, SIM &amp; ID Card request ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ। SIM/ID card issue করা HR Operations-এর আলাদা <code>requisitions</code> layer (ডিফল্টে বন্ধ); কর্মী শুধু নিজের request দেখেন ও বাতিল করেন, joiner-এর request-এর route শুধু onboarding login-এর জন্য (<code>RequisitionRoutes.ts</code>)।</li>
+<li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → Audit approve → Accounts pay। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
+<li><strong>নিজের দাবি নিজে অনুমোদন নয়:</strong> কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট <code>LEAVE-12</code>)।</li>
+<li><strong>নিয়ম (<code>CLAUDE.md</code>):</strong> নতুন যেকোনো ফিচার/মেনু/বোতাম/API অনুমতির পেছনে থাকবে। UI লুকানো <strong>এবং</strong> API বন্ধ।</li>
+<li><strong>Admin Dashboard:</strong> পাতাটা সব Admin খোলেন, কিন্তু প্রতিটি অংশ আসে শুধু সেই মডিউল থাকলে — জন্মদিন (Employees), probation/চুক্তি/ডকুমেন্টের মেয়াদ (Employees বা HR Operations), উপস্থিতির অনুমোদন (Attendance), প্রতিটি "অপেক্ষার কাজ"-এর সংখ্যা তার নিজের মডিউলে (<code>AdminDashboardRoutes.ts</code>; টেস্ট QA-01)।</li>
+<li><strong>কর্মীর তথ্য যাচাই:</strong> ইমেইল <code>name@domain.tld</code> হতে হবে; জন্মতারিখ আসল, ভবিষ্যতের নয়, বয়স ১৪–১০০ (শ্রম আইন ২০০৬, ধারা ৩৪; <code>EmployeeValidation.ts</code>)। পুরনো রেকর্ডে শুধু বদলানো ঘরটা যাচাই হয়।</li>
+</ol>
+<hr />
+<h2 id="_2">৫. ডাটা সুরক্ষা</h2>
+<table>
+<thead>
+<tr>
+<th>বিষয়</th>
+<th>ব্যবস্থা</th>
+<th>প্রমাণ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SQL Injection</td>
+<td>সব query <code>queryDB(sql, [params])</code>, prepared statement; লগইনে injection চেষ্টা আটকায়</td>
+<td><code>server.ts</code> <code>queryDB</code>, টেস্ট <code>SEC-04</code></td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড/সিক্রেট ডাটাবেসে</td>
+<td>login: bcrypt; মেইল পাসওয়ার্ড: AES-256-GCM; passkey: শুধু public key; fingerprint: শুধু SHA-256; reset কোড: hash; token: hash</td>
+<td><code>MailRoutes.ts</code>, <code>FingerprintRoutes.ts</code>, <code>PasswordResetRoutes.ts</code></td>
+</tr>
+<tr>
+<td>কর্মী মুছলে বেতন-রেকর্ড</td>
+<td>ডাটাবেস <code>ON DELETE RESTRICT</code> (১৪টি foreign key), API-তেও <code>409</code></td>
+<td><code>EmployeeRecordsGuard.ts</code>, টেস্ট</td>
+</tr>
+<tr>
+<td>পরিশোধিত বেতন</td>
+<td>বদলানো যায় না ("A Paid payroll run can't be edited"); একই কর্মী-মাস দুবার হয় না (UNIQUE)</td>
+<td><code>PayrollRoutes.ts</code>, টেস্ট</td>
+</tr>
+<tr>
+<td>ছুটি দ্বৈত আবেদন</td>
+<td>একই দিনে দ্বিতীয় আবেদন 409; ব্যালেন্স শূন্যের নিচে যায় না</td>
+<td>টেস্ট <code>LEAVE-04..06</code></td>
+</tr>
+<tr>
+<td>একসাথে দুবার চাপ (double-click, দুই ট্যাব, দুই server worker)</td>
+<td>approve, payroll submit/approve/return/pay, বেতন "paid", বিল disburse, ঋণ approve — প্রতিটা ডাটাবেসে শর্তসহ <code>UPDATE ... WHERE status = &lt;আগের অবস্থা&gt;</code>; যে দ্বিতীয় আসে সে 409 পায়। ফলে ঋণের কিস্তি দুবার কাটে না, বিল দুবার দেওয়া হয় না। দিনে একটা claim ও একটা চলমান ঋণ-আবেদনের নিয়ম একসাথে পাঠালেও ভাঙে না</td>
+<td>টেস্ট <code>qa-concurrency.mjs</code> C1–C9</td>
+</tr>
+<tr>
+<td>সময়ের সঠিকতা</td>
+<td>Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল</td>
+<td>টেস্ট <code>qa-dates.mjs</code> DT-11..13b</td>
+</tr>
+<tr>
+<td>ডাটাবেস ত্রুটি গোপন</td>
+<td>ব্যবহারকারী ডাটাবেসের বার্তা (কলামের নাম ইত্যাদি) দেখে না, লগে যায়</td>
+<td><code>ApiErrors.ts</code></td>
+</tr>
+<tr>
+<td>তথ্য প্রকাশ কমানো</td>
+<td>পাসওয়ার্ড hash কোনো API-তে ফেরে না (টেস্ট <code>SEC-08</code>); কর্মী অন্যের payroll/payslip পায় না (<code>PAY-06/07</code>)</td>
+<td>টেস্ট</td>
+</tr>
+<tr>
+<td>ফাইল</td>
+<td>ডাটাবেসের BLOB-এ (আলাদা ফাইল সার্ভার নেই); JSON সীমা ২৫MB, Nginx ৩০MB; ছবির MIME যাচাই</td>
+<td><code>profileRoutes.ts</code>, <code>deploy/nginx.conf.example</code></td>
+</tr>
+<tr>
+<td>ট্র্যাকিং সম্মতি</td>
+<td>লোকেশন ট্র্যাকিং চালুর আগে ব্যবহারকারীকে নোটিশ ও সম্মতি, আলাদা Superadmin সুইচ</td>
+<td><code>TrackingNoticeCard.tsx</code>, <code>locationDisclosure.tsx</code></td>
+</tr>
+<tr>
+<td>AI Assistant</td>
+<td>আসল API-কে প্রশ্নকারীর <strong>নিজের token</strong> দিয়ে ডাকে, তাই অধিকারের বাইরে কিছু দেখায় না; কিছু লেখে না; Gemini চালু না থাকলে কোনো ডাটা বাইরে যায় না</td>
+<td><code>AiAssistantRoutes.ts</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="xss-cors-header">৬. ওয়েব নিরাপত্তা (XSS, CORS, Header)</h2>
+<ul>
+<li><strong>XSS:</strong> React ডিফল্টে সব লেখা escape করে। যেখানে HTML দেখানো দরকার (Notice, Mail): সার্ভারে <code>sanitize-html</code> (<code>NoticeSafety.ts</code>: শুধু সাধারণ ট্যাগ; script, frame, form, <code>onerror</code>, <code>javascript:</code> লিংক, CSS <code>url()</code> বাদ; Lottie expression বাদ), সংরক্ষণ ও পড়া <strong>দুবারই</strong>; ব্রাউজারে DOMPurify (<code>noticeHtml.ts</code>, <code>MailBody.tsx</code>)। টেস্ট: <code>&lt;script&gt;</code> ও <code>onerror</code> ফেরে না।</li>
+<li><strong>CORS:</strong> <code>CORS_ORIGINS</code> সেট করলে শুধু ওই ঠিকানা (টেস্টে <code>evil.example</code> পায় না)। <strong>সেট না করলে সবাই ডাকতে পারে</strong> ও সার্ভার চালুর সময় সতর্কবার্তা ছাপে (<code>WebSecurity.ts</code>)।</li>
+<li><strong>Header (প্রতি উত্তরে):</strong> <code>X-Content-Type-Options: nosniff</code>, <code>X-Frame-Options: SAMEORIGIN</code>, <code>Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'</code>, <code>Referrer-Policy: strict-origin-when-cross-origin</code>, <code>Permissions-Policy</code> (ক্যামেরা, মাইক, লোকেশন শুধু নিজের); HTTPS হলে <code>Strict-Transport-Security</code>।</li>
+<li><strong>CSRF:</strong> token <code>Authorization</code> header-এ যায়, কুকিতে নয়; তাই ব্রাউজার নিজে থেকে অন্য সাইট থেকে অনুরোধ পাঠালে token যাবে না।</li>
+<li><strong>Android app download (<code>/downloads/*.apk</code>, লগইন ছাড়াই খোলা):</strong> শুধু <code>downloads/</code> (বা <code>APK_DIR</code>) ফোল্ডারের নির্দিষ্ট নামের ফাইল পাঠায়। নামে <code>/</code> বা <code>..</code> থাকলে 404, তাই ফোল্ডারের বাইরের ফাইল পাওয়া যায় না। ফাইলটা সত্যিই APK কিনা (ভেতরে <code>AndroidManifest.xml</code>) পরীক্ষা করে পাঠায়, নইলে 404। APK-কে ঘিরে থাকা zip-এর ভেতরের APK বের করে পাঠায়, অন্য কিছু নয় (<code>AndroidApkRoute.ts</code>, টেস্ট <code>npm run test:apk</code>)। <code>GET /api/app/android-latest</code>-ও লগইন ছাড়া খোলা, কারণ লগইন পাতাতেও app-কে update-এর কথা জানাতে হয়। এটা শুধু ওই APK-এর version নম্বর আর download ঠিকানা দেয়, অন্য কোনো তথ্য নয়। app (<code>MainActivity.java</code>) পাতার কোনো download নিজে খোলে না, শুধু <code>http(s)</code> ঠিকানা ফোনের browser-কে দিয়ে দেয়।</li>
+<li><strong>ত্রুটির উত্তর:</strong> সব <code>/api</code> উত্তর JSON; অজানা ঠিকানায় 404 <code>{error}</code>; ভাঙা JSON-এ 400 <code>{error}</code>; ভেতরের ত্রুটির বিবরণ বাইরে যায় না (<code>ApiErrors.ts</code>)।</li>
+</ul>
+<hr />
+<h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
+<p>(<code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>, <code>DocumentVaultRoutes.ts</code>)
+- পাঠানোর সময় মূল ফাইলের <strong>SHA-256</strong> স্থির; প্রতি স্বাক্ষরে আবার মেলানো; সই করা PDF-এর SHA-256-ও রাখা।
+- <strong>ক্রমানুযায়ী স্বাক্ষর:</strong> শুধু যার পালা সে সই করতে পারে।
+- <strong>OTP (ঐচ্ছিক সুইচ):</strong> ৬ অঙ্ক, ৫ মিনিট, একবার, ৫ ভুলে ১৫ মিনিট লক, hash করে রাখা; কোড স্বাক্ষরকারীর Credence Mail ঠিকানায় যায়।
+- <strong>ডিজিটাল সার্টিফিকেট স্বাক্ষর (ঐচ্ছিক):</strong> PKCS#7 (Adobe Reader-এ "Signed")। কেনা <code>.p12</code> (<code>ESIGN_CERT_FILE</code>) বা কোম্পানির self-signed (শুধু পরীক্ষার জন্য, Adobe-এ "validity unknown")।
+- <strong>যাচাই:</strong> সাধারণ মানুষও <code>/verify/&lt;code&gt;</code> (QR) খুলে দেখতে পারে কে কখন সই করেছে, এবং ফাইল ফেলে মিলিয়ে দেখতে পারে।
+- সব ঘটনা <code>document_events</code>-এ।</p>
+<hr />
+<h2 id="audit-trail">৮. নিরীক্ষা (Audit Trail)</h2>
+<table>
+<thead>
+<tr>
+<th>কী</th>
+<th>কোথায়</th>
+<th>কত দিন</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ব্যর্থ/সফল লগইন চেষ্টা</td>
+<td><code>login_attempts</code></td>
+<td>৩০ দিন পরে পরিষ্কার</td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড রিসেট অনুরোধ ও কোড</td>
+<td><code>password_reset_log</code>, <code>password_reset_requests</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>অ্যাক্সেস বদল (কে কাকে কোন অনুমতি দিল, পাসওয়ার্ড রিসেট)</td>
+<td><code>user_access_audit</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Payroll: কে খুলল, কী করল</td>
+<td><code>payroll_access_log</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>কর্মীর তথ্য বদল (আগের/পরের মান), বেতনের ব্যাংক/MFS অ্যাকাউন্ট যোগ-বদল-মোছা (কর্মীকে alert যায়)</td>
+<td><code>employee_change_log</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>MPR entry সম্পাদনা/স্থায়ী মোছা</td>
+<td><code>entry_edit_history</code>, <code>entry_permanent_delete_log</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>ই-স্বাক্ষর ঘটনা</td>
+<td><code>document_events</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Mail অ্যাডমিন কাজ</td>
+<td><code>mail_admin_log</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>রিপোর্ট ইমেইল</td>
+<td><code>report_email_log</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>সেশন</td>
+<td><code>user_sessions</code> (token hash, শেষ ব্যবহার)</td>
+<td>৩০ দিন অব্যবহৃত হলে পরিষ্কার</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="secret">৯. Secret ব্যবস্থাপনা</h2>
+<p><code>.env</code> git-এ নেই (<code>.gitignore</code>: <code>.env*</code>, শুধু <code>.env.example</code> আছে); <code>.jwt-secret</code>-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (<code>GEMINI_API_KEY</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>ESIGN_CERT_*</code>, <code>ERP360_APP_SECRET</code>, Firebase, SMTP সবই <code>.env</code>/পরিবেশ থেকে)।
+<strong>মনে রাখার:</strong> <code>.env.example</code>-এ <code>ADMIN_PASSWORD="ChangeThisPassword123"</code>। লাইভে অবশ্যই বদলাবেন।</p>
+<hr />
+<h2 id="_3">১০. জানা সীমাবদ্ধতা (সৎ তালিকা)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>সীমাবদ্ধতা</th>
+<th>ঝুঁকি</th>
+<th>করণীয়</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>১</td>
+<td><strong>CORS</strong> <code>CORS_ORIGINS</code> না দিলে সব সাইটের জন্য খোলা</td>
+<td>মাঝারি</td>
+<td>লাইভের <code>.env</code>-এ অবশ্যই দিন</td>
+</tr>
+<tr>
+<td>২</td>
+<td>সহজ পাসওয়ার্ড অনুমোদিত (কোম্পানির সিদ্ধান্ত) — অনুমান করা সহজ</td>
+<td>মাঝারি (গ্রহণ করা ঝুঁকি)</td>
+<td>লগইন আটকানো ও এক-ফোন নিয়ম চালু রাখুন; Superadmin/Payroll অ্যাকাউন্টে নিজেরা শক্ত পাসওয়ার্ড বা fingerprint/passkey ব্যবহার করুন। কড়া করতে চাইলে শুধু <code>passwordProblem</code> বদলান</td>
+</tr>
+<tr>
+<td>৩</td>
+<td><strong>CSP</strong> শুধু frame/object/base সীমিত; <code>script-src</code> নেই</td>
+<td>নিম্ন–মাঝারি</td>
+<td>Vite বান্ডেলের সাথে মিলিয়ে ক্রমান্বয়ে কড়া করা</td>
+</tr>
+<tr>
+<td>৪</td>
+<td>সাধারণ API রেট লিমিট নেই (শুধু লগইন, reset, OTP-তে আছে)</td>
+<td>নিম্ন–মাঝারি</td>
+<td>Nginx <code>limit_req</code> বা middleware</td>
+</tr>
+<tr>
+<td>৫</td>
+<td>token ব্রাউজারের <code>localStorage</code>-এ</td>
+<td>XSS হলে ঝুঁকি</td>
+<td>XSS রোধ কড়া রাখা (আছে); দীর্ঘমেয়াদে HttpOnly কুকি</td>
+</tr>
+<tr>
+<td>৬</td>
+<td>ফাইল আপলোডে ধরন যাচাই সীমিত (ছবিতে আছে, ডকুমেন্টে আকার ছাড়া কম)</td>
+<td>নিম্ন–মাঝারি</td>
+<td>অনুমোদিত ধরন ও ভাইরাস স্ক্যান</td>
+</tr>
+<tr>
+<td>৭</td>
+<td>ফাইল ডাটাবেসে, রেস্টে এনক্রিপশন অ্যাপ করে না (ডিস্ক/ডাটাবেস এনক্রিপশন হোস্টিংয়ের ব্যাপার)</td>
+<td>হোস্টিং-নির্ভর</td>
+<td>সার্ভার ডিস্ক এনক্রিপশন, ব্যাকআপ এনক্রিপশন</td>
+</tr>
+<tr>
+<td>৮</td>
+<td>Superadmin নিজের payroll মাস নিজেই submit ও approve করতে পারে</td>
+<td>নীতি</td>
+<td>বড় অঙ্কে আলাদা ব্যক্তি লাগলে বদলানো</td>
+</tr>
+<tr>
+<td>৯</td>
+<td>Supervisor ও Template না থাকলে আবেদন অপেক্ষায় থাকে, শুধু Superadmin সিদ্ধান্ত দেন (তাঁর My Approvals-এ আসে; কর্মী "No approver set yet" দেখেন)</td>
+<td>কার্যকারিতা</td>
+<td>প্রধানদের Supervisor বা Template ঠিক করুন</td>
+</tr>
+<tr>
+<td>১০</td>
+<td>কর্মীর NID সব Employees-অ্যাডমিন দেখেন; Directory-তে সবার ফোন নম্বর</td>
+<td>গোপনীয়তা নীতি</td>
+<td>HR ঠিক করুক কে কী দেখবে</td>
+</tr>
+<tr>
+<td>১১</td>
+<td>বাইরের penetration test ও ব্যাকআপ/পুনরুদ্ধার পরীক্ষা এই ডকুমেন্টে নেই</td>
+<td>—</td>
+<td>নিচের "ডকুমেন্ট প্রস্তুতি" দেখুন</td>
+</tr>
+<tr>
+<td>১২</td>
+<td>e-sign-এর <code>node-forge</code>-এ একটি high দুর্বলতা (RSA স্বাক্ষর <em>যাচাই</em>), এখনো কোনো সংস্করণে ঠিক নেই</td>
+<td>নিম্ন</td>
+<td>অ্যাপ forge দিয়ে শুধু সার্টিফিকেট খোলে ও স্বাক্ষর দেয়, যাচাই করে না; নতুন সংস্করণ এলে আপডেট</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_4">১১. আমাদের নিজস্ব টেস্ট (প্রমাণ হিসেবে দেখানো যায়)</h2>
+<p>লগ: <code>docs/test-logs/2026-10-19/</code> ও <code>2026-10-25/</code>।</p>
+<table>
+<thead>
+<tr>
+<th>টেস্ট</th>
+<th>ফল (২৫ অক্টো)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HR ম্যানেজারের ২ বছর (১৬ কর্মী)</td>
+<td>২৮৪ পাস, ৪ ফেল (R-01)</td>
+</tr>
+<tr>
+<td>একজন কর্মীর ৫ বছর</td>
+<td>৩৫৩ পাস, ১ ফেল (স্ক্রিপ্টের ভুল পথ)</td>
+</tr>
+<tr>
+<td>নিরাপত্তা/নীতির "ভাঙার চেষ্টা"</td>
+<td>৫০ পাস, ৫ ফেল (উপরের সীমাবদ্ধতা ২, ১, ৬-এর অংশ)</td>
+</tr>
+<tr>
+<td>প্রজেক্টের নিজস্ব <code>test:onboarding</code> / <code>test:hr-linkage</code></td>
+<td>১০২ / ২৯ পাস, ০ ফেল</td>
+</tr>
+<tr>
+<td>UI স্মোক (১০৪ পেজ)</td>
+<td>০ সমস্যা</td>
+</tr>
+<tr>
+<td>একসাথে দুবার চাপ (<code>qa-concurrency</code>)</td>
+<td>৯ পাস, ০ ফেল (আগে ৫টা ফেল, ঠিক করা)</td>
+</tr>
+<tr>
+<td>কোম্পানি আলাদা রাখা (<code>qa-companies</code>)</td>
+<td>১৮ পাস, ০ ফেল (আগে id দিয়ে অন্য কোম্পানির তথ্য পড়া/বদলানো যেত, ঠিক করা)</td>
+</tr>
+<tr>
+<td>তারিখের কিনারা (<code>qa-dates</code>)</td>
+<td>১৫ পাস, ০ ফেল</td>
+</tr>
+<tr>
+<td>বাংলা PDF/Excel (<code>qa-bangla-*</code>)</td>
+<td>PDF-এ বাংলা ঠিক (আগে গোলমাল/"????"); Excel ৫ পাস</td>
+</tr>
+<tr>
+<td>এক মাসের উপস্থিতি, ছুটি ও বেতন হাতে-কলমে হিসাবের সাথে মেলানো (<code>qa-month-reconcile</code>, ১০ জন, সেপ্টেম্বর ২০২৬)</td>
+<td>২৩ পাস, ০ ফেল; Excel-এ মেলানোর ফাইল তৈরি হয়</td>
+</tr>
+<tr>
+<td>ফর্মে টাইপ ও ক্লিক করে (<code>qa-e2e-forms</code>, আসল ব্রাউজার)</td>
+<td>১০ পাস, ০ ফেল (লগইন, নতুন কর্মী, ছুটি আবেদন ও অনুমোদন, night shift সংশোধন)</td>
+</tr>
+<tr>
+<td>বড় কোম্পানি (<code>qa-bigdata</code>, ৩০০০ ও ৫০০০ কর্মী)</td>
+<td>১৫ পাস, ০ ফেল (তালিকা &lt; ০.৬ সে.; ৫০০০ জনের মাসের বেতন একবারে ২৪ সে.)</td>
+</tr>
+</tbody>
+</table>
+<p>এই টেস্টগুলো প্রতি push-এ GitHub-এ নিজে চলে: <strong>QA tests</strong> workflow (<code>.github/workflows/qa-tests.yml</code>, <code>tests/qa/run-all.sh</code>) — প্রতিটা টেস্ট নতুন খালি ডাটাবেসে; ফল Actions-এর "qa-results"-এ।</p>
+<p>২৫ অক্টোবরের আগে ধরা এবং এখন <strong>ঠিক হওয়া</strong> জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।</p>
+<hr />
+<h2 id="_5">১২. দুর্ঘটনা ঘটলে কী করা যায় (প্রযুক্তিগত হাতিয়ার)</h2>
+<table>
+<thead>
+<tr>
+<th>পরিস্থিতি</th>
+<th>হাতিয়ার</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>একজনের অ্যাকাউন্ট ঝুঁকিতে</td>
+<td>Admin Panel → Users → Block (সব সেশন বন্ধ); পাসওয়ার্ড রিসেট</td>
+</tr>
+<tr>
+<td>সন্দেহজনক সেশন</td>
+<td>Active Users → Sign out</td>
+</tr>
+<tr>
+<td>ফোন হারানো</td>
+<td>Device Access → ফোন সরান</td>
+</tr>
+<tr>
+<td>সবাইকে বের করা</td>
+<td><code>JWT_SECRET</code> বদলান (সবাই লগআউট)</td>
+</tr>
+<tr>
+<td>কে কী করেছে</td>
+<td>উপরের ৮ নম্বর অংশের লগ</td>
+</tr>
+<tr>
+<td>কাউকে ডাটা দেখা বন্ধ</td>
+<td>Module Access থেকে অনুমতি তুলুন (সঙ্গে সঙ্গে কার্যকর)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Notification পরীক্ষা (<code>POST /api/web-push/test</code>):</strong> login করা account শুধু নিজের phone/browser-এ test message পাঠাতে পারে (অন্যের নয়)। উত্তরে push service-এর (Apple/Google) host ও status code আসে, কোনো key বা token নয়। Profile → Notifications থেকে চালানো হয়।</li>
+</ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

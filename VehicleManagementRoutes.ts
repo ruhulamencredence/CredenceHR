@@ -1,0 +1,1840 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Vehicle Requisition & Management (Self Service -> "Book a Ride" / "Ride
+// Status", plus Admin Panel -> Vehicle Management) — kept in its own file,
+// same reasoning as AssetManagementRoutes.ts/GrievanceRoutes.ts: server.ts is
+// already huge, so new features go in their own module and are registered
+// from inside startServer() via registerVehicleManagementRoutes(), reusing
+// that request's authenticateToken/requireAdmin/requireModule/queryDB.
+//
+// Follows the flowchart (যানবাহন রিকুইজিশন ওয়ার্কফ্লো v1.0):
+//   লগইন -> Book a Ride -> রিকুইজিশন ফর্ম পূরণ -> সাবমিট -> HR/Admin রিভিউ
+//   (গাড়ির অ্যাভেইলেবিলিটি চেক) -> Approved: গাড়ি ও ড্রাইভার অ্যাসাইনমেন্ট,
+//   ইউজারকে কনফার্মেশন -> রাইড সম্পন্ন ও গাড়ি ফেরত -> নির্ধারিত সময়ে ফেরত
+//   এসেছে? হ্যাঁ -> রাইড ক্লোজড (End). না (Late) -> ইউজার পূর্বে সিস্টেমে
+//   ইনফর্ম করেছে? হ্যাঁ -> টাইম এক্সটেনশন রিকোয়েস্ট HR/Admin অনুমোদন করবে ->
+//   End. না -> HR ম্যানুয়ালি এন্ট্রি ও নোটিশ ফ্ল্যাগ প্রদান করবে -> End.
+//
+// The "HR/Admin রিভিউ" diamond routes through the SAME Dynamic Approval
+// Engine every other module uses (request_type 'vehicle', source_type
+// 'vehicle_requisition' — see createTemplateApprovalRequest/
+// performApprovalAction/finalizeVehicleRequisitionApproval in server.ts): a
+// Superadmin builds a Template for it from Admin Panel -> Approvals ->
+// Templates (Layer 1 is named "HR/Admin Review" — see LAYER_NAMES in
+// ApprovalTemplateManager.tsx — with its Approver Type set to Employee/Admin
+// and specific people picked, since this flowchart has no separate
+// Supervisor step to default Layer 1 to). Approve/Reject itself therefore
+// happens from Admin Panel -> Approvals / "My Approvals" like every other
+// module, NOT from a route in this file. Once the Approval Workflow
+// approves, the requisition flips to 'approved' (workflow cleared) — IT/
+// Admin then still has to do the flowchart's own "গাড়ি ও ড্রাইভার
+// অ্যাসাইনমেন্ট" step via PUT /api/vehicles/requisitions/:id/assign below
+// (status 'approved' -> 'ongoing'), same two-step shape as Asset
+// Requisition's own POST /api/assets/requisitions/:id/fulfill.
+//
+// Same convention as GrievanceRoutes.ts/ExitOffboardingRoutes.ts otherwise:
+// every write route only ever does `WHERE id = ?`, filtering/joins happen in
+// JS after a full-table SELECT, and every INSERT/UPDATE is all-`?`-
+// placeholders so the in-memory dev fallback's generic positional simulator
+// (see simulateGenericTable in memoryDbFallback.ts) stays correct with zero
+// bespoke handlers needed.
+
+import type { Express } from "express";
+import type { AlertType } from "./Alerts";
+import { runsBackgroundJobs } from "./jobRunner";
+
+interface VehicleManagementRouteDeps {
+  authenticateToken: any;
+  requireAdmin: any;
+  // 'vehicle_maintainer' is a separate AdminModuleKey from 'vehicle_management'
+  // (see server.ts's ADMIN_MODULE_KEYS comment) — it only gates the direct-
+  // book/direct-assign bypass routes below, not the full Admin Panel tab.
+  requireModule: (moduleKey: "vehicle_management" | "vehicle_maintainer") => any;
+  queryDB: (sql: string, params?: any[]) => Promise<any>;
+  getAdminModules: (userId: number) => Promise<string[]>;
+  createAlert: (
+    queryDB: (sql: string, params?: any[]) => Promise<any>,
+    params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
+  ) => Promise<void>;
+  // Dynamic Approval Engine (server.ts) — routes a submitted requisition
+  // through request_type 'vehicle' the same way Asset Requisition does. See
+  // the design note above registerVehicleManagementRoutes.
+  createTemplateApprovalRequest: (
+    requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
+    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
+    sourceId: number,
+    requestedBy: number,
+    overrideSupervisorId?: number | null
+  ) => Promise<{ autoApproved: boolean; template: any | null }>;
+  getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  isVehicleMaintainerStep: (request: any) => Promise<boolean>;
+  // Auto-approve path (no Template resolved at all for this employee/type) —
+  // same finalize function performApprovalAction's 'vehicle_requisition'
+  // branch calls once the Approval Workflow's LAST step signs off.
+  finalizeVehicleRequisitionApproval: (requisitionId: number, approvedBy: number, remarks: string | null) => Promise<void>;
+  // Live tracking (LiveTrackingRoutes.ts): a ride started or ended — the
+  // requester's and driver's phones go live / drop back at once.
+  rideChanged?: (userIds: number[]) => Promise<void>;
+}
+
+export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> {
+  if (!dbPool) return;
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        vehicle_no VARCHAR(50) NOT NULL UNIQUE,
+        model VARCHAR(150) NOT NULL,
+        vehicle_type VARCHAR(50) NULL,
+        status ENUM('available','on_ride','maintenance') NOT NULL DEFAULT 'available',
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure vehicles table exists: " + err.message);
+  }
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_requisitions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_user_id INT NOT NULL,
+        purpose TEXT NOT NULL,
+        pickup_location VARCHAR(255) NOT NULL,
+        destination VARCHAR(255) NOT NULL,
+        ride_date DATE NOT NULL,
+        start_time VARCHAR(10) NOT NULL,
+        estimated_duration_hours DECIMAL(5,2) NOT NULL,
+        expected_return_at DATETIME NULL,
+        status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending',
+        decided_by INT NULL,
+        decided_at TIMESTAMP NULL DEFAULT NULL,
+        rejection_reason TEXT NULL,
+        assigned_vehicle_id INT NULL,
+        driver_name VARCHAR(150) NULL,
+        driver_mobile VARCHAR(30) NULL,
+        actual_return_at DATETIME NULL,
+        returned_late TINYINT(1) NULL,
+        time_extension_status ENUM('none','requested','approved','rejected') NOT NULL DEFAULT 'none',
+        time_extension_note TEXT NULL,
+        time_extension_decided_by INT NULL,
+        hr_notice_flag TINYINT(1) NOT NULL DEFAULT 0,
+        hr_manual_note TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (assigned_vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+        FOREIGN KEY (time_extension_decided_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure vehicle_requisitions table exists: " + err.message);
+  }
+  // Widen status for installs created before the Dynamic Approval Engine
+  // integration added the 'ongoing' status (workflow-approved but not yet
+  // vehicle+driver assigned is 'approved'; assigned and the ride actually
+  // underway is 'ongoing' — previously 'approved' meant what 'ongoing' means
+  // now, back when this file did its own direct approve+assign in one step).
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending'`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'ongoing': " + err.message);
+  }
+  // driver_user_id — added so the assigned driver can be an actual employee
+  // account (Employee Tracking's location_pings, keyed by user_id) instead of
+  // just a free-text name/mobile, so the Live Ride Map (see
+  // GET .../:id/live-location below) has somewhere to pull the driver's
+  // position from. driver_name/driver_mobile are kept too, denormalized from
+  // this account at assign time, for display and notification text.
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions ADD COLUMN driver_user_id INT NULL, ADD FOREIGN KEY (driver_user_id) REFERENCES users(id) ON DELETE SET NULL`
+    );
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
+    }
+  }
+  // 'expired' — the ride's start time (plus the grace time below) passed
+  // while the request was still waiting on approval or a vehicle. See
+  // expireOverdueRides.
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'expired': " + err.message);
+  }
+  // 'assigned' — a vehicle and driver are given but the ride hasn't started
+  // yet (a ride booked for later). It becomes 'ongoing' only when the driver,
+  // whoever assigned it, or Vehicle Management presses Start Ride
+  // (POST .../:id/start).
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','assigned','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'assigned': " + err.message);
+  }
+  // When the "ride starts soon" reminder went out, and when the request expired.
+  // assigned_at / started_at / start_reminded_at — the Start Ride step above.
+  for (const col of ["deadline_reminded_at", "expired_at", "assigned_at", "started_at", "start_reminded_at"]) {
+    try {
+      await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} DATETIME NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
+    }
+  }
+  // Who gave the vehicle (may differ from decided_by, the final approver) and
+  // who pressed Start Ride.
+  for (const col of ["assigned_by", "started_by"]) {
+    try {
+      await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} INT NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
+    }
+  }
+  // Ride deadline rules (Admin Panel -> Vehicle Management -> Ride Deadline):
+  // grace_minutes — how long after the start time a waiting request can still
+  // be approved / given a vehicle before it expires; reminder_minutes — how
+  // long before the start time the approvers get a reminder.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_ride_settings (
+        id INT PRIMARY KEY,
+        grace_minutes INT NOT NULL DEFAULT 30,
+        reminder_minutes INT NOT NULL DEFAULT 60,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure vehicle_ride_settings table: " + err.message);
+  }
+  // Geocoded destination for the Live Ride Map's road route — filled lazily
+  // the first time the map is opened (see geocodeDestination below), since
+  // destination itself is free text typed by the requester.
+  for (const col of ["destination_lat", "destination_lng"]) {
+    try {
+      await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} DECIMAL(10,7) NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") {
+        console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
+      }
+    }
+  }
+}
+
+export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps): { expireOverdueRides: () => Promise<void> } {
+  const {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB,
+    getAdminModules,
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    isVehicleMaintainerStep,
+    finalizeVehicleRequisitionApproval,
+    rideChanged
+  } = deps;
+  const rideLive = (r: any) => {
+    if (!rideChanged) return;
+    void rideChanged([Number(r.employee_user_id), Number(r.driver_user_id) || 0]).catch(() => undefined);
+  };
+  const adminGate = [authenticateToken, requireAdmin, requireModule("vehicle_management")];
+  // Vehicle Requisition Flowchart v3.0's bypass path: whoever actually keeps
+  // the vehicles running day to day (Superadmin-granted 'vehicle_maintainer',
+  // deliberately separate from 'vehicle_management' — see server.ts) can skip
+  // the Approval Workflow entirely and book+confirm a ride directly, or push
+  // an already-submitted request straight to Assigned, for whenever the
+  // normal Supervisor -> HR/Admin Review -> Assign chain has nobody free to
+  // act on it in time. See POST .../direct-book and PUT .../:id/direct-assign
+  // below.
+  const maintainerGate = [authenticateToken, requireAdmin, requireModule("vehicle_maintainer")];
+
+  async function canManage(userId: number, role: string): Promise<boolean> {
+    if (role === "superadmin") return true;
+    if (role !== "admin" && role !== "user") return false;
+    const modules = await getAdminModules(userId);
+    return modules.includes("vehicle_management");
+  }
+
+  // Start Ride (and the driver's My Trips actions): the driver, whoever gave
+  // the vehicle, Vehicle Management / Vehicle Maintainer, or a Superadmin.
+  async function canRunRide(r: any, user: any): Promise<boolean> {
+    if (user.role === "superadmin") return true;
+    if (Number(r.driver_user_id) === Number(user.id) || Number(r.assigned_by) === Number(user.id)) return true;
+    if (user.role !== "admin" && user.role !== "user") return false;
+    const modules = await getAdminModules(user.id);
+    return modules.includes("vehicle_management") || modules.includes("vehicle_maintainer");
+  }
+
+  // Tells the driver their trip (sent when a vehicle is given).
+  async function alertDriver(r: any, driverUserId: number, vehicle: any, actorName?: string) {
+    if (!driverUserId || driverUserId === Number(r.employee_user_id)) return;
+    const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+    await createAlert(queryDB, {
+      userId: driverUserId,
+      type: "vehicle_requisition" as AlertType,
+      title: "Ride Assigned to You",
+      message: `${actorName || "Vehicle Management"} assigned you to drive ride #${r.id} (${r.pickup_location} → ${r.destination}) on ${when} with ${vehicle.vehicle_no}. Press Start Ride in Book a Ride → My Trips when the ride begins.`,
+      relatedType: "vehicle_requisition",
+      relatedId: Number(r.id)
+    });
+  }
+
+  function computeExpectedReturn(ride_date: string, start_time: string, durationHours: number): Date {
+    const start = new Date(`${ride_date}T${start_time.length === 5 ? start_time : start_time.padStart(5, "0")}:00`);
+    return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+  }
+
+  // Shared by submitRequisition below AND the Vehicle Maintainer's direct-book
+  // route — the same "purpose/pickup/destination/date/time/duration" form
+  // validation regardless of whether the result goes through the Approval
+  // Workflow or is booked+confirmed directly. Throws a plain Error with a
+  // message safe to send straight back to the client on bad input.
+  // A ride's start as a real instant. ride_date + start_time are Bangladesh
+  // local time (no DST), whatever timezone the server process runs in.
+  function rideStartAt(rideDate: any, startTime: any): Date | null {
+    const d = String(rideDate || "").slice(0, 10);
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(startTime || ""));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !m) return null;
+    const t = new Date(`${d}T${m[1].padStart(2, "0")}:${m[2]}:00+06:00`);
+    return Number.isNaN(t.getTime()) ? null : t;
+  }
+
+  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number }> {
+    try {
+      const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
+      if (rows.length > 0) {
+        return { grace_minutes: Number(rows[0].grace_minutes) || 0, reminder_minutes: Number(rows[0].reminder_minutes) || 0 };
+      }
+    } catch {
+      // table not there yet — defaults
+    }
+    return { grace_minutes: 30, reminder_minutes: 60 };
+  }
+
+  // Who can still act on a waiting request: the current approval step's
+  // approvers (pending) or whoever gave the final approval plus Vehicle
+  // Management (approved, waiting on a vehicle) — and the Vehicle
+  // Maintainers, who can direct-assign either.
+  async function rideActors(r: any): Promise<number[]> {
+    const ids = new Set<number>();
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const request = requestRows.find((x: any) => Number(x.source_id) === Number(r.id) && (r.status === "pending" ? x.status === "pending" : true));
+    if (r.status === "pending" && request) {
+      for (const a of await getCurrentStepApprovers(request)) ids.add(Number(a.user_id));
+    }
+    if (r.status === "approved" && request) {
+      try {
+        const actions: any[] = JSON.parse(request.actions_json || "[]");
+        const last = actions[actions.length - 1];
+        if (last?.approver_id) ids.add(Number(last.approver_id));
+      } catch {
+        // no actions recorded
+      }
+    }
+    const modules: any[] = await queryDB("SELECT user_id, module_key FROM admin_module_permissions");
+    for (const m of modules) {
+      if (m.module_key === "vehicle_maintainer" || (r.status === "approved" && m.module_key === "vehicle_management")) ids.add(Number(m.user_id));
+    }
+    ids.delete(Number(r.employee_user_id));
+    // Nobody else holds it (e.g. auto-approved, no Vehicle Management grant
+    // yet) — the Superadmins still hear about it.
+    if (ids.size === 0) {
+      const users: any[] = await queryDB("SELECT * FROM users WHERE role = ? OR id = ?", ["superadmin", r.employee_user_id]);
+      const groupOf = (u: any) => (u?.group_id == null ? null : Number(u.group_id));
+      const employeeGroup = groupOf(users.find((u) => Number(u.id) === Number(r.employee_user_id)));
+      for (const u of users) {
+        if (u.role === "superadmin" && Number(u.id) !== Number(r.employee_user_id) && groupOf(u) === employeeGroup) ids.add(Number(u.id));
+      }
+    }
+    return [...ids];
+  }
+
+  // Expires every request still waiting (pending / approved without a
+  // vehicle) whose start time + grace has passed, and sends the "starts
+  // soon" reminder for those inside the reminder window. Runs every minute
+  // and before any action that could approve or assign a ride, so nothing
+  // can be approved or assigned once its time is up.
+  let rideCheckRunning: Promise<void> | null = null;
+  function expireOverdueRides(): Promise<void> {
+    if (!rideCheckRunning) {
+      rideCheckRunning = (async () => {
+        const { grace_minutes, reminder_minutes } = await loadRideSettings();
+        const now = Date.now();
+        const rows: any[] = await queryDB("SELECT * FROM vehicle_requisitions WHERE status IN (?, ?)", ["pending", "approved"]);
+        for (const r of rows) {
+          const start = rideStartAt(r.ride_date, r.start_time);
+          if (!start) continue;
+          const route = `${r.pickup_location} → ${r.destination}`;
+          const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+          if (now > start.getTime() + grace_minutes * 60 * 1000) {
+            const actors = await rideActors(r);
+            const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ?, expired_at = ? WHERE id = ? AND status = ?", [
+              "expired",
+              new Date(),
+              r.id,
+              r.status
+            ]);
+            if (Number(done?.affectedRows ?? 1) === 0) continue;
+            const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+            const pendingRequest = requestRows.find((x: any) => Number(x.source_id) === Number(r.id) && x.status === "pending");
+            if (pendingRequest) await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
+            const stage = r.status === "pending" ? "approved" : "given a vehicle";
+            await createAlert(queryDB, {
+              userId: Number(r.employee_user_id),
+              type: "vehicle_requisition" as AlertType,
+              title: "Ride Request Expired",
+              message: `Your ride request (${route}, ${when}) expired — it wasn't ${stage} in time. Please book again if you still need a ride.`,
+              relatedType: "vehicle_requisition",
+              relatedId: Number(r.id)
+            });
+            for (const uid of actors) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_approval" as AlertType,
+                title: "Ride Request Expired",
+                message: `Ride request #${r.id} (${route}, ${when}) expired — it wasn't ${stage} in time.`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+          } else if (!r.deadline_reminded_at && reminder_minutes > 0 && now >= start.getTime() - reminder_minutes * 60 * 1000) {
+            await queryDB("UPDATE vehicle_requisitions SET deadline_reminded_at = ? WHERE id = ?", [new Date(), r.id]);
+            const need = r.status === "pending" ? "approval" : "a vehicle and driver";
+            for (const uid of await rideActors(r)) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_approval" as AlertType,
+                // "Needs a Vehicle" opens the assign screens, not Approvals
+                // (see the alert click handling in AlertsBell/AlertsPage).
+                title: r.status === "pending" ? "Ride Starts Soon — Awaiting Approval" : "Ride Starts Soon — Needs a Vehicle",
+                message: `Ride request #${r.id} (${route}) starts at ${when} and still needs ${need}. It expires ${grace_minutes} min after the start time.`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+          }
+        }
+        // A ride with its vehicle given whose start time has come but nobody
+        // pressed Start Ride: remind the driver and whoever assigned it, once.
+        const waiting: any[] = await queryDB("SELECT * FROM vehicle_requisitions WHERE status = ?", ["assigned"]);
+        for (const r of waiting) {
+          if (r.start_reminded_at) continue;
+          const start = rideStartAt(r.ride_date, r.start_time);
+          if (!start || now < start.getTime()) continue;
+          await queryDB("UPDATE vehicle_requisitions SET start_reminded_at = ? WHERE id = ?", [new Date(), r.id]);
+          const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+          const ids = new Set<number>([Number(r.driver_user_id) || 0, Number(r.assigned_by) || 0]);
+          ids.delete(0);
+          for (const uid of ids) {
+            await createAlert(queryDB, {
+              userId: uid,
+              type: "vehicle_requisition" as AlertType,
+              title: "Ride Time — Press Start Ride",
+              message: `Ride #${r.id} (${r.pickup_location} → ${r.destination}) was due to start at ${when}. Press Start Ride in Book a Ride → My Trips once it begins.`,
+              relatedType: "vehicle_requisition",
+              relatedId: Number(r.id)
+            });
+          }
+        }
+      })()
+        .catch((err: any) => console.warn("⚠️ Ride deadline check failed: " + err.message))
+        .finally(() => {
+          rideCheckRunning = null;
+        });
+    }
+    return rideCheckRunning;
+  }
+  // (Each request also runs it before reading rides, so the other PM2
+  // workers stay correct without their own timer.)
+  if (runsBackgroundJobs()) {
+    setInterval(() => void expireOverdueRides(), 60 * 1000);
+    setTimeout(() => void expireOverdueRides(), 15 * 1000);
+  }
+
+  const EXPIRED_MSG = "This ride request has expired — its start time (plus the grace time) has passed.";
+
+  function validateRideFields(body: any) {
+    const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
+    const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
+    const destination = typeof body.destination === "string" ? body.destination.trim().slice(0, 255) : "";
+    const rideDate = typeof body.ride_date === "string" ? body.ride_date : "";
+    const startTime = typeof body.start_time === "string" ? body.start_time : "";
+    const duration = Number(body.estimated_duration_hours);
+
+    if (!purpose) throw new Error("Purpose is required.");
+    if (!pickup) throw new Error("Pickup location is required.");
+    if (!destination) throw new Error("Destination is required.");
+    if (!rideDate) throw new Error("Ride date is required.");
+    if (!startTime) throw new Error("Start time is required.");
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("Estimated duration must be greater than 0 hours.");
+    }
+    const start = rideStartAt(rideDate, startTime);
+    if (!start) throw new Error("Ride date or start time is not valid.");
+    // A minute of slack for a form filled in right at the current time.
+    if (start.getTime() < Date.now() - 60 * 1000) throw new Error("The ride date and start time have already passed — pick a time from now on.");
+
+    const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
+    return { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn };
+  }
+
+  // Shared by PUT .../:id/assign AND the Vehicle Maintainer's direct-book /
+  // direct-assign routes — validates the vehicle+driver half of the form and
+  // confirms the vehicle is actually free. The driver MUST be a real employee
+  // account (driver_user_id), not free text, so the Live Ride Map (see
+  // GET .../:id/live-location below) has an account to pull Employee
+  // Tracking's location_pings from. driver_name/driver_mobile are still
+  // returned/stored, just denormalized from that account rather than typed in.
+  // Throws a plain Error with a message safe to send straight back to the
+  // client on bad input.
+  // Atomic compare-and-set: two concurrent bookings can both pass
+  // validateVehicleAssignment's "available" check, but only one UPDATE
+  // can match status = 'available', so only one claim succeeds.
+  async function claimVehicle(vehicleId: number) {
+    const result: any = await queryDB("UPDATE vehicles SET status = ? WHERE id = ? AND status = ?", [
+      "on_ride",
+      vehicleId,
+      "available"
+    ]);
+    if (!result || Number(result.affectedRows) === 0) {
+      throw new Error("That vehicle was just booked by someone else. Pick another vehicle.");
+    }
+  }
+
+  async function releaseVehicle(vehicleId: number) {
+    await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", vehicleId]);
+  }
+
+  async function validateVehicleAssignment(body: any) {
+    const vehicleId = Number(body.vehicle_id);
+    const driverUserId = Number(body.driver_user_id);
+    if (!vehicleId) throw new Error("Pick a vehicle.");
+    if (!Number.isFinite(driverUserId) || !driverUserId) throw new Error("Pick a driver.");
+
+    const vehicleRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [vehicleId]);
+    const vehicle = vehicleRows[0];
+    if (!vehicle) throw new Error("Vehicle not found.");
+    if (vehicle.status !== "available") throw new Error("That vehicle is not currently available.");
+
+    const driverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [driverUserId]);
+    const driverUser = driverRows[0];
+    if (!driverUser) throw new Error("That driver's account was not found.");
+    // all_employees.user_id is how EmployeeDirectoryRoutes.ts links a login
+    // account to its contact number(s); mobile/phone/telephone are all
+    // optional there, so fall back through them for a display number.
+    const employeeRows: any = await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [driverUserId]);
+    const employeeRow = employeeRows[0] || {};
+    const driverMobile = employeeRow.mobile || employeeRow.phone || employeeRow.telephone || "";
+
+    return { vehicleId, driverUserId, driverName: driverUser.name as string, driverMobile: driverMobile as string, vehicle };
+  }
+
+  // Resolves who a 'pending' requisition's Approval Workflow is CURRENTLY
+  // waiting on — same idea as AssetManagementRoutes.ts's own
+  // attachPendingApprover, kept a plain any[]-in/out helper for the same
+  // reason (avoids fighting TS generic inference when chained with other
+  // per-row enrichment).
+  async function attachPendingApprover(rows: any[]): Promise<any[]> {
+    const pendingIds = new Set(rows.filter((r) => r.status === "pending").map((r) => r.id));
+    if (pendingIds.size === 0) return rows.map((r) => ({ ...r, pending_with: null }));
+
+    const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const requestByRequisitionId = new Map<number, any>(
+      requestRows
+        .filter((rr: any) => rr.status === "pending" && pendingIds.has(Number(rr.source_id)))
+        .map((rr: any) => [Number(rr.source_id), rr])
+    );
+
+    const result: any[] = [];
+    for (const r of rows) {
+      const request = requestByRequisitionId.get(r.id);
+      if (!request) {
+        result.push({ ...r, pending_with: null });
+        continue;
+      }
+      const approvers = await getCurrentStepApprovers(request);
+      const names = approvers.map((a) => a.user_name).filter((n): n is string => !!n);
+      result.push({ ...r, pending_with: names.length > 0 ? names.join(", ") : null });
+    }
+    return result;
+  }
+
+  // Was this account the one who cast the FINAL 'approved' action that
+  // actually cleared a requisition's Approval Workflow (the last entry in
+  // approval_requests.actions_json)? Answers "the person who approved this
+  // may want to also finish the job (assign a vehicle+driver) without
+  // needing a SEPARATE 'vehicle_management' Module Access grant on top of
+  // already being trusted as a Template approver" — see PUT
+  // .../requisitions/:id/assign and GET .../awaiting-my-assignment below.
+  // Deliberately only the LAST action (not any earlier Layer, e.g. the
+  // Supervisor auto-layer) — the flowchart's "গাড়ি ও ড্রাইভার অ্যাসাইনমেন্ট"
+  // step is specifically HR/Admin's job, the Layer that actually cleared it.
+  async function wasFinalApprover(requisitionId: number, userId: number): Promise<boolean> {
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const request = requestRows.find((r: any) => Number(r.source_id) === requisitionId);
+    if (!request) return false;
+    let actions: any[] = [];
+    try {
+      actions = JSON.parse(request.actions_json || "[]");
+    } catch {
+      actions = [];
+    }
+    const last = actions[actions.length - 1];
+    return !!last && last.action === "approved" && Number(last.approver_id) === Number(userId);
+  }
+
+  function serialize(r: any, userById: Map<number, any>, vehicleById: Map<number, any>) {
+    const vehicle = r.assigned_vehicle_id ? vehicleById.get(Number(r.assigned_vehicle_id)) : null;
+    return {
+      id: Number(r.id),
+      employee_user_id: Number(r.employee_user_id),
+      employee_name: userById.get(Number(r.employee_user_id))?.name || null,
+      purpose: r.purpose,
+      pickup_location: r.pickup_location,
+      destination: r.destination,
+      ride_date: r.ride_date,
+      expired_at: r.expired_at || null,
+      start_time: r.start_time,
+      estimated_duration_hours: Number(r.estimated_duration_hours),
+      expected_return_at: r.expected_return_at,
+      status: r.status,
+      // Who the Approval Workflow is currently waiting on (comma-joined —
+      // ANY ONE of them clears the step) — null once past 'pending'.
+      pending_with: r.pending_with ?? null,
+      decided_by_name: r.decided_by ? userById.get(Number(r.decided_by))?.name || null : null,
+      decided_at: r.decided_at,
+      rejection_reason: r.rejection_reason,
+      assigned_vehicle_id: r.assigned_vehicle_id ? Number(r.assigned_vehicle_id) : null,
+      vehicle_no: vehicle?.vehicle_no || null,
+      vehicle_model: vehicle?.model || null,
+      driver_name: r.driver_name,
+      driver_mobile: r.driver_mobile,
+      // Set only when the driver is a real employee account (see
+      // validateVehicleAssignment) — that's what GET .../:id/live-location
+      // needs to pull the driver's position from Employee Tracking.
+      driver_user_id: r.driver_user_id ? Number(r.driver_user_id) : null,
+      // Start Ride step: who gave the vehicle, and when / by whom it started.
+      assigned_by: r.assigned_by ? Number(r.assigned_by) : null,
+      assigned_by_name: r.assigned_by ? userById.get(Number(r.assigned_by))?.name || null : null,
+      started_at: r.started_at || null,
+      started_by_name: r.started_by ? userById.get(Number(r.started_by))?.name || null : null,
+      actual_return_at: r.actual_return_at,
+      returned_late: r.returned_late === null || r.returned_late === undefined ? null : !!Number(r.returned_late),
+      time_extension_status: r.time_extension_status,
+      time_extension_note: r.time_extension_note,
+      hr_notice_flag: !!Number(r.hr_notice_flag),
+      hr_manual_note: r.hr_manual_note,
+      created_at: r.created_at
+    };
+  }
+
+  async function loadContext() {
+    const [rows, users, vehicles]: [any, any, any] = await Promise.all([
+      queryDB("SELECT * FROM vehicle_requisitions"),
+      queryDB("SELECT id, name FROM users"),
+      queryDB("SELECT * FROM vehicles")
+    ]);
+    const userById = new Map<number, any>(users.map((u: any): [number, any] => [Number(u.id), u]));
+    const vehicleById = new Map<number, any>(vehicles.map((v: any): [number, any] => [Number(v.id), v]));
+    return { rows, userById, vehicleById };
+  }
+
+  // ---------------------------------------------------------------------
+  // Self Service -> "Book a Ride" / "Ride Status"
+  // ---------------------------------------------------------------------
+
+  // GET /api/vehicles/requisitions — a module-granted account (or
+  // Superadmin) sees every ride request; anyone else only ever sees their
+  // own (covers both the employee's "Ride Status" list and the Admin
+  // Panel's "Ride Requests" board from one endpoint).
+  app.get("/api/vehicles/requisitions", authenticateToken, async (req: any, res: any) => {
+    try {
+      await expireOverdueRides();
+      const manage = await canManage(req.user.id, req.user.role);
+      const { rows, userById, vehicleById } = await loadContext();
+      const scoped = manage ? rows : rows.filter((r: any) => Number(r.employee_user_id) === Number(req.user.id));
+      const sorted = scoped.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      const withPending = await attachPendingApprover(sorted);
+      res.json(withPending.map((r: any) => serialize(r, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/awaiting-my-assignment — the OTHER half
+  // of the "who does the Assign Vehicle & Driver step" problem: an account
+  // named as a Template approver (Admin Panel -> Approvals -> Templates)
+  // may hold NO 'vehicle_management' Module Access at all, so it has no
+  // Admin Panel page to go finish the job on once it approves. This is that
+  // page's self-service equivalent — no module gate, just "did I approve
+  // this" (wasFinalApprover) — so the exact same account that cleared the
+  // Approval Workflow can see and act on its own approved-but-unassigned
+  // requisitions without a Superadmin having to grant it Admin Panel access
+  // on top of already being trusted as an approver.
+  app.get("/api/vehicles/requisitions/awaiting-my-assignment", authenticateToken, async (req: any, res: any) => {
+    try {
+      await expireOverdueRides();
+      const { rows, userById, vehicleById } = await loadContext();
+      const approved = rows.filter((r: any) => r.status === "approved");
+      const mine: any[] = [];
+      for (const r of approved) {
+        if (await wasFinalApprover(Number(r.id), req.user.id)) mine.push(r);
+      }
+      const sorted = mine.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      res.json(sorted.map((r: any) => serialize(r, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/available — no module gate, just enough (id/vehicle_no/
+  // model/vehicle_type) for the vehicle picker on PUT .../assign below, so an
+  // approver acting via the self-service route above can still pick a
+  // vehicle without 'vehicle_management' Module Access. GET /api/vehicles
+  // (the full inventory record, Admin Panel's own list) stays module-gated.
+  app.get("/api/vehicles/available", authenticateToken, async (_req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM vehicles");
+      res.json(
+        rows
+          .filter((v: any) => v.status === "available")
+          .map((v: any) => ({ id: Number(v.id), vehicle_no: v.vehicle_no, model: v.model, vehicle_type: v.vehicle_type }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/driver-candidates — every login account, for the
+  // driver picker on PUT .../assign / .../approve-and-assign / the Vehicle
+  // Maintainer's direct-book/direct-assign (see validateVehicleAssignment
+  // above, which only ever needs a users.id — the driver never has to be
+  // linked to an all_employees row). Deliberately NOT sourced from GET
+  // /api/employee-directory (all_employees): an account created directly as
+  // a login (e.g. POST /api/users/bulk) or otherwise never linked to an
+  // Employee record would be a real driver with a real account, yet
+  // invisible there — that's exactly the "driver dropdown shows nobody" bug
+  // this route exists to avoid. No module gate, same reasoning as GET
+  // /api/vehicles/available just above.
+  app.get("/api/vehicles/driver-candidates", authenticateToken, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
+      // Same "plain account never sees the Superadmin account" rule GET
+      // /api/employees/unlinked-users already applies.
+      const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
+      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Shared by POST /api/vehicles/requisitions (self-service "Book a Ride")
+  // and POST /api/vehicles/requisitions/admin-create (flowchart's "জরুরি/HR
+  // Direct" initiator path) — validates the ride form, inserts the row, and
+  // routes it through the Dynamic Approval Engine (request_type 'vehicle':
+  // Layer 1 the requester's own Supervisor unless overridden, Layer 2+
+  // "HR/Admin Review"), notifying whoever it lands on first. Throws a plain
+  // Error with a message safe to send straight back to the client on bad
+  // input; the caller is responsible for the try/catch + response.
+  async function submitRequisition(
+    body: any,
+    employeeUserId: number,
+    actor: { id: number; name?: string },
+    overrideSupervisorId?: number | null
+  ) {
+    const { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn } = validateRideFields(body);
+
+    // time_extension_status/hr_notice_flag are explicitly listed here
+    // (rather than relying on the columns' own SQL DEFAULT) because the
+    // in-memory dev fallback's generic INSERT simulator only ever sets
+    // whatever's in this column list — leaving them out would leave the
+    // in-memory row's time_extension_status literally `undefined`, and
+    // `undefined !== "none"` reads as "an extension WAS requested" in the
+    // late-return check inside POST .../complete below.
+    const result: any = await queryDB(
+      `INSERT INTO vehicle_requisitions
+         (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
+          estimated_duration_hours, expected_return_at, status, time_extension_status, hr_notice_flag)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn, "pending", "none", 0]
+    );
+
+    // Coordinates of the place picked in Book a Ride step 1, so the Live Ride
+    // Map doesn't have to look the free-text destination up again later.
+    const destLat = Number(body.destination_lat);
+    const destLng = Number(body.destination_lng);
+    if (body.destination_lat != null && body.destination_lng != null && Number.isFinite(destLat) && Number.isFinite(destLng) && Math.abs(destLat) <= 90 && Math.abs(destLng) <= 180) {
+      await queryDB("UPDATE vehicle_requisitions SET destination_lat = ?, destination_lng = ? WHERE id = ?", [destLat, destLng, result.insertId]);
+    }
+
+    // Dynamic Approval Engine — routed through this Employee's assigned
+    // Template for request_type 'vehicle'. Falls back to a straight
+    // auto-approve if neither a Supervisor nor a Template resolve at all.
+    const { autoApproved } = await createTemplateApprovalRequest(
+      "vehicle",
+      "vehicle_requisition",
+      result.insertId,
+      employeeUserId,
+      overrideSupervisorId
+    );
+    if (autoApproved) {
+      try {
+        await finalizeVehicleRequisitionApproval(result.insertId, actor.id, null);
+      } catch (finalizeErr: any) {
+        console.warn("⚠️ Could not auto-process Vehicle Requisition #" + result.insertId + ": " + finalizeErr.message);
+      }
+    } else {
+      try {
+        const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+        const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
+        if (createdRequest) {
+          const approvers = await getCurrentStepApprovers(createdRequest);
+          const assignOnly = await isVehicleMaintainerStep(createdRequest);
+          for (const approver of approvers) {
+            await createAlert(queryDB, {
+              userId: approver.user_id,
+              type: "vehicle_approval" as AlertType,
+              title: assignOnly ? "Ride Request Awaiting Vehicle Assignment" : "New Ride Request Awaiting Your Approval",
+              message: assignOnly
+                ? `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Assign a vehicle and driver to confirm it.`
+                : `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
+              relatedType: "vehicle_requisition",
+              relatedId: result.insertId
+            });
+          }
+        }
+      } catch (alertErr: any) {
+        console.warn("⚠️ Could not notify the current-step approver for Vehicle Requisition #" + result.insertId + ": " + alertErr.message);
+      }
+    }
+
+    const { rows, userById, vehicleById } = await loadContext();
+    const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
+    const [withPending] = await attachPendingApprover([created]);
+    return serialize(withPending, userById, vehicleById);
+  }
+
+  // POST /api/vehicles/requisitions — "Book a Ride": the requester submits
+  // their own request (flowchart's "সাধারণ ইউজার" path).
+  app.post("/api/vehicles/requisitions", authenticateToken, async (req: any, res: any) => {
+    try {
+      const result = await submitRequisition(req.body, req.user.id, req.user);
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/admin-create — flowchart's "জরুরি/HR
+  // Direct" initiator path: HR/Admin manually files a requisition on
+  // someone else's behalf (emergency, or the requester can't do it
+  // themselves) — "ইনিশিয়েটর কে/ধরন?" -> "HR/Admin ম্যানুয়ালি ইউজার সিলেক্ট
+  // করবেন" in the flowchart. Optionally names a specific approver for the
+  // Supervisor Layer (supervisor_user_id) instead of relying on that
+  // employee's own auto-resolved Direct/Department Supervisor — useful when
+  // there isn't one set, or HR wants a specific person to review this one
+  // emergency request. Still routes through the same Approval Workflow
+  // (Layer 2+ "HR/Admin Review") otherwise.
+  app.post("/api/vehicles/requisitions/admin-create", ...adminGate, async (req: any, res: any) => {
+    try {
+      const employeeUserId = Number(req.body?.employee_user_id);
+      if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "Pick who this ride is for." });
+      const employeeRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
+      if (employeeRows.length === 0) return res.status(404).json({ error: "That account was not found." });
+
+      let overrideSupervisorId: number | null | undefined;
+      if (req.body?.supervisor_user_id !== undefined && req.body?.supervisor_user_id !== null && req.body?.supervisor_user_id !== "") {
+        overrideSupervisorId = Number(req.body.supervisor_user_id);
+        const supRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [overrideSupervisorId]);
+        if (supRows.length === 0) return res.status(404).json({ error: "That Supervisor approver account was not found." });
+      }
+
+      const result = await submitRequisition(req.body, employeeUserId, req.user, overrideSupervisorId);
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/:id/cancel — the requester cancels
+  // their own still-pending request (flowchart's "ক্যানসেল" branch, self-
+  // initiated). Also clears the matching pending Approval Workflow request
+  // (if one was created) so it stops showing up in an approver's queue for
+  // a ride nobody is waiting on anymore.
+  app.post("/api/vehicles/requisitions/:id/cancel", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      const isOwner = Number(requisition.employee_user_id) === Number(req.user.id);
+      // A ride with its vehicle given but not started yet can still be called
+      // off — by the requester, or whoever runs the ride (frees the vehicle).
+      if (requisition.status === "assigned") {
+        if (!isOwner && !(await canRunRide(requisition, req.user))) return res.status(403).json({ error: "Not authorized." });
+        await queryDB("UPDATE vehicle_requisitions SET status = ? WHERE id = ?", ["cancelled", id]);
+        if (requisition.assigned_vehicle_id) await releaseVehicle(Number(requisition.assigned_vehicle_id));
+        const notify = new Set<number>([Number(requisition.employee_user_id), Number(requisition.driver_user_id) || 0, Number(requisition.assigned_by) || 0]);
+        notify.delete(0);
+        notify.delete(Number(req.user.id));
+        for (const uid of notify) {
+          await createAlert(queryDB, {
+            userId: uid,
+            type: "vehicle_requisition" as AlertType,
+            title: "Ride Cancelled",
+            message: `${req.user.name || "Someone"} cancelled ride #${id} (${requisition.pickup_location} → ${requisition.destination}) before it started.`,
+            relatedType: "vehicle_requisition",
+            relatedId: id
+          });
+        }
+        return res.json({ success: true });
+      }
+      if (!isOwner) return res.status(403).json({ error: "Not authorized." });
+      if (requisition.status !== "pending") return res.status(400).json({ error: "Only a pending request can be cancelled." });
+
+      await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_at = ? WHERE id = ?", ["cancelled", new Date(), id]);
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const pendingRequest = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (pendingRequest) {
+        await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/:id/request-extension — flowchart's
+  // "ইউজার পূর্বে সিস্টেমে ইনফর্ম করেছে?" branch: while the ride is Ongoing
+  // (vehicle+driver already assigned), the requester flags they'll be late
+  // so HR/Admin can approve the extension — this is what later tells the
+  // on-time check the requester DID inform the system beforehand.
+  app.post("/api/vehicles/requisitions/:id/request-extension", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const note = typeof (req.body || {}).note === "string" ? req.body.note.trim().slice(0, 1000) : "";
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (Number(requisition.employee_user_id) !== Number(req.user.id)) return res.status(403).json({ error: "Not authorized." });
+      if (requisition.status !== "ongoing") return res.status(400).json({ error: "Only an ongoing ride can request a time extension." });
+
+      await queryDB(
+        "UPDATE vehicle_requisitions SET time_extension_status = ?, time_extension_note = ?, time_extension_decided_by = ? WHERE id = ?",
+        ["requested", note || null, null, id]
+      );
+
+      if (requisition.decided_by) {
+        await createAlert(queryDB, {
+          userId: Number(requisition.decided_by),
+          type: "vehicle_requisition" as AlertType,
+          title: "Time Extension Requested",
+          message: `${req.user.name || "An employee"} requested more time for their ride (${requisition.pickup_location} → ${requisition.destination}).`,
+          relatedType: "vehicle_requisition",
+          relatedId: id
+        });
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/:id/complete — flowchart's "রাইড
+  // সম্পন্ন ও গাড়ি ফেরত": the requester (or IT/Admin) reports the ride is
+  // done and the vehicle is back. Frees the vehicle and runs the "নির্ধারিত
+  // সময়ে ফেরত এসেছে?" check — late + no prior extension request raises
+  // hr_notice_flag for HR to manually close out (see PUT .../resolve-notice
+  // below); late + an extension already requested/approved needs no flag,
+  // since the system was informed beforehand either way.
+  app.post("/api/vehicles/requisitions/:id/complete", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      // The requester, the driver / whoever assigned it, or Vehicle Management.
+      if (Number(requisition.employee_user_id) !== Number(req.user.id) && !(await canRunRide(requisition, req.user))) {
+        return res.status(403).json({ error: "Not authorized." });
+      }
+      if (requisition.status === "assigned") return res.status(400).json({ error: "This ride hasn't started yet — press Start Ride first." });
+      if (requisition.status !== "ongoing") return res.status(400).json({ error: "Only an ongoing ride can be marked completed." });
+
+      const now = new Date();
+      const expected = requisition.expected_return_at ? new Date(requisition.expected_return_at) : null;
+      const late = expected ? now.getTime() > expected.getTime() : false;
+      const informedBeforehand = !!requisition.time_extension_status && requisition.time_extension_status !== "none";
+      const noticeFlag = late && !informedBeforehand;
+
+      await queryDB(
+        "UPDATE vehicle_requisitions SET status = ?, actual_return_at = ?, returned_late = ?, hr_notice_flag = ? WHERE id = ?",
+        ["completed", now, late ? 1 : 0, noticeFlag ? 1 : 0, id]
+      );
+
+      if (requisition.assigned_vehicle_id) {
+        await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", requisition.assigned_vehicle_id]);
+      }
+      rideLive(requisition);
+      // Whoever didn't mark it (requester / driver) sees it close too.
+      for (const uid of [Number(requisition.employee_user_id), Number(requisition.driver_user_id) || 0]) {
+        if (uid && uid !== Number(req.user.id)) {
+          await createAlert(queryDB, {
+            userId: uid,
+            type: "vehicle_requisition" as AlertType,
+            title: "Ride Completed",
+            message: `Ride #${id} (${requisition.pickup_location} → ${requisition.destination}) was marked completed by ${req.user.name || "someone"}.`,
+            relatedType: "vehicle_requisition",
+            relatedId: id
+          });
+        }
+      }
+
+      if (late && informedBeforehand && requisition.time_extension_status === "requested") {
+        // The requester DID inform the system beforehand — auto-clear the
+        // extension to Approved rather than leaving it stuck "requested"
+        // now that the ride itself is already closed.
+        await queryDB("UPDATE vehicle_requisitions SET time_extension_status = ? WHERE id = ?", ["approved", id]);
+      }
+
+      if (noticeFlag) {
+        const admins = await queryDB("SELECT id, name FROM users WHERE role IN ('admin','superadmin')");
+        for (const a of admins as any[]) {
+          await createAlert(queryDB, {
+            userId: Number(a.id),
+            type: "vehicle_requisition" as AlertType,
+            title: "Late Vehicle Return — No Prior Notice",
+            message: `${requisition.driver_name ? `Vehicle for ${req.user.name || "an employee"}` : "A ride"} returned late with no advance notice — please add a manual note.`,
+            relatedType: "vehicle_requisition",
+            relatedId: id
+          });
+        }
+      }
+
+      res.json({ success: true, returned_late: late, hr_notice_flag: noticeFlag });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Admin Panel -> Vehicle Management — gated behind the
+  // 'vehicle_management' AdminModuleKey. Approve/Reject itself is done from
+  // the generic Approval Workflow queue (Admin Panel -> Approvals), not from
+  // here — see the design note above registerVehicleManagementRoutes.
+  // ---------------------------------------------------------------------
+
+  // GET/PUT /api/vehicles/ride-settings — the ride deadline rules
+  // (vehicle_ride_settings). Vehicle Management reads them; only a
+  // Superadmin changes them.
+  app.get("/api/vehicles/ride-settings", ...adminGate, async (req: any, res: any) => {
+    try {
+      res.json({ ...(await loadRideSettings()), can_change: req.user.role === "superadmin" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/vehicles/ride-settings", authenticateToken, async (req: any, res: any) => {
+    try {
+      if (req.user.role !== "superadmin") return res.status(403).json({ error: "Only a Superadmin can change the ride deadline rules." });
+      const grace = Number(req.body?.grace_minutes);
+      const reminder = Number(req.body?.reminder_minutes);
+      if (!Number.isInteger(grace) || grace < 0 || grace > 1440) return res.status(400).json({ error: "Grace time must be 0–1440 minutes." });
+      if (!Number.isInteger(reminder) || reminder < 0 || reminder > 1440) return res.status(400).json({ error: "Reminder time must be 0–1440 minutes." });
+      const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
+      if (rows.length === 0) {
+        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, updated_by) VALUES (?, ?, ?, ?)", [1, grace, reminder, req.user.id]);
+      } else {
+        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, req.user.id]);
+      }
+      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/vehicles", ...adminGate, async (_req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM vehicles");
+      res.json(rows.sort((a: any, b: any) => Number(b.id) - Number(a.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/vehicles", ...adminGate, async (req: any, res: any) => {
+    try {
+      const body = req.body || {};
+      const vehicleNo = typeof body.vehicle_no === "string" ? body.vehicle_no.trim().slice(0, 50) : "";
+      const model = typeof body.model === "string" ? body.model.trim().slice(0, 150) : "";
+      const vehicleType = typeof body.vehicle_type === "string" ? body.vehicle_type.trim().slice(0, 50) || null : null;
+      if (!vehicleNo) return res.status(400).json({ error: "Vehicle No. is required." });
+      if (!model) return res.status(400).json({ error: "Model is required." });
+
+      const existing: any = await queryDB("SELECT * FROM vehicles");
+      if (existing.some((v: any) => String(v.vehicle_no).toLowerCase() === vehicleNo.toLowerCase())) {
+        return res.status(400).json({ error: "That Vehicle No. already exists." });
+      }
+
+      const result: any = await queryDB(
+        "INSERT INTO vehicles (vehicle_no, model, vehicle_type, status, created_by) VALUES (?, ?, ?, ?, ?)",
+        [vehicleNo, model, vehicleType, "available", req.user.id]
+      );
+      res.status(201).json({ success: true, id: Number(result.insertId) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/vehicles/:id", ...adminGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const existingRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [id]);
+      const existing = existingRows[0];
+      if (!existing) return res.status(404).json({ error: "Vehicle not found." });
+      const body = req.body || {};
+      const model = typeof body.model === "string" && body.model.trim() ? body.model.trim().slice(0, 150) : existing.model;
+      const vehicleType = body.vehicle_type !== undefined ? (String(body.vehicle_type || "").trim().slice(0, 50) || null) : existing.vehicle_type;
+      const status = ["available", "on_ride", "maintenance"].includes(body.status) ? body.status : existing.status;
+      await queryDB("UPDATE vehicles SET model = ?, vehicle_type = ?, status = ? WHERE id = ?", [model, vehicleType, status, id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/vehicles/requisitions/:id/assign — flowchart's "গাড়ি ও
+  // ড্রাইভার অ্যাসাইনমেন্ট" step, done once the Approval Workflow has
+  // already cleared this requisition (status 'approved'): IT/Admin picks an
+  // available vehicle and records the driver's name/mobile, then notifies
+  // the requester (flowchart's "ইউজারকে কনফার্মেশন ও ড্রাইভার ডিটেইলস
+  // নোটিফিকেশন প্রেরণ"). Moves the ride into 'assigned' (ongoing once started).
+  //
+  // NOT module-gated the way every other Admin Panel route in this file is —
+  // a plain 'vehicle_management' Module Access grant is one way in, but the
+  // account that just cleared this SPECIFIC requisition's Approval Workflow
+  // (wasFinalApprover) is also allowed to finish the job, since the
+  // flowchart's HR/Admin actor is expected to review AND assign in one go —
+  // see GET .../awaiting-my-assignment above for where that account finds
+  // this action without any Admin Panel access at all.
+  app.put("/api/vehicles/requisitions/:id/assign", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const manage = await canManage(req.user.id, req.user.role);
+      if (!manage && !(await wasFinalApprover(id, req.user.id))) {
+        return res
+          .status(403)
+          .json({ error: "You need Vehicle Management access, or to be this request's approver, to assign a vehicle." });
+      }
+
+      await expireOverdueRides();
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
+      if (requisition.status !== "approved") {
+        return res.status(400).json({ error: "This requisition must be Approved (by the Approval Workflow) before a vehicle can be assigned." });
+      }
+
+      const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
+
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
+          ["assigned", vehicleId, driverUserId, driverName, driverMobile, req.user.id, new Date(), id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
+      await createAlert(queryDB, {
+        userId: Number(requisition.employee_user_id),
+        type: "vehicle_requisition" as AlertType,
+        title: "Vehicle Assigned",
+        message: `Your ride (${requisition.pickup_location} → ${requisition.destination}) is confirmed. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}. It shows as ongoing once the driver starts the ride.`,
+        relatedType: "vehicle_requisition",
+        relatedId: id
+      });
+      await alertDriver(requisition, driverUserId, vehicle, req.user.name);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/vehicles/requisitions/:id/approve-and-assign — for a Template
+  // whose FINAL Layer's Approver Type is 'vehicle_maintainer' (see
+  // server.ts's approval_template_steps.approver_type migration comment):
+  // that Layer's approver doesn't get a plain Approve/Reject on My Approvals
+  // — their job is only to hand over a vehicle, so this one action both
+  // closes the approval chain (recorded exactly like performApprovalAction's
+  // own 'approved' action, for the same actions_json audit trail) AND
+  // confirms the ride, skipping the separate 'approved' stopover and the
+  // normal PUT .../:id/assign step entirely. Open to ANY logged-in account
+  // that's actually a current approver for this step — same authorization
+  // shape as POST /api/my-approvals/:id/act, not gated behind
+  // 'vehicle_management'/'vehicle_maintainer' at all, since holding this
+  // Template step's approver slot IS the authorization.
+  app.put("/api/vehicles/requisitions/:id/approve-and-assign", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      await expireOverdueRides();
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
+      if (requisition.status !== "pending") {
+        return res.status(400).json({ error: "This requisition isn't waiting on an approval right now." });
+      }
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (!request) return res.status(400).json({ error: "No pending approval found for this requisition." });
+      if (Number(request.current_step) < Number(request.total_steps)) {
+        return res.status(400).json({ error: "This isn't the final approval Layer yet." });
+      }
+
+      const currentApprovers = await getCurrentStepApprovers(request);
+      const isApprover = currentApprovers.some((a) => Number(a.user_id) === Number(req.user.id));
+      if (req.user.role !== "superadmin" && !isApprover) {
+        return res.status(403).json({ error: "This request isn't waiting on you." });
+      }
+
+      const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
+      const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
+
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
+          ["assigned", req.user.id, new Date(), vehicleId, driverUserId, driverName, driverMobile, req.user.id, new Date(), id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+      actions.push({
+        step_order: Number(request.current_step),
+        approver_id: req.user.id,
+        approver_name: req.user.name,
+        action: "approved",
+        remarks,
+        acted_at: new Date().toISOString()
+      });
+      // Same 4-param "status, current_step, actions_json, id" shape
+      // performApprovalAction itself uses (current_step stays put — this IS
+      // already the final step) — memoryDbFallback.ts's approval_requests
+      // UPDATE handler is bespoke and only recognizes that exact param
+      // count/order, not a generic positional mapping.
+      await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ?", [
+        "approved",
+        request.current_step,
+        JSON.stringify(actions),
+        request.id
+      ]);
+
+      await createAlert(queryDB, {
+        userId: Number(requisition.employee_user_id),
+        type: "vehicle_requisition" as AlertType,
+        title: "Ride Confirmed",
+        message: `Your ride (${requisition.pickup_location} → ${requisition.destination}) was approved and confirmed. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}. It shows as ongoing once the driver starts the ride.`,
+        relatedType: "vehicle_requisition",
+        relatedId: id
+      });
+      await alertDriver(requisition, driverUserId, vehicle, req.user.name);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Vehicle Maintainer bypass — Flowchart v3.0's "গাড়ি রক্ষণাবেক্ষণকারী
+  // সরাসরি রাইড কনফার্ম করবেন" path, gated behind 'vehicle_maintainer'
+  // (maintainerGate), a SEPARATE grant from 'vehicle_management' — see
+  // server.ts's ADMIN_MODULE_KEYS comment. Neither route below touches or
+  // requires the normal Supervisor -> HR/Admin Review -> Assign chain.
+  // ---------------------------------------------------------------------
+
+  // GET /api/vehicles/requisitions/bypass-candidates — every requisition
+  // (any employee's, not just the Vehicle Maintainer's own) still stuck in
+  // 'pending' or 'approved', for the direct-assign bypass picker below. Kept
+  // separate from GET /api/vehicles/requisitions above, which only shows
+  // every employee's requests to a 'vehicle_management' account — a
+  // 'vehicle_maintainer'-only account has no reason to hold that broader
+  // module too.
+  app.get("/api/vehicles/requisitions/bypass-candidates", ...maintainerGate, async (_req: any, res: any) => {
+    try {
+      const { rows, userById, vehicleById } = await loadContext();
+      const candidates = rows.filter((r: any) => r.status === "pending" || r.status === "approved");
+      const sorted = candidates.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      res.json(sorted.map((r: any) => serialize({ ...r, pending_with: null }, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/direct-book — the Vehicle Maintainer
+  // books AND confirms a ride on behalf of any employee in one step: no
+  // Supervisor layer, no HR/Admin Review, no separate Assign step. Inserts
+  // the requisition straight into 'assigned' with the vehicle+driver already
+  // set, and skips createTemplateApprovalRequest entirely (no
+  // approval_requests row is ever created for this one) so it never shows up
+  // waiting in anyone's Approvals queue.
+  app.post("/api/vehicles/requisitions/direct-book", ...maintainerGate, async (req: any, res: any) => {
+    try {
+      const employeeUserId = Number(req.body?.employee_user_id);
+      if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "Pick who this ride is for." });
+      const employeeRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
+      if (employeeRows.length === 0) return res.status(404).json({ error: "That account was not found." });
+
+      const { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn } = validateRideFields(req.body || {});
+      const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
+
+      const now = new Date();
+      await claimVehicle(vehicleId);
+      let result: any;
+      try {
+        result = await queryDB(
+          `INSERT INTO vehicle_requisitions
+             (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
+              estimated_duration_hours, expected_return_at, status, decided_by, decided_at,
+              assigned_vehicle_id, driver_user_id, driver_name, driver_mobile, time_extension_status, hr_notice_flag,
+              assigned_by, assigned_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn,
+            "assigned", req.user.id, now, vehicleId, driverUserId, driverName, driverMobile, "none", 0,
+            req.user.id, now
+          ]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
+      await createAlert(queryDB, {
+        userId: employeeUserId,
+        type: "vehicle_requisition" as AlertType,
+        title: "Ride Booked & Confirmed",
+        message: `${req.user.name || "The Vehicle Maintainer"} booked and confirmed a ride for you (${pickup} → ${destination}). Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
+        relatedType: "vehicle_requisition",
+        relatedId: Number(result.insertId)
+      });
+      await alertDriver(
+        { id: Number(result.insertId), employee_user_id: employeeUserId, pickup_location: pickup, destination, ride_date: rideDate, start_time: startTime },
+        driverUserId,
+        vehicle,
+        req.user.name
+      );
+
+      const { rows, userById, vehicleById } = await loadContext();
+      const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
+      res.status(201).json(serialize({ ...created, pending_with: null }, userById, vehicleById));
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/vehicles/requisitions/:id/direct-assign — the Vehicle
+  // Maintainer's bypass for a requisition that ALREADY exists (self-
+  // submitted or HR-Direct-created) but is stuck — still 'pending' on a
+  // Supervisor/HR-Admin Review layer, or 'approved' but the account that
+  // would normally do the Assign step has no time. Cancels any open
+  // approval_requests row for it (so it stops showing up in anyone's
+  // Approvals queue for a ride that's already been decided outside that
+  // workflow — same convention as POST .../:id/cancel above) and moves it
+  // straight to 'assigned' with the vehicle+driver set.
+  app.put("/api/vehicles/requisitions/:id/direct-assign", ...maintainerGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      await expireOverdueRides();
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
+      if (!["pending", "approved"].includes(requisition.status)) {
+        return res.status(400).json({ error: "Only a pending or approved requisition can be bypassed like this." });
+      }
+
+      const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
+
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
+          ["assigned", req.user.id, requisition.decided_at || new Date(), vehicleId, driverUserId, driverName, driverMobile, req.user.id, new Date(), id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
+      if (requisition.status === "pending") {
+        const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+        const pendingRequest = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+        if (pendingRequest) {
+          await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
+        }
+      }
+
+      await createAlert(queryDB, {
+        userId: Number(requisition.employee_user_id),
+        type: "vehicle_requisition" as AlertType,
+        title: "Ride Confirmed (Direct)",
+        message: `${req.user.name || "The Vehicle Maintainer"} confirmed your ride (${requisition.pickup_location} → ${requisition.destination}) directly. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
+        relatedType: "vehicle_requisition",
+        relatedId: id
+      });
+      await alertDriver(requisition, driverUserId, vehicle, req.user.name);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/ongoing — every 'ongoing' ride (any
+  // employee's), for the Vehicle Maintainer's "Live Rides" list below. Same
+  // access as bypass-candidates above.
+  app.get("/api/vehicles/requisitions/ongoing", ...maintainerGate, async (_req: any, res: any) => {
+    try {
+      const { rows, userById, vehicleById } = await loadContext();
+      // Rides waiting to start are listed too, so they can be started from here.
+      const ongoing = rows
+        .filter((r: any) => r.status === "ongoing" || r.status === "assigned")
+        .sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      res.json(ongoing.map((r: any) => serialize({ ...r, pending_with: null }, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/my-trips — Book a Ride -> My Trips: the
+  // rides this account drives or gave the vehicle for, waiting to start or
+  // under way. Only ever this account's own trips (no module gate needed).
+  app.get("/api/vehicles/requisitions/my-trips", authenticateToken, async (req: any, res: any) => {
+    try {
+      const me = Number(req.user.id);
+      const { rows, userById, vehicleById } = await loadContext();
+      const mine = rows
+        .filter(
+          (r: any) =>
+            (r.status === "assigned" || r.status === "ongoing") && (Number(r.driver_user_id) === me || Number(r.assigned_by) === me)
+        )
+        .sort((a: any, b: any) => {
+          const ta = rideStartAt(a.ride_date, a.start_time)?.getTime() ?? 0;
+          const tb = rideStartAt(b.ride_date, b.start_time)?.getTime() ?? 0;
+          return ta - tb;
+        });
+      res.json(mine.map((r: any) => serialize({ ...r, pending_with: null }, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/:id/start — Start Ride: an assigned ride
+  // becomes 'ongoing' (and the Live Ride Map / live tracking switch on) only
+  // when the driver, whoever gave the vehicle, or Vehicle Management starts it.
+  app.post("/api/vehicles/requisitions/:id/start", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (!(await canRunRide(requisition, req.user))) {
+        return res.status(403).json({ error: "Only the driver, whoever assigned this ride, or Vehicle Management can start it." });
+      }
+      if (requisition.status === "ongoing") return res.status(400).json({ error: "This ride has already started." });
+      if (requisition.status !== "assigned") return res.status(400).json({ error: "Only a ride with a vehicle assigned can be started." });
+
+      const now = new Date();
+      const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ?, started_at = ?, started_by = ? WHERE id = ? AND status = ?", [
+        "ongoing",
+        now,
+        req.user.id,
+        id,
+        "assigned"
+      ]);
+      if (Number(done?.affectedRows ?? 1) === 0) return res.status(409).json({ error: "This ride was just changed by someone else — refresh and try again." });
+      rideLive(requisition);
+
+      const notify = new Set<number>([Number(requisition.employee_user_id), Number(requisition.driver_user_id) || 0, Number(requisition.assigned_by) || 0]);
+      notify.delete(0);
+      notify.delete(Number(req.user.id));
+      for (const uid of notify) {
+        await createAlert(queryDB, {
+          userId: uid,
+          type: "vehicle_requisition" as AlertType,
+          title: "Ride Started",
+          message: `Ride #${id} (${requisition.pickup_location} → ${requisition.destination}) has started${requisition.driver_name ? ` — driver ${requisition.driver_name}` : ""}. Follow it on the Live Map.`,
+          relatedType: "vehicle_requisition",
+          relatedId: id
+        });
+      }
+      res.json({ success: true, started_at: now });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/:id/live-location — the Live Ride Map's
+  // poll target (Uber-style "where's my ride" view). Pulls the SINGLE most
+  // recent Employee Tracking ping (location_pings, see server.ts's
+  // /api/tracking/* routes) for the requester and, if one is assigned, the
+  // driver. Only the ride's own requester or a Vehicle Maintainer/Vehicle
+  // Management account can see it — nobody else's ride. Both the employee
+  // and the driver need can_use_tracking enabled AND to have actually pinged
+  // at least once for their dot to appear; otherwise that side comes back
+  // null and the frontend shows "waiting for location".
+  // Free-text destination -> lat/lng via OpenStreetMap's Nominatim (free, no
+  // key). Runs server-side so it can send the User-Agent Nominatim's usage
+  // policy requires, and the result is stored on the requisition so each
+  // ride is looked up once. A failed lookup is retried at most every 10 min.
+  // Nominatim's usage policy allows at most 1 request/second and requires an
+  // identifying User-Agent, so every call goes through this one queue.
+  let nominatimChain: Promise<unknown> = Promise.resolve();
+  let nominatimLastAt = 0;
+  function nominatim(path: string): Promise<any> {
+    const run = async () => {
+      const wait = nominatimLastAt + 1100 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      nominatimLastAt = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/${path}`, {
+          headers: { "User-Agent": "CredenceHR/1.0 (vehicle requisition)", "Accept-Language": "en" },
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Place lookup failed (${response.status}).`);
+        return await response.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const next = nominatimChain.then(run, run);
+    nominatimChain = next.catch(() => undefined);
+    return next;
+  }
+
+  // "Anandalok Trust, Dhanmondi" rather than the full 8-part display_name.
+  function shortPlaceLabel(hit: any): string {
+    const a = hit?.address || {};
+    const name = hit?.name || a.road || a.neighbourhood || "";
+    const area = a.suburb || a.neighbourhood || a.quarter || a.city_district || a.city || a.town || a.village || "";
+    const parts = [name, area].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    return parts.length > 0 ? parts.join(", ") : String(hit?.display_name || "").split(",").slice(0, 3).join(",").trim();
+  }
+
+  const placeSearchCache = new Map<string, { at: number; results: any[] }>();
+
+  const geocodeFailedAt = new Map<number, number>();
+  async function geocodeDestination(requisition: any): Promise<{ lat: number; lng: number } | null> {
+    if (requisition.destination_lat != null && requisition.destination_lng != null) {
+      return { lat: Number(requisition.destination_lat), lng: Number(requisition.destination_lng) };
+    }
+    const id = Number(requisition.id);
+    const lastFail = geocodeFailedAt.get(id);
+    if (lastFail && Date.now() - lastFail < 10 * 60 * 1000) return null;
+    const query = String(requisition.destination || "").trim();
+    if (!query) return null;
+    try {
+      const results: any = await nominatim(`search?format=json&limit=1&countrycodes=bd&q=${encodeURIComponent(query)}`);
+      const hit = Array.isArray(results) ? results[0] : null;
+      if (!hit) {
+        geocodeFailedAt.set(id, Date.now());
+        return null;
+      }
+      const point = { lat: Number(hit.lat), lng: Number(hit.lon) };
+      await queryDB("UPDATE vehicle_requisitions SET destination_lat = ?, destination_lng = ? WHERE id = ?", [point.lat, point.lng, id]);
+      return point;
+    } catch {
+      geocodeFailedAt.set(id, Date.now());
+      return null;
+    }
+  }
+
+  // Book a Ride step 1 ("Where are you going?") — place suggestions while
+  // typing, restricted to Bangladesh. Cached for an hour per query.
+  app.get("/api/vehicles/places/search", authenticateToken, async (req: any, res: any) => {
+    try {
+      const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
+      if (q.length < 2) return res.json([]);
+      const key = q.toLowerCase();
+      const cached = placeSearchCache.get(key);
+      if (cached && Date.now() - cached.at < 60 * 60 * 1000) return res.json(cached.results);
+      const hits: any = await nominatim(`search?format=json&addressdetails=1&limit=6&countrycodes=bd&q=${encodeURIComponent(q)}`);
+      const results = (Array.isArray(hits) ? hits : []).map((h: any) => ({
+        label: shortPlaceLabel(h),
+        detail: String(h.display_name || ""),
+        lat: Number(h.lat),
+        lng: Number(h.lon)
+      }));
+      if (placeSearchCache.size > 500) placeSearchCache.clear();
+      placeSearchCache.set(key, { at: Date.now(), results });
+      res.json(results);
+    } catch (err: any) {
+      res.status(502).json({ error: "Place search is unavailable right now." });
+    }
+  });
+
+  // Book a Ride step 1 — turns the phone's GPS fix into a readable pickup
+  // address ("Anandalok Trust, Dhanmondi").
+  app.get("/api/vehicles/places/reverse", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        return res.status(400).json({ error: "Invalid coordinates." });
+      }
+      const hit: any = await nominatim(`reverse?format=json&addressdetails=1&zoom=18&lat=${lat}&lon=${lng}`);
+      res.json({ label: hit && !hit.error ? shortPlaceLabel(hit) : null });
+    } catch {
+      res.json({ label: null });
+    }
+  });
+
+  // Book a Ride step 1's "Recent" list — this account's own last distinct
+  // destinations, newest first.
+  app.get("/api/vehicles/places/recent", authenticateToken, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions");
+      const mine = rows
+        .filter((r: any) => Number(r.employee_user_id) === Number(req.user.id) && r.destination)
+        .sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      const seen = new Set<string>();
+      const recent: any[] = [];
+      for (const r of mine) {
+        const key = String(r.destination).trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        recent.push({
+          label: r.destination,
+          lat: r.destination_lat != null ? Number(r.destination_lat) : null,
+          lng: r.destination_lng != null ? Number(r.destination_lng) : null
+        });
+        if (recent.length >= 10) break;
+      }
+      res.json(recent);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/vehicles/requisitions/:id/live-location", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+
+      const isOwner = Number(requisition.employee_user_id) === Number(req.user.id);
+      // canRunRide covers the driver, whoever assigned it, and Vehicle Management / Maintainer.
+      if (!isOwner && !(await canRunRide(requisition, req.user))) {
+        return res.status(403).json({ error: "You don't have access to this ride's live location." });
+      }
+      if (!["ongoing", "completed"].includes(requisition.status)) {
+        return res.status(400).json({ error: "This ride hasn't started yet." });
+      }
+
+      async function latestPing(userId: number | null) {
+        if (!userId) return null;
+        const rows: any = await queryDB(
+          "SELECT lat, lng, recorded_at FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1",
+          [userId]
+        );
+        return rows[0] || null;
+      }
+
+      const driverUserId = requisition.driver_user_id ? Number(requisition.driver_user_id) : null;
+      const [employeeUserRows, driverUserRows, employeePing, driverPing] = await Promise.all([
+        queryDB("SELECT name FROM users WHERE id = ?", [requisition.employee_user_id]),
+        driverUserId ? queryDB("SELECT name FROM users WHERE id = ?", [driverUserId]) : Promise.resolve([]),
+        latestPing(Number(requisition.employee_user_id)),
+        latestPing(driverUserId)
+      ]);
+
+      const toPoint = (userId: number, nameRow: any, ping: any) =>
+        nameRow
+          ? {
+              user_id: userId,
+              name: nameRow.name,
+              lat: ping ? Number(ping.lat) : null,
+              lng: ping ? Number(ping.lng) : null,
+              recorded_at: ping ? ping.recorded_at : null
+            }
+          : null;
+
+      res.json({
+        status: requisition.status,
+        pickup_location: requisition.pickup_location,
+        destination: requisition.destination,
+        destination_point: await geocodeDestination(requisition),
+        employee: toPoint(Number(requisition.employee_user_id), employeeUserRows[0], employeePing),
+        driver: driverUserId ? toPoint(driverUserId, driverUserRows[0], driverPing) : null
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/:id/trip-details — "Ride Details" for a
+  // finished ride: the full record, the approval history, and the path the
+  // driver (and the employee) actually travelled, rebuilt from Employee
+  // Tracking pings between assignment and return. Same audience as the
+  // Live Ride Map.
+  app.get("/api/vehicles/requisitions/:id/trip-details", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const { rows, userById, vehicleById } = await loadContext();
+      const requisition = rows.find((r: any) => Number(r.id) === id);
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+
+      const isOwner = Number(requisition.employee_user_id) === Number(req.user.id);
+      if (!isOwner && !(await canRunRide(requisition, req.user))) return res.status(403).json({ error: "You don't have access to this ride." });
+
+      const plannedStart = new Date(`${String(requisition.ride_date).slice(0, 10)}T${requisition.start_time || "00:00"}:00`);
+      const startCandidates = [requisition.decided_at ? new Date(requisition.decided_at) : null, isNaN(plannedStart.getTime()) ? null : plannedStart].filter(
+        (d): d is Date => !!d && !isNaN(d.getTime())
+      );
+      // The real start when Start Ride was pressed; older rides fall back to the estimate.
+      const windowStart = requisition.started_at
+        ? new Date(requisition.started_at)
+        : startCandidates.length > 0
+          ? new Date(Math.min(...startCandidates.map((d) => d.getTime())))
+          : null;
+      const windowEnd = requisition.actual_return_at ? new Date(requisition.actual_return_at) : new Date();
+
+      async function track(userId: number | null) {
+        if (!userId || !windowStart || !["ongoing", "completed"].includes(requisition.status)) return [];
+        const pings: any = await queryDB(
+          "SELECT * FROM location_pings WHERE user_id = ? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at ASC",
+          [userId, windowStart, windowEnd]
+        );
+        return (pings as any[])
+          .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), recorded_at: p.recorded_at }))
+          .filter((p) => {
+            const t = new Date(p.recorded_at).getTime();
+            return Number.isFinite(p.lat) && Number.isFinite(p.lng) && t >= windowStart.getTime() && t <= windowEnd.getTime();
+          })
+          .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+      }
+
+      const driverUserId = requisition.driver_user_id ? Number(requisition.driver_user_id) : null;
+      const [driverTrack, employeeTrack] = await Promise.all([track(driverUserId), track(Number(requisition.employee_user_id))]);
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id);
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request?.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+
+      res.json({
+        ...serialize(requisition, userById, vehicleById),
+        time_extension_decided_by_name: requisition.time_extension_decided_by
+          ? userById.get(Number(requisition.time_extension_decided_by))?.name || null
+          : null,
+        destination_point: ["ongoing", "completed"].includes(requisition.status) ? await geocodeDestination(requisition) : null,
+        approval_history: actions.map((a: any) => ({
+          approver_name: a.approver_name || userById.get(Number(a.approver_id))?.name || null,
+          action: a.action,
+          remarks: a.remarks || null,
+          acted_at: a.acted_at || null
+        })),
+        driver_track: driverTrack,
+        employee_track: employeeTrack
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/vehicles/requisitions/:id/extension-decision — HR/Admin
+  // approves or rejects a still-open time extension request while the ride
+  // is ongoing.
+  app.put("/api/vehicles/requisitions/:id/extension-decision", ...adminGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const decision = req.body?.decision === "approved" ? "approved" : req.body?.decision === "rejected" ? "rejected" : null;
+      if (!decision) return res.status(400).json({ error: "decision must be 'approved' or 'rejected'." });
+
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.time_extension_status !== "requested") return res.status(400).json({ error: "No pending time extension request." });
+
+      await queryDB("UPDATE vehicle_requisitions SET time_extension_status = ?, time_extension_decided_by = ? WHERE id = ?", [
+        decision,
+        req.user.id,
+        id
+      ]);
+
+      await createAlert(queryDB, {
+        userId: Number(requisition.employee_user_id),
+        type: "vehicle_requisition" as AlertType,
+        title: decision === "approved" ? "Time Extension Approved" : "Time Extension Rejected",
+        message: `Your request for more time was ${decision}.`,
+        relatedType: "vehicle_requisition",
+        relatedId: id
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/vehicles/requisitions/:id/resolve-notice — flowchart's "HR
+  // ম্যানুয়ালি এন্ট্রি ও নোটিশ ফ্ল্যাগ প্রদান করবে": HR closes out a late
+  // return that had no advance notice, with a manual note on file.
+  app.put("/api/vehicles/requisitions/:id/resolve-notice", ...adminGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const note = typeof (req.body || {}).hr_manual_note === "string" ? req.body.hr_manual_note.trim().slice(0, 2000) : "";
+      if (!note) return res.status(400).json({ error: "Add a note before clearing this flag." });
+
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (!Number(requisition.hr_notice_flag)) return res.status(400).json({ error: "This request has no open notice flag." });
+
+      await queryDB("UPDATE vehicle_requisitions SET hr_notice_flag = ?, hr_manual_note = ? WHERE id = ?", [0, note, id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  return { expireOverdueRides };
+}

@@ -8,11 +8,12 @@ import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { Project, AttendanceRecord } from '../types';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface AttendanceCardProps {
   token: string;
   projects: Project[];
@@ -58,17 +59,42 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
   }
 
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("This browser can't access your location."));
-      return;
+  if (!navigator.geolocation) {
+    throw new Error("This browser can't access your location.");
+  }
+  // Browsers only give location to a secure page (https:// or localhost).
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    throw new Error('This page is not secure (http://), so the browser blocks location. Open the site with https:// and try again.');
+  }
+  const ask = (highAccuracy: boolean, timeout: number) =>
+    new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        (err) => reject(err),
+        { enableHighAccuracy: highAccuracy, timeout, maximumAge: 30000 }
+      );
+    });
+  try {
+    return await ask(true, 12000);
+  } catch (first: any) {
+    // A desktop often has no GPS: when the precise fix is slow or unavailable, take the Wi-Fi/network one.
+    if (first?.code === 2 || first?.code === 3) {
+      try {
+        return await ask(false, 15000);
+      } catch (second: any) {
+        first = second;
+      }
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      () => reject(new Error("Couldn't get your location. Please allow location access and try again.")),
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  });
+    if (first?.code === 1) {
+      throw new Error(
+        "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
+      );
+    }
+    if (first?.code === 2) {
+      throw new Error("Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again.");
+    }
+    throw new Error('Getting your location took too long. Please try again.');
+  }
 }
 
 // A User checks in/out for one of their assigned Projects — the server only
@@ -77,6 +103,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
 export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
+  // Blur is on in the Android/iPhone app too (it used to be left out there
+  // because some Android WebViews dropped it on reload); glass-mask-fix +
+  // translateZ(0) on the shell keep the card itself from disappearing. The
+  // blur is half the old strength (20px shell, 8px tiles), which is also
+  // lighter on the WebView's GPU budget.
   const [projectId, setProjectId] = useState<string>('');
   const [status, setStatus] = useState<AttendanceRecord | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
@@ -108,10 +139,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     (async () => {
       try {
-        const res = await fetch(apiUrl(`/api/attendance/status?project_id=${projectId}`), {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!cancelled && res.ok) setStatus(await res.json());
+        // This card mounts twice on every Dashboard load (mobile + desktop
+        // copies, see UserPanel.tsx) — dedupedFetchJson means only one of
+        // the two actually hits the network.
+        const row = await dedupedFetchJson(apiUrl(`/api/attendance/status?project_id=${projectId}`), token);
+        if (!cancelled && row) setStatus(row);
       } catch {
         // Offline or server unreachable — leave status as-is, the buttons still work.
       } finally {
@@ -125,6 +157,30 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
   const selectedProject = projects.find((p) => String(p.id) === projectId) || null;
   const hasCheckedIn = !!status?.check_in_at;
+
+  // Late warning: this month's own Delay / Extreme Delay counts against the
+  // Late Attendance Policy (same /api/my-attendance-summary figures the
+  // This Month card and payroll use). When one more late would cost a day's
+  // salary — e.g. 2 lates under "3 lates = 1 day" — a small rose badge in
+  // the In Time tile's corner says so ("2/3 late"; the full sentence is its
+  // tooltip).
+  // Read again after each check-in, since that's what can add a late.
+  const [lateSummary, setLateSummary] = useState<{
+    linked: boolean;
+    late_count: number;
+    extreme_late_count: number;
+    policy: { lates_per_deduction_day: number; extreme_lates_per_deduction_day: number } | null;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    dedupedFetchJson(apiUrl('/api/my-attendance-summary'), token).then((d) => {
+      if (!cancelled) setLateSummary(d && d.linked ? d : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, status?.check_in_at]);
+
   const hasCheckedOut = !!status?.check_out_at;
 
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
@@ -194,11 +250,17 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // card and only its data (not the card itself) shows up a beat later.
   if (loading && projects.length === 0) {
     return (
-      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl animate-pulse">
-        <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
+      // Same shell as the real card below: tinted glass on mobile, plain
+      // white card from md up (where it sits beside the other white cards).
+      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-200/80 via-white/40 to-indigo-100/60 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm animate-pulse">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-4 h-4 rounded bg-white/70 md:bg-slate-200" />
+          <div className="h-4 w-28 bg-white/70 md:bg-slate-200 rounded-md" />
+        </div>
+        <div className="h-9 rounded-xl bg-white/70 md:bg-slate-100 mb-2" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
+          <div className="rounded-xl bg-white/70 border border-white/50 md:bg-slate-50 md:border-slate-100 h-14" />
+          <div className="rounded-xl bg-white/70 border border-white/50 md:bg-slate-50 md:border-slate-100 h-14" />
         </div>
       </div>
     );
@@ -210,13 +272,49 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const outParts = status?.check_out_at ? formatTimeParts(status.check_out_at as string) : null;
   const busy = working !== null || !!pending || loadingStatus;
 
+  const lateWarnings: { badge: string; text: string }[] = [];
+  if (lateSummary?.policy) {
+    const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
+    const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
+    const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
+    if (oneShort(Number(lateSummary.late_count) || 0, per)) {
+      lateWarnings.push({
+        badge: `${lateSummary.late_count}/${per} late`,
+        text: `${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
+      });
+    }
+    if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {
+      lateWarnings.push({
+        badge: `${lateSummary.extreme_late_count}/${xPer} extreme`,
+        text: `${lateSummary.extreme_late_count} Extreme Delay this month — 1 more and a day's salary will be deducted (${xPer} Extreme Delay = 1 day).`
+      });
+    }
+  }
+
   return (
     // Liquid glass on mobile, matching the rest of the mobile Dashboard's
     // cards; plain white from md up, because on the desktop Dashboard this
     // card sits in a grid beside plain-white ones (Today, This Month, My
     // Requests) and the tinted-glass treatment made that row read as three
     // unrelated designs pushed together.
-    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
+    //
+    // Blur (20px) is on for the web and the app alike; the inset highlight in
+    // the shadow below (a bright top edge, same trick the floating action
+    // buttons use) does most of the frosted look on this smooth background.
+    //
+    // Separately (see glass-mask-fix in index.css for the full story): this
+    // card's own rounded gradient background was ALSO capable of losing
+    // itself the same way on reload, blur or no blur — a much broader
+    // Android/WebKit rounded-corner + translucent-background compositor bug,
+    // not specific to backdrop-filter at all. glass-mask-fix below is the
+    // actual fix for that.
+    <div
+      style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
+      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
+    >
+      {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
+          — that opacity alone reads as a distinct panel even where a
+          WebView skips the blur — with a light 8px blur on top. */}
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
@@ -227,25 +325,36 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
       {projects.length > 1 && (
         <div className="mb-2">
-          <select
+          <SearchSelect
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="w-full text-sm px-3 py-2 bg-white/50 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.project_name}</option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-2">
         {/* In Time — just the time itself, no "via Office/GPS" source line;
-            extra padding + a stronger blur than the card's own backdrop-blur
-            so the gradient behind genuinely shows through this tile instead
-            of the text crowding its rounded corners. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+            extra padding so the text doesn't crowd its rounded corners.
+            bg-white/70 (not the flatter /40 this used to be) reads as its
+            own distinct tile even where backdrop-blur-lg doesn't render
+            (Android WebView — see the note above), while staying low
+            enough to keep some translucency instead of a flat opaque box. */}
+        <div className={`relative rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+          {lateWarnings.length > 0 && (
+            <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+              {lateWarnings.map((w) => (
+                <span key={w.badge} role="status" title={w.text} aria-label={w.text} className="px-1.5 py-px rounded-full bg-rose-500 text-white text-[10px] font-bold leading-4 whitespace-nowrap">
+                  {w.badge}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -267,7 +376,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">

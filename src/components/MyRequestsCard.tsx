@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ClipboardList, Route, CreditCard, CalendarClock, Clock, ChevronRight } from 'lucide-react';
 import { LeaveApplication, ClaimRecord, UserClaim, AttendanceCorrection } from '../types';
@@ -62,6 +63,8 @@ const isWaiting = (status: RowStatus) => status === 'pending' || status === 'ope
 
 // How many rows the card shows before it stops and points at the full pages.
 const MAX_ROWS = 6;
+// Shown instead of "With …" when a request has nobody to approve it yet.
+const NO_APPROVER = 'No approver set yet — tell HR';
 
 // Dashboard "My Requests" — every request this account has submitted, across
 // all four workflows that have one (Leave Application, Movement Claim,
@@ -82,6 +85,8 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Live refresh: statuses update without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
 
@@ -126,6 +131,8 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
               ? null
               : a.reliever_status === 'pending'
               ? `Reliever${a.reliever_name ? ` · ${a.reliever_name}` : ''}`
+              : a.no_approver
+              ? NO_APPROVER
               : a.approver_name
               ? `${a.approver_name}${a.total_steps ? ` · Layer ${a.current_step} of ${a.total_steps}` : ''}`
               : null
@@ -157,7 +164,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           detail: `${c.category} · ৳${Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`,
           date: c.claim_date,
           status: c.status,
-          waitingOn: null
+          waitingOn: c.status === 'pending' && c.approval?.no_approver ? NO_APPROVER : null
         })),
         ...corrections.map((c) => ({
           key: `correction-${c.id}`,
@@ -167,7 +174,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           detail: `For ${formatDate(c.attendance_date)}`,
           date: c.created_at || c.attendance_date,
           status: c.status,
-          waitingOn: c.status === 'pending' ? c.approval?.current_approver_name || null : null
+          waitingOn: c.status === 'pending' ? (c.approval?.no_approver ? NO_APPROVER : c.approval?.current_approver_name || null) : null
         }))
       ];
 
@@ -186,7 +193,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet]);
+  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet, liveTick]);
 
   const waitingCount = rows.filter((r) => isWaiting(r.status)).length;
   const visible = rows.slice(0, MAX_ROWS);
@@ -240,7 +247,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
                   <div className="text-sm font-semibold text-slate-900 truncate">{row.title}</div>
                   <div className="text-xs text-slate-500 truncate mt-0.5">{row.detail}</div>
                   {row.waitingOn && (
-                    <div className="text-[11px] text-amber-700 truncate mt-0.5">With {row.waitingOn}</div>
+                    <div className="text-[11px] text-amber-700 truncate mt-0.5">{row.waitingOn === NO_APPROVER ? NO_APPROVER : `With ${row.waitingOn}`}</div>
                   )}
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">

@@ -1,0 +1,135 @@
+{
+ "when": "2026-10-26T03:37:17.609Z",
+ "summary": {
+  "PASS": 21,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "GH-01",
+   "status": "PASS",
+   "name": "Group HR has the sister company in the company switcher",
+   "detail": "access 200; modules 200; {\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"group_id\":1,\"name\":\"Credence Housing Limited"
+  },
+  {
+   "id": "GH-02",
+   "status": "PASS",
+   "name": "In CBL: sees CBL's employees",
+   "detail": "200 [{\"id\":45,\"employee_id\":null,\"name\":\"Bina Builders\",\"designation\":\"Site Engineer\",\"department\":null,\"department_id\":null,\"branch\":null,\"branch_id\":null,\"email\":"
+  },
+  {
+   "id": "GH-03",
+   "status": "PASS",
+   "name": "In CBL: edits a CBL employee",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "GH-04",
+   "status": "PASS",
+   "name": "In CBL: adds and reads the bank account",
+   "detail": "201 {\"id\":1} / 200 [{\"id\":1,\"employee_id\":45,\"account_type\":\"bank\",\"account_label\":\"Salary\",\"bank_name\":\"DBBL\",\"branch_name\":null,\"provider\":null,\"account_number\":\"777000111\",\"per"
+  },
+  {
+   "id": "GH-05",
+   "status": "PASS",
+   "name": "In CBL: sets the salary",
+   "detail": "200 {\"success\":true,\"id\":1,\"gross_salary\":70000}"
+  },
+  {
+   "id": "GH-06",
+   "status": "PASS",
+   "name": "In CBL: runs and opens the payroll",
+   "detail": "200 {\"success\":true,\"id\":1,\"net_salary\":70000} / 200"
+  },
+  {
+   "id": "GH-07",
+   "status": "PASS",
+   "name": "In CBL: the payroll list has the CBL salary",
+   "detail": "200 [{\"id\":1,\"employee_id\":45,\"month_year\":\"2026-09\",\"total_working_days\":26,\"present_days\":26,\"absent_days\":0,\"leave_days\":0,\"lwp_days\":0,\"overtime_hours\":\"0.00\",\""
+  },
+  {
+   "id": "GH-08",
+   "status": "PASS",
+   "name": "In the mother company: the list shows the mother company's employees",
+   "detail": "200 [{\"id\":36,\"employee_id\":null,\"name\":\"Farhana Akter\",\"designation\":\"Accounts Officer\",\"department\":\"Finance\",\"department_id\":1,\"branch\":null,\"branch_id\":null,\"em"
+  },
+  {
+   "id": "GH-09",
+   "status": "PASS",
+   "name": "In the mother company: a CBL record opened by id is not shown (switch to CBL for it)",
+   "detail": "200 []"
+  },
+  {
+   "id": "GH-10",
+   "status": "PASS",
+   "name": "Without the permission, \"All companies\" does nothing (no switcher entry, CBL stays out)",
+   "detail": "200 [{\"id\":36,\"employee_id\":null,\"name\":\"Farhana Akter\",\"designation\":\"Accounts Officer\",\"department\":\"Finance\",\"department_id\":1,\"branch\":null,\"branch_id\":null,\"em; mine {\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"grou"
+  },
+  {
+   "id": "GH-11",
+   "status": "PASS",
+   "name": "HR cannot give themselves the permission (Superadmin only)",
+   "detail": "403 {\"error\":\"Superadmin access required\"}"
+  },
+  {
+   "id": "GH-12",
+   "status": "PASS",
+   "name": "Superadmin ticks it: the switcher offers All companies, the change is in the access audit",
+   "detail": "200 {\"success\":true}; audit 1"
+  },
+  {
+   "id": "GH-13",
+   "status": "PASS",
+   "name": "All companies: one list has the mother company's and CBL's employees",
+   "detail": "200 [{\"id\":46,\"employee_id\":null,\"name\":\"Arif Mother\",\"designation\":\"Accountant\",\"department\":\"Finance\",\"department_id\":1,\"branch\":null,\"branch_id\":null,\"email\":\"ar"
+  },
+  {
+   "id": "GH-14",
+   "status": "PASS",
+   "name": "All companies: opens a CBL employee's bank account without switching",
+   "detail": "200 [{\"id\":1,\"employee_id\":45,\"account_type\":\"bank\",\"account_label\":\"Salary\",\"bank_name\":\"DBBL\",\"branch_name\":null,\"provider\":null,\"account_number\":\"777000111\",\"per"
+  },
+  {
+   "id": "GH-15",
+   "status": "PASS",
+   "name": "All companies: changes a CBL employee without switching",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "GH-16",
+   "status": "PASS",
+   "name": "All companies: changes a mother-company employee in the same place",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "GH-17",
+   "status": "PASS",
+   "name": "All companies: a new employee goes to the company chosen in the switcher (mother)",
+   "detail": "201 {\"id\":47,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}; company 1"
+  },
+  {
+   "id": "GH-18",
+   "status": "PASS",
+   "name": "All companies: payroll is still run per company (CBL's salary is run in CBL)",
+   "detail": "400 {\"error\":\"This employee's salary is run by their own company.\"}"
+  },
+  {
+   "id": "GH-19",
+   "status": "PASS",
+   "name": "Picking one company still shows just that company",
+   "detail": "200 [{\"id\":45,\"employee_id\":null,\"name\":\"Bina Builders\",\"designation\":\"Project Engineer\",\"department\":null,\"department_id\":null,\"branch\":null,\"branch_id\":null,\"emai"
+  },
+  {
+   "id": "GH-20",
+   "status": "PASS",
+   "name": "The mode only spans companies the account may enter (company 1 only → no CBL)",
+   "detail": "200 [{\"id\":46,\"employee_id\":null,\"name\":\"Arif Mother\",\"designation\":\"Senior Accountant\",\"department\":null,\"department_id\":null,\"branch\":null,\"branch_id\":null,\"email"
+  },
+  {
+   "id": "GH-21",
+   "status": "PASS",
+   "name": "Superadmin unticks it: back to one company at a time straight away",
+   "detail": "200 [{\"id\":46,\"employee_id\":null,\"name\":\"Arif Mother\",\"designation\":\"Senior Accountant\",\"department\":null,\"department_id\":null,\"branch\":null,\"branch_id\":null,\"email"
+  }
+ ]
+}

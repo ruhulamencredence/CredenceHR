@@ -16,18 +16,32 @@
 // Capacitor's server.url silently fails to load ("webpage not available")
 // without a valid scheme.
 
-// Your PC's LAN IP, for testing on a phone connected to the same WiFi.
-const LOCAL_SERVER_URL = 'http://192.168.66.4:3000';
+// Local testing on a phone. localhost (not the PC's LAN IP) because the
+// WebView only allows the microphone / camera (chat calls, voice messages) on
+// https:// or localhost — connect the phone by USB and run
+//   adb reverse tcp:3000 tcp:3000
+// so the phone's localhost:3000 reaches the server on this PC. (The old LAN
+// address, http://192.168.66.11:3001, still loads the app over WiFi but
+// calls can't get the microphone there.)
+const LOCAL_SERVER_URL = 'http://192.168.66.11:3000';
 
-// Your real deployed domain or public IP — fill this in once it's live, e.g.
-// 'https://mpr.yourcompany.com' or 'http://<public IP>:3000'.
-const REAL_SERVER_URL = 'http://203.95.222.58:3000';
+// The live server. The domain (HTTPS) is the normal address — the iPhone app
+// only loads HTTPS pages, so it always uses this one. The public IP (plain
+// http) is kept as a fallback for the Android APK only.
+const REAL_SERVER_DOMAIN_URL = 'https://hr.credencehousinglimited.com';
+const REAL_SERVER_IP_URL = 'http://203.95.222.58:3000';
 
-// Flip this to true once REAL_SERVER_URL above is filled in and live, then
-// rebuild + re-sync as noted above.
-const USE_REAL_SERVER = true;
+// Android only: true = build the APK against the IP instead of the domain.
+const USE_IP_INSTEAD_OF_DOMAIN = false;
+const REAL_SERVER_URL = USE_IP_INSTEAD_OF_DOMAIN ? REAL_SERVER_IP_URL : REAL_SERVER_DOMAIN_URL;
 
-const ACTIVE_SERVER_URL = USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL;
+// Flip this to true to build against the live server above instead of your
+// PC (LOCAL_SERVER_URL), then rebuild + re-sync as noted above.
+const USE_REAL_SERVER = false;
+
+// CAP_SERVER_URL (set by the cloud builds, .github/workflows/ios.yml and android.yml)
+// overrides both, so a build can point at any server without editing this file.
+const ACTIVE_SERVER_URL = process.env.CAP_SERVER_URL || (USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL);
 
 const config = {
   appId: 'com.credencehr.app',
@@ -58,7 +72,38 @@ const config = {
   android: {
     useLegacyBridge: true
   },
+  // iPhone build (ios/, built on a cloud Mac — see .github/workflows/ios.yml).
+  // Employee Tracking is Android-only: iOS reviews "Always" background
+  // location strictly, so the background-geolocation plugin is left out of
+  // the iOS app entirely (src/lib/backgroundTracking.ts also skips iOS).
+  // Every other native plugin is listed here — add new ones to this list too.
+  ios: {
+    contentInset: 'never',
+    includePlugins: [
+      '@capacitor/app',
+      '@capacitor/device',
+      '@capacitor/filesystem',
+      '@capacitor/geolocation',
+      '@capacitor/keyboard',
+      '@capacitor/push-notifications',
+      '@capacitor/share',
+      '@capacitor/status-bar',
+      'capacitor-voice-recorder'
+    ]
+  },
   plugins: {
+    // Android: the app draws edge-to-edge itself (MainActivity.java) and
+    // hands the page the real status / navigation bar heights
+    // (--native-safe-area-inset-*), which the header, bottom nav and every
+    // full-screen page already leave room for. Capacitor 8's own SystemBars
+    // handling ("css", its default) would ALSO pad the whole WebView below
+    // the status bar and above the navigation bar whenever the phone's
+    // Android System WebView is older than Chromium 140 (many Vivo / Oppo /
+    // Xiaomi phones): dark bars at the top and bottom, and the room left
+    // twice — a big gap under the status bar. So it is turned off here.
+    SystemBars: {
+      insetsHandling: 'disable'
+    },
     // Tells Android to shrink the WebView's own viewport when the on-screen
     // keyboard opens (instead of just drawing the keyboard on top of the page
     // at its current size), which is what makes `scrollIntoView` on the

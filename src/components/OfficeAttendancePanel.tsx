@@ -9,6 +9,8 @@ import { OfficeAttendanceRow } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { UnlinkedPinsModal, UnlinkedPin, PinlessEmployee } from './UnlinkedPinsModal';
 
 interface OfficeAttendancePanelProps {
   token: string;
@@ -50,6 +52,19 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   const [fromDate, setFromDate] = useState(todayDateOnlyString());
   const [toDate, setToDate] = useState(todayDateOnlyString());
   const [search, setSearch] = useState('');
+  // Unlinked PINs — only for accounts with the "Link Device PINs" layer
+  // (the API answers 403 otherwise, and the button stays hidden).
+  const [pinData, setPinData] = useState<{ unlinked: UnlinkedPin[]; employees_without_pin: PinlessEmployee[]; days: number } | null>(null);
+  const [showPins, setShowPins] = useState(false);
+  const loadPins = useCallback(() => {
+    fetch(apiUrl('/api/office-attendance/unlinked-pins?days=30'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPinData(d))
+      .catch(() => setPinData(null));
+  }, [token]);
+  useEffect(() => {
+    loadPins();
+  }, [loadPins]);
 
   // Per-column filters shown in the table header row — separate from the
   // global name/department/designation search box above, and combined with
@@ -303,7 +318,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   };
 
   const handleDeleteDevice = async (device: ZkDeviceStatus) => {
-    if (!window.confirm(`Delete "${device.name}" (${device.ip_address})? Its already-synced punch history is deleted too. This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete "${device.name}" (${device.ip_address})? Its already-synced punch history is deleted too. This cannot be undone.`))) return;
     setDeletingDeviceId(device.id);
     try {
       const res = await fetch(apiUrl(`/api/zk-devices/${device.id}`), {
@@ -344,6 +359,18 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {pinData && (
+            <button
+              onClick={() => setShowPins(true)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border ${
+                pinData.unlinked.length ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              title="Device PINs with punches that no Employee has"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" /> Unlinked PINs
+              {pinData.unlinked.length > 0 && <span className="px-1.5 rounded-full bg-amber-500 text-white text-[11px] font-bold">{pinData.unlinked.length}</span>}
+            </button>
+          )}
           <button
             onClick={() => setShowDeviceModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -565,7 +592,20 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
                 <td className="px-3 py-2 text-slate-500">{r.department || '—'}</td>
                 <td className="px-3 py-2 text-slate-600">{formatDate(r.attendance_date)}</td>
                 <td className="px-3 py-2 text-emerald-700">
-                  <span className="flex items-center gap-1"><LogIn className="w-3 h-3" /> {timeOnly(r.check_in_at)}</span>
+                  <span className="flex items-center gap-1 flex-wrap">
+                    <LogIn className="w-3 h-3" /> {timeOnly(r.check_in_at)}
+                    {r.late && (
+                      <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${r.late === 'extreme' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {r.late === 'extreme' ? 'Extreme Delay' : 'Delay'}
+                      </span>
+                    )}
+                    {r.shift && (
+                      <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 text-white" style={{ background: r.shift.color }} title={`${r.shift.name} ${r.shift.start}–${r.shift.end} (Duty Roster)`}>
+                        {r.shift.code} {r.shift.start}
+                      </span>
+                    )}
+                    {r.roster_off && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-slate-100 text-slate-600" title="Off day on the Duty Roster">Off day</span>}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-slate-600">
                   <span className="flex items-center gap-1"><LogOut className="w-3 h-3" /> {timeOnly(r.check_out_at)}</span>
@@ -582,6 +622,18 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
         </table>
       </div>
 
+      {showPins && pinData && (
+        <UnlinkedPinsModal
+          token={token}
+          data={pinData}
+          onClose={() => setShowPins(false)}
+          onLinked={() => {
+            loadPins();
+            fetchRows();
+          }}
+        />
+      )}
+
       {/* Manage Devices modal — the ZKTeco device registry (zk_devices),
           full CRUD from the interface instead of a manual SQL INSERT
           whenever a new terminal's IP needs registering. */}
@@ -594,6 +646,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
               </h3>
               <button
                 onClick={() => { setShowDeviceModal(false); closeDeviceForm(); }}
+                aria-label="Close"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="w-4 h-4" />

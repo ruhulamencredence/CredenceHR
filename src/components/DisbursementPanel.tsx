@@ -1,14 +1,82 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import jsPDF from '../lib/jspdf';
+import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import autoTable from 'jspdf-autotable';
 import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';
-import { ConveyanceBill, User } from '../types';
+import { ConveyanceBill, ConveyanceBillItem, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
-import credenceLogo from '../assets/credence-logo.png';
-import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
+import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Spinner } from './Spinner';
+import { PagerBar } from './PagerBar';
+import { confirmDialog } from '../lib/confirmDialog';
+
+import { SearchSelect } from './Combobox';
+// ---- Voucher sections ----
+// The Payment Voucher groups a Bill's lines by category, each with the
+// columns it needs: travel categories (and Movement Claim / manual items,
+// which are trips) show From / To / Distance; any other category shows a
+// Description. An item from a Conveyance Bill Claim is split into that
+// claim's own category lines; if it was approved for less than those lines
+// add up to, the difference is an Adjustment line so the total is what was
+// paid.
+interface VoucherLine {
+  date: string | null;
+  particulars: string;
+  from?: string | null;
+  to?: string | null;
+  km?: number | null;
+  amount: number;
+}
+interface VoucherSection {
+  category: string;
+  kind: 'travel' | 'other' | 'adjustment';
+  lines: VoucherLine[];
+  total: number;
+}
+const TRAVEL_CATEGORY = /convey|transport|travel|movement|rickshaw|cng|bus|taxi|ride|uber|pathao/i;
+
+function voucherSections(items: ConveyanceBillItem[]): VoucherSection[] {
+  const byCategory = new Map<string, VoucherSection>();
+  const add = (category: string, kind: VoucherSection['kind'], line: VoucherLine) => {
+    const key = kind === 'adjustment' ? '__adjustment' : category.trim().toLowerCase();
+    if (!byCategory.has(key)) byCategory.set(key, { category, kind, lines: [], total: 0 });
+    const sec = byCategory.get(key)!;
+    sec.lines.push(line);
+    sec.total = Math.round((sec.total + line.amount) * 100) / 100;
+  };
+  const kindOf = (category: string) => (TRAVEL_CATEGORY.test(category) ? 'travel' : 'other');
+  for (const it of items) {
+    const amount = Number(it.amount);
+    if (it.source !== 'user_claim') {
+      add('Conveyance', 'travel', { date: it.entry_date, particulars: it.particulars || '', from: it.from_location, to: it.to_location, km: it.distance_km, amount });
+      continue;
+    }
+    const lines = it.claim_lines || [];
+    if (!lines.length) {
+      const category = it.claim_category || 'Others';
+      add(category, kindOf(category), { date: it.entry_date, particulars: it.particulars || '', amount });
+      continue;
+    }
+    for (const l of lines) {
+      add(l.category, kindOf(l.category), { date: l.bill_date, particulars: l.description || it.particulars || '', amount: Number(l.amount) });
+    }
+    const claimed = lines.reduce((s, l) => s + Number(l.amount), 0);
+    const diff = Math.round((amount - claimed) * 100) / 100;
+    if (Math.abs(diff) >= 0.01) {
+      add('Adjustment', 'adjustment', {
+        date: it.entry_date,
+        particulars: `${diff < 0 ? 'Deducted at approval' : 'Added at approval'} — claim of ${formatDate(it.entry_date)} (claimed ${pdfMoney(claimed)}, approved ${pdfMoney(amount)})`,
+        amount: diff
+      });
+    }
+  }
+  const order = (sec: VoucherSection) => (sec.kind === 'travel' ? 0 : sec.kind === 'other' ? 1 : 2);
+  return [...byCategory.values()].sort((a, b) => order(a) - order(b));
+}
 
 interface DisbursementPanelProps {
   token: string;
@@ -35,6 +103,7 @@ const suggestVoucherNo = (billId: number) => {
 // BUILD bills without also being trusted to authorize payouts, and vice versa.
 export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, users }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
+  const canEmailReports = useCanEmailReports();
   const plainUsers = users.filter((u) => u.role === 'user');
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
@@ -43,16 +112,26 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   const [userFilter, setUserFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'disbursed'>('pending');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // One page of bills at a time; User and Status filter on the server.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const listReq = useRef(0);
 
   const fetchBills = async () => {
+    const req = ++listReq.current;
     setLoading(true);
     setLoadError('');
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (userFilter) params.set('user_id', userFilter);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
       const res = await fetch(apiUrl(`/api/conveyance-bills?${params.toString()}`), { headers: authHeaders });
+      if (req !== listReq.current) return; // a newer request is on its way
       if (res.ok) {
-        setBills(await res.json());
+        const data = await res.json();
+        setBills(Array.isArray(data) ? data : data.rows || []);
+        setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
       } else {
         setLoadError('Failed to load conveyance bills.');
       }
@@ -60,14 +139,22 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
       console.error('Failed to load conveyance bills', err);
       setLoadError('Failed to load conveyance bills.');
     } finally {
-      setLoading(false);
+      if (req === listReq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchBills();
+    // Selection is per page — what's ticked is always on screen.
+    setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize, statusFilter]);
+
+  // Applying the User filter always starts again from page 1.
+  const applyFilters = () => {
+    if (page !== 1) setPage(1);
+    else fetchBills();
+  };
 
   const visibleBills = useMemo(
     () =>
@@ -79,7 +166,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     [bills, statusFilter]
   );
 
-  const selectableIds = useMemo(() => visibleBills.filter((b) => !b.is_disbursed).map((b) => b.id), [visibleBills]);
+  // A Bill with no line items yet can't be disbursed (the server refuses it),
+  // so it gets no checkbox or Disburse button until items are added.
+  const canDisburse = (b: ConveyanceBill) => !b.is_disbursed && Number(b.item_count || 0) > 0;
+  const selectableIds = useMemo(() => visibleBills.filter(canDisburse).map((b) => b.id), [visibleBills]);
   const allSelectableChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
   const toggleOne = (id: number) => {
@@ -105,98 +195,131 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // /api/conveyance-bills) only returns item_count/total_amount, not the
   // actual line items, so this always does its own GET .../:id fetch first
   // rather than trusting whatever's already sitting in `bills` state.
-  const buildAndSaveVoucherPdf = async (billId: number) => {
+  const buildAndSaveVoucherPdf = async (billId: number, mode: 'save' | 'email' = 'save') => {
     const res = await fetch(apiUrl(`/api/conveyance-bills/${billId}`), { headers: authHeaders });
     if (!res.ok) throw new Error(`Failed to load Bill CB-${billId} for its voucher.`);
     const bill: ConveyanceBill = await res.json();
 
-    const logoImg = await loadImageElement(credenceLogo);
+    const co = await loadPdfCompany(token);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const items = bill.items || [];
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const sections = voucherSections(bill.items || []);
+    const total = sections.reduce((s, sec) => s + sec.total, 0);
 
-    const letterheadOptions = {
-      reportTitle: 'Conveyance Payment Voucher',
-      filters: [
-        ['Voucher No', bill.voucher_no || '—'],
-        ['Paid To', bill.user_name || '—'],
-        ['Bill No', `CB-${bill.id}`],
-        ['Bill Date', formatDate(bill.bill_date) || '—'],
-        ['Disbursed On', bill.disbursed_at ? formatDate(bill.disbursed_at) : '—']
-      ] as [string, string][]
+    let y = drawStandardHeader(doc, co, 'Conveyance Payment Voucher', [
+      ['Voucher No', bill.voucher_no || '-'],
+      ['Employee Name', bill.user_name || '-'],
+      ['Employee Code', bill.employee_code || '-'],
+      ['Designation', bill.designation || '-'],
+      ['Department', bill.department || '-'],
+      ['Bill No', `CB-${bill.id}`],
+      ['Bill Date', formatDate(bill.bill_date) || '-'],
+      ['Claim Category', sections.filter((sec) => sec.kind !== 'adjustment').map((sec) => sec.category).join(', ') || '-'],
+      ['Status', bill.is_disbursed ? `Disbursed${bill.disbursed_at ? ` on ${formatDate(bill.disbursed_at)}` : ''}${bill.disbursed_by_name ? ` by ${bill.disbursed_by_name}` : ''}` : 'Not disbursed']
+    ]);
+    const roomFor = (h: number) => {
+      if (y + h > pageHeight - 18) {
+        doc.addPage();
+        y = 14;
+      }
     };
-    const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
+    const left = { halign: 'left' as const };
 
-    autoTable(doc, {
-      startY: contentStartY,
-      margin: { top: contentStartY, left: 8, right: 8 },
-      head: [['SL', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
-      body: items.map((it, idx) => [
-        String(idx + 1),
-        formatDate(it.entry_date) || '',
-        it.particulars || '',
-        it.from_location || '',
-        it.to_location || '',
-        it.distance_km != null ? String(it.distance_km) : '',
-        it.amount.toFixed(2)
-      ]),
-      styles: { fontSize: 7.5, cellPadding: 1.7, overflow: 'linebreak' },
-      columnStyles: {
-        0: { cellWidth: 8 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 55 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 26 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 22 }
-      },
-      headStyles: { fillColor: [21, 128, 61], textColor: 255, fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
-    });
+    // One table per category, each with the columns that category needs.
+    for (const sec of sections) {
+      roomFor(22);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(40, 40, 40);
+      doc.text(sec.kind === 'adjustment' ? 'Adjustment' : sec.category, 8, y + 2);
+      const base = standardTable(y + 4);
+      if (sec.kind === 'travel') {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), formatDate(l.date) || '', l.particulars, l.from || '-', l.to || '-', l.km != null ? String(l.km) : '-', pdfMoney(l.amount)]),
+          foot: [[{ content: 'Subtotal', colSpan: 6, styles: left }, pdfMoney(sec.total)]],
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 1: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 30 }, 4: { cellWidth: 30 }, 5: { cellWidth: 20, halign: 'right' }, 6: { cellWidth: 24, halign: 'right' } }
+        });
+      } else if (sec.kind === 'adjustment') {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Particulars', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), l.particulars, pdfMoney(l.amount)]),
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 2: { cellWidth: 24, halign: 'right' } }
+        });
+      } else {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Date', 'Description', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), formatDate(l.date) || '', l.particulars, pdfMoney(l.amount)]),
+          foot: [[{ content: 'Subtotal', colSpan: 3, styles: left }, pdfMoney(sec.total)]],
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 1: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 24, halign: 'right' } }
+        });
+      }
+      y = (doc as any).lastAutoTable.finalY + 7;
+    }
 
-    const total = items.reduce((s, it) => s + Number(it.amount), 0);
-    const finalY = (doc as any).lastAutoTable.finalY;
-
+    // Category summary and the amount paid.
+    roomFor(20 + sections.length * 6);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Total Amount Disbursed: ${total.toFixed(2)}`, 8, finalY + 8);
-
-    doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.setTextColor(71, 85, 105);
-    doc.text(
-      `I acknowledge receipt of the above amount in full settlement of the conveyance claim referenced above.`,
-      8,
-      finalY + 16,
-      { maxWidth: doc.internal.pageSize.getWidth() - 16 }
-    );
+    doc.text('Summary', 8, y + 2);
+    autoTable(doc, {
+      ...standardTable(y + 4),
+      tableWidth: 110,
+      head: [['Category', 'Amount']],
+      body: sections.map((sec) => [sec.kind === 'adjustment' ? 'Adjustment' : sec.category, pdfMoney(sec.total)]),
+      foot: [[{ content: 'Total Amount', styles: left }, pdfMoney(total)]],
+      columnStyles: { 1: { cellWidth: 30, halign: 'right' } }
+    });
+    y = (doc as any).lastAutoTable.finalY;
+
+    roomFor(45);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(40, 40, 40);
+    doc.text(`Received Tk ${pdfMoney(total)} in full settlement of the conveyance claim referenced above.`, 8, y + 8, { maxWidth: pageWidth - 16 });
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
     // for both the person disbursing and the claimant receiving to sign.
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const sigY = finalY + 40;
-    doc.setDrawColor(148, 163, 184);
+    // Each approving Layer's signature (Bill Claim Policy -> "Put each approver's
+    // signature on the Bill and Voucher"); with none, the plain "Approved By" line.
+    const approvers = await loadBillApprovers(token, bill.id);
+    let sigY = y + 32;
+    if (approvers.length) {
+      const below = drawApproverBlock(doc, approvers, y + 16, 8, pageWidth - 8, { perRow: 3, title: 'Approved By' });
+      sigY = below + 14;
+      if (sigY > pageHeight - 20) {
+        doc.addPage();
+        sigY = 30;
+      }
+    }
+    doc.setDrawColor(120, 120, 120);
     doc.setLineWidth(0.2);
-    doc.line(14, sigY, 74, sigY);
-    doc.line(pageWidth / 2 - 30, sigY, pageWidth / 2 + 30, sigY);
-    doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.text('Prepared By', 14, sigY + 4);
-    doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
-    doc.text("Received By (Claimant)", pageWidth - 74, sigY + 4);
+    doc.line(8, sigY, 62, sigY);
+    if (!approvers.length) doc.line(pageWidth / 2 - 27, sigY, pageWidth / 2 + 27, sigY);
+    doc.line(pageWidth - 62, sigY, pageWidth - 8, sigY);
+    doc.setFontSize(7.5);
+    doc.text('Prepared By', 35, sigY + 4, { align: 'center' });
+    if (!approvers.length) doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
+    doc.text('Received By (Claimant)', pageWidth - 35, sigY + 4, { align: 'center' });
 
     finalizePdfPageNumbers(doc);
     const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: 'Conveyance Payment Voucher' });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
   const [printingId, setPrintingId] = useState<number | null>(null);
-  const handlePrintVoucher = async (billRow: ConveyanceBill) => {
+  const handlePrintVoucher = async (billRow: ConveyanceBill, mode: 'save' | 'email' = 'save') => {
     setPrintingId(billRow.id);
     try {
-      await buildAndSaveVoucherPdf(billRow.id);
+      await buildAndSaveVoucherPdf(billRow.id, mode);
     } catch (err) {
       console.error('Failed to print voucher', err);
       alert('Failed to load bill details for the voucher. Please try again.');
@@ -273,7 +396,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // ---- Undo (mark back to pending) ----
   const [undoingId, setUndoingId] = useState<number | null>(null);
   const handleUndoDisburse = async (id: number) => {
-    if (!confirm('Mark this Bill back as Pending? The Voucher No. will be cleared.')) return;
+    if (!(await confirmDialog('Mark this Bill back as Pending? The Voucher No. will be cleared.'))) return;
     setUndoingId(id);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${id}/undisburse`), { method: 'POST', headers: authHeaders });
@@ -307,7 +430,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
               <div className="min-w-0">
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-                <select
+                <SearchSelect
                   value={userFilter}
                   onChange={(e) => setUserFilter(e.target.value)}
                   className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none"
@@ -316,7 +439,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   {plainUsers.map((u) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div className="min-w-0">
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>
@@ -325,7 +448,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setStatusFilter(s)}
+                      onClick={() => {
+                        setStatusFilter(s);
+                        setPage(1);
+                      }}
                       className={`flex-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold capitalize transition-colors ${
                         statusFilter === s ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                       }`}
@@ -337,7 +463,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
               </div>
               <button
                 type="button"
-                onClick={fetchBills}
+                onClick={applyFilters}
                 className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap transition-colors"
               >
                 <Filter className="w-3.5 h-3.5" /> Apply
@@ -374,7 +500,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 <div key={b.id} className="p-4 flex flex-col gap-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5 min-w-0">
-                      {!b.is_disbursed && (
+                      {canDisburse(b) && (
                         <button type="button" onClick={() => toggleOne(b.id)} className="mt-0.5 text-slate-400 hover:text-emerald-600 shrink-0">
                           {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                         </button>
@@ -411,6 +537,13 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                         >
                           {printingId === b.id ? <Spinner size={14} /> : <Printer className="w-3.5 h-3.5" />} Print Voucher
                         </button>
+                        {canEmailReports && (
+                          <EmailReportButton
+                            onClick={() => handlePrintVoucher(b, 'email')}
+                            disabled={printingId === b.id}
+                            className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium transition-colors disabled:opacity-50"
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => handleUndoDisburse(b.id)}
@@ -420,6 +553,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                           {undoingId === b.id ? <Spinner size={14} /> : <RotateCcw className="w-3.5 h-3.5" />} Undo
                         </button>
                       </>
+                    ) : !canDisburse(b) ? (
+                      <span className="text-xs text-slate-400">No items yet — add them from Bill Claim first.</span>
                     ) : (
                       <button
                         type="button"
@@ -457,7 +592,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   {visibleBills.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {!b.is_disbursed && (
+                        {canDisburse(b) && (
                           <button type="button" onClick={() => toggleOne(b.id)} className="text-slate-400 hover:text-emerald-600">
                             {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                           </button>
@@ -492,6 +627,14 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                               >
                                 {printingId === b.id ? <Spinner size={14} /> : <Printer className="w-3.5 h-3.5" />}
                               </button>
+                              {canEmailReports && (
+                                <EmailReportButton
+                                  onClick={() => handlePrintVoucher(b, 'email')}
+                                  disabled={printingId === b.id}
+                                  title="Email Payment Voucher as a PDF"
+                                  className="flex items-center gap-1 p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
+                                />
+                              )}
                               <button
                                 type="button"
                                 onClick={() => handleUndoDisburse(b.id)}
@@ -502,6 +645,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                                 {undoingId === b.id ? <Spinner size={14} /> : <RotateCcw className="w-3.5 h-3.5" />}
                               </button>
                             </>
+                          ) : !canDisburse(b) ? (
+                            <span className="text-[11px] text-slate-400" title="Add items to this Bill from Bill Claim first">No items yet</span>
                           ) : (
                             <button
                               type="button"
@@ -518,6 +663,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 </tbody>
               </table>
             </div>
+            <PagerBar page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
           </>
         )}
       </div>

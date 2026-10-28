@@ -1,0 +1,88 @@
+# Example Nginx reverse proxy / load balancer for CredenceHR.
+#
+# How this fits with PM2 (see ../ecosystem.config.cjs): PM2 cluster mode
+# spawns multiple Node worker processes that all share ONE port via Node's
+# `cluster` module (the OS/master hands each connection to a free worker) —
+# so on a single machine, Nginx only ever needs to reverse-proxy to that one
+# port (127.0.0.1:3000 below). It is NOT doing the cross-worker load
+# balancing itself; PM2/Node already does that. Nginx's job here is TLS
+# termination, gzip, and being the actual public-facing listener.
+#
+# The `upstream` block below is still worth keeping even for a single
+# machine (see the multi-server section further down) — once this app
+# outgrows one machine, scaling out means running this same PM2 setup on a
+# second/third server, pointing every server at the SAME Redis instance
+# (REDIS_URL, see .env.example and server.ts's Socket.IO Redis adapter) so
+# chat stays correct across machines, and then just adding more `server`
+# lines below.
+#
+# Install: copy to /etc/nginx/sites-available/credencehr.conf, symlink into
+# sites-enabled, `nginx -t` to validate, then `systemctl reload nginx`.
+
+upstream credencehr_backend {
+    # Single machine running the PM2 cluster from ecosystem.config.cjs —
+    # every PM2 worker on this box is reachable through this one port.
+    server 127.0.0.1:3000;
+
+    # --- Scaling to more than one machine ---
+    # Once traffic outgrows a single server, stand up the same app (same
+    # build, same PM2 ecosystem file) on additional machines, point every
+    # machine's REDIS_URL at the SAME shared Redis instance, then list each
+    # machine here instead of just localhost:
+    #
+    # server 10.0.0.11:3000;
+    # server 10.0.0.12:3000;
+    #
+    # `ip_hash` sends a given client to the same backend machine every time
+    # (a plain round robin would let a single client's Socket.IO handshake
+    # -- which is several HTTP requests before it upgrades to a WebSocket --
+    # land on a different machine each time, which Socket.IO's client
+    # doesn't handle on its own without sticky sessions):
+    # ip_hash;
+}
+
+server {
+    listen 80;
+    server_name your-domain.example.com;
+
+    # Matches server.ts's express.json({ limit: "25mb" }) with a little
+    # headroom for multipart overhead — raise both together if ever needed
+    # (e.g. larger Conveyance Bill Claim attachments).
+    client_max_body_size 30m;
+
+    # gzip text-ish responses (HTML/CSS/JS/JSON) — Vite's own build output
+    # under dist/assets is already content-hashed and cacheable; this just
+    # shrinks the transfer size on top of that.
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length 1024;
+
+    location / {
+        proxy_pass http://credencehr_backend;
+        proxy_http_version 1.1;
+
+        # Required for Socket.IO's WebSocket upgrade (Chat) to work through
+        # the proxy at all — without these, the connection falls back to
+        # (or gets stuck on) HTTP long-polling.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # A WebSocket connection (Chat) is long-lived — the default 60s
+        # would silently drop idle-but-open chat sockets.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+# --- HTTPS ---
+# Production should terminate TLS here rather than serving plain HTTP.
+# The quickest path is Certbot (`certbot --nginx -d your-domain.example.com`),
+# which rewrites the block above into a matching `listen 443 ssl;` server
+# block (plus an HTTP -> HTTPS redirect) automatically — safer than hand
+# -writing the ssl_certificate/ssl_certificate_key paths here.

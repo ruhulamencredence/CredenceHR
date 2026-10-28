@@ -73,6 +73,13 @@ export async function ensureRecruitmentSchema(dbPool: any): Promise<void> {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure job_candidates table exists: " + err.message);
   }
+  // The Employee a Hired candidate became, set when their New Joiner
+  // Onboarding (OnboardingSelfServiceRoutes.ts) is approved.
+  try {
+    await dbPool.query("ALTER TABLE job_candidates ADD COLUMN employee_id INT NULL");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add job_candidates.employee_id column: " + err.message);
+  }
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS candidate_interviews (
@@ -148,9 +155,20 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
   app.get("/api/job-candidates", ...gate, async (req: any, res: any) => {
     try {
       const postingId = req.query.posting_id ? Number(req.query.posting_id) : null;
-      const rows: any = await queryDB("SELECT * FROM job_candidates");
+      const [rows, interviews]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM job_candidates"),
+        queryDB("SELECT id, candidate_id, scheduled_at FROM candidate_interviews WHERE status = 'scheduled' ORDER BY scheduled_at ASC").catch(() => [])
+      ]);
+      // The candidate's scheduled interview (Admin Dashboard counts today's
+      // and this week's from it).
+      const nextInterview = new Map<number, any>();
+      for (const i of interviews || []) if (!nextInterview.has(Number(i.candidate_id))) nextInterview.set(Number(i.candidate_id), i);
       const scoped = postingId ? rows.filter((c: any) => Number(c.posting_id) === postingId) : rows;
-      res.json(scoped.sort((a: any, b: any) => Number(b.id) - Number(a.id)));
+      res.json(
+        scoped
+          .sort((a: any, b: any) => Number(b.id) - Number(a.id))
+          .map((c: any) => ({ ...c, interview_id: nextInterview.get(Number(c.id))?.id ?? null, interview_at: nextInterview.get(Number(c.id))?.scheduled_at ?? null }))
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -185,6 +203,15 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
       const existing = existingRows[0];
       const validStatuses = ["applied", "shortlisted", "interview_scheduled", "interviewed", "offered", "hired", "rejected"];
       const status = validStatuses.includes(body.status) ? body.status : existing.status;
+      // A Hired candidate with a New Joiner Onboarding under way (or done)
+      // stays Hired — otherwise their temporary login would be left hanging.
+      if (existing.status === "hired" && status !== "hired") {
+        const apps: any[] = await queryDB("/*unscoped*/ SELECT status FROM onboarding_applications WHERE candidate_id = ?", [id]).catch(() => []);
+        if (apps.some((a: any) => a.status === "approved"))
+          return res.status(409).json({ error: "This candidate has already joined as an Employee, so they stay Hired." });
+        if (apps.some((a: any) => ["draft", "submitted", "rejected"].includes(a.status)))
+          return res.status(409).json({ error: "This candidate's onboarding is still open. Cancel it in HR Operations → Onboarding → New Joiners first." });
+      }
       const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : existing.notes;
       await queryDB("UPDATE job_candidates SET status = ?, notes = ? WHERE id = ?", [status, notes, id]);
       const rows: any = await queryDB("SELECT * FROM job_candidates WHERE id = ?", [id]);
@@ -253,7 +280,8 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
       const rating =
         body.rating === undefined || body.rating === null || body.rating === "" ? existing.rating ?? null : Number(body.rating);
       const status = ["scheduled", "completed", "cancelled"].includes(body.status) ? body.status : existing.status;
-      await queryDB("UPDATE candidate_interviews SET feedback = ?, rating = ?, status = ? WHERE id = ?", [feedback, rating, status, id]);
+      const scheduledAt = body.scheduled_at !== undefined ? body.scheduled_at || null : existing.scheduled_at;
+      await queryDB("UPDATE candidate_interviews SET feedback = ?, rating = ?, status = ?, scheduled_at = ? WHERE id = ?", [feedback, rating, status, scheduledAt, id]);
       if (status === "completed") {
         await queryDB("UPDATE job_candidates SET status = ? WHERE id = ?", ["interviewed", existing.candidate_id]);
       }

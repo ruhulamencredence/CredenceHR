@@ -1,0 +1,39 @@
+{
+ "when": "2026-10-25T19:27:57.736Z",
+ "summary": {
+  "PASS": 5,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "XL-01",
+   "status": "PASS",
+   "name": "An .xlsx export with Bangla names reads back exactly",
+   "detail": "{\"Name\":\"রহিম উদ্দিন চৌধুরী\",\"Department\":\"হিসাব ও অর্থ বিভাগ\",\"Designation\":\"সহকারী ব্যবস্থাপক\",\"Salary\":50000}"
+  },
+  {
+   "id": "XL-02",
+   "status": "PASS",
+   "name": "A Bangla sheet name survives",
+   "detail": ""
+  },
+  {
+   "id": "XL-03",
+   "status": "PASS",
+   "name": "Data Import: a CSV saved by Excel as \"CSV UTF-8\" keeps the Bangla",
+   "detail": "{\"Name\":\"রহিম উদ্দিন চৌধুরী\",\"Department\":\"হিসাব ও অর্থ বিভাগ\",\"Designation\":\"সহকারী ব্যবস্থাপক\",\"Salary\":50000}"
+  },
+  {
+   "id": "XL-04",
+   "status": "PASS",
+   "name": "Data Import: a UTF-8 CSV without a BOM (Google Sheets, LibreOffice) keeps the Bangla",
+   "detail": "{\"Name\":\"রহিম উদ্দিন চৌধুরী\",\"Department\":\"হিসাব ও অর্থ বিভাগ\",\"Designation\":\"সহকারী ব্যবস্থাপক\",\"Salary\":50000}"
+  },
+  {
+   "id": "XL-05",
+   "status": "PASS",
+   "name": "A CSV phone number keeps its leading 0",
+   "detail": "{\"Name\":\"রহিম\",\"Phone\":\"01711000000\"}"
+  }
+ ]
+}

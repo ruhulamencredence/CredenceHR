@@ -10,6 +10,7 @@
 // Department, with a search box. GET /api/tracking/status needs the
 // 'tracking' module, so without it this renders nothing (and the API refuses).
 
+import { UserAvatar } from './UserAvatar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BarChart3, CheckCircle2, Navigation, Search, Send, X } from 'lucide-react';
@@ -27,6 +28,7 @@ interface TrackingRow {
   tracked: boolean;
   last_ping: string | null;
   minutes_ago: number | null;
+  standing_still?: boolean;
   reason: string | null;
 }
 export interface TrackingStatus {
@@ -194,9 +196,9 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
   }
   if (data === undefined && variant === 'panel') {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-pulse">
-        <div className="h-[106px] rounded-2xl border border-emerald-100 bg-emerald-50/60" />
-        <div className="h-[106px] rounded-2xl border border-slate-200 bg-slate-50" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 animate-pulse">
+        <div className="h-[50px] rounded-xl border border-emerald-100 bg-emerald-50/60" />
+        <div className="h-[50px] rounded-xl border border-slate-200 bg-slate-50" />
       </div>
     );
   }
@@ -216,27 +218,30 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
   return (
     <>
       {variant === 'panel' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {(
             [
               ['tracked', 'Currently Under Tracking', data.tracked, `Sent a location in the last ${data.live_minutes} min`, 'bg-emerald-50 border-emerald-200 text-emerald-700', 'bg-emerald-500'],
-              ['not_tracked', 'Currently Not Tracked', data.not_tracked, 'Tracking off, or no recent location', 'bg-slate-50 border-slate-200 text-slate-700', 'bg-slate-400']
+              ['not_tracked', 'Currently Not Tracked', data.not_tracked, 'Tracking off, Location off, or app not running', 'bg-slate-50 border-slate-200 text-slate-700', 'bg-slate-400']
             ] as const
           ).map(([key, label, count, hint, cls, dot]) => (
             <button
               key={key}
               type="button"
               onClick={() => openList(key)}
-              className={`text-left rounded-2xl border p-4 hover:shadow-sm transition-shadow ${cls}`}
+              title={`${hint} · tap to see who`}
+              className={`text-left rounded-xl border px-3 py-2 hover:shadow-sm transition-shadow flex items-center gap-3 ${cls}`}
             >
-              <div className="flex items-center gap-2 text-xs font-semibold">
-                <span className={`w-2 h-2 rounded-full ${dot}`} /> {label}
+              <div className="text-2xl font-bold text-slate-900 leading-none min-w-[2ch]">{count}</div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} /> {label}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">{hint} · tap to see who</div>
               </div>
-              <div className="text-3xl font-bold mt-1 text-slate-900">{count}</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">{hint} · tap to see who</div>
             </button>
           ))}
-          <div className="sm:col-span-2 flex justify-end -mt-1">
+          <div className="sm:col-span-2 flex justify-end -mt-0.5">
             <button type="button" onClick={() => setReportOpen(true)} className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
               <BarChart3 className="w-3.5 h-3.5" /> Not Tracked Notice Report
             </button>
@@ -436,16 +441,14 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                             aria-label={`Select ${r.name}`}
                           />
                         )}
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0 ${r.tracked ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-                          {initials(r.name)}
-                        </span>
+                        <UserAvatar userId={r.user_id ? Number(r.user_id) : null} name={r.name} className="w-6 h-6 text-[9px]" color={r.tracked ? '#10b981' : '#94a3b8'} />
                         <span className="min-w-0 flex-1">
                           <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
                           <span className="block text-[10px] text-slate-400 truncate">{[r.employee_id, r.designation].filter(Boolean).join(' · ') || '—'}</span>
                         </span>
                         <span className={`text-[10px] font-semibold text-right shrink-0 ${r.tracked ? 'text-emerald-600' : 'text-slate-500'}`}>
-                          {r.tracked ? ago(r.minutes_ago) : r.reason}
-                          {!r.tracked && r.minutes_ago != null && <span className="block font-normal text-slate-400">last {ago(r.minutes_ago)}</span>}
+                          {r.tracked ? (r.standing_still ? 'Phone on, standing still' : ago(r.minutes_ago)) : r.reason}
+                          {(!r.tracked || r.standing_still) && r.minutes_ago != null && <span className="block font-normal text-slate-400">last location {ago(r.minutes_ago)}</span>}
                         </span>
                       </div>
                     ))}

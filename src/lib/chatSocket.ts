@@ -19,7 +19,9 @@
 // SocketIOServer(httpServer, ...)`), so this needs no separate host/port.
 
 import { io, Socket } from 'socket.io-client';
+import { refreshNotices } from './noticesLive';
 import { setLiveUntil } from './backgroundTracking';
+import { RECORDS_CHANGED_EVENT } from './liveRefresh';
 
 let socket: Socket | null = null;
 let connectedToken: string | null = null;
@@ -42,14 +44,24 @@ export function connectChatSocket(token: string): Socket {
     reconnectionDelay: 2000,
     reconnectionDelayMax: 15000,
     // WebSocket straight away: one connection that stays on one server
-    // process (PM2 cluster mode); long-polling remains the fallback for a
-    // network that blocks WebSockets.
+    // process. The default (start with HTTP long-polling, then upgrade)
+    // sends several separate requests, which under PM2 cluster mode land
+    // on different workers and break the connection. Long-polling remains
+    // the fallback for a network that blocks WebSockets.
     transports: ['websocket', 'polling'],
     tryAllTransports: true
   });
+  // Notices (NoticePopup): a new one shows at once; after a reconnect, one
+  // published while the app was asleep/offline does too.
+  socket.on('notices:changed', refreshNotices);
+  socket.io.on('reconnect', refreshNotices);
   // Employee Tracking -> Live Follow: an Admin opened this person (or a ride
   // started) — report location every few seconds until the given time.
   socket.on('tracking:live', (d: { until: number | null }) => setLiveUntil(d?.until));
+  // A request of this account changed, or a new one waits for it: open pages
+  // refresh (src/lib/liveRefresh.ts). After a reconnect everything refreshes once.
+  socket.on('records:changed', (d: any) => window.dispatchEvent(new CustomEvent(RECORDS_CHANGED_EVENT, { detail: d })));
+  socket.io.on('reconnect', () => window.dispatchEvent(new CustomEvent(RECORDS_CHANGED_EVENT, { detail: null })));
   return socket;
 }
 

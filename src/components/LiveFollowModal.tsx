@@ -74,6 +74,10 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
   const lastRef = useRef<{ p: LatLng; t: number } | null>(null);
 
   const [fix, setFix] = useState<Fix | null>(null);
+  // When the phone last answered (a new fix or a "still here" heartbeat).
+  // Standing still sends no new fix, so this — not the fix time — says
+  // whether the phone is live.
+  const [heardAt, setHeardAt] = useState<number | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
   const [follow, setFollow] = useState(true);
   const [onRide, setOnRide] = useState(false);
@@ -165,6 +169,7 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
           const f: Fix = { ...d.latest, lat: Number(d.latest.lat), lng: Number(d.latest.lng) };
           setFix(f);
           moveTo(f, true);
+          if (d.heard_at) setHeardAt(new Date(d.heard_at).getTime());
           if (pts.length > 1 && mapRef.current) mapRef.current.setView([f.lat, f.lng], 16);
         }
         setError(null);
@@ -192,8 +197,10 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
     const onLoc = (d: any) => {
       if (Number(d?.user_id) !== userId) return;
       const f: Fix = { lat: Number(d.lat), lng: Number(d.lng), accuracy_m: d.accuracy_m, battery_pct: d.battery_pct, recorded_at: d.recorded_at };
+      setHeardAt(d.heard_at ? new Date(d.heard_at).getTime() : Date.now());
       setFix(f);
-      moveTo(f);
+      // A heartbeat from a phone standing still: same place, nothing to move.
+      if (!d.still) moveTo(f);
     };
     socket.on('tracking:location', onLoc);
     return () => {
@@ -208,7 +215,11 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
   }, []);
 
   const secsAgo = fix ? Math.max(0, Math.round((Date.now() - new Date(fix.recorded_at).getTime()) / 1000)) : null;
-  const fresh = secsAgo != null && secsAgo < 60;
+  const heardSecs = heardAt != null ? Math.max(0, Math.round((Date.now() - heardAt) / 1000)) : null;
+  // Live while the phone keeps answering, moving or not.
+  const fresh = (secsAgo != null && secsAgo < 60) || (heardSecs != null && heardSecs < 60);
+  const still = fresh && secsAgo != null && secsAgo >= 60;
+  const sinceTime = fix ? new Date(fix.recorded_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
   const ago =
     secsAgo == null ? '—' : secsAgo < 60 ? `${secsAgo}s ago` : secsAgo < 3600 ? `${Math.round(secsAgo / 60)} min ago` : `${Math.round(secsAgo / 3600)} hr ago`;
 
@@ -227,8 +238,18 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
                 {onRide && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-[var(--g-accent-soft)] text-[color:var(--g-accent-700)]">On a ride</span>}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Updated {ago}
-                {!fresh && fix && ' — their phone is switching to live; it can take up to a few minutes if the app is in the background.'}
+                {still ? (
+                  <>
+                    Standing still here since {sinceTime} · phone answered {heardSecs}s ago
+                  </>
+                ) : (
+                  <>
+                    Updated {ago}
+                    {!fresh &&
+                      fix &&
+                      ' — waiting for their phone to answer. With the app open this takes seconds; with the app closed or the phone in battery saver, up to 10 minutes.'}
+                  </>
+                )}
               </p>
             </div>
             <button onClick={onClose} className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center shrink-0" aria-label="Close">

@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { ChevronDown, ChevronRight, FileDown, FileSpreadsheet, X } from 'lucide-react';
@@ -21,6 +21,8 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 interface Send {
   notice_id: number;
   title: string;
@@ -68,6 +70,7 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const canEmailReports = useCanEmailReports();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,7 +98,7 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const downloadPdf = async () => {
+  const downloadPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!report) return;
     setExporting(true);
     try {
@@ -112,6 +115,7 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
       };
       const startY = drawPdfLetterhead(doc, logoImg, opts);
       autoTable(doc, {
+      theme: 'grid',
         startY,
         margin: { top: startY, left: 8, right: 8 },
         head: [['SL', 'Employee', 'Department', 'Notices', 'Opened', 'Sent on (reason)']],
@@ -123,15 +127,18 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
           `${r.seen} of ${r.notices}`,
           r.sends.map((s) => `${dateTime(s.sent_at)} — ${s.reason || '—'}${s.seen_at ? ' (opened)' : ''}`).join('\n')
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak', valign: 'top' },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5, overflow: 'linebreak', valign: 'top' },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 55 }, 2: { cellWidth: 35 }, 3: { cellWidth: 18 }, 4: { cellWidth: 20 } },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
         didDrawPage: () => {
           drawPdfLetterhead(doc, logoImg, opts);
         }
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Tracking-Notice-Report-${report.month}.pdf`, title: opts.reportTitle });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Tracking-Notice-Report-${report.month}.pdf`);
     } catch (err: any) {
       setError(err.message || 'Could not make the PDF.');
@@ -203,12 +210,19 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
             </button>
             <button
               type="button"
-              onClick={downloadPdf}
+              onClick={() => downloadPdf()}
               disabled={!report || exporting}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
             >
               <FileDown className="w-3.5 h-3.5" /> {exporting ? 'Preparing…' : 'PDF'}
             </button>
+            {canEmailReports && (
+              <EmailReportButton
+                onClick={() => downloadPdf('email')}
+                disabled={!report || exporting}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              />
+            )}
             <button type="button" onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100" aria-label="Close">
               <X className="w-4 h-4" />
             </button>

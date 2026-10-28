@@ -1,0 +1,28 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>পুরো ডাটাবেস ER ডায়াগ্রাম — CredenceHR</title>
+<style>body{margin:0;font:15px 'Noto Sans Bengali','Segoe UI',sans-serif;background:#f6f4fb;overflow:hidden}
+#bar{position:fixed;top:0;left:0;right:0;z-index:5;background:#2a0f5c;color:#fff;display:flex;gap:10px;align-items:center;padding:8px 14px;flex-wrap:wrap}
+#bar b{font-size:16px}#bar input{padding:6px 10px;border-radius:8px;border:0;min-width:220px}#bar button,#bar a{background:#7c3aed;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;text-decoration:none}
+#bar span{opacity:.8;font-size:13px}#view{position:absolute;top:48px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab;background:#fff}
+#view.drag{cursor:grabbing}#stage{transform-origin:0 0;position:absolute;left:0;top:0}
+.hit polygon{stroke:#e11d48 !important;stroke-width:6 !important}</style></head><body>
+<div id="bar"><b>CredenceHR: পুরো ডাটাবেস ({{TABLES}} টেবিল)</b><input id="q" placeholder="টেবিলের নাম খুঁজুন, যেমন payrolls"><button id="fit">সব দেখুন</button><button id="in">+</button><button id="out">−</button><a href="diagrams/full-application-er.svg" download>SVG</a><span>মাউস চাকায় zoom, টেনে সরান। ধূসর ডটেড রেখা = যুক্তিগত সম্পর্ক। PK লাল, FK নীল।</span></div>
+<div id="view"><div id="stage">{{SVG}}</div></div>
+<script>
+const v=document.getElementById('view'),s=document.getElementById('stage'),el=document.getElementById('er');
+const W=parseFloat(el.getAttribute('viewBox').split(' ')[2]),H=parseFloat(el.getAttribute('viewBox').split(' ')[3]);
+el.setAttribute('width',W*4/3);el.setAttribute('height',H*4/3);
+let k=1,x=0,y=0;const ap=()=>s.style.transform=`translate(${x}px,${y}px) scale(${k})`;
+function fit(){const r=v.getBoundingClientRect();k=Math.min(r.width/(W*4/3),r.height/(H*4/3));x=(r.width-W*4/3*k)/2;y=0;ap()}
+fit();addEventListener('resize',fit);document.getElementById('fit').onclick=fit;
+const zoom=(f,cx,cy)=>{const r=v.getBoundingClientRect();cx=cx??r.width/2;cy=cy??r.height/2;x=cx-(cx-x)*f;y=cy-(cy-y)*f;k*=f;ap()};
+document.getElementById('in').onclick=()=>zoom(1.4);document.getElementById('out').onclick=()=>zoom(1/1.4);
+v.addEventListener('wheel',e=>{e.preventDefault();const r=v.getBoundingClientRect();zoom(e.deltaY<0?1.15:1/1.15,e.clientX-r.left,e.clientY-r.top)},{passive:false});
+let d=null;v.addEventListener('pointerdown',e=>{d={x:e.clientX-x,y:e.clientY-y};v.classList.add('drag');v.setPointerCapture(e.pointerId)});
+v.addEventListener('pointermove',e=>{if(d){x=e.clientX-d.x;y=e.clientY-d.y;ap()}});v.addEventListener('pointerup',()=>{d=null;v.classList.remove('drag')});
+const nodes=[...el.querySelectorAll('g.node')];
+document.getElementById('q').addEventListener('input',e=>{const t=e.target.value.trim().toLowerCase();nodes.forEach(n=>n.classList.remove('hit'));if(!t)return;
+ const m=nodes.filter(n=>(n.querySelector('title')?.textContent||'').toLowerCase().includes(t));m.forEach(n=>n.classList.add('hit'));
+ if(m.length){const bb=m[0].getBBox();const r=v.getBoundingClientRect();k=Math.max(k,0.6);x=r.width/2-(bb.x+bb.width/2)*4/3*k+0;y=r.height/2-(-(bb.y+bb.height/2))*4/3*k*0;
+  const tr=m[0].ownerSVGElement.querySelector('g.graph').transform.baseVal.consolidate().matrix;const px=(bb.x+bb.width/2)*tr.a+tr.e,py=(bb.y+bb.height/2)*tr.d+tr.f;
+  x=r.width/2-px*4/3*k;y=r.height/2-py*4/3*k;ap()}});
+</script></body></html>

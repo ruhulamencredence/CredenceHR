@@ -1,90 +1,82 @@
+import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
+import { readWorkbook } from '../lib/readWorkbook';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, Loader2, Truck, LayoutTemplate } from 'lucide-react';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
 import { ClaimsPanel } from './ClaimsPanel';
 import { ConveyanceBillPanel } from './ConveyanceBillPanel';
-import { MyConveyanceBillClaimPanel } from './MyConveyanceBillClaimPanel';
+import { BillClaimPolicyPanel } from './BillClaimPolicyPanel';
 import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
+import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
+import { SystemCompanies } from './SystemCompanies';
+import { DeviceAccess } from './DeviceAccess';
 import { ActiveUsers } from './ActiveUsers';
-import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { VehicleManagementAdmin } from './VehicleManagementAdmin';
 import { ExitOffboardingPanel } from './ExitOffboardingPanel';
 import { PerformanceManagementPanel } from './PerformanceManagementPanel';
 import { RecruitmentPanel } from './RecruitmentPanel';
 import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
+import { ReportsInsights } from './ReportsInsights';
+import { DataImport } from './DataImport';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
-import { ServerProfilesPanel } from './ServerProfilesPanel';
+import { HROperationsPanel } from './HROperationsPanel';
+import { TaskManagement } from './TaskManagement';
+import { TargetReports } from './TargetReports';
+import { MailAdministration } from './mail/MailAdministration';
+import { DutyRoster } from './DutyRoster';
+import { BreakTimeAdmin } from './BreakTimeAdmin';
+import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
+import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserBulkBar } from './UserBulkBar';
+import { ModuleAccessPage } from './ModuleAccessPage';
+import { PasswordRequestsPopup } from './PasswordRequestsPopup';
+import { JobEditDetailsPopup } from './JobEditDetailsPopup';
+import { FeedbackAdmin } from './feedback/FeedbackAdmin';
+import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
+import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { MprPoImport } from './MprPoImport';
 import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
-import { DeviceAccess } from './DeviceAccess';
-import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
-import { UserBulkBar } from './UserBulkBar';
-import { AccessTemplatesModal } from './AccessTemplatesModal';
-import { ModuleAccessPage } from './ModuleAccessPage';
-import { JobEditDetailsPopup } from './JobEditDetailsPopup';
-import { confirmDialog } from '../lib/confirmDialog';
-import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
-import { PagerBar } from './PagerBar';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
-import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
+import { Capacitor } from '@capacitor/core';
+import { ModulePath } from './ModulePath';
+import { ADMIN_TAB_PATH } from '../lib/modulePaths';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { confirmDialog } from '../lib/confirmDialog';
+import { PagerBar } from './PagerBar';
+import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
+import { LoadingBlock } from './LoadingBlock';
 
-// Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
-// Access") groups the same Admin Panel tabs into the same labeled clusters
-// GlobalSidebar.tsx itself uses (PEPM Manage / HR + its own nested
-// Attendance, Claims/Bill/Disbursement and Employee sub-groups / MIS /
-// Payroll), so granting access reads the same way it's navigated in the
-// sidebar. HR's sub-groups are flattened into their own "HR - ..." labels
-// here since this list has no nested-group UI. Any ADMIN_MODULES key not
-// listed under one of these falls into "Other" automatically.
-const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
-  { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
-  { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
-  { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
-  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management'] },
-  { label: 'MIS', keys: ['users', 'projects', 'branches'] },
-  { label: 'Payroll', keys: ['payroll'] },
-  {
-    label: 'Other',
-    keys: ADMIN_MODULES.map((m) => m.key).filter(
-      (key) => ![
-        'reports', 'mprs', 'imports', 'recycle', 'editlog', 'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
-        'attendance', 'attendance_reports', 'office_attendance',
-        'claims', 'conveyance', 'disbursement',
-        'employees', 'tracking', 'asset_management',
-        'users', 'projects', 'branches',
-        'payroll',
-      ].includes(key)
-    )
-  }
-];
-
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
+import { SearchSelect } from './Combobox';
+import { Combobox } from './Combobox';
 interface AdminPanelProps {
   token: string;
   // The logged-in Admin/Superadmin viewing this panel — used to decide which tabs
@@ -439,6 +431,7 @@ const ReportRow = React.memo(function ReportRow({
 // what's actually rendered, and re-lookups are free — reverseGeocode's own
 // cache (keyed by rounded coordinate) already dedupes accounts sharing a
 // login spot, like an office Wi-Fi gate.
+// User Management quick filter chips.
 const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean }[] = [
   { key: 'admins', label: 'Admins', match: (u) => u.role === 'admin' },
   { key: 'no_modules', label: 'No modules', match: (u) => u.role !== 'superadmin' && (u.module_permissions || []).length === 0 },
@@ -478,6 +471,7 @@ const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = 
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRequest, adminNavRequest, onActiveTabChange }) => {
   const isSuperAdmin = user.role === 'superadmin';
+  const canEmailReports = useCanEmailReports();
   // Which Admin Panel tabs THIS logged-in Admin/Superadmin may see. A Superadmin
   // always gets every tab; a plain Admin only gets the ones the Superadmin granted
   // (user.module_permissions, refreshed on every login/app-open by App.tsx).
@@ -485,12 +479,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     ? ADMIN_MODULES.map((m) => m.key)
     : (user.module_permissions || []);
   const canSee = (key: AdminModuleKey) => visibleModules.includes(key);
-  // The new Admin Dashboard tab isn't a grantable module (see GlobalSidebar's
-  // adminDashboardItem) — it's this account's own home screen, so it's
-  // visible whenever the real role is admin/superadmin, regardless of
-  // module_permissions (and never for a plain 'user' role account, even one
-  // holding module_permissions).
+  // The Admin Dashboard tab is this account's own home screen whenever the
+  // real role is admin/superadmin — no module grant needed for that case.
+  // A plain 'user' role account only gets it once explicitly granted the
+  // 'admin_dashboard' module (see GlobalSidebar's adminDashboardItem, and
+  // canSee below).
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
+  const canSeeDashboard = isAdminRole || canSee('admin_dashboard');
+  const canSeeReportsInsights = isSuperAdmin || REPORTS_INSIGHTS_MODULES.some((m) => visibleModules.includes(m));
+  const canSeeDataImport = isSuperAdmin || DATA_IMPORT_MODULES.some((m) => visibleModules.includes(m));
   // Whether THIS logged-in Admin/Superadmin can see the "Last Login Location"
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
@@ -503,29 +500,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
+  // Whether this account may open that tab. 'bill_claim_policy' isn't its own
+  // module_permissions entry — it rides along with 'conveyance'.
+  // 'permanent_delete_log' isn't either — Superadmin-only, never granted via
+  // module_permissions (see GET /api/entries/permanent-delete-log).
+  const isTabVisible = (tab: string) =>
+    tab === 'dashboard' ? canSeeDashboard :
+    tab === 'reports_insights' ? canSeeReportsInsights :
+    tab === 'data_import' ? canSeeDataImport :
+    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
+    tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
+    isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
       // able to land back on the same page, the active tab is mirrored to
       // localStorage (survives a reload) instead of living only in memory.
       try {
+        // An address like /admin/departments wins over the remembered tab.
+        const fromUrl = adminUrlEnabled() ? adminPathToTab(window.location.pathname) : null;
+        if (fromUrl && ADMIN_TAB_KEYS.has(fromUrl) && isTabVisible(fromUrl)) return fromUrl as any;
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
-        // 'my_conveyance' isn't its own module_permissions entry — it rides
-        // along with 'conveyance' (see the tab-visibility effect below).
-        // 'servers'/'permanent_delete_log' aren't either — both Superadmin-only,
-        // never granted via module_permissions (see ServerProfileRoutes.ts and
-        // GET /api/entries/permanent-delete-log respectively).
-        const savedVisible =
-          saved === 'dashboard' ? isAdminRole :
-          saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'servers' || saved === 'permanent_delete_log' || saved === 'active_users' || saved === 'devices' ? isSuperAdmin :
-          isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
-        if (saved && savedVisible) return saved as any;
+        if (saved && isTabVisible(saved)) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
       }
-      return isAdminRole ? 'dashboard' : ((visibleModules[0] as any) || 'reports');
+      return canSeeDashboard ? 'dashboard' : ((visibleModules[0] as any) || 'reports');
     }
   );
 
@@ -539,6 +541,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // ignore, it just means a reload won't be able to restore this tab.
     }
   }, [activeTab, user.id]);
+
+  // Mirrors the tab in the browser address (/admin/<tab>) so a page can be
+  // copied, bookmarked and stepped back to with the browser's Back button.
+  // The first write replaces the entry (no extra Back step); later ones push.
+  const urlSynced = useRef(false);
+  const frozenUsersTab = useRef<React.ReactNode>(null);
+  const frozenDrawer = useRef<React.ReactNode>(null);
+  useEffect(() => {
+    if (!adminUrlEnabled()) return;
+    const target = adminTabToPath(activeTab);
+    if (window.location.pathname === target) {
+      urlSynced.current = true;
+      return;
+    }
+    try {
+      if (urlSynced.current) window.history.pushState(null, '', target + window.location.search);
+      else window.history.replaceState(null, '', target + window.location.search);
+    } catch {
+      // history can be unavailable in some embedded WebViews — the tab still works, just no address.
+    }
+    urlSynced.current = true;
+  }, [activeTab]);
+  // Back / Forward: follow the address, but only to a tab this account may open.
+  useEffect(() => {
+    if (!adminUrlEnabled()) return;
+    const onPop = () => {
+      const tab = adminPathToTab(window.location.pathname);
+      if (tab && ADMIN_TAB_KEYS.has(tab) && isTabVisible(tab)) setActiveTab(tab as any);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSeeDashboard, canSeeReportsInsights, canSeeDataImport, isSuperAdmin, visibleModules]);
+  // Leaving the Admin Panel (User Panel, Self Service…) clears its address.
+  useEffect(
+    () => () => {
+      try {
+        if (adminUrlEnabled() && adminPathToTab(window.location.pathname)) window.history.replaceState(null, '', '/');
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
 
   // Reports the live activeTab up to App.tsx (see onActiveTabChange above) so
   // GlobalSidebar can highlight whichever item actually matches this tab.
@@ -561,19 +607,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     if (!adminNavRequest) return;
     if (adminNavRequest.target === 'dashboard') {
-      if (isAdminRole) setActiveTab('dashboard');
+      if (canSeeDashboard) setActiveTab('dashboard');
       return;
     }
-    // 'servers'/'permanent_delete_log' aren't AdminModuleKey/module_permissions
-    // entries either — both Superadmin-only, same reasoning as 'my_conveyance'
+    if (adminNavRequest.target === 'data_import') {
+      if (canSeeDataImport) setActiveTab('data_import');
+      return;
+    }
+    if (adminNavRequest.target === 'reports_insights') {
+      if (canSeeReportsInsights) setActiveTab('reports_insights');
+      return;
+    }
+    // 'permanent_delete_log' isn't an AdminModuleKey/module_permissions
+    // entry either — Superadmin-only, same reasoning as 'bill_claim_policy'
     // below.
-    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'active_users' || adminNavRequest.target === 'devices') {
+    if (adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'companies' || adminNavRequest.target === 'devices' || adminNavRequest.target === 'active_users') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
-    // 'my_conveyance' isn't its own module_permissions entry — it rides along
-    // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
-    const visible = adminNavRequest.target === 'my_conveyance' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    // 'bill_claim_policy' isn't its own module_permissions entry — it rides along
+    // with 'conveyance' (see the "Bill Claim Policy" item in GlobalSidebar).
+    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
     if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
@@ -583,9 +637,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // forbidden panel.
   useEffect(() => {
     const activeTabStillVisible =
-      activeTab === 'dashboard' ? isAdminRole :
-      activeTab === 'servers' || activeTab === 'permanent_delete_log' || activeTab === 'active_users' || activeTab === 'devices' ? isSuperAdmin :
-      activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
+      activeTab === 'dashboard' ? canSeeDashboard :
+      activeTab === 'reports_insights' ? canSeeReportsInsights :
+      activeTab === 'data_import' ? canSeeDataImport :
+      activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' || activeTab === 'active_users' ? isSuperAdmin :
+      activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -608,6 +664,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [changingEmail, setChangingEmail] = useState(false);
   // Accounts the Module Access page opened with (ModuleAccessPage.tsx).
   const [moduleAccessIds, setModuleAccessIds] = useState<number[]>([]);
+
+  // The Module Access page belongs to the Users page: leaving it closes it.
+  useEffect(() => {
+    if (activeTab !== 'users') {
+      setManagingModulesFor(null);
+      setManagingUserId(null);
+    }
+  }, [activeTab]);
   const openManageModules = (u: User | User[]) => {
     const list = Array.isArray(u) ? u : [u];
     if (list.length === 0) return;
@@ -616,6 +680,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // Opens as a page: start at its top.
     window.scrollTo({ top: 0 });
   };
+
+  // Employees -> a row's "Module Access" button: go to Users and open that
+  // account's Module Access page. Offered only to someone who can see Users
+  // and grant module access (same gate as the button on the Users page).
+  const [pendingModuleAccessUser, setPendingModuleAccessUser] = useState<number | null>(null);
+  const canOpenModuleAccessFromEmployees = canSee('users') && canGrantModuleAccess;
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -630,6 +700,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [savingDepartment, setSavingDepartment] = useState(false);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  // Who's who (id, name, role…) for the pickers and filters of every tab but Users.
+  const [people, setPeople] = useState<User[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   // User Management table search + role filter — narrows the (often long)
   // users list by name/Login ID and/or role without touching the underlying
@@ -639,8 +711,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
   // Quick filter chips above the list (see USER_ACCESS_FILTERS).
   const [userAccessFilter, setUserAccessFilter] = useState<string>('all');
-  // Account open on the "Manage" page (UserAccessDrawer), by id so it always
-  // shows the latest copy from `users`.
+  // Department filter ('' = all, '__none__' = no department) — from each account's linked Employee record.
+  const [userDeptFilter, setUserDeptFilter] = useState('');
+  // Account open on the "Manage" page (UserAccessDrawer), by id so it
+  // always shows the latest copy from `users`.
   const [managingUserId, setManagingUserId] = useState<number | null>(null);
   const openManageUser = (id: number) => {
     setManagingUserId(id);
@@ -651,26 +725,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     if (managingUserId != null && users.length > 0 && !users.some((x) => x.id === managingUserId)) setManagingUserId(null);
   }, [users, managingUserId]);
-  // The Users page's own pages close when another tab is opened.
-  useEffect(() => {
-    if (activeTab !== 'users') {
-      setManagingModulesFor(null);
-      setManagingUserId(null);
-    }
-  }, [activeTab]);
-  // While Manage / Module Access is open the Users page is kept as drawn.
-  const frozenUsersTab = useRef<React.ReactNode>(null);
-  const frozenDrawer = useRef<React.ReactNode>(null);
   // Ticked rows for the bulk bar (UserBulkBar), and the Access Templates list.
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
   const [accessTemplates, setAccessTemplates] = useState<AccessTemplate[]>([]);
   const [showAccessTemplates, setShowAccessTemplates] = useState(false);
+  // Users -> Password requests (Forgot password, layer "password_requests");
+  // a "Password reset request" alert opens it too.
+  const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
+  const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
+  useEffect(() => {
+    const open = () => setShowPasswordRequests(true);
+    window.addEventListener('credence:password-requests', open);
+    return () => window.removeEventListener('credence:password-requests', open);
+  }, []);
+  useEffect(() => {
+    if (pendingModuleAccessUser == null || activeTab !== 'users') return;
+    const u = users.find((x) => x.id === pendingModuleAccessUser);
+    if (!u) return;
+    setPendingModuleAccessUser(null);
+    openManageModules(u);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingModuleAccessUser, activeTab, users]);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
     return users.filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
       if (accessFilter && !accessFilter.match(u)) return false;
+      if (userDeptFilter) {
+        const d = (u.department || '').trim();
+        if (userDeptFilter === '__none__' ? d !== '' : d.toLowerCase() !== userDeptFilter.toLowerCase()) return false;
+      }
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -678,13 +764,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter, userAccessFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
   // Only one page of the (filtered) accounts is drawn at a time.
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(50);
   useEffect(() => {
     setUserPage(1);
-  }, [userSearchText, userRoleFilter, userAccessFilter]);
+  }, [userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
   const pagedUsers = useMemo(
     () => filteredUsers.slice((userPage - 1) * userPageSize, userPage * userPageSize),
     [filteredUsers, userPage, userPageSize]
@@ -708,12 +794,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       else next.add(id);
       return next;
     });
-  // Users module layers for this account: Block login is explicit-only.
-  const usersLayer = (key: PermissionLayerKey) => {
-    if (user.role === 'superadmin') return true;
-    const saved = user.module_permission_layers?.users;
-    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
-  };
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -832,9 +912,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Edit Log -> Job Edit Approvals -> Details (JobEditDetailsPopup.tsx).
   const [jobEditDetails, setJobEditDetails] = useState<PendingJobEdit | null>(null);
-
   const actOnJobEditRequest = async (id: number, action: 'approve' | 'reject') => {
-    if (action === 'reject' && !(await confirmDialog('Reject this Job Edit request?', { tone: 'danger' }))) return;
+    if (action === 'reject' && !(await confirmDialog('Reject this Job Edit request?'))) return;
     setActingJobEditId(id);
     setJobEditActionError('');
     try {
@@ -928,28 +1007,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [attendanceUserFilter, setAttendanceUserFilter] = useState('');
   const [attendanceFromFilter, setAttendanceFromFilter] = useState('');
   const [attendanceToFilter, setAttendanceToFilter] = useState('');
+  // One page of the server's list at a time — every record is reachable, not only the newest 1,000.
+  const [attendancePage, setAttendancePage] = useState(1);
+  const [attendancePageSize, setAttendancePageSize] = useState(50);
+  const [attendanceTotal, setAttendanceTotal] = useState(0);
+  const attendanceReq = useRef(0);
 
   const fetchAttendance = async () => {
+    const req = ++attendanceReq.current;
     setLoadingAttendance(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(attendancePage), limit: String(attendancePageSize) });
       if (attendanceProjectFilter) params.set('project_id', attendanceProjectFilter);
       if (attendanceUserFilter) params.set('user_id', attendanceUserFilter);
       if (attendanceFromFilter) params.set('from', attendanceFromFilter);
       if (attendanceToFilter) params.set('to', attendanceToFilter);
       const res = await fetch(apiUrl(`/api/attendance?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setAttendanceRecords(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (req !== attendanceReq.current) return; // a newer request is on its way
+        setAttendanceRecords(Array.isArray(data) ? data : data.rows || []);
+        setAttendanceTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+      }
     } catch (err) {
       console.error('Failed to load attendance', err);
     } finally {
-      setLoadingAttendance(false);
+      if (req === attendanceReq.current) setLoadingAttendance(false);
     }
   };
 
   useEffect(() => {
     if (activeTab === 'attendance') fetchAttendance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, attendancePage, attendancePageSize]);
+
+  // Applying a filter always starts again from page 1.
+  const applyAttendanceFilters = () => {
+    if (attendancePage !== 1) setAttendancePage(1);
+    else fetchAttendance();
+  };
 
   // Monthly Attendance Report (separate Admin tab from the raw 'attendance'
   // log above, its own 'attendance_reports' module — can be granted to an
@@ -967,6 +1063,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportEmployeeFilter, setReportEmployeeFilter] = useState('');
   const [reportDepartmentFilter, setReportDepartmentFilter] = useState('');
   const [reportDepartments, setReportDepartments] = useState<string[]>([]);
+  // Active / Inactive employees (by their Employee record); '' = everyone.
+  const [reportStatusFilter, setReportStatusFilter] = useState<'' | 'active' | 'inactive'>('');
   // Month Wise grid cell display — 'symbol' is the original compact P/A/H/W
   // per day (times only on hover); 'times' widens each day column and prints
   // the actual Check In/Out time stacked in the cell, for when the Admin
@@ -985,6 +1083,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [leaveApplicationsReportSearch, setLeaveApplicationsReportSearch] = useState('');
   const [leaveApplicationsReportDeptFilter, setLeaveApplicationsReportDeptFilter] = useState('');
   const [leaveApplicationsReportDepartments, setLeaveApplicationsReportDepartments] = useState<string[]>([]);
+  // Paged by the server: one page of applications at a time, name search done there too.
+  const [leaveReportPage, setLeaveReportPage] = useState(1);
+  const [leaveReportPageSize, setLeaveReportPageSize] = useState(50);
+  const [leaveReportTotal, setLeaveReportTotal] = useState(0);
+  const [leaveReportQuery, setLeaveReportQuery] = useState('');
+  const leaveReportReq = useRef(0);
 
   const [reportYear, setReportYear] = useState(now.getFullYear());
   const [reportMonth, setReportMonth] = useState(now.getMonth() + 1);
@@ -994,22 +1098,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportDate, setReportDate] = useState(todayDateOnlyString());
   const [loadingDailyReport, setLoadingDailyReport] = useState(false);
   const [dailyReport, setDailyReport] = useState<any>(null);
+  // Month Wise grid: one page of employees at a time, fetched from the
+  // server page by page (the whole month for ~1,500 staff was ~12 MB). The
+  // PDF download fetches everyone when it is clicked.
+  const [monthGridPage, setMonthGridPage] = useState(1);
+  const [monthGridPageSize, setMonthGridPageSize] = useState(50);
+  const [exportingMonthlyReport, setExportingMonthlyReport] = useState(false);
+  const monthlyReportReq = useRef(0);
+  const monthlyReportParams = () => {
+    const params = new URLSearchParams();
+    params.set('year', String(reportYear));
+    params.set('month', String(reportMonth));
+    if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+    if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
+    if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+    if (reportStatusFilter) params.set('status', reportStatusFilter);
+    return params;
+  };
+  const monthlyReportTotal = (r: any) => (r ? Number(r.total ?? r.users?.length ?? 0) : 0);
 
-  const fetchMonthlyReport = async () => {
+  const fetchMonthlyReport = async (page = 1, pageSize = monthGridPageSize) => {
+    const reqId = ++monthlyReportReq.current;
     setLoadingMonthlyReport(true);
     try {
-      const params = new URLSearchParams();
-      params.set('year', String(reportYear));
-      params.set('month', String(reportMonth));
-      if (reportProjectFilter) params.set('project_id', reportProjectFilter);
-      if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-      if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+      const params = monthlyReportParams();
+      params.set('limit', String(pageSize));
+      params.set('page', String(page));
       const res = await fetch(apiUrl(`/api/attendance/report/monthly?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setMonthlyReport(await res.json());
+      if (res.ok && reqId === monthlyReportReq.current) {
+        const data = await res.json();
+        setMonthlyReport(data);
+        setMonthGridPage(Number(data.page) || page);
+      }
     } catch (err) {
       console.error('Failed to load monthly attendance report', err);
     } finally {
-      setLoadingMonthlyReport(false);
+      if (reqId === monthlyReportReq.current) setLoadingMonthlyReport(false);
     }
   };
 
@@ -1021,6 +1145,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (reportProjectFilter) params.set('project_id', reportProjectFilter);
       if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
       if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+      if (reportStatusFilter) params.set('status', reportStatusFilter);
       const res = await fetch(apiUrl(`/api/attendance/report/daily?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setDailyReport(await res.json());
     } catch (err) {
@@ -1040,10 +1165,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       filters.push(['Project', proj?.project_name || reportProjectFilter]);
     }
     if (reportEmployeeFilter) {
-      const emp = users.find((u) => String(u.id) === reportEmployeeFilter);
+      const emp = people.find((u) => String(u.id) === reportEmployeeFilter);
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
     if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
+    if (reportStatusFilter) filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : 'Inactive employees']);
     return filters;
   };
 
@@ -1053,68 +1179,87 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // grid uses in "Symbols" mode — the actual per-day Check In/Out times don't
   // fit legibly across that many columns on paper, so the PDF always uses
   // symbols regardless of which mode the on-screen toggle is set to.
-  const handleExportMonthlyReportPdf = async () => {
-    if (!monthlyReport || monthlyReport.users.length === 0) return;
-    const logoImg = await loadImageElement(credenceLogo);
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const handleExportMonthlyReportPdf = async (mode: 'save' | 'email' = 'save') => {
+    if (!monthlyReport || monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport) return;
+    setExportingMonthlyReport(true);
+    try {
+      // The grid holds one page; the PDF covers everyone, so fetch them all now.
+      const fullRes = await fetch(apiUrl(`/api/attendance/report/monthly?${monthlyReportParams().toString()}`), { headers: { Authorization: `Bearer ${token}` } });
+      if (!fullRes.ok) return;
+      const monthlyReport = await fullRes.json();
+      if (!monthlyReport.users?.length) return;
+      const logoImg = await loadImageElement(credenceLogo);
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-    const monthLabel = new Date(monthlyReport.year, monthlyReport.month - 1, 1).toLocaleString('en-US', { month: 'long' });
-    const letterheadOptions = {
-      reportTitle: `Monthly Attendance Report — ${monthLabel} ${monthlyReport.year}`,
-      filters: activeReportFilters()
-    };
-    const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      const monthLabel = new Date(monthlyReport.year, monthlyReport.month - 1, 1).toLocaleString('en-US', { month: 'long' });
+      const letterheadOptions = {
+        reportTitle: `Monthly Attendance Report — ${monthLabel} ${monthlyReport.year}`,
+        filters: activeReportFilters()
+      };
+      const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
-    const dayHeaders = Array.from({ length: monthlyReport.days_in_month }, (_, i) => String(i + 1));
+      const dayHeaders = Array.from({ length: monthlyReport.days_in_month }, (_, i) => String(i + 1));
 
-    autoTable(doc, {
-      startY: contentStartY,
-      margin: { top: contentStartY, left: 6, right: 6 },
-      head: [['Employee', ...dayHeaders, 'P', 'H', 'A']],
-      body: monthlyReport.users.map((u: any) => {
-        const daySymbols = u.days.map((d: any) => {
-          const isHoliday = !!d.day_type;
-          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : '-';
-        });
-        return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
-      }),
-      styles: { fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
-      columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 5.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      // Same color convention as the on-screen grid: green Present, amber
-      // Holiday, sky Weekend, slate Absent.
-      didParseCell: (data: any) => {
-        if (data.section === 'body' && data.column.index > 0 && data.column.index <= monthlyReport.days_in_month) {
-          const val = data.cell.raw;
-          if (val === 'P') data.cell.styles.textColor = [5, 150, 105];
-          else if (val === 'H') data.cell.styles.textColor = [217, 119, 6];
-          else if (val === 'W') data.cell.styles.textColor = [2, 132, 199];
-          else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
+      autoTable(doc, {
+      theme: 'grid',
+        startY: contentStartY,
+        margin: { top: contentStartY, left: 6, right: 6 },
+        head: [['Employee', ...dayHeaders, 'P', 'H', 'L', 'A']],
+        body: monthlyReport.users.map((u: any) => {
+          const daySymbols = u.days.map((d: any) => {
+            const isHoliday = !!d.day_type;
+            return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '-';
+          });
+          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
+        }),
+        styles: { ...STD_STYLES, fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
+        columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
+        headStyles: { ...STD_HEAD, fontSize: 5.5 },
+        // Same color convention as the on-screen grid: green Present, amber
+        // Holiday, sky Weekend, slate Absent.
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && data.column.index > 0 && data.column.index <= monthlyReport.days_in_month) {
+            const val = data.cell.raw;
+            if (val === 'P') data.cell.styles.textColor = [5, 150, 105];
+            else if (val === 'H') data.cell.styles.textColor = [217, 119, 6];
+            else if (val === 'W') data.cell.styles.textColor = [2, 132, 199];
+            else if (val === 'L') data.cell.styles.textColor = [13, 148, 136];
+            else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
+          }
+        },
+        didDrawPage: () => {
+          drawPdfLetterhead(doc, logoImg, letterheadOptions);
         }
-      },
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
-    });
+      });
 
-    const finalY = (doc as any).lastAutoTable.finalY;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Total Employees: ${monthlyReport.users.length}`, 6, finalY + 8);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text('P = Present   H = Holiday   W = Weekend   - = Absent', 6, finalY + 13);
+      const finalY = (doc as any).lastAutoTable.finalY;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Total Employees: ${monthlyReport.users.length}`, 6, finalY + 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text('P = Present   H = Holiday   W = Weekend   L = Leave   - = Absent', 6, finalY + 13);
 
-    finalizePdfPageNumbers(doc);
-    const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
-    await savePdfCrossPlatform(doc, filename);
+      finalizePdfPageNumbers(doc);
+      const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+        return;
+      }
+      await savePdfCrossPlatform(doc, filename);
+    } catch (err) {
+      console.error('Failed to export the monthly attendance report', err);
+    } finally {
+      setExportingMonthlyReport(false);
+    }
   };
 
   // Export PDF — Date Wise. Portrait, one row per Employee across all three
   // groups (Present / Absent / Holiday) with a colored Status column, same
   // convention as ConveyanceBillPanel/UserPanel's own PDF exports.
-  const handleExportDailyReportPdf = async () => {
+  const handleExportDailyReportPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!dailyReport) return;
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1143,13 +1288,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     ];
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 10, right: 10 },
       head: [['Status', 'Employee', 'Department', 'Project', 'Check In', 'Check Out', 'Source']],
       body: rows,
-      styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: { ...STD_STYLES, fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+      headStyles: { ...STD_HEAD, fontSize: 7.5 },
       didParseCell: (data: any) => {
         if (data.section === 'body' && data.column.index === 0) {
           const val = data.cell.raw;
@@ -1158,7 +1303,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           else if (val === 'Holiday') data.cell.styles.textColor = [217, 119, 6];
         }
       },
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+      didDrawPage: () => {
+        drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY;
@@ -1173,6 +1320,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
     finalizePdfPageNumbers(doc);
     const filename = `Daily_Attendance_Report_${dailyReport.date}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
@@ -1197,20 +1348,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // filter changes (the filter is applied server-side, same as Attendance
   // Report's ?department= above) and whenever this tab is opened.
   const fetchLeaveApplicationsReport = async () => {
+    const req = ++leaveReportReq.current;
     setLeaveApplicationsReportLoading(true);
     setLeaveApplicationsReportError('');
     try {
-      const qs = leaveApplicationsReportDeptFilter ? `?department=${encodeURIComponent(leaveApplicationsReportDeptFilter)}` : '';
+      const qs =
+        `?page=${leaveReportPage}&limit=${leaveReportPageSize}&q=${encodeURIComponent(leaveReportQuery)}` +
+        (leaveApplicationsReportDeptFilter ? `&department=${encodeURIComponent(leaveApplicationsReportDeptFilter)}` : '');
       const res = await fetch(apiUrl(`/api/leave-applications/report${qs}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave Applications');
-      setLeaveApplicationsReport(Array.isArray(data) ? data : []);
+      if (req !== leaveReportReq.current) return; // a newer request is on its way
+      const rows = Array.isArray(data) ? data : Array.isArray(data.rows) ? data.rows : [];
+      setLeaveApplicationsReport(rows);
+      setLeaveReportTotal(Array.isArray(data) ? rows.length : Number(data.total) || 0);
     } catch (err: any) {
-      setLeaveApplicationsReportError(err.message || 'Failed to load Leave Applications');
+      if (req === leaveReportReq.current) setLeaveApplicationsReportError(err.message || 'Failed to load Leave Applications');
     } finally {
-      setLeaveApplicationsReportLoading(false);
+      if (req === leaveReportReq.current) setLeaveApplicationsReportLoading(false);
     }
   };
 
@@ -1228,7 +1385,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     fetchLeaveApplicationsReport();
     if (leaveApplicationsReportDepartments.length === 0) fetchLeaveApplicationsReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, leaveApplicationsReportDeptFilter]);
+  }, [activeTab, leaveApplicationsReportDeptFilter, leaveReportPage, leaveReportPageSize, leaveReportQuery]);
+  // The name search waits for a pause in typing, then goes back to page 1.
+  useEffect(() => {
+    if (leaveApplicationsReportSearch === leaveReportQuery) return;
+    const t = setTimeout(() => {
+      setLeaveReportQuery(leaveApplicationsReportSearch);
+      setLeaveReportPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaveApplicationsReportSearch]);
 
   // Groups the flat edit-log rows by calendar day (in the local timezone), newest day
   // first, so the tab reads as "which MPR rows were edited on which day" instead of one
@@ -1324,7 +1491,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Branches. Kept as its own separate set of state (not reused from Projects)
   // since the two forms/pickers can't otherwise tell which one is open.
   const [newBranchName, setNewBranchName] = useState('');
+  // Which Holiday Calendar (Admin Panel -> Holidays) applies to every
+  // Employee at this Branch — see branches.branch_type / getEmployeeBranchTypeMap.
+  const [newBranchType, setNewBranchType] = useState<'head_office' | 'project_site'>('head_office');
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  // The Project (attendance site + PEPM) this Branch is kept in step with:
+  // 'auto' = link/create the same-name Project, 'none', or a Project id.
+  // Only sent by an account that can see Projects; the API checks Edit/Add.
+  const [branchProjectLink, setBranchProjectLink] = useState<string>('auto');
   const [branchListSearch, setBranchListSearch] = useState('');
   const [showAllBranches, setShowAllBranches] = useState(false);
   const [branchLocation, setBranchLocation] = useState<{ lat: number | null; lng: number | null; label: string | null; radius: number | null }>({
@@ -1435,8 +1609,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [filterBudgetId, setFilterBudgetId] = useState('');
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
-  const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
 
   // Android hardware back button: closes whichever modal is currently open
   // instead of exiting the app (see useBackButtonClose.ts). Each line is a
@@ -1455,34 +1627,80 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useBackButtonClose(showBulkUsers, () => setShowBulkUsers(false));
   useBackButtonClose(approveResult !== null, () => setApproveResult(null));
 
-  useEffect(() => {
-    fetchAllData();
-  }, [token]);
-
-  const fetchAllData = async () => {
+  // The Admin Panel's shared lists (projects, branches, MPR numbers, PEPM
+  // entries, users, budgets, permissions, departments) load only when a tab
+  // that uses them is opened — not every time the panel opens. A tab that
+  // fetches its own data (Dashboard, HR Operations, Mobile Bill…) loads none
+  // of them, and the PEPM entries (the biggest list) only load for Reports.
+  // Each list loads once; fetchAllData() refreshes the ones already loaded.
+  type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'people' | 'budgets' | 'permissions' | 'departments';
+  const loadedShared = useRef<Set<SharedKey>>(new Set());
+  const SHARED_URL: Record<SharedKey, string> = {
+    projects: '/api/projects',
+    branches: '/api/branches',
+    mprNumbers: '/api/mpr-numbers',
+    entries: '/api/entries?scope=all',
+    users: '/api/users',
+    people: '/api/users?slim=1',
+    budgets: '/api/budgets',
+    permissions: '/api/permissions',
+    departments: '/api/departments'
+  };
+  const SHARED_SET: Record<SharedKey, (v: any) => void> = {
+    projects: setProjects,
+    branches: setBranches,
+    mprNumbers: setMprNumbers,
+    entries: setEntries,
+    users: setUsers,
+    people: setPeople,
+    budgets: setBudgets,
+    permissions: setPermissions,
+    departments: setDepartments
+  };
+  const loadShared = async (keys: SharedKey[]) => {
+    if (!keys.length) return;
+    keys.forEach((k) => loadedShared.current.add(k));
     try {
-      const [projRes, branchRes, mprRes, entRes, userRes, budgetRes, permRes, deptRes] = await Promise.all([
-        fetch(apiUrl('/api/projects'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/branches'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/mpr-numbers'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/entries?scope=all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/users'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/budgets'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/permissions'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/departments'), { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-
-      if (projRes.ok) setProjects(await projRes.json());
-      if (branchRes.ok) setBranches(await branchRes.json());
-      if (mprRes.ok) setMprNumbers(await mprRes.json());
-      if (entRes.ok) setEntries(await entRes.json());
-      if (userRes.ok) setUsers(await userRes.json());
-      if (budgetRes.ok) setBudgets(await budgetRes.json());
-      if (permRes.ok) setPermissions(await permRes.json());
-      if (deptRes.ok) setDepartments(await deptRes.json());
+      await Promise.all(
+        keys.map(async (k) => {
+          const res = await fetch(apiUrl(SHARED_URL[k]), { headers: { Authorization: `Bearer ${token}` } });
+          if (res.ok) SHARED_SET[k](await res.json());
+        })
+      );
     } catch (err) {
       console.error('Failed to load admin data', err);
     }
+  };
+  // Tabs that read none of the shared lists.
+  const SELF_CONTAINED_TABS = new Set<string>([
+    'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies'
+  ]);
+  const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
+  // The full accounts list (every access switch — the biggest list after PEPM entries) is
+  // only for the Users tab. Tabs that just pick or filter by an account get the light
+  // `people` list (id, name, role…); every other tab loads neither.
+  const PEOPLE_TABS = new Set<string>([
+    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
+  ]);
+  const sharedFor = (tab: string): SharedKey[] =>
+    SELF_CONTAINED_TABS.has(tab)
+      ? []
+      : ALL_SHARED.filter(
+          (k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || tab === 'users') && (k !== 'people' || PEOPLE_TABS.has(tab))
+        );
+
+  useEffect(() => {
+    loadedShared.current = new Set();
+  }, [token]);
+  useEffect(() => {
+    loadShared(sharedFor(activeTab).filter((k) => !loadedShared.current.has(k)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, token]);
+
+  // After a change: reload the lists this panel has already loaded.
+  const fetchAllData = async () => {
+    await loadShared(ALL_SHARED.filter((k) => loadedShared.current.has(k)));
   };
 
   const fetchRateFileSummary = async () => {
@@ -1656,7 +1874,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handlePermanentDelete = async (id: number) => {
-    if (!confirm('Permanently erase this entry? This cannot be undone.')) return;
+    if (!(await confirmDialog('Permanently erase this entry? This cannot be undone.'))) return;
     setErasingEntryId(id);
     try {
       const res = await fetch(apiUrl(`/api/entries/${id}/permanent`), {
@@ -1680,7 +1898,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // delete — the entry moves into the Job Recycle bin (Reports -> Job Recycle) so it
   // can still be restored, rather than being erased outright.
   const handleDeleteEntry = async (id: number) => {
-    if (!confirm('Delete this entry? It will be moved to the Job Recycle bin.')) return;
+    if (!(await confirmDialog('Delete this entry? It will be moved to the Job Recycle bin.'))) return;
     setDeletingEntryId(id);
     try {
       const res = await fetch(apiUrl(`/api/reports/entries/${id}`), {
@@ -1701,7 +1919,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Permanent Delete straight from the report (Reports permission layer).
   const handlePermanentDeleteReportEntry = async (ent: Entry) => {
-    if (!confirm(`Permanently delete this entry (${ent.job_no || ''} · ${ent.item_name})? It can't be restored. It will be recorded in the Permanent Delete Log.`)) return;
+    if (!(await confirmDialog(`Permanently delete this entry (${ent.job_no || ''} · ${ent.item_name})? It can't be restored. It will be recorded in the Permanent Delete Log.`))) return;
     setDeletingEntryId(ent.id);
     try {
       const res = await fetch(apiUrl(`/api/reports/entries/${ent.id}/permanent`), {
@@ -1785,7 +2003,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteProject = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this project?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this project?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/projects/${id}`), {
         method: 'DELETE',
@@ -1815,16 +2033,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           branch_name: newBranchName.trim(),
+          branch_type: newBranchType,
           location_lat: branchLocation.lat,
           location_lng: branchLocation.lng,
           location_label: branchLocation.label,
-          location_radius: branchLocation.radius
+          location_radius: branchLocation.radius,
+          ...(canSee('projects') ? { project_link: branchProjectLink } : {})
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save branch');
+      setBranchProjectLink('auto');
 
       setNewBranchName('');
+      setNewBranchType('head_office');
       setEditingBranch(null);
       setBranchLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
@@ -1835,7 +2057,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteBranch = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this branch?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this branch?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/branches/${id}`), {
         method: 'DELETE',
@@ -1900,7 +2122,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteDepartment = async (id: number) => {
-    if (!confirm('Delete this Department? Employees linked to it will just lose that link — nothing else about them changes.')) return;
+    if (!(await confirmDialog('Delete this Department? Employees linked to it will just lose that link — nothing else about them changes.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/departments/${id}`), {
         method: 'DELETE',
@@ -1942,7 +2164,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteMpr = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this MPR number?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this MPR number?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/mpr-numbers/${id}`), {
         method: 'DELETE',
@@ -1992,7 +2214,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // /api/budgets/:id/remove-unused-items's own comment for the exact "used"
   // check. Separate action from the real Delete Budget below.
   const handleRemoveUnusedItems = async (id: number) => {
-    if (!confirm("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone.")) return;
+    if (!(await confirmDialog("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone."))) return;
     longTask.start('Removing unused rows', 'Checking every row against the entries…');
     longTask.creep(95);
     try {
@@ -2027,7 +2249,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // ever submitted under it, not just its imported Excel rows. Separate
   // button from "Remove unused rows" above; this one has no going back.
   const handleDeleteBudget = async (id: number) => {
-    if (!confirm('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.'))) return;
     longTask.start('Deleting budget', 'Deleting the budget, its imported rows, Jobs and entries…');
     longTask.creep(95);
     try {
@@ -2123,7 +2345,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const buf = await file.arrayBuffer();
       longTask.step(8, 'Opening the workbook…');
       await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      const workbook = readWorkbook(buf, { cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       longTask.step(18, `Reading ${rawRows.length.toLocaleString()} rows…`);
@@ -2249,7 +2471,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const buf = await file.arrayBuffer();
       longTask.step(8, 'Opening the workbook…');
       await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      const workbook = readWorkbook(buf, { cellDates: true });
       longTask.step(18, 'Reading the Rate and Materials Category sheets…');
 
       const rateSheet = workbook.Sheets['Rate'];
@@ -2389,11 +2611,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const handleUnlockSubmission = async (userId: number, job?: { id: number; no: string | null }) => {
     if (!submissionsBudget) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         job
           ? `Unlock Job ${job.no || job.id} for this user? They will be able to change that Job's entries again.`
           : 'Unlock this user\'s Final Submit on this Budget? They will be able to add new entries to it again.'
-      )
+      ))
     )
       return;
     setUnlockingUserId(userId);
@@ -2525,13 +2747,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (!file) return;
 
     setMessage(null);
+    longTask.start('Reading the users file', `Reading ${file.name}…`);
     try {
       const buf = await file.arrayBuffer();
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      longTask.step(30, 'Opening the workbook…');
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
+      const workbook = readWorkbook(buf, { cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      longTask.step(80, `Reading ${rawRows.length.toLocaleString()} rows…`);
 
       if (rawRows.length === 0) {
+        longTask.close();
         setMessage({ type: 'error', text: 'The Excel file has no data rows.' });
         return;
       }
@@ -2549,14 +2776,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       }).filter((r) => r.project_name || r.password);
 
       if (parsed.length === 0) {
+        longTask.close();
         setMessage({ type: 'error', text: 'Could not find "Project Name" / "Password" columns in that file.' });
         return;
       }
 
       setBulkRows(parsed);
       setBulkResult(null);
+      await longTask.finish();
       setMessage({ type: 'success', text: `Loaded ${parsed.length} row(s) from the Excel file — review below, then click Import Users.` });
     } catch (err: any) {
+      longTask.close();
       setMessage({ type: 'error', text: err.message || 'Failed to read the Excel file.' });
     }
   };
@@ -2574,6 +2804,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setBulkImporting(true);
     setMessage(null);
     setBulkResult(null);
+    longTask.start('Importing users', `Adding ${rows.length.toLocaleString()} user${rows.length === 1 ? '' : 's'}…`);
+    longTask.creep(95, undefined, rows.length * 150);
     try {
       const res = await fetch(apiUrl('/api/users/bulk'), {
         method: 'POST',
@@ -2582,6 +2814,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Bulk import failed');
+      await longTask.finish();
 
       setBulkResult({ created: data.created, skipped: data.skipped });
       setMessage({
@@ -2594,6 +2827,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         fetchAllData();
       }
     } catch (err: any) {
+      longTask.close();
       setMessage({ type: 'error', text: err.message });
     } finally {
       setBulkImporting(false);
@@ -2643,6 +2877,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update permission');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, [field]: value } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -2665,6 +2900,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update attendance project');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, attendance_project_id: projectId } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -2683,14 +2919,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update permission');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, can_view_login_location: value } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     }
   };
 
+  // Users module layers for this account (Module Access -> Users). No saved
+  // layers = the defaults, which never include Block Account.
+  // HR Operations layers (Module Access -> HR Operations), same rule.
+  const hrOpsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.hr_operations;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  const usersLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.users;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this user?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/users/${userId}`), {
         method: 'DELETE',
@@ -2717,8 +2968,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const handleResetPassword = async () => {
     if (!resettingPasswordFor) return;
-    if (newPasswordInput.length < 6) {
-      setMessage({ type: 'error', text: 'New password must be at least 6 characters.' });
+    const pwBad = passwordProblem(newPasswordInput);
+    if (pwBad) {
+      setMessage({ type: 'error', text: pwBad });
       return;
     }
     setResettingPassword(true);
@@ -3149,28 +3401,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
-      {/* Violet gradient welcome banner — same brand gradient as the logo/hero
-          text elsewhere (see --g-gradient in index.css), sitting right below the
-          title the way the reference dashboard's "Welcome Back" card does.
-          Hidden on mobile for Monthly Leave Application specifically — that
-          report's own header (title + search/filter row) already needs the
-          space on a small screen, and this repeated greeting doesn't add
-          anything there; desktop keeps it, and every other tab keeps it on
-          both mobile and desktop, unchanged. */}
-      <div
-        className={`rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm ${
-          activeTab === 'leave_applications' ? 'hidden md:block' : ''
-        }`}
-        style={{ background: 'var(--g-gradient)' }}
-      >
-        <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
-        <p className="mt-1 text-sm text-white/85">
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900">
+      {/* Where this page sits in the menu — web only, same as every
+          Self Service page's breadcrumb. */}
+      {!Capacitor.isNativePlatform() && ADMIN_TAB_PATH[activeTab] && (
+        <div className="-mb-2">
+          <ModulePath path={ADMIN_TAB_PATH[activeTab]} />
+        </div>
+      )}
+      {/* Welcome greeting — plain text straight on the page background (no
+          banner card): a small "Hi, Name" line in the accent colour, a large
+          heading, and the overview line under it. Only on the Admin
+          Dashboard and HR Analytics — every other Admin Panel page goes
+          straight to its own content, web and mobile. */}
+      {(activeTab === 'dashboard' || activeTab === 'hr_analytics') && (
+      <div className="pt-1 pb-1">
+        <p className="text-sm font-semibold" style={{ color: 'var(--g-accent)' }}>Hi {user.name.split(' ')[0]},</p>
+        <h3 className="mt-0.5 text-2xl sm:text-[32px] sm:leading-tight font-bold tracking-tight text-slate-900">Welcome back!</h3>
+        <p className="mt-1 text-sm text-slate-500">
           {isSuperAdmin
             ? "Here's your full overview — projects, reports, users, and every admin module."
             : "Here's your overview for the modules you've been granted access to."}
         </p>
       </div>
+      )}
 
       {visibleModules.length === 0 && activeTab !== 'dashboard' && (
         <div className="p-6 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-sm">
@@ -3187,9 +3441,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* TAB 0: DASHBOARD — role admin/superadmin only (see isAdminRole above) */}
-      {activeTab === 'dashboard' && isAdminRole && (
-        <AdminDashboard token={token} user={user} />
+      {/* TAB 0: DASHBOARD — role admin/superadmin, or a granted 'admin_dashboard' module (see canSeeDashboard above) */}
+      {activeTab === 'dashboard' && canSeeDashboard && (
+        <AdminDashboard
+          token={token}
+          user={user}
+          onNavigate={(tab) => {
+            if (tab === 'companies' || tab === 'devices' || tab === 'active_users' || tab === 'permanent_delete_log' ? isSuperAdmin : canSee(tab as AdminModuleKey)) setActiveTab(tab as any);
+          }}
+        />
       )}
 
       {/* TAB 1: REPORTS */}
@@ -3221,7 +3481,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
-      {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => fetchAllData()} />}
+      {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => void loadShared(['entries'])} />}
 
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
         <div className="space-y-6">
@@ -3244,7 +3504,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Project Name</label>
-                <select
+                <SearchSelect
                   value={filterProjectId}
                   onChange={(e) => setFilterProjectId(e.target.value)}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -3253,12 +3513,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.project_name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Budget</label>
-                <select
+                <SearchSelect
                   value={filterBudgetId}
                   onChange={(e) => setFilterBudgetId(e.target.value)}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -3267,7 +3527,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {budgets.map(b => (
                     <option key={b.id} value={b.id}>{b.budget_name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
 
               <div>
@@ -3409,12 +3669,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     {reportFilterInput('project_name', 'Project Name')}
                     {reportFilterInput('mpr_no', 'MPR No')}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" list="report-item-name-options" aria-label="Filter Description of Material" value={reportColFilters.item_name} onChange={(e) => setReportColFilter('item_name', e.target.value)} placeholder="Type or select..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                      <datalist id="report-item-name-options">
-                        {reportItemNameOptions.map((n) => (
-                          <option key={n} value={n} />
-                        ))}
-                      </datalist>
+                      <Combobox
+                        free
+                        ariaLabel="Filter Description of Material"
+                        value={reportColFilters.item_name}
+                        onChange={(v) => setReportColFilter('item_name', v)}
+                        options={reportItemNameOptions}
+                        placeholder="Type or select..."
+                        className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
+                      />
                     </th>
                     {reportFilterInput('specification', 'Specification')}
                     {reportFilterInput('qty', 'Qty')}
@@ -3674,7 +3937,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             <div className="flex flex-wrap items-end gap-2">
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
-                <select
+                <SearchSelect
                   value={attendanceProjectFilter}
                   onChange={(e) => setAttendanceProjectFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -3683,20 +3946,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>{p.project_name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-                <select
+                <SearchSelect
                   value={attendanceUserFilter}
                   onChange={(e) => setAttendanceUserFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">All Users</option>
-                  {users.filter((u) => u.role === 'user').map((u) => (
+                  {people.filter((u) => u.role === 'user').map((u) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">From</label>
@@ -3718,7 +3981,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
               <button
                 type="button"
-                onClick={fetchAttendance}
+                onClick={applyAttendanceFilters}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
               >
                 <Filter className="w-3.5 h-3.5" /> Apply
@@ -3768,7 +4031,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{formatDate(r.attendance_date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{r.user_name || '—'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">{r.project_name || '—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
+                        {r.project_name || '—'}
+                        {r.project_office_type && (
+                          <span
+                            className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                              r.project_office_type === 'project_site'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}
+                          >
+                            {r.project_office_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs">
                         {r.check_in_at ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700">
@@ -3821,6 +4097,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   ))}
                 </tbody>
               </table>
+              <PagerBar
+                page={attendancePage}
+                pageSize={attendancePageSize}
+                total={attendanceTotal}
+                onPage={setAttendancePage}
+                onPageSize={(n) => { setAttendancePageSize(n); setAttendancePage(1); }}
+              />
             </div>
           )}
         </div>
@@ -3866,7 +4149,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
-                <select
+                <SearchSelect
                   value={reportProjectFilter}
                   onChange={(e) => setReportProjectFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -3875,30 +4158,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>{p.project_name}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </div>
 
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
-                <select
+                <SearchSelect
                   value={reportEmployeeFilter}
                   onChange={(e) => setReportEmployeeFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
                 >
                   <option value="">All Employees</option>
-                  {users
+                  {people
                     .filter((u) => u.role === 'user' || u.role === 'admin')
                     .slice()
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((u) => (
                       <option key={u.id} value={u.id}>{u.name}</option>
                     ))}
-                </select>
+                </SearchSelect>
               </div>
 
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Department</label>
-                <select
+                <SearchSelect
                   value={reportDepartmentFilter}
                   onChange={(e) => setReportDepartmentFilter(e.target.value)}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
@@ -3907,7 +4190,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {reportDepartments.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
-                </select>
+                </SearchSelect>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>
+                <SearchSelect
+                  value={reportStatusFilter}
+                  onChange={(e) => setReportStatusFilter(e.target.value as '' | 'active' | 'inactive')}
+                  className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[140px]"
+                >
+                  <option value="">All Employees</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </SearchSelect>
               </div>
 
               {attendanceReportView === 'month' ? (
@@ -3923,7 +4219,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-slate-500 mb-1">Month</label>
-                    <select
+                    <SearchSelect
                       value={reportMonth}
                       onChange={(e) => setReportMonth(Number(e.target.value))}
                       className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -3933,11 +4229,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           {new Date(2000, m - 1, 1).toLocaleString('en-US', { month: 'long' })}
                         </option>
                       ))}
-                    </select>
+                    </SearchSelect>
                   </div>
                   <button
                     type="button"
-                    onClick={fetchMonthlyReport}
+                    onClick={() => fetchMonthlyReport(1)}
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
                   >
                     <Filter className="w-3.5 h-3.5" /> Apply
@@ -3966,13 +4262,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
                   <button
                     type="button"
-                    onClick={handleExportMonthlyReportPdf}
-                    disabled={!monthlyReport || monthlyReport.users.length === 0}
+                    onClick={() => handleExportMonthlyReportPdf()}
+                    disabled={monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport}
                     title="Download this report as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
                   >
-                    <FileDown className="w-3.5 h-3.5" /> Export PDF
+                    <FileDown className="w-3.5 h-3.5" /> {exportingMonthlyReport ? 'Preparing…' : 'Export PDF'}
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton
+                      onClick={() => handleExportMonthlyReportPdf('email')}
+                      disabled={monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport}
+                      className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-emerald-600 bg-white hover:bg-emerald-50 text-emerald-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
+                    />
+                  )}
                 </>
               ) : (
                 <>
@@ -3995,38 +4298,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
                   <button
                     type="button"
-                    onClick={handleExportDailyReportPdf}
+                    onClick={() => handleExportDailyReportPdf()}
                     disabled={!dailyReport}
                     title="Download this report as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
                   >
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton onClick={() => handleExportDailyReportPdf('email')} disabled={!dailyReport} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-emerald-600 bg-white hover:bg-emerald-50 text-emerald-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1" />
+                  )}
                 </>
               )}
             </div>
           </div>
 
           {attendanceReportView === 'month' ? (
-            loadingMonthlyReport ? (
+            loadingMonthlyReport && !monthlyReport ? (
               <p className="text-xs text-slate-400 text-center py-12">Loading report...</p>
-            ) : !monthlyReport || monthlyReport.users.length === 0 ? (
+            ) : monthlyReportTotal(monthlyReport) === 0 ? (
               <div className="text-center text-xs text-slate-400 py-12 flex flex-col items-center gap-2">
                 <Calendar className="w-6 h-6 text-slate-300" />
                 No users to report on yet.
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className={`overflow-x-auto transition-opacity ${loadingMonthlyReport ? 'opacity-50 pointer-events-none' : ''}`}>
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                     <tr>
                       <th className="px-4 py-2.5 text-left sticky left-0 bg-slate-50">User</th>
                       {Array.from({ length: monthlyReport.days_in_month }, (_, i) => i + 1).map((d) => (
-                        <th key={d} className={`px-1.5 py-2.5 text-center ${monthlyCellDisplay === 'times' ? 'w-16' : 'w-6'}`}>{d}</th>
+                        <th key={d} className={`px-1 py-2.5 text-center ${monthlyCellDisplay === 'times' ? 'w-16' : 'w-6'}`}>{d}</th>
                       ))}
-                      <th className="px-4 py-2.5 text-center">Present</th>
-                      <th className="px-4 py-2.5 text-center">Holiday</th>
-                      <th className="px-4 py-2.5 text-center">Absent</th>
+                      <th className="px-2 py-2.5 text-center">Present</th>
+                      <th className="px-2 py-2.5 text-center">Holiday</th>
+                      <th className="px-2 py-2.5 text-center">Leave</th>
+                      <th className="px-2 py-2.5 text-center">Absent</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
@@ -4037,12 +4344,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
                           const isHoliday = !!d.day_type;
-                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : '·';
+                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '·';
                           const colorClass = d.present
                             ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
                             : isHoliday
-                              ? d.day_type === 'weekend' ? 'text-sky-500' : 'text-amber-500'
-                              : 'text-slate-300';
+                              ? d.day_type === 'weekend' ? 'text-violet-500' : 'text-amber-500'
+                              : d.leave_type ? 'text-teal-600' : 'text-slate-300';
                           // "Which way" attendance was given (GPS via Remote
                           // Attendance, or ZKT via the office biometric device),
                           // plus either Check In/Out remarks, in the tooltip.
@@ -4062,7 +4369,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               ? `${d.date}${d.project_name ? ' — ' + d.project_name : ''}${sourcePart}${remarksPart ? ' — ' + remarksPart : ''}`
                               : isHoliday
                                 ? `${d.date} — ${d.holiday_title || (d.day_type === 'weekend' ? 'Weekend' : 'Holiday')}`
-                                : d.date;
+                                : d.leave_type
+                                  ? `${d.date} — ${d.leave_type} leave`
+                                  : d.date;
                           if (monthlyCellDisplay === 'times') {
                             const inTime = shortTime(d.check_in_at);
                             const outTime = shortTime(d.check_out_at);
@@ -4083,23 +4392,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <td
                               key={d.date}
                               title={cellTitle}
-                              className={`px-1.5 py-3 text-center text-[10px] font-bold ${colorClass}`}
+                              className={`px-1 py-3 text-center text-[10px] font-bold ${colorClass}`}
                             >
                               {label}
                             </td>
                           );
                         })}
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-emerald-700">{u.present_days}</td>
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-amber-600">{u.holiday_days ?? 0}</td>
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-rose-600">{u.absent_days}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-emerald-700">{u.present_days}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-amber-600">{u.holiday_days ?? 0}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-teal-600">{u.leave_days ?? 0}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-rose-600">{u.absent_days}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <PagerBar page={monthGridPage} pageSize={monthGridPageSize} total={monthlyReportTotal(monthlyReport)} onPage={(p) => fetchMonthlyReport(p)} onPageSize={(n) => { setMonthGridPageSize(n); fetchMonthlyReport(1, n); }} />
                 <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-[10px] text-slate-500 border-t border-slate-100">
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Present — GPS (Remote Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500" /> Present — ZKT (Office Attendance)</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> Holiday</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-violet-500" /> W — Weekend</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> H — Holiday</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-300" /> Absent</span>
                   <span className="text-slate-400">Hover a day for check-in time, project, source and remarks.</span>
                 </div>
@@ -4256,7 +4568,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
               <select
                 value={leaveApplicationsReportDeptFilter}
-                onChange={(e) => setLeaveApplicationsReportDeptFilter(e.target.value)}
+                onChange={(e) => {
+                  setLeaveApplicationsReportDeptFilter(e.target.value);
+                  setLeaveReportPage(1);
+                }}
                 className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">All Departments</option>
@@ -4268,7 +4583,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           {leaveApplicationsReportLoading ? (
-            <div className="p-10 flex justify-center"><Spinner /></div>
+            <LoadingBlock />
           ) : leaveApplicationsReportError ? (
             <p className="p-6 text-sm text-rose-600">{leaveApplicationsReportError}</p>
           ) : (
@@ -4284,13 +4599,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       <th className="px-4 py-3">Start Date</th>
                       <th className="px-4 py-3">End Date</th>
                       <th className="px-4 py-3">Days</th>
+                      <th className="px-4 py-3">Purpose</th>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Approver</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {leaveApplicationsReport
-                      .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
                       .map((a) => (
                         <tr key={a.id} className="hover:bg-slate-50">
                           <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
@@ -4299,12 +4614,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
                           <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
                           <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                          <td className="px-4 py-3 text-slate-600 max-w-[260px]">
+                            <span className="line-clamp-2 break-words" title={a.purpose || ''}>{a.purpose || '—'}</span>
+                          </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
                               a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
                               a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
                             }`}>
-                              {a.status}
+                              <span className="capitalize">{a.status}</span>
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
@@ -4312,7 +4630,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       ))}
                     {leaveApplicationsReport.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                        <td colSpan={9} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4324,7 +4642,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   ConveyanceClaimCard.tsx's own mobile treatment). */}
               <div className="md:hidden divide-y divide-slate-100">
                 {leaveApplicationsReport
-                  .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
                   .map((a) => (
                     <div key={a.id} className="p-4 flex flex-col gap-2">
                       <div className="flex items-start justify-between gap-2">
@@ -4336,7 +4653,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
                           a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
                         }`}>
-                          {a.status}
+                          <span className="capitalize">{a.status}</span>
                         </span>
                       </div>
 
@@ -4344,6 +4661,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {a.leave_type.replace('_', ' ')} &middot; {a.day_count} day{Number(a.day_count) === 1 ? '' : 's'}
                       </div>
+                      {a.purpose && <p className="text-xs text-slate-600 break-words">{a.purpose}</p>}
 
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-slate-500">
@@ -4357,6 +4675,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <p className="px-4 py-10 text-center text-slate-400 text-sm">No Leave Applications found.</p>
                 )}
               </div>
+              {leaveReportTotal > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 text-xs text-slate-600">
+                  <span>
+                    {(leaveReportPage - 1) * leaveReportPageSize + 1}–{Math.min(leaveReportPage * leaveReportPageSize, leaveReportTotal)} of {leaveReportTotal}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={leaveReportPageSize}
+                      onChange={(e) => {
+                        setLeaveReportPageSize(Number(e.target.value));
+                        setLeaveReportPage(1);
+                      }}
+                      className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                      aria-label="Rows per page"
+                    >
+                      {[25, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>{n} / page</option>
+                      ))}
+                    </select>
+                    <button type="button" disabled={leaveReportPage <= 1} onClick={() => setLeaveReportPage((p) => Math.max(1, p - 1))} className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40">
+                      Prev
+                    </button>
+                    <span>Page {leaveReportPage} / {Math.max(1, Math.ceil(leaveReportTotal / leaveReportPageSize))}</span>
+                    <button
+                      type="button"
+                      disabled={leaveReportPage >= Math.ceil(leaveReportTotal / leaveReportPageSize)}
+                      onClick={() => setLeaveReportPage((p) => p + 1)}
+                      className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -4383,7 +4735,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           roster's zk_device_pin instead of a logged-in user. */}
       {activeTab === 'office_attendance' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <OfficeAttendancePanel token={token} />
+          <OfficeAttendanceHub token={token} />
         </div>
       )}
 
@@ -4407,6 +4759,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* TAB: VEHICLE MANAGEMENT — IT/Admin side: vehicle inventory, ride
+          request review/approval (vehicle + driver assignment), and
+          return/lateness tracking. Gated behind the 'vehicle_management'
+          AdminModuleKey like every other tab here. */}
+      {activeTab === 'vehicle_management' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <VehicleManagementAdmin users={people} />
+        </div>
+      )}
+
       {/* TABS: world-class HRM extension modules — Exit/Offboarding,
           Performance Management, Recruitment/ATS, Grievance & Disciplinary,
           HR Analytics, Document Vault. Each gated behind its own
@@ -4416,21 +4778,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
+      {activeTab === 'reports_insights' && <ReportsInsights token={token} />}
+      {/* TAB: DATA IMPORT — employees, leave, claims and attendance history from Excel/CSV (DataImport.tsx). */}
+      {activeTab === 'data_import' && canSeeDataImport && <DataImport token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
+      {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} canRequisitions={hrOpsLayer('requisitions')} />}
+      {activeTab === 'task_management' && <TaskManagement token={token} user={user} />}
+      {activeTab === 'target_reports' && <TargetReports token={token} user={user} />}
+      {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}
+      {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
+      {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
+      {activeTab === 'break_time' && canSee('break_time') && <BreakTimeAdmin token={token} />}
+      {activeTab === 'user_feedback' && canSee('user_feedback') && <FeedbackAdmin token={token} isSuperAdmin={user.role === 'superadmin'} />}
 
-      {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
-          (IP/URL) the Android app can switch between after login. Not a
-          grantable AdminModuleKey (see ServerProfileRoutes.ts) — access is
-          gated purely by isSuperAdmin in the effects above, same as the
-          "Users" tab's role-promotion controls. */}
-      {activeTab === 'servers' && (
+      {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
+          /api/entries/permanent-delete-log and the comment on DELETE
+          /api/entries/:id/permanent) audit trail of every entry ever erased
+          from the Job Recycle bin below, including an Admin's erases and a
+          Superadmin's own. Not a grantable AdminModuleKey — gated purely by
+          isSuperAdmin in the effects above, same as the "Users" tab's
+          role-promotion controls. */}
+      {/* TAB: DEVICE ACCESS — which phone each account may use the app on, Superadmin only (DeviceAccess.tsx). */}
+      {activeTab === 'devices' && isSuperAdmin && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <ServerProfilesPanel token={token} />
+          <DeviceAccess token={token} />
         </div>
       )}
-
-      {/* TAB: DEVICE ACCESS — which phones each account may use the app on, Superadmin only (DeviceAccess.tsx). */}
-      {activeTab === 'devices' && isSuperAdmin && <DeviceAccess token={token} />}
 
       {/* TAB: ACTIVE USERS — who is signed in right now, with IP and device, Superadmin only (ActiveUsers.tsx). */}
       {activeTab === 'active_users' && isSuperAdmin && (
@@ -4439,12 +4812,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
-          /api/entries/permanent-delete-log and the comment on DELETE
-          /api/entries/:id/permanent) audit trail of every entry ever erased
-          from the Job Recycle bin below, including an Admin's erases and a
-          Superadmin's own. Not a grantable AdminModuleKey — gated purely by
-          isSuperAdmin in the effects above, same as the "Servers" tab. */}
+      {/* TAB: COMPANIES — multi-company setup, Superadmin only (SystemCompanies.tsx). */}
+      {activeTab === 'companies' && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <SystemCompanies token={token} />
+        </div>
+      )}
+
       {activeTab === 'permanent_delete_log' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200">
@@ -5006,7 +5380,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <Building2 className="w-5 h-5" />
                         </div>
                         <div>
-                          <span className="font-semibold text-slate-900 text-sm block">{p.project_name}</span>
+                          <span className="font-semibold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
+                            {p.project_name}
+                            {p.linked_branch_id && (
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                  p.linked_branch_type === 'project_site'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                }`}
+                                title={`Branch: ${p.linked_branch_name}`}
+                              >
+                                {p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              </span>
+                            )}
+                          </span>
+                          {p.linked_branch_id && p.linked_branch_name !== p.project_name && (
+                            <span className="block text-[11px] text-slate-500">Branch: {p.linked_branch_name}</span>
+                          )}
                           {p.location_lat != null && p.location_lng != null && (
                             <a
                               href={`https://www.openstreetmap.org/?mlat=${p.location_lat}&mlon=${p.location_lng}#map=17/${p.location_lat}/${p.location_lng}`}
@@ -5094,6 +5485,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                    Holiday Calendar Group
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewBranchType('head_office')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                        newBranchType === 'head_office'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Head Office
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewBranchType('project_site')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                        newBranchType === 'project_site'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Project Site
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Every Employee assigned to this Branch follows this group's Weekend/Holiday calendar (Admin Panel -&gt; Holidays).
+                  </p>
+                </div>
+                {canSee('projects') ? (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                      Attendance Project
+                    </label>
+                    <SearchSelect
+                      value={branchProjectLink}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setBranchProjectLink(v);
+                        // A Branch with no pin of its own takes the Project's.
+                        const p = projects.find((x) => String(x.id) === v);
+                        if (p && branchLocation.lat == null && p.location_lat != null && p.location_lng != null) {
+                          setBranchLocation({
+                            lat: Number(p.location_lat),
+                            lng: Number(p.location_lng),
+                            label: p.location_label ?? null,
+                            radius: p.location_radius != null ? Number(p.location_radius) : null
+                          });
+                        }
+                      }}
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    >
+                      {!editingBranch?.project_id && <option value="auto">Same name as this Branch (link or create)</option>}
+                      <option value="none">Not linked</option>
+                      {projects.map((p) => {
+                        const takenBy = p.linked_branch_id && p.linked_branch_id !== editingBranch?.id ? p.linked_branch_name : null;
+                        return (
+                          <option key={p.id} value={String(p.id)} disabled={!!takenBy}>
+                            {p.project_name}{takenBy ? ` — linked to ${takenBy}` : ''}
+                          </option>
+                        );
+                      })}
+                    </SearchSelect>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      The Project used for attendance check-in (and PEPM). Its name and map location are kept the same as this Branch's.
+                    </p>
+                  </div>
+                ) : editingBranch?.linked_project_name ? (
+                  <p className="text-[11px] text-slate-500">
+                    Linked Project: <span className="font-semibold text-slate-700">{editingBranch.linked_project_name}</span>
+                  </p>
+                ) : null}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
                     Branch Location
                   </label>
                   {branchLocation.lat != null && branchLocation.lng != null ? (
@@ -5144,7 +5610,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {editingBranch && (
                     <button
                       type="button"
-                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
+                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setNewBranchType('head_office'); setBranchProjectLink('auto'); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
                     >
                       Cancel
@@ -5189,7 +5655,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <Building2 className="w-5 h-5" />
                         </div>
                         <div>
-                          <span className="font-semibold text-slate-900 text-sm block">{b.branch_name}</span>
+                          <span className="font-semibold text-slate-900 text-sm inline-flex items-center gap-1.5">
+                            {b.branch_name}
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                b.branch_type === 'project_site'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}
+                            >
+                              {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                            </span>
+                          </span>
+                          {b.linked_project_name && (
+                            <span className="block text-[11px] text-slate-500 mt-0.5">Attendance Project: {b.linked_project_name}</span>
+                          )}
                           {b.location_lat != null && b.location_lng != null && (
                             <a
                               href={`https://www.openstreetmap.org/?mlat=${b.location_lat}&mlon=${b.location_lng}#map=17/${b.location_lat}/${b.location_lng}`}
@@ -5213,6 +5693,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           onClick={() => {
                             setEditingBranch(b);
                             setNewBranchName(b.branch_name);
+                            setNewBranchType(b.branch_type === 'project_site' ? 'project_site' : 'head_office');
+                            setBranchProjectLink(b.project_id ? String(b.project_id) : 'none');
                             setBranchLocation({
                               lat: b.location_lat != null ? Number(b.location_lat) : null,
                               lng: b.location_lng != null ? Number(b.location_lng) : null,
@@ -5742,10 +6224,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <input
                   type="text"
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
-                  placeholder="Min. 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
                 />
               </div>
@@ -5988,6 +6470,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
+              <SearchSelect
+                aria-label="Department filter"
+                value={userDeptFilter}
+                onChange={(e) => setUserDeptFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer max-w-[11rem]"
+              >
+                <option value="">All departments</option>
+                {[...new Set(users.map((u) => (u.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+                <option value="__none__">No department</option>
+              </SearchSelect>
               <button
                 type="button"
                 onClick={() => setShowAccessTemplates(true)}
@@ -5995,6 +6489,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               >
                 <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
               </button>
+              {usersLayer('password_requests') && (
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordRequests(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <KeyRound className="w-3.5 h-3.5" /> Password requests
+                </button>
+              )}
             </div>
           </div>
           {/* Quick filters — one tap narrows the list to accounts with a given
@@ -6016,7 +6519,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               );
             })}
-            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all') && (
+            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all' || userDeptFilter) && (
               <span className="ml-auto text-[11px] text-slate-500">
                 Showing {filteredUsers.length} of {users.length} users
               </span>
@@ -6097,7 +6600,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 truncate">{u.name}</div>
-                            <div className="text-xs text-slate-500 truncate">{u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}</div>
+                            <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
                           </div>
                         </div>
                       </td>
@@ -6170,7 +6673,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
+                      <div className="text-xs text-slate-500 truncate">{u.username ? `${u.username}${u.email ? ` · ${u.email}` : ''}` : u.email || '—'}</div>
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
@@ -6191,7 +6694,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           Name, Designation, Department, Email, Phone). Plain hand-entered
           reference data, not tied to a login account. */}
       {activeTab === 'employees' && (
-        <EmployeesPanel token={token} user={user} />
+        <EmployeesPanel
+          token={token}
+          user={user}
+          onOpenModuleAccess={
+            canOpenModuleAccessFromEmployees
+              ? (userId) => {
+                  setPendingModuleAccessUser(userId);
+                  setActiveTab('users');
+                }
+              : undefined
+          }
+        />
       )}
 
       {/* TAB: DEPARTMENTS — real org-structure master data: a Department name
@@ -6227,16 +6741,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Supervisor</label>
-                  <select
+                  <SearchSelect
                     value={deptForm.supervisor_user_id}
                     onChange={(e) => setDeptForm((f) => ({ ...f, supervisor_user_id: e.target.value }))}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">— None —</option>
-                    {users.map((u) => (
+                    {activePeople(people, deptForm.supervisor_user_id).map((u) => (
                       <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
               </div>
 
@@ -6380,7 +6894,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* TAB: MOVEMENT CLAIMS — review point A -> point B travel check-in/outs
           Users have recorded for office work (TA/DA-style reimbursement). */}
       {activeTab === 'claims' && (
-        <ClaimsPanel token={token} users={users} />
+        <ClaimsPanel token={token} users={people} />
       )}
 
       {/* TAB: CONVEYANCE BILL CLAIM — Superadmin + explicitly-granted Admins only.
@@ -6388,16 +6902,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           completed Movement Claims (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
-        <ConveyanceBillPanel token={token} users={users} />
+        <ConveyanceBillPanel token={token} users={people} currentUserId={user.id} />
       )}
 
-      {/* TAB: MY CONVEYANCE BILL CLAIM — same "conveyance" module grant as the
-          tab above, but scoped to THIS Admin's own Bills/Claims and read-only
-          (no Approve/Reject/Edit/Delete) — see MyConveyanceBillClaimPanel.tsx
-          for why this exists as a separate page. */}
-      {activeTab === 'my_conveyance' && (
-        <MyConveyanceBillClaimPanel token={token} user={user} />
-      )}
+      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;
+          only the Superadmin can change it (BillClaimPolicyPanel.tsx). */}
+      {activeTab === 'bill_claim_policy' && <BillClaimPolicyPanel token={token} />}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins
           only. Marks a Conveyance Bill's claim(s) as actually paid out (voucher
@@ -6405,7 +6915,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           as its own module (separate from 'conveyance' above) so an Admin can be
           allowed to BUILD bills without also being able to authorize payouts. */}
       {activeTab === 'disbursement' && (
-        <DisbursementPanel token={token} users={users} />
+        <DisbursementPanel token={token} users={people} />
       )}
 
       {/* TAB: APPROVALS — the OLD single global chain (Queue) sits alongside the
@@ -6435,9 +6945,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </button>
           </div>
           {approvalsSection === 'queue' ? (
-            <ApprovalManager token={token} user={user} users={users} />
+            <ApprovalManager token={token} user={user} users={people} />
           ) : (
-            <ApprovalTemplateManager token={token} user={user} users={users} />
+            <ApprovalTemplateManager token={token} user={user} users={people} />
           )}
         </div>
       )}
@@ -6970,6 +7480,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
           may open (projects, mprs, imports, reports, users, recycle, editlog). */}
+      {showAccessTemplates && (
+        <AccessTemplatesModal
+          token={token}
+          canGrantModuleAccess={canGrantModuleAccess}
+          templates={accessTemplates}
+          onChanged={loadAccessTemplates}
+          onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
+
       {budgetNotice && (
         <BudgetNoticePopup
           token={token}
@@ -6982,14 +7502,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
-      {showAccessTemplates && (
-        <AccessTemplatesModal
-          token={token}
-          canGrantModuleAccess={canGrantModuleAccess}
-          templates={accessTemplates}
-          onChanged={loadAccessTemplates}
-          onClose={() => setShowAccessTemplates(false)}
-        />
+      {showPasswordRequests && usersLayer('password_requests') && (
+        <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />
       )}
 
       {/* Module Access — a full page in place of the Users page (Users ->
@@ -7042,7 +7556,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   type="text"
                   value={newPasswordInput}
                   onChange={(e) => setNewPasswordInput(e.target.value)}
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   autoFocus
                 />
@@ -7069,7 +7583,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </button>
               <button
                 onClick={handleResetPassword}
-                disabled={resettingPassword || newPasswordInput.length < 6}
+                disabled={resettingPassword || newPasswordInput.length < PASSWORD_MIN}
                 className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
               >
                 {resettingPassword ? 'Resetting…' : 'Reset Password'}

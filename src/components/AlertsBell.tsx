@@ -3,11 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { BellRing, Check, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BellRing, Check, Trash2, X } from 'lucide-react';
 import { confirmDialog } from '../lib/confirmDialog';
 import { Alert } from '../types';
+import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
+import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 
@@ -18,6 +22,30 @@ interface AlertsBellProps {
   // in Navbar already points at) — optional so this component still works
   // standing alone if nothing wires it up.
   onOpenLeaveApplication?: () => void;
+  // 'vehicle_approval' = a ride request waiting on this account (approve, or
+  // assign a vehicle on a Vehicle Maintainer Layer) -> Approve Application.
+  // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
+  onOpenApproveApplications?: () => void;
+  // 'assign' — a ride already approved that still needs a vehicle (or one
+  // that expired): open where vehicles are assigned instead of Approvals.
+  onOpenVehicleManagement?: (target?: 'status' | 'assign' | 'trips') => void;
+  // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
+  onOpenConveyanceClaim?: () => void;
+  // The requester's own Asset Requisition updates -> My Asset (Status for
+  // the requisition's approval updates, My Assets for handed-over items).
+  onOpenMyAsset?: (target: MyAssetTarget) => void;
+  // The employee's own resignation updates -> My Resignation.
+  onOpenResignation?: () => void;
+  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary;
+  // the HR-side ones open the Admin Panel module instead when this account
+  // can see it (canOpenGrievanceAdmin).
+  onOpenMyCases?: () => void;
+  canOpenGrievanceAdmin?: boolean;
+  // HR Operations: a letter issued to this account -> My Letters; HR-side
+  // updates (a letter acknowledged/requested, an action decided) -> the
+  // HR Operations module.
+  onOpenMyLetters?: () => void;
+  onOpenHrOperations?: () => void;
   // Dropdown footer "View all" link — opens AlertsPage.tsx (the full-page
   // inbox), since this dropdown itself only ever shows the 50 most recent.
   onViewAll?: () => void;
@@ -29,12 +57,16 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Starts true so the first open shows "Loading..." rather than flashing
+  // "No alerts yet." for the render before fetchAlerts kicks in.
+  const [loading, setLoading] = useState(true);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // The phone sheet is portalled to <body>, so outside-click checks both.
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
@@ -75,10 +107,18 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     if (open) fetchAlerts();
   }, [open, fetchAlerts]);
 
+  // A new alert arrives over the socket: the badge (and the open list) update at once.
+  useLiveRefresh(() => {
+    void fetchUnreadCount();
+    if (open) void fetchAlerts();
+  });
+
   useEffect(() => {
     if (!open) return;
     const onClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapperRef.current?.contains(t) || sheetRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
@@ -141,25 +181,191 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
 
   const handleAlertClick = (alert: Alert) => {
     if (!alert.is_read) markRead(alert.id);
-    if (alert.type === 'leave_application' && onOpenLeaveApplication) {
+    const rideNeedsVehicle =
+      alert.type === 'vehicle_approval' && (/Needs a Vehicle|Ride Request Expired/.test(alert.title) || /still needs a vehicle/.test(alert.message || ''));
+    // The driver's / assigner's trip alerts open My Trips (Start Ride).
+    const rideForDriver = alert.type === 'vehicle_requisition' && /Ride Assigned to You|Press Start Ride/.test(alert.title);
+    const target =
+      alert.type === 'leave_application'
+        ? onOpenLeaveApplication
+        : rideNeedsVehicle && onOpenVehicleManagement
+        ? () => onOpenVehicleManagement('assign')
+        : rideForDriver && onOpenVehicleManagement
+        ? () => onOpenVehicleManagement('trips')
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
+        ? onOpenApproveApplications
+        : alert.type === 'vehicle_requisition' && onOpenVehicleManagement
+        ? () => onOpenVehicleManagement('status')
+        : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
+        ? onOpenConveyanceClaim
+        : alert.type === 'asset_requisition' && onOpenMyAsset
+        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
+        : alert.type === 'resignation'
+        ? onOpenResignation
+        : alert.type === 'grievance' || alert.type === 'disciplinary'
+        ? canOpenGrievanceAdmin && isHrSideCaseAlert(alert.title)
+          ? () => openGrievanceAdmin(alert.type === 'disciplinary' ? 'disciplinary' : 'grievances')
+          : onOpenMyCases
+        : alert.type === 'assistant_support'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-assistant-support', { detail: alert.related_id }))
+        : alert.type === 'hr_reminder'
+        ? () => {
+            // HR reminders (probation / contract / document / retirement /
+            // increment dates): HR Operations -> Dashboard -> Coming up.
+            try {
+              sessionStorage.setItem('hr_ops_tab', 'dashboard');
+            } catch {
+              // storage unavailable
+            }
+            (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'dashboard' })), 0);
+          }
+        : alert.type === 'requisition'
+        ? alert.related_type === 'requisition_hr'
+          ? () => {
+              // HR: HR Operations -> SIM & ID Card.
+              try {
+                sessionStorage.setItem('hr_ops_tab', 'requisitions');
+              } catch {
+                // storage unavailable
+              }
+              window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }));
+              setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'requisitions' })), 0);
+            }
+          : () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRequisitions' }))
+        : alert.type === 'hr_action' && alert.related_type === 'onboarding_application'
+        ? () => {
+            // HR: Onboarding -> New Joiners.
+            try {
+              sessionStorage.setItem('hr_ops_tab', 'onboarding');
+            } catch {
+              // storage unavailable
+            }
+            (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'onboarding' })), 0);
+          }
+        : alert.type === 'hr_action'
+        ? /Awaiting Your Approval/.test(alert.title)
+          ? onOpenApproveApplications
+          : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
+        : alert.type === 'hr_request'
+        ? /^Submitted for review/.test(alert.title)
+          ? () => {
+              // HR: Employee Reports -> Requests.
+              try {
+                sessionStorage.setItem('hr_ops_tab', 'reports');
+                sessionStorage.setItem('hr_reports_view', 'requests');
+              } catch {
+                // storage unavailable
+              }
+              (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+              setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
+            }
+          : onOpenMyLetters
+          ? () => {
+              // Employee: My Letters & Service Record -> Pending Items.
+              try {
+                sessionStorage.setItem('my_letters_tab', 'pending');
+              } catch {
+                // storage unavailable
+              }
+              onOpenMyLetters();
+            }
+          : undefined
+        : alert.type === 'hr_report'
+        ? () => {
+            // HR Operations -> Employee Reports -> Received.
+            try {
+              sessionStorage.setItem('hr_ops_tab', 'reports');
+              sessionStorage.setItem('hr_reports_view', 'received');
+            } catch {
+              // storage unavailable — opens on the default tab
+            }
+            (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
+          }
+        : alert.type === 'task'
+        ? // My Tasks / Task Management, with this task open (App.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_task_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the page opens without the task
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-task', { detail: { title: alert.title } }));
+          }
+        : alert.type === 'target'
+        ? // My Targets, with this target open (App.tsx, MyTargets.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_target_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the page opens without the target
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-target'));
+          }
+        : alert.type === 'payroll_approval' && alert.title === 'Salary Paid'
+        ? // My Payslip with that month open (App.tsx, MyPayslips.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_payslip_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the list opens instead
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myPayslips' }));
+          }
+        : alert.type === 'payroll_approval' && alert.title !== 'Salary Paid'
+        ? // Audit / Accounts / HR: Payroll -> Approval (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-payroll-approval'))
+        : alert.type === 'loan_request'
+        ? // My Loan / Advance, or Payroll -> Loans & Advances for one to decide (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-loan', { detail: { title: alert.title } }))
+        : alert.type === 'mobile_bill'
+        ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
+        : alert.type === 'device_request'
+        ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))
+        : alert.type === 'mail'
+        ? // Credence Mail, with this mail open (App.tsx, mail/CredenceMail.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_mail_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — Credence Mail opens on the Inbox
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
+          }
+        : alert.type === 'site_attendance'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
+        : alert.type === 'document_sign'
+        ? // Documents to Sign, or Document Vault for a signed / declined one (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-esign', { detail: { title: alert.title } }))
+        : alert.type === 'notice_draft'
+        ? // Admin Panel -> Notices, where the draft waits to be published.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }))
+        : alert.type === 'password_request'
+        ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
+          () => {
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'users' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:password-requests')), 300);
+          }
+        : alert.type === 'mpr_dispatch'
+        ? // Material on its way -> Material Receive; a short receipt -> Purchase's Dispatch Material.
+          alert.title === 'Material dispatched'
+          ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'materialReceive' }))
+          : () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'reports' }))
+        : alert.type === 'roster'
+        ? // Self Service -> My Duty Roster (App.tsx, MyRoster.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRoster' }))
+        : alert.type === 'hr_letter'
+        ? /^New Letter|Request Rejected$/.test(alert.title)
+          ? onOpenMyLetters
+          : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
+        : undefined;
+    if (target) {
       setOpen(false);
-      onOpenLeaveApplication();
-    }
-    // Material on its way -> Material Receive (App.tsx); a short receipt ->
-    // Purchase's Dispatch Material (Admin Panel -> Reports).
-    if (alert.type === 'mpr_dispatch') {
-      setOpen(false);
-      window.dispatchEvent(
-        alert.title === 'Material dispatched'
-          ? new CustomEvent('credence:open-self-service', { detail: 'materialReceive' })
-          : new CustomEvent('credence:open-admin-module', { detail: 'reports' })
-      );
-    }
-    // A notice drafted from a Budget import -> Admin Panel -> Notices, where it
-    // waits to be published.
-    if (alert.type === 'notice_draft') {
-      setOpen(false);
-      window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }));
+      target();
     }
   };
 
@@ -184,9 +390,92 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         )}
       </button>
 
+      {/* Phones: a liquid-glass sheet (the house popup style — see
+          CLAUDE.md / TrackingNoticeCard.tsx) under the header, each alert a
+          glass well with a dot while unread. Portalled to <body> so its
+          full-screen backdrop isn't clipped by the header. */}
+      {open &&
+        createPortal(
+          <div className="sm:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Alerts">
+            <div className="absolute inset-0 liquid-glass-backdrop" />
+            <div
+              ref={sheetRef}
+              className="absolute left-3 right-3"
+              style={{ top: 'calc(4.25rem + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
+            >
+              <div className="liquid-glass liquid-glass-in rounded-[32px] flex flex-col max-h-[calc(100dvh-10rem)] overflow-hidden">
+                <div className="flex items-center gap-2 px-5 pt-4 pb-3">
+                  <h3 className="text-base font-bold text-slate-900 flex-1">
+                    Alerts
+                    {unreadCount > 0 && <span className="ml-2 text-xs font-semibold text-rose-600">{unreadCount} new</span>}
+                  </h3>
+                  {unreadCount > 0 && (
+                    <button type="button" onClick={markAllRead} className="liquid-glass-chip flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
+                      <Check className="w-3.5 h-3.5" /> Mark all read
+                    </button>
+                  )}
+                  {alerts.length > 0 && (
+                    <button type="button" onClick={clearAll} className="liquid-glass-chip flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600">
+                      <Trash2 className="w-3.5 h-3.5" /> Clear all
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setOpen(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close alerts">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto overscroll-contain px-3 pb-3 space-y-2">
+                  {loading && alerts.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">Loading...</p>
+                  ) : alerts.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">No alerts yet.</p>
+                  ) : (
+                    alerts.map((alert) => (
+                      <div
+                        key={alert.id}
+                        onClick={() => handleAlertClick(alert)}
+                        className={`liquid-glass-inset rounded-2xl px-3.5 py-3 flex items-start gap-2.5 active:scale-[0.99] transition-transform ${alert.is_read ? '' : '!bg-white/80'}`}
+                      >
+                        <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm leading-snug ${alert.is_read ? 'font-medium text-slate-700' : 'font-semibold text-slate-900'}`}>{alert.title}</div>
+                          <div className="text-xs mt-0.5 line-clamp-2 text-slate-500">{alert.message}</div>
+                          <div className="text-[11px] mt-1 text-slate-400">{formatDate(alert.created_at)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => removeAlert(alert.id, e)}
+                          className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-slate-400 active:bg-white/70"
+                          aria-label="Remove alert"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {onViewAll && (
+                  <div className="px-4 pt-1 pb-4 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false);
+                        onViewAll();
+                      }}
+                      className="liquid-glass-button w-full py-2.5 rounded-full text-sm font-semibold"
+                    >
+                      View all
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
       {open && (
         <div
-          className="absolute right-0 mt-2 w-80 max-w-[90vw] rounded-2xl shadow-lg border overflow-hidden z-50"
+          className="max-sm:hidden absolute right-0 mt-2 w-80 max-w-[90vw] rounded-2xl shadow-lg border overflow-hidden z-50"
           style={{ background: 'var(--g-surface, #fff)', borderColor: 'var(--g-border, #e5e7eb)' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--g-border, #e5e7eb)' }}>

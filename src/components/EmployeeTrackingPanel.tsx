@@ -6,9 +6,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2 } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -18,8 +18,10 @@ import { LiveFollowModal } from './LiveFollowModal';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // "18-Aug-2026, 02:19 PM" — same dd-MMM-yyyy date as formatDate, plus a local
 // 12-hour time, for report rows where the exact moment (not just the day)
 // matters. Reads local (not UTC) components, same reasoning as
@@ -125,10 +127,13 @@ function agoLabel(iso: string): string {
 //  - Path playback: click a user's row (or "View Path") to instead draw their
 //    full ping history for an optional date range as a connected purple trail.
 export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false, canLive = false }) => {
+  const canEmailReports = useCanEmailReports();
   // Live Follow (LiveFollowModal) — who is open, if anyone.
   const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
   // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
   const [showStay, setShowStay] = useState(false);
+  // The map filling the whole screen (button on the map, Esc to leave).
+  const [mapFull, setMapFull] = useState(false);
   const [live, setLive] = useState<LocationPing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,7 +204,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
             headers: { Authorization: `Bearer ${token}` }
           });
           if (cancelled) return;
-          if (!res.ok) {
+          if (!res.ok || res.status === 204) {
             photoUrlsRef.current[userId] = null;
           } else {
             const blob = await res.blob();
@@ -288,7 +293,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   // point first, one row per ping, so an Admin can hand someone "where was
   // this employee between X and Y" as a document instead of a map they'd have
   // to screenshot.
-  const handleExportReport = useCallback(async () => {
+  const handleExportReport = useCallback(async (mode: 'save' | 'email' = 'save') => {
     if (!selectedUser || history.length === 0) return;
     setExportingReport(true);
     try {
@@ -308,6 +313,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
       autoTable(doc, {
+      theme: 'grid',
         startY: contentStartY,
         margin: { top: contentStartY, left: 8, right: 8 },
         head: [['SL', 'Date & Time', 'Location', 'Accuracy (m)', 'Battery']],
@@ -318,15 +324,18 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           p.accuracy_m != null ? String(p.accuracy_m) : '—',
           p.battery_pct != null ? `${p.battery_pct}%` : '—'
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 38 }, 3: { cellWidth: 22 }, 4: { cellWidth: 16 } },
-        headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8 },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
       });
 
       finalizePdfPageNumbers(doc);
       const safeName = selectedUser.name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Employee';
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Tracking-History-${safeName}.pdf`, title: letterheadOptions.reportTitle });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Tracking-History-${safeName}.pdf`);
     } catch (err: any) {
       setError(err.message || 'Failed to export report');
@@ -343,15 +352,31 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   // Initialize the map once.
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    const map = L.map(mapContainerRef.current, { zoomControl: true }).setView([23.8103, 90.4125], 12);
+    // Half-step zoom, and two levels past the tiles' own 19 (the last tiles
+    // are enlarged) so a single street or building can be looked at closely.
+    const map = L.map(mapContainerRef.current, { zoomControl: true, zoomSnap: 0.5, zoomDelta: 0.5, wheelPxPerZoomLevel: 90, maxZoom: 21 }).setView([23.8103, 90.4125], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
+      maxNativeZoom: 19,
+      maxZoom: 21
     }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 100);
   }, []);
+
+  // Full screen on/off: Leaflet has to re-measure its box.
+  useEffect(() => {
+    const t = setTimeout(() => mapRef.current?.invalidateSize(), 60);
+    if (!mapFull) return () => clearTimeout(t);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMapFull(false);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mapFull]);
 
   // Redraw whenever the live board OR the selected user's path changes.
   useEffect(() => {
@@ -372,7 +397,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           `<div style="font-size:12px;"><b>${i === 0 ? 'Start' : i === sorted.length - 1 ? 'Latest' : 'Point ' + (i + 1)}</b><br/>${formatDate(p.recorded_at)}${p.battery_pct != null ? `<br/>Battery: ${p.battery_pct}%` : ''}</div>`
         );
       });
-      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 16 });
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 17 });
     } else {
       // Live board mode — one dot (now an avatar/photo) per user, latest
       // position only, restricted to whoever matches the employee filter.
@@ -507,11 +532,26 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-xl overflow-hidden border border-slate-200" style={{ height: 460 }}>
+        <div
+          className={
+            mapFull
+              ? 'fixed inset-0 z-[1040] bg-white'
+              : 'relative lg:col-span-2 rounded-xl overflow-hidden border border-slate-200 h-[460px] lg:h-[max(560px,calc(100vh-300px))]'
+          }
+        >
           <div ref={mapContainerRef} className="w-full h-full" />
+          <button
+            type="button"
+            onClick={() => setMapFull((v) => !v)}
+            className="absolute top-2.5 right-2.5 z-[1000] w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-slate-300 shadow-sm text-slate-700 hover:bg-slate-50"
+            title={mapFull ? 'Exit full screen (Esc)' : 'Full screen map'}
+            aria-label={mapFull ? 'Exit full screen' : 'Full screen map'}
+          >
+            {mapFull ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
         </div>
 
-        <div className="border border-slate-200 rounded-xl overflow-hidden flex flex-col" style={{ height: 460 }}>
+        <div className="border border-slate-200 rounded-xl overflow-hidden flex flex-col h-[460px] lg:h-[max(560px,calc(100vh-300px))]">
           <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5" /> Reporting now
           </div>
@@ -608,12 +648,19 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={handleExportReport}
+                  onClick={() => handleExportReport()}
                   disabled={exportingReport}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <FileDown className="w-3.5 h-3.5" /> {exportingReport ? 'Preparing…' : 'Download PDF'}
                 </button>
+                {canEmailReports && (
+                  <EmailReportButton
+                    onClick={() => handleExportReport('email')}
+                    disabled={exportingReport}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  />
+                )}
                 <button
                   onClick={() => setShowReport(false)}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600"

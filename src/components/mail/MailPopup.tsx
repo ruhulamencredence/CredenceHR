@@ -47,7 +47,7 @@ export const MailPopup: React.FC<{
             {children}
           </div>
           {footer && (
-            <div className="px-4 sm:px-5 py-3 flex items-center justify-end gap-2" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="px-4 sm:px-5 py-3 flex items-center justify-end gap-2" style={{ paddingBottom: 'max(0.75rem, var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
               {footer}
             </div>
           )}

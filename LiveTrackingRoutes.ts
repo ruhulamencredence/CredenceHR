@@ -10,8 +10,9 @@
 //   - someone with the tracking "live" layer has that person open in Live
 //     Follow (POST .../watch, renewed every WATCH_TTL_MS by the open page), or
 //   - the person is the requester or the driver of an ongoing Book a Ride ride.
-// The phone learns it is live from a socket event ("tracking:live") and, as a
-// fallback, from the reply to its own ping ({ live_until }). Every ping that
+// The phone learns it is live from a socket event ("tracking:live"), a silent
+// push that wakes it when the app is in the background (its socket asleep),
+// and, as a last fallback, from the reply to its own ping ({ live_until }). Every ping that
 // arrives while someone is watching is pushed straight to the watchers'
 // sockets ("tracking:location"), so the map moves without polling.
 //
@@ -20,6 +21,7 @@
 
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
+import { sendSilentPushToUserIds } from "./PushNotificationService";
 
 interface Deps {
   authenticateToken: any;
@@ -43,7 +45,14 @@ const RIDE_LIVE_MS = 2 * 60_000;
 export interface LiveTracking {
   // Called by POST /api/tracking/ping after the ping is stored. Pushes it to
   // anyone watching and returns when the phone should stay live until (ms).
-  onPing: (userId: number, ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date }) => Promise<number | null>;
+  // still = a heartbeat re-sending the last fix (the phone hasn't moved).
+  onPing: (
+    userId: number,
+    ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date; still?: boolean }
+  ) => Promise<number | null>;
+  // A Book a Ride ride just started or ended for these people: re-check at
+  // once (no 30s cache wait) and tell / wake their phones.
+  rideChanged: (userIds: number[]) => Promise<void>;
 }
 
 export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracking {
@@ -95,6 +104,21 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
     getIo()?.to(`user:${userId}`).emit("tracking:live", { until });
   };
 
+  // Silent push for "go live": sent when following starts, and again on a
+  // renewal while the phone still hasn't answered (at most every
+  // WAKE_RETRY_MS, WAKE_MAX_TRIES times per follow).
+  const WAKE_RETRY_MS = 60_000;
+  const WAKE_MAX_TRIES = 3;
+  const lastHeard = new Map<number, number>();
+  const wakes = new Map<number, { at: number; tries: number }>();
+  const wakePhone = (userId: number, until: number | null) => {
+    if (!until) return;
+    const w = wakes.get(userId);
+    if (w && (w.tries >= WAKE_MAX_TRIES || Date.now() - w.at < WAKE_RETRY_MS)) return;
+    wakes.set(userId, { at: Date.now(), tries: (w?.tries || 0) + 1 });
+    void sendSilentPushToUserIds(queryDB, [userId], { type: "tracking_live", until: String(until) });
+  };
+
   // Start (or renew) following someone. Also returns their latest ping and
   // today's path so the map has something to draw at once.
   app.post(
@@ -115,6 +139,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
         );
         if (latest.length === 0) return res.status(404).json({ error: "This employee hasn't sent a location yet." });
         const userRows = await queryDB("SELECT id, name FROM users WHERE id = ?", [userId]);
+        // Last time the phone checked in at all (pings and heartbeats).
+        const stateRows: any[] =
+          (await queryDB("SELECT reported_at FROM tracking_device_state WHERE user_id = ?", [userId]).catch(() => [])) || [];
         if (userRows.length === 0) return res.status(404).json({ error: "Employee not found." });
 
         let m = watchers.get(userId);
@@ -122,7 +149,14 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
         if (!m) watchers.set(userId, (m = new Map()));
         m.set(Number(req.user.id), Date.now() + WATCH_TTL_MS);
         const until = await liveUntil(userId);
-        if (!wasLive) tellPhone(userId, until);
+        if (!wasLive) {
+          tellPhone(userId, until);
+          wakes.delete(userId);
+          wakePhone(userId, until);
+        } else if ((lastHeard.get(userId) || 0) < (wakes.get(userId)?.at || 0)) {
+          // Followed, but not a word from the phone since the last wake-up.
+          wakePhone(userId, until);
+        }
 
         // The first call of a session also sends today's path; renewals skip it.
         let trail: any[] = [];
@@ -137,6 +171,7 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
           latest: latest[0],
           trail: trail.map((p: any) => ({ lat: Number(p.lat), lng: Number(p.lng), recorded_at: p.recorded_at })),
           live_until: until,
+          heard_at: stateRows[0]?.reported_at ? new Date(stateRows[0].reported_at).toISOString() : null,
           on_ride: await onRide(userId)
         });
       } catch (err: any) {
@@ -163,7 +198,20 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
   );
 
   return {
+    rideChanged: async (userIds) => {
+      for (const userId of userIds) {
+        if (!userId) continue;
+        rideCache.delete(userId);
+        const until = await liveUntil(userId);
+        tellPhone(userId, until);
+        if (until) {
+          wakes.delete(userId);
+          wakePhone(userId, until);
+        }
+      }
+    },
     onPing: async (userId, ping) => {
+      lastHeard.set(userId, Date.now());
       const ws = activeWatchers(userId);
       if (ws.length) {
         const io = getIo();
@@ -173,7 +221,10 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
           lng: ping.lng,
           accuracy_m: ping.accuracy_m,
           battery_pct: ping.battery_pct,
-          recorded_at: ping.recorded_at.toISOString()
+          recorded_at: ping.recorded_at.toISOString(),
+          // When the phone answered — differs from recorded_at while it stands still.
+          heard_at: new Date().toISOString(),
+          still: !!ping.still
         };
         for (const w of ws) io?.to(`user:${w}`).emit("tracking:location", payload);
       }

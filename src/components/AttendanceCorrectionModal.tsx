@@ -12,6 +12,7 @@ import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface AttendanceCorrectionModalProps {
   token: string;
   dateStr: string;
@@ -47,6 +48,13 @@ const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'a
 // never drifts a display-hour off from what formatTime() already shows
 // elsewhere in Timesheet (both read the same naive, no-timezone-suffix string
 // the server hands back with dateStrings:true).
+// "2026-10-25" -> "2026-10-26" (calendar arithmetic, no timezone involved).
+function nextDate(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function toTimeInputValue(value?: string | null): string {
   if (!value) return '';
   const str = String(value);
@@ -137,6 +145,9 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
     setFile(f);
   };
 
+  // An Out Time earlier than the In Time is a night shift: out the next morning.
+  const outNextDay = !!checkInTime && !!checkOutTime && checkOutTime < checkInTime;
+
   const validate = (): string | null => {
     if (projectId === '' || projectId === null || projectId === undefined) return 'Select a Project.';
     if (!checkInTime && !checkOutTime) return 'Enter an In Time or Out Time to correct.';
@@ -169,7 +180,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
           project_id: projectId,
           attendance_date: dateStr,
           check_in_at: checkInTime ? `${dateStr} ${checkInTime}:00` : undefined,
-          check_out_at: checkOutTime ? `${dateStr} ${checkOutTime}:00` : undefined,
+          check_out_at: checkOutTime ? `${outNextDay ? nextDate(dateStr) : dateStr} ${checkOutTime}:00` : undefined,
           remarks: remarks.trim() || undefined,
           ...(file_base64 ? { file_base64, file_name: file!.name, file_mimetype: file!.type } : {})
         })
@@ -224,7 +235,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
               {options.length > 1 && (
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-500 mb-1">Project *</label>
-                  <select
+                  <SearchSelect
                     value={projectId}
                     onChange={(e) => handleProjectChange(Number(e.target.value))}
                     className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -234,7 +245,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
                         {o.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
               )}
               {options.length === 1 && (
@@ -261,6 +272,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
                     onChange={(e) => setCheckOutTime(e.target.value)}
                     className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                  {outNextDay && <p className="mt-1 text-[11px] text-slate-500">Next day ({nextDate(dateStr)}) — a night shift.</p>}
                 </div>
               </div>
 

@@ -1,0 +1,93 @@
+{
+ "when": "2026-10-25T18:06:43.960Z",
+ "summary": {
+  "PASS": 14,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "QA-01a",
+   "status": "PASS",
+   "name": "An Admin with no modules gets no birthdays, HR alerts or task counts",
+   "detail": "{\"today\":\"2026-10-26\",\"birthdays\":[],\"attendance_approvals\":[],\"attendance_corrections\":[],\"documents\":[],\"status_effective\":[],\"tasks\":[],\"alerts\":[]}"
+  },
+  {
+   "id": "QA-01b",
+   "status": "PASS",
+   "name": "An Admin with the Employees module sees birthdays, but not other modules' task counts",
+   "detail": "{\"today\":\"2026-10-26\",\"birthdays\":[{\"name\":\"Birthday Person\",\"employee_code\":null,\"department\":\"Finance\",\"designation\":\"Officer\",\"date\":\"2026-10-28\",\"days_away\":2,\"turning\":36}],\"attendance_approvals\""
+  },
+  {
+   "id": "QA-01c",
+   "status": "PASS",
+   "name": "Superadmin still sees every part",
+   "detail": "1 birthdays, 12 task rows"
+  },
+  {
+   "id": "QA-02",
+   "status": "PASS",
+   "name": "Unused Servers code (calling an API that is not there) is gone",
+   "detail": ""
+  },
+  {
+   "id": "QA-04",
+   "status": "PASS",
+   "name": "Too-long name, letter with no employee, unknown notice → 4xx (not 500)",
+   "detail": "400 / 400 / 404 / 404"
+  },
+  {
+   "id": "PWD-01",
+   "status": "PASS",
+   "name": "Simple passwords are accepted when creating a user (1234, 111111, password, a)",
+   "detail": "200,200,200,200"
+  },
+  {
+   "id": "PWD-02",
+   "status": "PASS",
+   "name": "An empty password is refused",
+   "detail": "400 {\"error\":\"Name, email and password are required\"}"
+  },
+  {
+   "id": "PWD-03",
+   "status": "PASS",
+   "name": "The user signs in with the simple password 1234",
+   "detail": ""
+  },
+  {
+   "id": "PWD-04",
+   "status": "PASS",
+   "name": "Changing my own password to 1111 works",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "PWD-05",
+   "status": "PASS",
+   "name": "Employee login (123) and Admin reset (0000) accept simple passwords too",
+   "detail": "201 / 200"
+  },
+  {
+   "id": "EMP-02",
+   "status": "PASS",
+   "name": "Invalid email refused",
+   "detail": "400 {\"error\":\"Email \\\"not-an-email\\\" isn't a valid email address.\"}"
+  },
+  {
+   "id": "EMP-04",
+   "status": "PASS",
+   "name": "Age under 14 and a future birth date refused; a normal record saves",
+   "detail": "400 / 400 / 201"
+  },
+  {
+   "id": "EMP-05",
+   "status": "PASS",
+   "name": "An old record with a bad email can still be saved for an unrelated change",
+   "detail": "200 {\"success\":true}"
+  },
+  {
+   "id": "R01-b",
+   "status": "PASS",
+   "name": "A \"no approver\" request is in the Superadmin's My Approvals (marked) and can be decided there",
+   "detail": "in queue true, no_approver=true, act 200"
+  }
+ ]
+}

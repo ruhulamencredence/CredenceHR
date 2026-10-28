@@ -17,6 +17,7 @@
 
 import type { Express } from "express";
 import crypto from "crypto";
+import { DEFAULT_GROUP_ID, activeGroupId } from "./companyContext";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -168,11 +169,16 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
       // A whole week covers every range's counts at once.
       const weekAgo = Math.min(since, now - 7 * 86400000);
 
-      const users: any[] = (await queryDB("SELECT * FROM users")) || [];
-      const byId = new Map(users.map((u) => [Number(u.id), u]));
-      const rows: any[] = ((await queryDB("SELECT * FROM user_sessions WHERE last_seen_at >= ?", [new Date(weekAgo)])) || []).filter((r: any) =>
-        byId.has(Number(r.user_id))
+      const gid = activeGroupId();
+      const users: any[] = ((await queryDB("/*unscoped*/ SELECT * FROM users")) || []).filter(
+        (u: any) => Number(u.group_id ?? DEFAULT_GROUP_ID) === gid
       );
+      const byId = new Map(users.map((u) => [Number(u.id), u]));
+      // Ended sign-ins (Logout, Sign out, password change, unused) aren't listed.
+      const rows: any[] = ((await queryDB("SELECT * FROM user_sessions WHERE last_seen_at >= ?", [new Date(weekAgo)])) || []).filter(
+        (r: any) => byId.has(Number(r.user_id)) && !r.revoked_at
+      );
+      const myKey = crypto.createHash("sha1").update(String(req.headers["authorization"] || "").split(" ")[1] || "").digest("hex");
       const devices: any[] = (await queryDB("SELECT id, device_name, platform FROM user_devices").catch(() => [])) || [];
       const devName = new Map(devices.map((d: any) => [Number(d.id), d.device_name || null]));
 
@@ -202,7 +208,8 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
             ip: r.ip || null,
             signed_in_at: iso(r.signed_in_at || r.first_seen_at),
             last_seen_at: iso(r.last_seen_at),
-            online: now - seen(r) < ONLINE_MS
+            online: now - seen(r) < ONLINE_MS,
+            current: r.session_key === myKey
           };
         });
 

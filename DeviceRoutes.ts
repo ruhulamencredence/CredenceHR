@@ -15,6 +15,7 @@
 // (deviceStillAllowed, checked in authenticateToken).
 
 import type { Express } from "express";
+import { DEFAULT_GROUP_ID, activeGroupId } from "./companyContext";
 import { createAlert } from "./Alerts";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -58,14 +59,8 @@ export type DeviceCheck = { ok: true; deviceRowId: number } | { ok: false; statu
 /** Called by /api/auth/login for the app, after the password is checked. */
 export async function checkAppDevice(queryDB: QueryDB, user: any, body: any): Promise<DeviceCheck> {
   const deviceId = clean(body?.device_id, 128);
-  // An app built before Device Access sends no device id. It still signs in
-  // (no phone limit) unless DEVICE_REQUIRE_APP_UPDATE=1 is set in .env —
-  // turn that on once everyone has the new app.
-  if (!deviceId) {
-    if (process.env.DEVICE_REQUIRE_APP_UPDATE === "1")
-      return { ok: false, status: 426, code: "APP_UPDATE_REQUIRED", error: "Please update the CredenceHR app to the latest version to sign in." };
-    return { ok: true, deviceRowId: 0 };
-  }
+  if (!deviceId)
+    return { ok: false, status: 426, code: "APP_UPDATE_REQUIRED", error: "Please update the CredenceHR app to the latest version to sign in." };
   const name = clean(body?.device_name, 200) || null;
   const platform = clean(body?.device_platform, 20) || null;
   const userId = Number(user.id);
@@ -107,9 +102,10 @@ export async function checkAppDevice(queryDB: QueryDB, user: any, body: any): Pr
       now
     ]);
   if (firstAsk) {
-    const admins: any[] = (await queryDB("SELECT id, role FROM users").catch(() => [])) || [];
+    const groupId = Number(user.group_id ?? DEFAULT_GROUP_ID);
+    const admins: any[] = (await queryDB("/*unscoped*/ SELECT id, role, group_id FROM users").catch(() => [])) || [];
     for (const a of admins)
-      if (a.role === "superadmin")
+      if (a.role === "superadmin" && Number(a.group_id ?? DEFAULT_GROUP_ID) === groupId)
         await createAlert(queryDB, {
           userId: Number(a.id),
           type: "device_request",
@@ -147,8 +143,12 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
   const fail = (res: any, err: any) => res.status(err?.statusCode || 500).json({ error: err?.message || String(err) });
   const bad = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
-  // Every account.
-  const groupUsers = async () => ((await queryDB("SELECT * FROM users")) || []) as any[];
+  // Accounts of the group being worked in.
+  const groupUsers = async () => {
+    const gid = activeGroupId();
+    const users: any[] = (await queryDB("/*unscoped*/ SELECT * FROM users")) || [];
+    return users.filter((u) => Number(u.group_id ?? DEFAULT_GROUP_ID) === gid);
+  };
   const deviceOfGroup = async (id: number) => {
     const rows: any[] = (await queryDB("SELECT * FROM user_devices WHERE id = ?", [id])) || [];
     const d = rows.find((r) => Number(r.id) === id);
@@ -209,7 +209,7 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
         forget(active.map((r) => Number(r.id)));
       } else {
         if (active.length + 1 > MAX_DEVICES_LIMIT) throw bad(`At most ${MAX_DEVICES_LIMIT} phones per account.`);
-        if (active.length + 1 > Number(u.max_devices || 1)) await queryDB("UPDATE users SET max_devices = ? WHERE id = ?", [active.length + 1, Number(u.id)]);
+        if (active.length + 1 > Number(u.max_devices || 1)) await queryDB("/*unscoped*/ UPDATE users SET max_devices = ? WHERE id = ?", [active.length + 1, Number(u.id)]);
       }
       await queryDB("UPDATE user_devices SET status = 'active', approved_by = ?, approved_at = ? WHERE id = ?", [req.user.id, new Date(), Number(d.id)]);
       forget([Number(d.id)]);
@@ -238,7 +238,7 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
       if (!(await groupUsers()).some((u) => Number(u.id) === userId)) throw bad("Account not found.", 404);
       const n = Math.trunc(Number(req.body?.max_devices));
       if (!(n >= 1 && n <= MAX_DEVICES_LIMIT)) throw bad(`Choose 1 to ${MAX_DEVICES_LIMIT} phones.`);
-      await queryDB("UPDATE users SET max_devices = ? WHERE id = ?", [n, userId]);
+      await queryDB("/*unscoped*/ UPDATE users SET max_devices = ? WHERE id = ?", [n, userId]);
       res.json({ success: true });
     } catch (err) {
       fail(res, err);

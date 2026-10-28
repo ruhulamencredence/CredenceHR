@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Plus, Search, Smartphone, Trash2, X } from 'lucide-react';
-import { useHrApi, Notice, btnGhost, btnPrimary } from './uiKit';
+import { useHrApi, Notice, btnGhost, btnPrimary } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 

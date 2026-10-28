@@ -482,7 +482,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         const people: any[] =
           (await queryDB(
             `SELECT DISTINCT u.id FROM users u JOIN user_project_permissions upp ON upp.user_id = u.id
-             WHERE upp.project_id = ? AND u.can_receive_material = 1`,
+             WHERE upp.project_id = ? AND u.can_receive_material = 1 AND COALESCE(u.is_blocked, 0) = 0`,
             [projectId]
           ).catch(() => [])) || [];
         for (const u of people) {

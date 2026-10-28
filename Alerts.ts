@@ -27,7 +27,7 @@
 import type { Express } from "express";
 import { sendPushToUserIds } from "./PushNotificationService";
 
-export type AlertType = "leave_application" | "conveyance_claim" | "conveyance_disbursed" | "asset_requisition" | "mpr_dispatch" | "notice_draft" | "device_request" | "assistant_support";
+export type AlertType = "leave_application" | "leave_approval" | "conveyance_claim" | "conveyance_approval" | "conveyance_disbursed" | "asset_requisition" | "asset_approval" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary" | "resignation" | "exit_clearance" | "exit_offboarding" | "hr_action" | "hr_letter" | "hr_report" | "hr_request" | "site_attendance" | "device_request" | "task" | "mobile_bill" | "mobile_limit_approval" | "loan_request" | "loan_approval" | "payroll_approval" | "hr_reminder" | "assistant_support" | "target" | "mail" | "roster" | "document_sign" | "mpr_dispatch" | "password_request" | "notice_draft" | "requisition";
 
 export interface AlertRow {
   id: number;
@@ -73,6 +73,27 @@ export async function ensureAlertsSchema(dbPool: any): Promise<void> {
   }
 }
 
+// Live refresh: open pages (Ride Status, My Leave, Approve Applications…)
+// reload themselves when something of theirs changes, without a page
+// reload. server.ts hands over its Socket.IO server; every alert, and every
+// approval step (notifyRecordChanged from performApprovalAction), tells the
+// accounts involved over their socket ("records:changed").
+let alertsIo: { to: (room: string) => { emit: (ev: string, data: any) => void } } | null = null;
+export function setAlertsIo(io: typeof alertsIo) {
+  alertsIo = io;
+}
+export function notifyRecordChanged(userIds: number[], info: { type?: string; relatedType?: string | null; relatedId?: number | null }) {
+  if (!alertsIo) return;
+  const payload = { type: info.type || null, related_type: info.relatedType || null, related_id: info.relatedId ?? null };
+  for (const id of new Set(userIds.map(Number).filter((n) => n > 0))) {
+    try {
+      alertsIo.to(`user:${id}`).emit("records:changed", payload);
+    } catch {
+      // A socket hiccup never affects the change itself.
+    }
+  }
+}
+
 // Called from elsewhere in server.ts (e.g. the Leave Application
 // approve/reject handler) whenever something worth notifying one account
 // about happens. Fails soft — a notification that couldn't be written should
@@ -105,6 +126,7 @@ export async function createAlert(
     console.warn("⚠️ Could not write alert: " + err.message);
     return;
   }
+  notifyRecordChanged([params.userId], { type: params.type, relatedType: params.relatedType, relatedId: params.relatedId });
   // Fire-and-forget — never awaited by the caller, same reasoning as
   // ChatRoutes.ts's notifyNewMessage: a push failure never affects the
   // alert itself, which is already in this account's inbox by the time

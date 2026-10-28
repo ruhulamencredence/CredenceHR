@@ -22,6 +22,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface RunPayrollWizardProps {
   token: string;
@@ -46,6 +47,8 @@ interface WizardRow {
   extreme_late_count: number;
   extreme_late_deduction_days: number;
   overtime_hours: number;
+  // Entered per hour; overtime_amount is the total (hours x rate) that is paid.
+  overtime_rate: number;
   overtime_amount: number;
   bonus_amount: number;
   other_deduction: number;
@@ -55,6 +58,22 @@ interface WizardRow {
   already_generated: boolean;
   included: boolean;
   pending_bonus_amount?: number;
+}
+
+// One Bank/MFS disbursement line of an employee's Payment split (Admin Panel
+// -> Employees -> Edit -> Payment tab), pre-computed server-side against this
+// employee's Net Salary for this run — see buildPaymentSplit in
+// PayrollRoutes.ts. Empty/absent for an employee with no split configured,
+// who's paid via this wizard's single Payment Method dropdown instead.
+interface PaymentSplitLine {
+  account_type: 'bank' | 'mfs' | 'cash';
+  account_label: string;
+  bank_name: string | null;
+  branch_name: string | null;
+  provider: string | null;
+  account_number: string;
+  percentage: number;
+  amount: number;
 }
 
 interface PreviewResult {
@@ -75,6 +94,9 @@ interface PreviewResult {
   other_deduction?: number;
   total_deduction?: number;
   net_salary?: number;
+  payment_split?: PaymentSplitLine[];
+  // Allowance & Adjustment lines this run will carry.
+  pay_lines?: { name: string; kind: 'earning' | 'deduction'; amount: number }[];
 }
 
 interface SubmitResult {
@@ -133,6 +155,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
     extreme_lates_per_deduction_day: number;
   } | null>(null);
   const [viewingLateFor, setViewingLateFor] = useState<WizardRow | null>(null);
+  // The salary month's own dates (Salary Setup -> Salary Month), e.g.
+  // 26 Aug – 25 Sep for September with a 26th start.
+  const [period, setPeriod] = useState<{ start: string; end: string } | null>(null);
 
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer');
   const [submitting, setSubmitting] = useState(false);
@@ -150,9 +175,11 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
         return;
       }
       setLatePolicy(data.late_policy || null);
+      setPeriod(data.period_start && data.period_end ? { start: data.period_start, end: data.period_end } : null);
       setRows(
         (data.employees || []).map((e: any) => ({
           ...e,
+          overtime_rate: 0,
           overtime_amount: 0,
           // Pre-filled from any bonus staged earlier via Bonus & Incentive
           // -> "Stage" (POST /api/payroll/pending-bonuses) for an employee
@@ -289,12 +316,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
     { gross: 0, deductions: 0, net: 0, count: 0 }
   );
 
+  const otTotal = (hours: number, rate: number) => Math.round((Number(hours) || 0) * (Number(rate) || 0) * 100) / 100;
+
   const numInput = (row: WizardRow, key: keyof WizardRow, width = 'w-16') => (
     <input
       type="number"
       value={row[key] as number}
       disabled={!row.included}
-      onChange={(e) => updateRow(row.employee_id, { [key]: Number(e.target.value) } as any)}
+      onChange={(e) => {
+        const v = Number(e.target.value);
+        // OT hours / rate keep the total (hours x rate) in step.
+        if (key === 'overtime_hours') updateRow(row.employee_id, { overtime_hours: v, overtime_amount: otTotal(v, row.overtime_rate) });
+        else if (key === 'overtime_rate') updateRow(row.employee_id, { overtime_rate: v, overtime_amount: otTotal(row.overtime_hours, v) });
+        else updateRow(row.employee_id, { [key]: v } as any);
+      }}
       className={`${width} px-1.5 py-1 text-xs border border-slate-200 rounded-md text-right focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-300`}
     />
   );
@@ -354,7 +389,14 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-xs text-slate-500">
-                    Present/Absent/Leave days for {monthLabel(monthYear)}, auto-filled where attendance data exists — edit any row as needed.
+                    Present/Absent/Leave days for {monthLabel(monthYear)}
+                    {period && (
+                      <span className="font-semibold text-slate-700">
+                        {' '}({new Date(`${period.start}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} –{' '}
+                        {new Date(`${period.end}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})
+                      </span>
+                    )}
+                    , auto-filled where attendance data exists — edit any row as needed.
                   </p>
                   {latePolicy && (
                     <p className="text-[10px] text-slate-400 mt-0.5">
@@ -374,7 +416,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 </button>
               </div>
               {loadingSummary ? (
-                <div className="flex justify-center py-16"><Spinner size={26} /></div>
+                <LoadingBlock />
               ) : summaryError ? (
                 <p className="text-xs text-rose-600 text-center py-16">{summaryError}</p>
               ) : (
@@ -474,7 +516,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     <tr>
                       <th className="px-3 py-2 text-left">Employee</th>
                       <th className="px-3 py-2 text-right">OT Hours</th>
-                      <th className="px-3 py-2 text-right">OT Amount</th>
+                      <th className="px-3 py-2 text-right">OT Amount (per hour)</th>
+                      <th className="px-3 py-2 text-right">Total OT Amount</th>
                       <th className="px-3 py-2 text-right">Bonus / Incentive</th>
                       <th className="px-3 py-2 text-right">Fine / Other Ded.</th>
                       <th className="px-3 py-2 text-left">Remarks</th>
@@ -485,7 +528,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       <tr key={r.employee_id}>
                         <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_hours')}</td>
-                        <td className="px-3 py-2 text-right">{numInput(r, 'overtime_amount', 'w-20')}</td>
+                        <td className="px-3 py-2 text-right">{numInput(r, 'overtime_rate', 'w-20')}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-slate-800" title={`${r.overtime_hours || 0} h × ${r.overtime_rate || 0}`}>
+                          {r.included && r.overtime_amount > 0 ? money(r.overtime_amount) : '—'}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           {numInput(r, 'bonus_amount', 'w-20')}
                           {!!r.pending_bonus_amount && (
@@ -506,7 +552,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     ))}
                     {includedRows.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-3 py-8 text-center text-slate-400">
+                        <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
                           No employees included — go back to Step 2.
                         </td>
                       </tr>
@@ -529,7 +575,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 </button>
               </div>
               {calculating ? (
-                <div className="flex justify-center py-16"><Spinner size={26} /></div>
+                <LoadingBlock />
               ) : previewError ? (
                 <p className="text-xs text-rose-600 text-center py-16">{previewError}</p>
               ) : (
@@ -550,7 +596,37 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           const p = previewResults.get(r.employee_id);
                           return (
                             <tr key={r.employee_id}>
-                              <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
+                              <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">
+                                {r.employee_name}
+                                {p && !p.error && p.payment_split && p.payment_split.length > 0 && (
+                                  <div className="mt-0.5 flex flex-wrap gap-1">
+                                    {p.payment_split.map((s, i) => (
+                                      <span
+                                        key={i}
+                                        title={`${s.account_type === 'mfs' ? s.provider || 'MFS' : s.account_type === 'cash' ? 'Cash' : [s.bank_name, s.branch_name].filter(Boolean).join(' — ')}${s.account_type === 'cash' ? '' : ` · ${s.account_number}`} · ${money(s.amount)}`}
+                                        className="inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700"
+                                      >
+                                        {s.account_label} {s.percentage}%
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {p && !p.error && p.pay_lines && p.pay_lines.length > 0 && (
+                                  <div className="mt-0.5 flex flex-wrap gap-1">
+                                    {p.pay_lines.map((l, i) => (
+                                      <span
+                                        key={i}
+                                        className={`inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full ${
+                                          l.kind === 'earning' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                                        }`}
+                                      >
+                                        {l.name} {l.kind === 'earning' ? '+' : '−'}
+                                        {money(l.amount)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-right">{p && !p.error ? money(p.gross_earned) : '—'}</td>
                               <td className="px-3 py-2 text-right text-rose-600">{p && !p.error ? money(p.total_deduction) : '—'}</td>
                               <td className="px-3 py-2 text-right font-semibold text-slate-900">{p && !p.error ? money(p.net_salary) : '—'}</td>
@@ -579,7 +655,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     </table>
                   </div>
                   <div className="flex items-center gap-2 mt-3">
-                    <label className="text-[11px] text-slate-500">Payment Method</label>
+                    <label className="text-[11px] text-slate-500">Payment Method (for employees with no Bank/MFS split set up)</label>
                     <select
                       value={paymentMethod}
                       onChange={(e) => setPaymentMethod(e.target.value)}
@@ -591,6 +667,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       <option>Cheque</option>
                     </select>
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    An employee with Bank/MFS accounts set up (Admin Panel → Employees → Edit → Payment tab) is always paid out by that
+                    split instead — the badges above show each account's share of Net Salary.
+                  </p>
                 </>
               )}
             </div>
@@ -801,7 +881,7 @@ const LateDaysModal: React.FC<{
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {loading ? (
-            <div className="flex justify-center py-10"><Spinner size={24} /></div>
+            <LoadingBlock />
           ) : error ? (
             <p className="text-xs text-rose-600 text-center py-10">{error}</p>
           ) : days.length === 0 ? (

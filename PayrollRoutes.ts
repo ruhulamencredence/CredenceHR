@@ -38,8 +38,15 @@
 // (Admin Panel -> Users -> Module Access), exactly like every other module.
 
 import type { Express } from "express";
-import { getHolidayMap } from "./holidayRoutes";
+import { createAlert } from "./Alerts";
+import { finalizeAdvanceRequest, rejectAdvanceRequest } from "./LoanRequestRoutes";
+import { monthLocked, lockedMessage, settlePaidPayroll, batchFor } from "./PayrollApprovalRoutes";
+import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
+import { loadRoster, lateThresholds, nightShiftCheckIn } from "./RosterRoutes";
+import { loadSiteEntries } from "./SiteAttendanceRoutes";
+import { activeCompanyId } from "./companyContext";
 import { isMailerConfigured, sendMail } from "./mailer";
+import { computePayLines, savePayLines, loadPayLines } from "./PayrollItemsRoutes";
 
 interface PayrollRouteDeps {
   authenticateToken: any;
@@ -49,6 +56,15 @@ interface PayrollRouteDeps {
   // uses (server.ts) — a Superadmin always passes; an Admin/User needs the
   // 'payroll' key granted via Admin Panel -> Users -> Module Access.
   requireModule: (moduleKey: "payroll") => any;
+  // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
+  // the salary month setting, which needs "salary_month" ticked.
+  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list") => Promise<boolean>;
+  // Attendance Reports' Department-wise scope (null = every Department).
+  getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
+  // The account's granted Admin Panel modules — the Dashboard calendar lets
+  // an 'attendance_reports' holder open their own Department's calendars.
+  getAdminModules: (userId: number) => Promise<string[]>;
 }
 
 // Self-healing migration — same pattern as ensureHolidayCalendarSchema in
@@ -130,6 +146,34 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         UNIQUE KEY unique_employee_month (employee_id, month_year)
       )
     `);
+    // Snapshot of the employee's Payment (Bank/MFS split) accounts AT THE
+    // MOMENT a payroll row was generated — a copy of the relevant
+    // employee_payment_accounts rows plus each one's actual disbursed amount
+    // for this run (net_salary * percentage / 100), never a live reference.
+    // Same "snapshot at creation time" convention as payrolls.basic_amount
+    // etc. themselves: if the employee's split is edited next month, every
+    // past payroll's disbursement record stays exactly as it was actually
+    // paid out. A payroll row with no rows here at all just means that
+    // employee had no split configured — paid out via payrolls.payment_method
+    // as a single disbursement, unchanged legacy behavior.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS payroll_payment_splits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        payroll_id INT NOT NULL,
+        account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank',
+        account_label VARCHAR(100) NOT NULL,
+        bank_name VARCHAR(150) NULL,
+        branch_name VARCHAR(150) NULL,
+        provider VARCHAR(50) NULL,
+        account_number VARCHAR(100) NOT NULL,
+        percentage DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+        amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (payroll_id) REFERENCES payrolls(id) ON DELETE CASCADE
+      )
+    `);
+    // Cash as a third kind next to Bank / MFS (tables made before it existed).
+    await dbPool.query(`ALTER TABLE payroll_payment_splits MODIFY COLUMN account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank'`);
     // ---- Salary Structure Setup: Components & Pay Grades ------------------
     // salary_components — the reusable catalogue of Earning/Deduction line
     // items shown on the "Salary Templates / Components Setup" page (Basic,
@@ -185,7 +229,7 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
       )
     `);
     // ---- Loan/Advance Requests (employee submit -> Admin approve/reject) --
-    // Fills the gap called out in PayrollModule_wiring_notes.md: logs a
+    // Fills the gap called out in docs/changes/PayrollModule_wiring_notes.md: logs a
     // *request* separately from the actual employee_advances row. Approving
     // one INSERTs into employee_advances (advance_id records which row) —
     // rejecting just closes the request out with a remark. Modeled on
@@ -283,6 +327,27 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
          VALUES ('09:00:00', 10, 3, 60, 1, '2000-01-01')`
       );
     }
+    // ---- Salary month ---------------------------------------------------------
+    // salary_month_settings — the day a salary month starts. 1 = the calendar
+    // month; 26 = "26 to 25", where the September salary month runs from
+    // 26 August to 25 September (named after the month it ends in). Same
+    // never-update-in-place history as late_policy_settings: a change inserts
+    // a row with the first salary month it applies to (effective_month), so
+    // re-running an old month keeps that month's own period. A company
+    // setting (companyScope.ts SHARE_KINDS "payroll_setup") — a sister company
+    // may use the mother company's.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS salary_month_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        company_id INT NOT NULL DEFAULT 1,
+        start_day TINYINT NOT NULL DEFAULT 1,
+        effective_month CHAR(7) NOT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_salary_month_company (company_id),
+        INDEX idx_salary_month_effective (effective_month)
+      )
+    `);
     // late_waivers — HR/Admin excusing one specific (employee, date) late
     // mark so it's dropped from that month's late count before the "3 lates =
     // 1 day" threshold is evaluated. A row here means "don't count this day",
@@ -313,6 +378,22 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_days column: " + err.message);
     }
+    // Salary Hold — a held run can't be Processed or marked Paid until it is
+    // released (POST /api/payroll/:id/hold, /release; "salary_hold" layer).
+    for (const [name, def] of [
+      ["is_held", "TINYINT(1) NOT NULL DEFAULT 0"],
+      ["hold_reason", "VARCHAR(255) NULL"],
+      ["held_by", "INT NULL"],
+      ["held_at", "DATETIME NULL"],
+      ["released_by", "INT NULL"],
+      ["released_at", "DATETIME NULL"]
+    ]) {
+      try {
+        await dbPool.query(`ALTER TABLE payrolls ADD COLUMN ${name} ${def}`);
+      } catch (err: any) {
+        if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add payrolls.${name} column: ` + err.message);
+      }
+    }
     try {
       await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_deduction_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00`);
     } catch (err: any) {
@@ -325,15 +406,95 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
 
 const MONTH_YEAR_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-function num(v: any, fallback = 0): number {
+// "YYYY-MM" plus n months.
+function shiftMonthYear(monthYear: string, n: number): string {
+  const [y, m] = monthYear.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// The dates a salary month covers. startDay 1 is the calendar month; any
+// other day D runs from D of the month before to D-1 of the named month
+// (startDay 26: "2026-09" = 2026-08-26 .. 2026-09-25). D is kept to 2..28 so
+// every month has that day.
+export function salaryPeriodFor(monthYear: string, startDay: number): { start: string; end: string; dates: string[] } {
+  const sd = Math.min(28, Math.max(1, Math.round(Number(startDay) || 1)));
+  const [y, m] = monthYear.split("-").map(Number);
+  const startUtc = sd === 1 ? Date.UTC(y, m - 1, 1) : Date.UTC(y, m - 2, sd);
+  const endUtc = sd === 1 ? Date.UTC(y, m, 0) : Date.UTC(y, m - 1, sd - 1);
+  const dates: string[] = [];
+  for (let t = startUtc; t <= endUtc; t += 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
+  return { start: dates[0], end: dates[dates.length - 1], dates };
+}
+
+function num(v: any, fallback: any = 0): number {
   const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+  if (Number.isFinite(n)) return n;
+  // The fallback is often a DECIMAL column, which the pool hands back as a
+  // string ("0.00") — returned as-is it turned PUT /api/payroll/:id's sums
+  // into NaN for every field the request left out.
+  const f = Number(fallback);
+  return Number.isFinite(f) ? f : 0;
+}
+
+// Amounts that only ever add to (or are) a salary line. A negative one would
+// cut the net pay without showing up as a deduction, so it is refused —
+// a cut goes in Other Deduction.
+const NON_NEGATIVE_FIELDS: [string, string][] = [
+  ["overtime_hours", "Overtime hours"],
+  ["overtime_amount", "Overtime amount"],
+  ["bonus_amount", "Bonus"],
+  ["other_deduction", "Other deduction"]
+];
+function negativeAmount(src: any): string | null {
+  for (const [key, label] of NON_NEGATIVE_FIELDS) {
+    const v = src?.[key];
+    if (v !== undefined && v !== null && v !== "" && Number(v) < 0) return `${label} can't be negative — put a cut in Other Deduction instead.`;
+  }
+  return null;
+}
+
+// Ghost-employee control: an inactive employee (resigned, terminated or
+// switched off) is paid only for a month that began before they left — the
+// last month's salary. With no leaving date on record nothing is paid.
+async function inactiveEmployeeBlock(queryDB: (sql: string, params?: any[]) => Promise<any>, employeeId: number, monthYear: string): Promise<string | null> {
+  const rows: any[] = await queryDB(
+    `SELECT is_active, DATE_FORMAT(COALESCE(job_status_effective_date, status_effective_date), '%Y-%m-%d') AS left_on
+       FROM all_employees WHERE id = ?`,
+    [employeeId]
+  );
+  if (!rows.length || Number(rows[0].is_active ?? 1) === 1) return null;
+  const leftOn = rows[0].left_on ? String(rows[0].left_on) : "";
+  if (leftOn && leftOn >= `${monthYear}-01`) return null;
+  return leftOn
+    ? `This employee left on ${leftOn} — there is no salary for ${monthYear}.`
+    : "This employee is inactive. Set their leaving date (Employees → Status) before running a last salary.";
 }
 
 // Rounds to 2 decimals the same way every DECIMAL(10,2) column here stores.
 function money(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
+
+// The attendance a payroll run may be saved with: no more days than the
+// month has working days, counted together, and no more unpaid days
+// (Absent + LWP + Late-policy) than that either — otherwise the run showed
+// e.g. 40 present out of 26 and could cut more pay than the month's salary.
+function payDaysProblem(d: { workingDays: number; present: number; absent: number; leave: number; lwp: number; lateDeductionDays: number }): string | null {
+  if (d.workingDays > 31) return `Working days (${d.workingDays}) can't be more than 31.`;
+  const total = d.present + d.absent + d.leave + d.lwp;
+  if (total > d.workingDays) {
+    return `Present ${d.present} + Absent ${d.absent} + Leave ${d.leave} + LWP ${d.lwp} = ${total} days, more than the ${d.workingDays} working days.`;
+  }
+  const unpaid = d.absent + d.lwp + d.lateDeductionDays;
+  if (unpaid > d.workingDays) {
+    return `Unpaid days (Absent ${d.absent} + LWP ${d.lwp} + Late-policy ${d.lateDeductionDays} = ${unpaid}) are more than the ${d.workingDays} working days.`;
+  }
+  return null;
+}
+
+const negativeNetMessage = (net: number) =>
+  `Deductions are more than the earnings (Net Salary would be ${net}). Check the attendance, advance and deduction figures.`;
 
 // Currency string for the Email Payslip HTML body — same ৳/en-BD formatting
 // PayrollModule.tsx and its panels use on the client.
@@ -342,7 +503,7 @@ function fmtMoney(v: number): string {
 }
 
 // One employee's payslip as an HTML email body — the "Email Payslips" gap
-// called out in PayrollModule_wiring_notes.md. Deliberately a plain HTML
+// called out in docs/changes/PayrollModule_wiring_notes.md. Deliberately a plain HTML
 // table rather than a re-creation of the branded jsPDF letterhead (that
 // PDF is built client-side using the browser's Image/Canvas APIs, which
 // aren't available in this Node server) — the figures are identical, just
@@ -366,7 +527,7 @@ function buildPayslipEmailHtml(record: any): string {
         </tr>
         <tr>
           <td style="${cell}">Basic Salary</td><td style="${cell} text-align:right;">${fmtMoney(record.basic_amount)}</td>
-          <td style="${cell}">Absent / LWP Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.absent_deduction)}</td>
+          <td style="${cell}">Absent / LWP / Late Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.absent_deduction)}</td>
         </tr>
         <tr>
           <td style="${cell}">Allowances</td><td style="${cell} text-align:right;">${fmtMoney(record.allowances_total)}</td>
@@ -380,6 +541,24 @@ function buildPayslipEmailHtml(record: any): string {
           <td style="padding:6px 8px;">Bonus</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.bonus_amount)}</td>
           <td style="padding:6px 8px;">Advance Recovery</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.advance_deduction)}</td>
         </tr>
+        ${(() => {
+          const lines: any[] = Array.isArray(record.pay_lines) ? record.pay_lines : [];
+          const earn = lines.filter((l) => l.kind === "earning");
+          const ded = lines.filter((l) => l.kind === "deduction");
+          const rows = Math.max(earn.length, ded.length);
+          let html = "";
+          for (let i = 0; i < rows; i++) {
+            const e = earn[i];
+            const d = ded[i];
+            html += `<tr>
+          <td style="${cell}">${e ? e.name : ""}</td><td style="${cell} text-align:right;">${e ? fmtMoney(e.amount) : ""}</td>
+          <td style="${cell}">${d ? d.name : ""}</td><td style="${cell} text-align:right;">${d ? fmtMoney(d.amount) : ""}</td>
+        </tr>`;
+          }
+          if (Number(record.other_deduction) > 0)
+            html += `<tr><td style="${cell}"></td><td style="${cell}"></td><td style="${cell}">Other Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.other_deduction)}</td></tr>`;
+          return html;
+        })()}
         <tr style="background:#f1f5f9; font-weight:bold;">
           <td style="padding:6px 8px;">Gross Earned</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.gross_earned)}</td>
           <td style="padding:6px 8px;">Total Deduction</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.total_deduction)}</td>
@@ -395,8 +574,55 @@ function buildPayslipEmailHtml(record: any): string {
   `;
 }
 
+// Leave approved for days whose salary was already processed/paid (e.g. a
+// sick day filed after the payslip went out): those days were cut as Absent,
+// so the cut is paid back with the next salary as an Arrear
+// (salary_adjustments, PayrollItemsRoutes.ts). Set up by
+// registerPayrollRoutes; server.ts's finalizeLeaveApplicationApproval calls
+// it. Returns what it created, for the employee's alert.
+export interface LateLeaveArrear {
+  for_month: string;
+  start_month: string;
+  days: number;
+  amount: number;
+}
+let lateLeaveArrearImpl: ((leaveId: number, actorId: number | null) => Promise<LateLeaveArrear[]>) | null = null;
+export async function arrearForLateLeave(leaveId: number, actorId: number | null): Promise<LateLeaveArrear[]> {
+  return lateLeaveArrearImpl ? lateLeaveArrearImpl(leaveId, actorId) : [];
+}
+export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
+
+const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope } = deps;
+
+  // Builds one employee's payroll disbursement split for a given Net Salary,
+  // from that employee's active employee_payment_accounts rows (Admin Panel
+  // -> Employees -> Edit -> Payment tab). Returns [] when the employee has no
+  // accounts configured — the caller falls back to the run's single global
+  // Payment Method for that employee, unchanged legacy behavior. Each
+  // account's amount is net_salary * percentage / 100, rounded the same way
+  // every other money figure here is (money()); if the accounts don't add up
+  // to exactly 100%, the remainder is simply undistributed (not an error) —
+  // the same "informational, not enforced by generation" spirit as
+  // payment_method itself.
+  async function buildPaymentSplit(employeeId: number, netSalary: number) {
+    const accounts = await queryDB(
+      "SELECT * FROM employee_payment_accounts WHERE employee_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC",
+      [employeeId]
+    );
+    return accounts.map((a: any) => ({
+      account_type: a.account_type,
+      account_label: a.account_label,
+      bank_name: a.bank_name,
+      branch_name: a.branch_name,
+      provider: a.provider,
+      account_number: a.account_number,
+      percentage: Number(a.percentage),
+      amount: money(netSalary * (Number(a.percentage) / 100))
+    }));
+  }
 
   // Self Service -> Payroll landing ping. Kept for the existing frontend
   // call (PayrollModule.tsx) that confirms the module is wired end-to-end;
@@ -553,7 +779,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         `SELECT p.id, p.employee_id, p.month_year, p.total_working_days, p.present_days,
                 p.basic_amount, p.allowances_total, p.tax_deduction, p.pf_deduction,
                 p.advance_deduction, p.other_deduction, p.absent_deduction, p.total_deduction,
-                p.net_salary, p.payment_status,
+                p.net_salary, p.payment_status, p.item_earnings, p.item_deductions, p.is_held, p.hold_reason,
                 e.name AS employee_name, e.employee_id AS employee_code, e.designation, e.department
          FROM payrolls p
          JOIN all_employees e ON e.id = p.employee_id
@@ -577,8 +803,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const structureByEmployee = new Map<number, any>(structureRows.map((s: any) => [s.employee_id, s]));
 
       const records = rows.map((r: any) => {
-        const ratio = num(r.total_working_days) > 0 ? num(r.present_days) / num(r.total_working_days) : 0;
         const structure = structureByEmployee.get(r.employee_id);
+        // Split the run's own allowances_total across the structure's
+        // allowance lines in proportion, so the columns always add up to what
+        // was actually paid (full amounts now; prorated on older runs).
+        const structureAllowances = structure
+          ? num(structure.house_rent) + num(structure.medical_allowance) + num(structure.conveyance_allowance) + num(structure.other_allowance)
+          : 0;
+        const ratio = structureAllowances > 0 ? num(r.allowances_total) / structureAllowances : 0;
         const houseRent = structure ? money(num(structure.house_rent) * ratio) : 0;
         const medicalAllowance = structure ? money(num(structure.medical_allowance) * ratio) : 0;
         const otherAllowance = structure
@@ -599,9 +831,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           tax_deduction: num(r.tax_deduction),
           pf_deduction: num(r.pf_deduction),
           other_deduction: money(num(r.other_deduction) + num(r.advance_deduction) + num(r.absent_deduction)),
+          item_earnings: num(r.item_earnings),
+          item_deductions: num(r.item_deductions),
           total_deduction: num(r.total_deduction),
           net_salary: num(r.net_salary),
-          payment_status: r.payment_status
+          payment_status: r.payment_status,
+          is_held: Number(r.is_held || 0) === 1,
+          hold_reason: r.hold_reason || null
         };
       });
 
@@ -1115,7 +1351,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // ---- Loan/Advance Requests (employee submit -> Admin approve/reject) -----
-  // Fills the gap called out in PayrollModule_wiring_notes.md: an employee
+  // Fills the gap called out in docs/changes/PayrollModule_wiring_notes.md: an employee
   // with a linked login (all_employees.user_id) can submit a request here
   // without needing 'payroll' module access; an Admin with that access then
   // approves it (which creates the real employee_advances row — identical
@@ -1123,41 +1359,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // remark. The existing "New Loan / Advance" flow is unchanged — an Admin
   // can still log one directly with no request step, exactly as before.
 
-  app.post("/api/user-advance-requests", authenticateToken, async (req: any, res) => {
-    try {
-      const empRows = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [req.user.id]);
-      if (empRows.length === 0) {
-        return res.status(400).json({ error: "Your account isn't linked to an Employee Directory record, so a loan/advance request can't be submitted." });
-      }
-      const employeeId = empRows[0].id;
-      const total = num(req.body?.total_amount);
-      const installment = num(req.body?.monthly_installment);
-      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : null;
-      if (total <= 0) return res.status(400).json({ error: "Total Amount must be a positive number." });
-      if (installment <= 0) return res.status(400).json({ error: "Monthly Installment must be a positive number." });
-      if (installment > total) return res.status(400).json({ error: "Monthly Installment can't be more than the Total Amount." });
-
-      const result = await queryDB(
-        `INSERT INTO advance_requests (employee_id, total_amount, monthly_installment, reason, requested_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [employeeId, total, installment, reason, req.user.id]
-      );
-      res.json({ success: true, id: result.insertId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to submit request." });
-    }
-  });
-
-  app.get("/api/user-advance-requests/mine", authenticateToken, async (req: any, res) => {
-    try {
-      const empRows = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [req.user.id]);
-      if (empRows.length === 0) return res.json([]);
-      const rows = await queryDB("SELECT * FROM advance_requests WHERE employee_id = ? ORDER BY created_at DESC", [empRows[0].id]);
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // The employee's own side (apply, follow, cancel) is LoanRequestRoutes.ts
+  // (/api/my-loans, behind users.can_view_loan_request).
 
   app.get("/api/payroll/advance-requests", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
@@ -1183,39 +1386,28 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // A Payroll holder's decision. A request still inside its approval
+  // chain (chain_status 'in_progress') is decided there first.
   app.post("/api/payroll/advance-requests/:id/decision", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM advance_requests WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Request not found." });
       const request = rows[0];
       if (request.status !== "pending") return res.status(400).json({ error: "This request has already been decided." });
-
+      if (request.chain_status === "in_progress") {
+        return res.status(400).json({ error: "This request is still with its approvers (Approve Applications) — it comes here once they approve it." });
+      }
       const action = req.body?.action;
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 255) : null;
-
       if (action === "reject") {
-        await queryDB(
-          "UPDATE advance_requests SET status = 'rejected', decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP WHERE id = ?",
-          [req.user.id, remarks, req.params.id]
-        );
+        await rejectAdvanceRequest(queryDB, createAlert, Number(request.id), req.user.id, remarks);
         return res.json({ success: true, status: "rejected" });
       }
       if (action !== "approve") return res.status(400).json({ error: "action must be 'approve' or 'reject'." });
-
-      const total = Number(request.total_amount);
-      const installment = Number(request.monthly_installment);
-      const result = await queryDB(
-        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [request.employee_id, total, installment, request.reason, req.user.id]
-      );
-      await queryDB(
-        "UPDATE advance_requests SET status = 'approved', decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP, advance_id = ? WHERE id = ?",
-        [req.user.id, remarks, result.insertId, req.params.id]
-      );
-      res.json({ success: true, status: "approved", advance_id: result.insertId });
+      const made = await finalizeAdvanceRequest(queryDB, createAlert, Number(request.id), req.user.id, remarks);
+      res.json({ success: true, status: "approved", advance_id: made.advance_id });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to record the decision." });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to record the decision." });
     }
   });
 
@@ -1318,9 +1510,122 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
          ORDER BY p.month_year DESC, e.name ASC`,
         params
       );
-      res.json(rows);
+      const lines = await loadPayLines(queryDB, rows.map((r: any) => Number(r.id)));
+      res.json(rows.map((r: any) => ({ ...r, pay_lines: lines.get(Number(r.id)) || [] })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Whether this account may hold / release salaries (Payroll -> "Salary
+  // Hold / Release" layer). Registered before GET /api/payroll/:id.
+  app.get("/api/payroll/hold-access", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      res.json({ can_hold: await hasModuleLayer(req.user, "payroll", "salary_hold") });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Hold one employee's salary for a month: the run stays on the list (and
+  // its payslip), but can't be Processed or marked Paid until released.
+  app.post("/api/payroll/:id/hold", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_hold"), async (req: any, res) => {
+    try {
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : "";
+      if (!reason) return res.status(400).json({ error: "Write the reason for holding this salary." });
+      const rows = await queryDB("SELECT id, payment_status, is_held FROM payrolls WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
+      if (rows[0].payment_status === "paid") return res.status(400).json({ error: "A Paid salary can't be held." });
+      await queryDB(
+        "UPDATE payrolls SET is_held = 1, hold_reason = ?, held_by = ?, held_at = NOW(), released_by = NULL, released_at = NULL WHERE id = ?",
+        [reason, req.user.id, req.params.id]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/payroll/:id/release", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_hold"), async (req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT id, is_held FROM payrolls WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
+      if (!Number(rows[0].is_held)) return res.status(400).json({ error: "This salary isn't on hold." });
+      await queryDB("UPDATE payrolls SET is_held = 0, released_by = ?, released_at = NOW() WHERE id = ?", [req.user.id, req.params.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET current policy + full change history (newest first) for the Settings
+  // screen — one call gives the form its defaults and the table its rows.
+  // Registered BEFORE /api/payroll/:id below: Express matches GET routes in
+  // registration order, and :id matches any single path segment — including
+  // the literal string "late-policy" — so this route must come first or
+  // every call here 404s as "Payroll record not found" (the :id handler's
+  // own not-found message), which is exactly what happened until this was
+  // moved: AdminDashboard.tsx's safeGet swallowed the 404 silently, so
+  // Quick View's Delay/Extreme Delay badges silently stayed "—" for
+  // everyone, Superadmin included, not just a module-granted account.
+  app.get("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const rows = await queryDB(
+        `SELECT lp.*, u.name AS changed_by_name
+         FROM late_policy_settings lp LEFT JOIN users u ON u.id = lp.created_by
+         ORDER BY lp.effective_date DESC, lp.id DESC`
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load late policy history." });
+    }
+  });
+
+  // ---- Salary month setting (Payroll -> Salary Structure Setup) -------------
+  // GET: the start day in force now, the current salary month and its dates,
+  // and the change history. Anyone with Payroll can read it.
+  app.get("/api/payroll/salary-month", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const current = await salaryMonthOf(today);
+      const period = await getSalaryPeriod(current);
+      const history = await queryDB(
+        `SELECT s.id, s.start_day, s.effective_month, s.created_at, u.name AS changed_by_name
+         FROM salary_month_settings s LEFT JOIN users u ON u.id = s.created_by
+         ORDER BY s.effective_month DESC, s.id DESC`
+      );
+      res.json({
+        can_edit: await hasModuleLayer(req.user, "payroll", "salary_month"),
+        start_day: period.startDay,
+        current_month: current,
+        current_period: { start: period.start, end: period.end, days: period.dates.length },
+        history
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the salary month setting." });
+    }
+  });
+
+  // POST { start_day: 1-28, effective_month: "YYYY-MM" } — from that salary
+  // month on, a month runs from start_day of the month before to the day
+  // before start_day (1 = calendar month). Needs Payroll's "Salary Month
+  // Setting" layer (server.ts PAYROLL_LAYER_KEYS).
+  app.post("/api/payroll/salary-month", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_month"), async (req: any, res) => {
+    try {
+      const startDay = Math.round(num(req.body?.start_day, NaN));
+      const effectiveMonth = typeof req.body?.effective_month === "string" ? req.body.effective_month.trim() : "";
+      if (!Number.isFinite(startDay) || startDay < 1 || startDay > 28) {
+        return res.status(400).json({ error: "The start day must be between 1 and 28." });
+      }
+      if (!MONTH_YEAR_RE.test(effectiveMonth)) return res.status(400).json({ error: "Pick the first salary month it applies to." });
+      const result = await queryDB(
+        "INSERT INTO salary_month_settings (start_day, effective_month, created_by) VALUES (?, ?, ?)",
+        [startDay, effectiveMonth, req.user.id]
+      );
+      const period = await getSalaryPeriod(effectiveMonth);
+      res.json({ success: true, id: result.insertId, period: { start: period.start, end: period.end, days: period.dates.length } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to save the salary month setting." });
     }
   });
 
@@ -1334,20 +1639,38 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [req.params.id]
       );
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
-      res.json(rows[0]);
+      // The Bank/MFS split snapshot taken when this row was generated (see
+      // buildPaymentSplit/generate-bulk) — [] for a run predating this
+      // feature, or one where the employee had no split configured.
+      const splitRows = await queryDB("SELECT * FROM payroll_payment_splits WHERE payroll_id = ?", [req.params.id]);
+      const lines = await loadPayLines(queryDB, [Number(rows[0].id)]);
+      res.json({
+        ...rows[0],
+        pay_lines: lines.get(Number(rows[0].id)) || [],
+        payment_split: splitRows.map((s: any) => ({ ...s, percentage: Number(s.percentage), amount: Number(s.amount) }))
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // ---- Email Payslips -------------------------------------------------------
-  // Fills the "Email Payslips" gap called out in PayrollModule_wiring_notes.md
+  // Fills the "Email Payslips" gap called out in docs/changes/PayrollModule_wiring_notes.md
   // for PayslipManagementPanel.tsx. Sends the payslip figures as an HTML
   // email (buildPayslipEmailHtml above) via the shared SMTP mailer
   // (mailer.ts) to the employee's Employee Directory email (falling back to
   // their personal email) — nothing sends if SMTP_* isn't configured in .env,
   // and that's reported back as a normal { error } response rather than a
   // silent failure.
+
+  function payslipPdfAttachment(b64: any, record: any): { filename: string; content: Buffer; contentType: string } | { error: string } | null {
+    if (!b64) return null;
+    const content = Buffer.from(String(b64).replace(/^data:[^,]*,/, ""), "base64");
+    if (content.subarray(0, 5).toString("latin1") !== "%PDF-") return { error: "The payslip PDF is not a valid PDF." };
+    if (content.length > 5 * 1024 * 1024) return { error: "The payslip PDF is too big." };
+    const name = String(record.employee_name || "Employee").replace(/[^\w]+/g, "_");
+    return { filename: `Payslip_${name}_${record.month_year}.pdf`, content, contentType: "application/pdf" };
+  }
 
   app.post("/api/payroll/:id/email", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
@@ -1359,12 +1682,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       const record = rows[0];
+      record.pay_lines = (await loadPayLines(queryDB, [Number(record.id)])).get(Number(record.id)) || [];
       const to = record.employee_email || record.employee_personal_email;
       if (!to) return res.status(400).json({ error: `${record.employee_name} has no email on file in the Employee Directory.` });
 
-      const result = await sendMail({ to, subject: `Payslip — ${record.month_year}`, html: buildPayslipEmailHtml(record) });
+      // The payslip PDF the browser built (lib/payslipPdf.ts — the same file
+      // as Payroll -> Payslips -> PDF), attached when sent.
+      const pdf = payslipPdfAttachment(req.body?.pdf_base64, record);
+      if (pdf && "error" in pdf) return res.status(400).json({ error: pdf.error });
+      const result = await sendMail({ to, subject: `Payslip — ${record.month_year}`, html: buildPayslipEmailHtml(record), attachments: pdf && !("error" in pdf) ? [pdf] : undefined });
       if (!result.success) return res.status(400).json({ error: result.error });
-      res.json({ success: true });
+      res.json({ success: true, to, attached: !!pdf });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to email payslip." });
     }
@@ -1384,7 +1712,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [monthYear]
       );
       const results: any[] = [];
+      const linesByRun = await loadPayLines(queryDB, rows.map((r: any) => Number(r.id)));
       for (const record of rows) {
+        record.pay_lines = linesByRun.get(Number(record.id)) || [];
         const to = record.employee_email || record.employee_personal_email;
         if (!to) {
           results.push({ employee_id: record.employee_id, employee_name: record.employee_name, success: false, error: "No email on file." });
@@ -1404,6 +1734,95 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // given month (most recent effective_date on or before that month's 1st) —
   // same "look back to what was true then" resolution salary_structures uses,
   // so re-running payroll math for an old month never picks up today's policy.
+  // ---- Salary month helpers -------------------------------------------------
+  // Start day in force for a salary month (latest setting whose
+  // effective_month is on or before it); 1 = calendar month when none is set.
+  async function getSalaryMonthStartDay(monthYear: string): Promise<number> {
+    const rows = await queryDB(
+      "SELECT start_day FROM salary_month_settings WHERE effective_month <= ? ORDER BY effective_month DESC, id DESC LIMIT 1",
+      [monthYear]
+    );
+    return Math.min(28, Math.max(1, Number(rows?.[0]?.start_day) || 1));
+  }
+  // A salary month always starts the day after the previous one ended, so
+  // the month a new start day takes effect is a one-off shorter (or longer)
+  // month — e.g. calendar months until August, then a 26th start from
+  // September: August is 1–31 Aug and September 1–25 Sep — and no day is
+  // ever counted in two salary months or in none.
+  async function getSalaryPeriod(monthYear: string) {
+    const startDay = await getSalaryMonthStartDay(monthYear);
+    const own = salaryPeriodFor(monthYear, startDay);
+    const prev = shiftMonthYear(monthYear, -1);
+    const prevEnd = salaryPeriodFor(prev, await getSalaryMonthStartDay(prev)).end;
+    const startUtc = Date.parse(`${prevEnd}T00:00:00Z`) + 86400000;
+    const endUtc = Date.parse(`${own.end}T00:00:00Z`);
+    const dates: string[] = [];
+    for (let t = startUtc; t <= endUtc; t += 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
+    return { startDay, start: dates[0], end: own.end, dates };
+  }
+  // The salary month a date falls in: with a 26th start, 26 Sep belongs to
+  // the October salary month.
+  async function salaryMonthOf(dateStr: string): Promise<string> {
+    const calMonth = dateStr.slice(0, 7);
+    for (const m of [calMonth, shiftMonthYear(calMonth, 1)]) {
+      const p = await getSalaryPeriod(m);
+      if (p.start <= dateStr && dateStr <= p.end) return m;
+    }
+    return calMonth;
+  }
+
+  // See arrearForLateLeave above. Per salary month the leave touches whose
+  // run is already Processed/Paid: the leave's days in that month (counted
+  // the way payroll counts leave), at most the days that run cut as
+  // Absent/LWP less what earlier late leaves already gave back, priced at
+  // that run's own per-day gross. Settled in the first month after it that
+  // has no Processed/Paid run yet, in one go.
+  lateLeaveArrearImpl = async (leaveId, actorId) => {
+    const rows: any[] = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
+    const leave = rows.find((r: any) => Number(r.id) === leaveId);
+    if (!leave || leave.status !== "approved" || leave.leave_type === "without_pay") return [];
+    const emps: any[] = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [Number(leave.user_id)]);
+    const employeeId = Number(emps[0]?.id || 0);
+    if (!employeeId) return [];
+    const from = String(leave.start_date).slice(0, 10);
+    const to = String(leave.end_date).slice(0, 10);
+    const runs: any[] = await queryDB("SELECT * FROM payrolls WHERE employee_id = ?", [employeeId]);
+    const closed = new Set(runs.filter((r: any) => r.payment_status === "processed" || r.payment_status === "paid").map((r: any) => String(r.month_year)));
+    const made: LateLeaveArrear[] = [];
+    const firstMonth = await salaryMonthOf(from);
+    const lastMonth = await salaryMonthOf(to);
+    for (let m = firstMonth; m <= lastMonth; m = shiftMonthYear(m, 1)) {
+      const run = runs.find((r: any) => String(r.month_year) === m && (r.payment_status === "processed" || r.payment_status === "paid"));
+      if (!run) continue;
+      const p = await getSalaryPeriod(m);
+      const s = from > p.start ? from : p.start;
+      const e = to < p.end ? to : p.end;
+      const leaveDays = Math.max(0, Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1);
+      const workingDays = Math.max(1, Number(run.total_working_days) || 1);
+      const perDay = (num(run.basic_amount) + num(run.allowances_total)) / workingDays;
+      if (!(perDay > 0) || leaveDays <= 0) continue;
+      const earlier: any[] = await queryDB("SELECT * FROM salary_adjustments WHERE employee_id = ? AND kind = 'arrear' AND for_month = ?", [employeeId, m]);
+      const mine = earlier.filter((a: any) => a.status !== "cancelled" && String(a.reason || "").startsWith(LATE_LEAVE_ARREAR_PREFIX));
+      if (mine.some((a: any) => String(a.reason || "").includes(`#${leaveId})`))) continue;
+      const alreadyBack = mine.reduce((t: number, a: any) => t + num(a.total_amount), 0);
+      const cutDays = Math.max(0, Math.round(num(run.absent_days)) + Math.round(num(run.lwp_days)));
+      const room = money(perDay * cutDays - alreadyBack);
+      const amount = Math.min(money(perDay * leaveDays), room);
+      if (!(amount > 0)) continue;
+      const days = Math.round((amount / perDay) * 100) / 100;
+      let start = shiftMonthYear(m, 1);
+      while (closed.has(start)) start = shiftMonthYear(start, 1);
+      const reason = `${LATE_LEAVE_ARREAR_PREFIX}: ${from === to ? from : `${from} to ${to}`} (${days} day${days === 1 ? "" : "s"}, leave #${leaveId})`;
+      await queryDB(
+        `INSERT INTO salary_adjustments (employee_id, kind, for_month, total_amount, installment_amount, start_month, reason, status, created_by)
+         VALUES (?, 'arrear', ?, ?, ?, ?, ?, 'active', ?)`,
+        [employeeId, m, amount, amount, start, reason.slice(0, 500), actorId]
+      );
+      made.push({ for_month: m, start_month: start, days, amount });
+    }
+    return made;
+  };
+
   async function getLatePolicyForMonth(monthYear: string) {
     const rows = await queryDB(
       `SELECT * FROM late_policy_settings WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1`,
@@ -1439,12 +1858,33 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     employees: any[],
     monthStart: string,
     monthEnd: string,
-    holidayMap: Map<string, any>,
+    holidayMapsByGroup: Record<HolidayAppliesTo, Map<string, any>>,
+    branchTypeByUserId: Map<number, HolidayAppliesTo>,
     policy: any,
     excludeWaivers: boolean = true
   ): Promise<{ lateDatesByEmployee: Map<number, string[]>; extremeLateDatesByEmployee: Map<number, string[]> }> {
+    const userIdToEmployeeId = new Map<number, number>();
+    for (const e of employees) {
+      if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
+    }
+    // Duty Roster (RosterRoutes.ts): an Off day is never late, a rostered
+    // shift is a working day even on a calendar Weekend/Holiday, and late is
+    // measured from that shift's own start time.
+    const roster = await loadRoster(queryDB, monthStart, monthEnd, employees.map((e: any) => Number(e.id)));
+    // Head Office and Project-site Employees can each have their own
+    // Weekend/Holiday calendar — a date late-marked for one group can be an
+    // ordinary working day for the other, so "is this date a holiday" is
+    // resolved per-user, never off one shared map.
+    const isHolidayForUser = (userId: number, dateStr: string) => {
+      const base = holidayMapsByGroup[branchTypeByUserId.get(userId) || "head_office"];
+      const employeeId = userIdToEmployeeId.get(userId);
+      return !!(employeeId ? roster.holidaysFor(employeeId, base) : base).get(dateStr);
+    };
+
     const userIds = employees.filter((e: any) => e.user_id).map((e: any) => Number(e.user_id));
     const firstCheckInByUserDate = new Map<number, Map<string, Date>>();
+    // Remote check-ins kept on their own as well, for night shifts below.
+    const remoteFirstByUserDate = new Map<number, Map<string, Date>>();
 
     if (userIds.length > 0) {
       const placeholders = userIds.map(() => "?").join(",");
@@ -1457,9 +1897,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       for (const r of remoteRows) {
         const dateStr = String(r.attendance_date).slice(0, 10);
-        if (holidayMap.has(dateStr)) continue;
+        if (isHolidayForUser(Number(r.user_id), dateStr)) continue;
         if (!firstCheckInByUserDate.has(r.user_id)) firstCheckInByUserDate.set(r.user_id, new Map());
         firstCheckInByUserDate.get(r.user_id)!.set(dateStr, new Date(r.first_check_in));
+        if (!remoteFirstByUserDate.has(Number(r.user_id))) remoteFirstByUserDate.set(Number(r.user_id), new Map());
+        remoteFirstByUserDate.get(Number(r.user_id))!.set(dateStr, new Date(r.first_check_in));
       }
 
       const pinToUserId = new Map<string, number>();
@@ -1477,14 +1919,53 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of officeRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
           const userId = pinToUserId.get(r.device_user_pin);
           if (!userId) continue;
+          if (isHolidayForUser(userId, dateStr)) continue;
           const punchTime = new Date(r.first_punch);
           if (!firstCheckInByUserDate.has(userId)) firstCheckInByUserDate.set(userId, new Map());
           const existing = firstCheckInByUserDate.get(userId)!.get(dateStr);
           // Keep whichever source's check-in was earlier that day.
           if (!existing || punchTime < existing) firstCheckInByUserDate.get(userId)!.set(dateStr, punchTime);
+        }
+
+        // Night shifts: the first punch of such a date is usually the
+        // previous night's check-out, so the arrival is re-read from that
+        // date's punches near the shift's start (nightShiftCheckIn).
+        const nightPins = pins.filter((pin) => {
+          const employeeId = userIdToEmployeeId.get(pinToUserId.get(pin)!);
+          if (!employeeId) return false;
+          for (const d of roster.daysOf(employeeId).values()) if (d.shift?.crosses_midnight) return true;
+          return false;
+        });
+        if (nightPins.length) {
+          const punchRows = await queryDB(
+            `SELECT device_user_pin, punch_time FROM zk_attendance_logs
+             WHERE DATE(punch_time) BETWEEN ? AND ? AND device_user_pin IN (${nightPins.map(() => "?").join(",")})`,
+            [monthStart, monthEnd, ...nightPins]
+          );
+          const punchesByUserDate = new Map<string, Date[]>();
+          for (const r of punchRows) {
+            const userId = pinToUserId.get(r.device_user_pin);
+            if (!userId) continue;
+            const t = new Date(r.punch_time);
+            const key = `${userId}|${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+            if (!punchesByUserDate.has(key)) punchesByUserDate.set(key, []);
+            punchesByUserDate.get(key)!.push(t);
+          }
+          for (const pin of nightPins) {
+            const userId = pinToUserId.get(pin)!;
+            const employeeId = userIdToEmployeeId.get(userId)!;
+            for (const [dateStr, d] of roster.daysOf(employeeId)) {
+              if (!d.shift?.crosses_midnight || dateStr < monthStart || dateStr > monthEnd) continue;
+              const office = nightShiftCheckIn(punchesByUserDate.get(`${userId}|${dateStr}`) || [], d.shift);
+              const remote = remoteFirstByUserDate.get(userId)?.get(dateStr) || null;
+              const arrival = office && remote ? (office < remote ? office : remote) : office || remote;
+              if (!firstCheckInByUserDate.has(userId)) firstCheckInByUserDate.set(userId, new Map());
+              if (arrival) firstCheckInByUserDate.get(userId)!.set(dateStr, arrival);
+              else firstCheckInByUserDate.get(userId)!.delete(dateStr);
+            }
+          }
         }
       }
     }
@@ -1502,27 +1983,44 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       waivedKeys = new Set<string>(waiverRows.map((w: any) => `${w.employee_id}_${String(w.waiver_date).slice(0, 10)}`));
     }
 
-    const [startH, startM] = String(policy.shift_start_time).split(":").map(Number);
-    const thresholdMinutes = startH * 60 + startM + Number(policy.grace_minutes);
-    const extremeThresholdMinutes = startH * 60 + startM + Number(policy.extreme_grace_minutes ?? 60);
-
-    const userIdToEmployeeId = new Map<number, number>();
-    for (const e of employees) {
-      if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
+    // Re-keyed by Employee, so Site Attendance (supervisor muster roll —
+    // Employees who may have no login at all) can join in: a Late / Present
+    // entry with an arrival time counts like any other first check-in.
+    const firstCheckInByEmployeeDate = new Map<number, Map<string, Date>>();
+    for (const [userId, dateMap] of firstCheckInByUserDate.entries()) {
+      const employeeId = userIdToEmployeeId.get(userId);
+      if (employeeId) firstCheckInByEmployeeDate.set(employeeId, new Map(dateMap));
+    }
+    const employeeIds = new Set<number>(employees.map((e: any) => Number(e.id)));
+    const siteEntries = (await loadSiteEntries(queryDB, monthStart, monthEnd)).filter(
+      (r: any) => employeeIds.has(Number(r.employee_id)) && r.in_time && (r.status === "late" || r.status === "present")
+    );
+    if (siteEntries.length) {
+      const groupByEmployee = await getEmployeeBranchTypeByEmployeeId(queryDB);
+      for (const r of siteEntries) {
+        const employeeId = Number(r.employee_id);
+        const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
+        if (roster.holidaysFor(employeeId, holidayMapsByGroup[groupByEmployee.get(employeeId) || "head_office"]).get(dateStr)) continue;
+        const at = new Date(`${dateStr}T${String(r.in_time).slice(0, 5)}:00`);
+        if (!firstCheckInByEmployeeDate.has(employeeId)) firstCheckInByEmployeeDate.set(employeeId, new Map());
+        const existing = firstCheckInByEmployeeDate.get(employeeId)!.get(dateStr);
+        if (!existing || at < existing) firstCheckInByEmployeeDate.get(employeeId)!.set(dateStr, at);
+      }
     }
 
     const lateDatesByEmployee = new Map<number, string[]>();
     const extremeLateDatesByEmployee = new Map<number, string[]>();
-    for (const [userId, dateMap] of firstCheckInByUserDate.entries()) {
-      const employeeId = userIdToEmployeeId.get(userId);
-      if (!employeeId) continue;
+    for (const [employeeId, dateMap] of firstCheckInByEmployeeDate.entries()) {
       for (const [dateStr, checkInAt] of dateMap.entries()) {
         if (waivedKeys.has(`${employeeId}_${dateStr}`)) continue;
+        // The rostered shift's start (and grace) when there is one, else the
+        // Late Attendance Policy's.
+        const th = lateThresholds(policy, roster.shiftOn(employeeId, dateStr));
         const minutesOfDay = checkInAt.getHours() * 60 + checkInAt.getMinutes();
-        if (minutesOfDay > extremeThresholdMinutes) {
+        if (minutesOfDay > th.extreme) {
           if (!extremeLateDatesByEmployee.has(employeeId)) extremeLateDatesByEmployee.set(employeeId, []);
           extremeLateDatesByEmployee.get(employeeId)!.push(dateStr);
-        } else if (minutesOfDay > thresholdMinutes) {
+        } else if (minutesOfDay > th.delay) {
           if (!lateDatesByEmployee.has(employeeId)) lateDatesByEmployee.set(employeeId, []);
           lateDatesByEmployee.get(employeeId)!.push(dateStr);
         }
@@ -1532,21 +2030,6 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     for (const dates of extremeLateDatesByEmployee.values()) dates.sort();
     return { lateDatesByEmployee, extremeLateDatesByEmployee };
   }
-
-  // GET current policy + full change history (newest first) for the Settings
-  // screen — one call gives the form its defaults and the table its rows.
-  app.get("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
-    try {
-      const rows = await queryDB(
-        `SELECT lp.*, u.name AS changed_by_name
-         FROM late_policy_settings lp LEFT JOIN users u ON u.id = lp.created_by
-         ORDER BY lp.effective_date DESC, lp.id DESC`
-      );
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load late policy history." });
-    }
-  });
 
   // POST always INSERTs a new row (history preserved) rather than updating
   // the existing one in place — identical reasoning to salary_structures: a
@@ -1605,10 +2088,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const employeeId = Number(req.params.employeeId);
       const requested = req.query.month_year ? String(req.query.month_year) : "";
       const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
       const empRows = await queryDB(
         "SELECT id, name, employee_id AS employee_code, user_id, zk_device_pin FROM all_employees WHERE id = ?",
@@ -1616,7 +2100,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
       const policy = await getLatePolicyForMonth(monthYear);
 
       // Reuse the same computation but unwaived (pass no waivers) so this
@@ -1629,7 +2114,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
 
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        [empRows[0]], monthStart, monthEnd, holidayMap, policy, false
+        [empRows[0]], monthStart, monthEnd, holidayMapsByGroup, branchTypeByUserId, policy, false
       );
       const rawLateDates: string[] = lateDatesByEmployee.get(employeeId) || [];
       const rawExtremeLateDates: string[] = extremeLateDatesByEmployee.get(employeeId) || [];
@@ -1654,6 +2139,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       res.json({
         employee_id: employeeId,
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         policy: {
           shift_start_time: policy.shift_start_time,
           grace_minutes: policy.grace_minutes,
@@ -1690,14 +2177,19 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   app.get("/api/my-attendance-summary", authenticateToken, async (req: any, res) => {
     try {
       const requested = req.query.month_year ? String(req.query.month_year) : "";
-      const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // Default: the salary month today falls in (with a 26th start, 26 Sep
+      // onwards is already the October salary month).
+      const monthYear = MONTH_YEAR_RE.test(requested)
+        ? requested
+        : await salaryMonthOf(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }));
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
       const empRows = await queryDB(
-        "SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1",
+        "SELECT id, user_id, zk_device_pin, joining_date FROM all_employees WHERE user_id = ? LIMIT 1",
         [req.user.id]
       );
       // No Employee record is linked to this login, so there's no payroll
@@ -1706,8 +2198,21 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (empRows.length === 0) return res.json({ linked: false, month_year: monthYear });
       const employee = empRows[0];
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
-      const workingDays = Math.max(1, daysInMonth - holidayMap.size);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, Number(employee.user_id));
+      const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
+      // This person's calendar with their Duty Roster laid over it (an Off
+      // day is not a working day; a rostered shift on a Weekend is).
+      const holidayMap = (await loadRoster(queryDB, monthStart, monthEnd, [Number(employee.id)])).holidaysFor(Number(employee.id), await getHolidayMap(queryDB, monthStart, monthEnd, myGroup));
+      // Days before this person's Joining Date aren't theirs to attend — they
+      // count as neither working days nor Absent, so someone who joins on the
+      // 28th doesn't open their dashboard to 27 days "absent".
+      const joiningDate = employee.joining_date ? String(employee.joining_date).slice(0, 10) : null;
+      const isWorkingDay = (dateStr: string) => !holidayMap.has(dateStr) && (!joiningDate || dateStr >= joiningDate);
+      let workingDays = 0;
+      for (const dateStr of period.dates) {
+        if (isWorkingDay(dateStr)) workingDays++;
+      }
+      if (!joiningDate) workingDays = Math.max(1, workingDays);
 
       // Present days — the same two sources the payroll wizard reads: Remote
       // Attendance check-ins, plus Office (ZKTeco) punches for any day with no
@@ -1743,18 +2248,24 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
          WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?`,
         [employee.user_id, monthEnd, monthStart]
       );
+      // Only working days without attendance count as leave (a Friday or
+      // holiday inside the leave isn't a working day lost) — same rule as
+      // the payroll wizard's attendance summary.
+      const leaveDates = new Set<string>();
       for (const l of leaveRows) {
-        const rawStart = String(l.start_date).slice(0, 10);
-        const rawEnd = String(l.end_date).slice(0, 10);
-        const start = rawStart < monthStart ? monthStart : rawStart;
-        const end = rawEnd > monthEnd ? monthEnd : rawEnd;
-        leaveDays += Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
+        const start = String(l.start_date).slice(0, 10);
+        const end = String(l.end_date).slice(0, 10);
+        for (const d of period.dates) if (d >= start && d <= end && !holidayMap.has(d) && !presentDays.has(d)) leaveDates.add(d);
       }
-      leaveDays = Math.min(workingDays, leaveDays);
+      leaveDays = Math.min(workingDays, leaveDates.size);
 
       const policy = await getLatePolicyForMonth(monthYear);
+      // Single-employee call — both Record keys point at the same
+      // already-myGroup-scoped holidayMap above, since whichever one
+      // computeLateDatesByEmployee's internal per-user lookup picks for
+      // this one employee resolves to the correct map either way.
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        [employee], monthStart, monthEnd, holidayMap, policy
+        [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
       );
       // Keyed by Number(e.id) inside computeLateDatesByEmployee, so look it up
       // the same way rather than with whatever type the driver handed back.
@@ -1774,21 +2285,31 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       let workingDaysSoFar = workingDays;
       if (today >= monthStart && today <= monthEnd) {
         let elapsed = 0;
-        for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
+        for (const dateStr of period.dates) {
           if (dateStr > today) break;
-          if (!holidayMap.has(dateStr)) elapsed++;
+          if (isWorkingDay(dateStr)) elapsed++;
         }
-        workingDaysSoFar = Math.max(1, elapsed);
+        workingDaysSoFar = joiningDate ? elapsed : Math.max(1, elapsed);
       }
+
+      // Absence — working days elapsed so far, minus days actually present
+      // and days on approved Leave. A Delay/Extreme Delay day still counts as
+      // present (it's a late check-in, not a missed day), so this is purely
+      // "didn't show up and wasn't on approved Leave," floored at 0 since a
+      // day recorded as both present and on Leave (edge case) shouldn't go
+      // negative.
+      const absentDays = Math.max(0, workingDaysSoFar - presentDays.size - leaveDays);
 
       res.json({
         linked: true,
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         working_days: workingDays,
         working_days_so_far: workingDaysSoFar,
         present_days: presentDays.size,
         leave_days: leaveDays,
+        absent_days: absentDays,
         late_count: lateCount,
         late_deduction_days: Math.floor(lateCount / latesPerDay),
         extreme_late_count: extremeLateCount,
@@ -1803,6 +2324,224 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load your attendance summary." });
+    }
+  });
+
+  // Self Service -> Timesheet: which of this account's own days in
+  // [from, to] were a Delay or an Extreme Delay, using the same per-month
+  // late policy, holiday calendar, office punches and waivers the payroll
+  // wizard and the month summary above use. Returns { "YYYY-MM-DD": "delay" |
+  // "extreme" }; days that weren't late are simply absent from the map.
+  app.get("/api/my-late-days", authenticateToken, async (req: any, res) => {
+    try {
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const from = String(req.query.from || "");
+      const to = String(req.query.to || "");
+      if (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to) {
+        return res.status(400).json({ error: "from and to must be YYYY-MM-DD dates, from on or before to." });
+      }
+      const empRows = await queryDB("SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+      if (empRows.length === 0) return res.json({ linked: false, days: {} });
+      const employee = empRows[0];
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, Number(employee.user_id));
+      const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
+
+      const days: Record<string, "delay" | "extreme"> = {};
+      // Policy can change month to month, so resolve each salary month on its
+      // own (capped at 14 — the Timesheet range is at most a year).
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 14; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const monthStart = period.start < from ? from : period.start;
+        const monthEnd = period.end > to ? to : period.end;
+        const holidayMap = (await loadRoster(queryDB, monthStart, monthEnd, [Number(employee.id)])).holidaysFor(Number(employee.id), await getHolidayMap(queryDB, monthStart, monthEnd, myGroup));
+        const policy = await getLatePolicyForMonth(monthYear);
+        const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+          [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
+        );
+        for (const d of lateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "delay";
+        for (const d of extremeLateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "extreme";
+        monthYear = shiftMonthYear(monthYear, 1);
+      }
+      res.json({ linked: true, days });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load your late days." });
+    }
+  });
+
+  // Attendance Reports -> who came late on one day (Delay / Extreme Delay),
+  // by the same late policy, holiday calendars, office punches and waivers
+  // payroll uses. Needs the "Late list" layer of Attendance Reports
+  // (explicit-only) and keeps to that account's Departments. Read by the
+  // Credence Assistant ("aj ke ke late").
+  app.get("/api/attendance/report/late", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "attendance_reports", "late_list"))) {
+        return res.status(403).json({ error: "You don't have access to the late list. Ask your Superadmin to grant it." });
+      }
+      const date = String(req.query.date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "A valid date (YYYY-MM-DD) is required." });
+      const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
+      const employees = (
+        await queryDB(
+          `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id
+           FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+        )
+      ).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId() && (!deptScope || deptScope.includes(e.department)));
+      if (!employees.length) return res.json({ date, late: [], total: 0 });
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, date, date);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const policy = await getLatePolicyForMonth(await salaryMonthOf(date));
+      const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+        employees, date, date, holidayMapsByGroup, branchTypeByUserId, policy
+      );
+      const late = employees
+        .map((e: any) => ({
+          e,
+          kind: (extremeLateDatesByEmployee.get(Number(e.id)) || []).includes(date) ? "extreme" : (lateDatesByEmployee.get(Number(e.id)) || []).includes(date) ? "delay" : null
+        }))
+        .filter((x: any) => x.kind);
+      // First arrival for each of them (app check-in or device punch).
+      const userIds = late.map((x: any) => x.e.user_id).filter(Boolean);
+      const pins = late.map((x: any) => x.e.zk_device_pin).filter(Boolean);
+      const firstIn = new Map<number, string>();
+      const keep = (id: number, t: any) => { const v = String(t || ""); if (v && (!firstIn.has(id) || v < firstIn.get(id)!)) firstIn.set(id, v); };
+      if (userIds.length) {
+        for (const r of await queryDB(`SELECT user_id, MIN(check_in_at) AS t FROM attendance WHERE attendance_date = ? AND check_in_at IS NOT NULL AND user_id IN (${userIds.map(() => "?").join(",")}) GROUP BY user_id`, [date, ...userIds]))
+          keep(Number(r.user_id), r.t);
+      }
+      if (pins.length) {
+        const byPin = new Map<string, number>(late.filter((x: any) => x.e.zk_device_pin && x.e.user_id).map((x: any) => [String(x.e.zk_device_pin), Number(x.e.user_id)]));
+        for (const r of await queryDB(`SELECT device_user_pin, MIN(punch_time) AS t FROM zk_attendance_logs WHERE DATE(punch_time) = ? AND device_user_pin IN (${pins.map(() => "?").join(",")}) GROUP BY device_user_pin`, [date, ...pins]).catch(() => []))
+          if (byPin.has(String(r.device_user_pin))) keep(byPin.get(String(r.device_user_pin))!, r.t);
+      }
+      res.json({
+        date,
+        total: employees.length,
+        shift_start: policy.shift_start_time || null,
+        late: late.map((x: any) => ({
+          employee_id: x.e.id, name: x.e.name, employee_code: x.e.employee_code || null, designation: x.e.designation || null,
+          department: x.e.department || null, kind: x.kind, first_in: x.e.user_id ? firstIn.get(Number(x.e.user_id)) || null : null
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the late list." });
+    }
+  });
+
+  // ---- Dashboard calendar: attendance status -------------------------------
+  // The Dashboard's Global Calendar marks each day with Delay / Extreme
+  // Delay — always the viewer's own only — and Leave, whose scope is:
+  //   - everyone: their own;
+  //   - an account granted 'attendance_reports' (Monthly Attendance
+  //     Report): everyone in their own Department;
+  //   - the Superadmin: every employee.
+  async function calendarViewableEmployees(user: any): Promise<any[]> {
+    const COLS = "id, name, employee_id AS employee_code, department, user_id, zk_device_pin, company_id";
+    const inCompany = (rows: any[]) => rows.filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId());
+    if (user.role === "superadmin") {
+      return inCompany(await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id IS NOT NULL ORDER BY name ASC`));
+    }
+    // Everyone else sees themselves (and, with Attendance Reports, their own
+    // department) — read just those rows, not the whole company's, since
+    // this runs on every Dashboard open.
+    // (Filtered again in JS: the in-memory fallback DB ignores WHERE.)
+    const me = inCompany(await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id = ?`, [Number(user.id)])).find(
+      (e: any) => Number(e.user_id) === Number(user.id) && Number(e.is_active ?? 1) === 1
+    );
+    if (!me) return [];
+    const canSeeDepartment =
+      (user.role === "admin" || user.role === "user") && (await getAdminModules(user.id)).includes("attendance_reports");
+    if (!canSeeDepartment || !me.department) return [me];
+    return inCompany(
+      await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id IS NOT NULL AND department = ? ORDER BY name ASC`, [me.department])
+    ).filter((e: any) => e.department === me.department && e.user_id != null);
+  }
+
+  // The viewer's own Delay / Extreme Delay and the Leave of the people this
+  // account may see, in [from, to] (at most ~6 weeks, one calendar grid):
+  //   { me: user_id, people: [{ user_id, name, department }],
+  //     days: { "YYYY-MM-DD": [{ user_id, kind: "delay" | "extreme" | "leave",
+  //                               leave_type?, status? }] } }
+  app.get("/api/calendar-attendance", authenticateToken, async (req: any, res) => {
+    try {
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const from = String(req.query.from || "");
+      const to = String(req.query.to || "");
+      if (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to) {
+        return res.status(400).json({ error: "from and to must be YYYY-MM-DD dates, from on or before to." });
+      }
+      if ((new Date(to).getTime() - new Date(from).getTime()) / 86400000 > 62) {
+        return res.status(400).json({ error: "The range can be at most 62 days." });
+      }
+      const employees = await calendarViewableEmployees(req.user);
+      const people = employees.map((e: any) => ({ user_id: Number(e.user_id), name: e.name, department: e.department || null }));
+      const me = Number(req.user.id);
+      if (employees.length === 0) return res.json({ me, people, days: {} });
+
+      type Mark = { user_id: number; kind: "delay" | "extreme" | "leave"; leave_type?: string; status?: string };
+      const days: Record<string, Mark[]> = {};
+      const userIdByEmployeeId = new Map<number, number>(employees.map((e: any) => [Number(e.id), Number(e.user_id)]));
+      // One mark per person per day: Leave wins over a late check-in.
+      const marked = new Set<string>();
+      const add = (d: string, m: Mark) => {
+        if (marked.has(`${m.user_id}|${d}`)) return;
+        marked.add(`${m.user_id}|${d}`);
+        (days[d] ||= []).push(m);
+      };
+
+      // Approved and still-pending Leave (rejected ones aren't leave at all);
+      // approved rows first so a pending one never covers them.
+      const userIds = people.map((p) => p.user_id);
+      const leaveRows = await queryDB(
+        `SELECT user_id, leave_type, start_date, end_date, status FROM leave_applications
+         WHERE user_id IN (${userIds.map(() => "?").join(",")}) AND status IN ('approved', 'pending')
+           AND start_date <= ? AND end_date >= ?
+         ORDER BY status = 'approved' DESC`,
+        [...userIds, to, from]
+      );
+      for (const l of leaveRows) {
+        const start = String(l.start_date instanceof Date ? l.start_date.toLocaleDateString("en-CA") : l.start_date).slice(0, 10);
+        const end = String(l.end_date instanceof Date ? l.end_date.toLocaleDateString("en-CA") : l.end_date).slice(0, 10);
+        const cursor = new Date(`${start < from ? from : start}T00:00:00`);
+        const last = end > to ? to : end;
+        for (let guard = 0; guard < 70; guard++) {
+          const d = cursor.toLocaleDateString("en-CA");
+          if (d > last) break;
+          add(d, { user_id: Number(l.user_id), kind: "leave", leave_type: l.leave_type, status: l.status });
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      }
+
+      // Lates — the viewer's own only, with the same policy, waivers and
+      // holiday calendars as the payroll. The policy is per salary month, so
+      // resolve each one the range touches.
+      const self = employees.filter((e: any) => Number(e.user_id) === me);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, me);
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 4 && self.length > 0; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const monthStart = period.start < from ? from : period.start;
+        const monthEnd = period.end > to ? to : period.end;
+        const holidayMaps = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+        const policy = await getLatePolicyForMonth(monthYear);
+        const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+          self, monthStart, monthEnd, holidayMaps, branchTypeByUserId, policy
+        );
+        for (const [kind, map] of [["extreme", extremeLateDatesByEmployee], ["delay", lateDatesByEmployee]] as const) {
+          for (const [employeeId, dates] of map.entries()) {
+            const userId = userIdByEmployeeId.get(Number(employeeId));
+            if (userId) for (const d of dates) add(d, { user_id: userId, kind });
+          }
+        }
+        monthYear = shiftMonthYear(monthYear, 1);
+      }
+
+      res.json({ me, people, days });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load attendance for the calendar." });
     }
   });
 
@@ -1859,17 +2598,56 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const requested = req.query.month_year ? String(req.query.month_year) : "";
       const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const daysInMonth = period.dates.length;
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
-      const workingDays = Math.max(1, daysInMonth - holidayMap.size);
+      // Head Office and Project-site Employees can each have their own
+      // Weekend/Holiday calendar — every per-employee figure below (working
+      // days, present/absent, lates) is resolved against THEIR OWN group's
+      // calendar, not one shared one. branchTypeByUserId resolves via
+      // all_employees.branch_id -> branches.branch_type.
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      // Only used for the wizard's own month-level display figures (days_in_month/
+      // working_days at the bottom of this route) — every per-employee figure
+      // below uses that employee's own group instead. Head Office is the
+      // arbitrary but harmless default for a single summary number covering
+      // a mixed roster.
+      const workingDaysDisplay = Math.max(1, daysInMonth - holidayMapsByGroup.head_office.size);
 
-      const employees = await queryDB(
-        `SELECT id, employee_id AS employee_code, name, department, designation, user_id, zk_device_pin
-         FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+      // Multi-company: salary is run by the Employee's own company only — someone
+      // also assigned to a sister company shows in its lists, not its payroll.
+      const employees = (
+        await queryDB(
+          `SELECT id, employee_id AS employee_code, name, department, designation, user_id, zk_device_pin, company_id
+           FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+        )
+      ).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId());
+      // Per-employee working days — this employee's OWN group's holiday
+      // count subtracted from the month, not the shared display figure
+      // above. Keyed by all_employees.id (not user_id — an employee with no
+      // login still needs a working-days figure for has_attendance_data:
+      // false rows below, which default to fully present).
+      // Resolved per Employee (branch_id), so a no-login Employee still gets
+      // their own branch's calendar.
+      const groupByEmployeeId = await getEmployeeBranchTypeByEmployeeId(queryDB);
+      const groupOf = (e: any): HolidayAppliesTo =>
+        groupByEmployeeId.get(Number(e.id)) || (e.user_id ? branchTypeByUserId.get(Number(e.user_id)) : undefined) || "head_office";
+      // Each Employee's own calendar with their Duty Roster laid over it — an
+      // Off day is not a working day, a rostered shift on a Weekend is.
+      const roster = await loadRoster(queryDB, monthStart, monthEnd, employees.map((e: any) => Number(e.id)));
+      const holidaysOf = (e: any) => roster.holidaysFor(Number(e.id), holidayMapsByGroup[groupOf(e)]);
+      const employeeByUserId = new Map<number, any>(employees.filter((e: any) => e.user_id).map((e: any) => [Number(e.user_id), e]));
+      const holidaysOfUser = (userId: number) => {
+        const e = employeeByUserId.get(Number(userId));
+        return e ? holidaysOf(e) : holidayMapsByGroup[branchTypeByUserId.get(Number(userId)) || "head_office"];
+      };
+      const workingDaysByEmployeeId = new Map<number, number>(
+        employees.map((e: any) => [Number(e.id), Math.max(1, daysInMonth - holidaysOf(e).size)])
       );
 
       const existingRows = await queryDB("SELECT employee_id FROM payrolls WHERE month_year = ?", [monthYear]);
@@ -1902,7 +2680,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of remoteRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
+          if (holidaysOfUser(Number(r.user_id)).has(dateStr)) continue;
           if (!presentDaysByUser.has(r.user_id)) presentDaysByUser.set(r.user_id, new Set());
           presentDaysByUser.get(r.user_id)!.add(dateStr);
         }
@@ -1925,30 +2703,62 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of officeRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
           const userId = pinToUserId.get(r.device_user_pin);
           if (!userId) continue;
+          if (holidaysOfUser(userId).has(dateStr)) continue;
           if (!presentDaysByUser.has(userId)) presentDaysByUser.set(userId, new Set());
           presentDaysByUser.get(userId)!.add(dateStr);
         }
       }
 
+      // Site Attendance (supervisor muster roll) — keyed by Employee, since
+      // most people marked this way have no login. Any confirmed entry at all
+      // (even Absent) means this Employee's attendance IS tracked, so their
+      // unmarked working days count as absent rather than defaulting to
+      // fully present.
+      const sitePresentByEmployee = new Map<number, Set<string>>();
+      const siteLeaveByEmployee = new Map<number, Set<string>>();
+      const siteTracked = new Set<number>();
+      const employeeById = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
+      for (const r of await loadSiteEntries(queryDB, monthStart, monthEnd)) {
+        const employeeId = Number(r.employee_id);
+        const e = employeeById.get(employeeId);
+        if (!e) continue;
+        siteTracked.add(employeeId);
+        const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
+        if (holidaysOf(e).has(dateStr)) continue;
+        const target = r.status === "present" || r.status === "late" ? sitePresentByEmployee : r.status === "leave" ? siteLeaveByEmployee : null;
+        if (!target) continue;
+        if (!target.has(employeeId)) target.set(employeeId, new Set());
+        target.get(employeeId)!.add(dateStr);
+      }
+
       // Approved Leave Applications overlapping this month — clipped to the
       // days that actually fall inside the month, since a leave range can
       // straddle two months but only the overlapping part counts here.
-      const leaveDaysByUser = new Map<number, number>();
+      // The dates each person is on approved leave this period. Counted below
+      // only on their working days that have no attendance: a leave that
+      // runs over a Friday / holiday used to add those days too, which
+      // pushed present + leave past the working days and hid a real absent
+      // day (absent = working - present - leave), so it was paid.
+      // "Leave Without Pay" is kept apart (lwpDatesByUser): those days are
+      // unpaid, so they are counted as LWP (cut from the pay), not as leave.
+      const leaveDatesByUser = new Map<number, Set<string>>();
+      const lwpDatesByUser = new Map<number, Set<string>>();
       if (userIds.length > 0) {
         const leavePlaceholders = userIds.map(() => "?").join(",");
         const leaveRows = await queryDB(
-          `SELECT user_id, start_date, end_date FROM leave_applications
+          `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
            WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${leavePlaceholders})`,
           [monthEnd, monthStart, ...userIds]
         );
         for (const l of leaveRows) {
-          const start = String(l.start_date).slice(0, 10) < monthStart ? monthStart : String(l.start_date).slice(0, 10);
-          const end = String(l.end_date).slice(0, 10) > monthEnd ? monthEnd : String(l.end_date).slice(0, 10);
-          const days = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
-          leaveDaysByUser.set(l.user_id, (leaveDaysByUser.get(l.user_id) || 0) + days);
+          const start = String(l.start_date).slice(0, 10);
+          const end = String(l.end_date).slice(0, 10);
+          const target = l.leave_type === "without_pay" ? lwpDatesByUser : leaveDatesByUser;
+          const set = target.get(Number(l.user_id)) || new Set<string>();
+          for (const d of period.dates) if (d >= start && d <= end) set.add(d);
+          target.set(Number(l.user_id), set);
         }
       }
 
@@ -1970,10 +2780,22 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // already had any waived day dropped inside computeLateDatesByEmployee.
       const latePolicy = await getLatePolicyForMonth(monthYear);
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        employees, monthStart, monthEnd, holidayMap, latePolicy
+        employees, monthStart, monthEnd, holidayMapsByGroup, branchTypeByUserId, latePolicy
       );
       const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
       const extremeLatesPerDay = Number(latePolicy.extreme_lates_per_deduction_day || 1);
+
+      // Running Payroll before the month is over (e.g. on the 28th): the
+      // working days still to come can't have attendance yet, so they're
+      // counted as expected-present instead of Absent — otherwise everyone's
+      // pay would be cut for days that simply haven't happened.
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const upcomingDaysOf = (e: any) => {
+        const hol = holidaysOf(e);
+        let n = 0;
+        for (const dateStr of period.dates) if (dateStr > todayStr && !hol.has(dateStr)) n++;
+        return n;
+      };
 
       const result = employees.map((e: any) => {
         // has_attendance_data must mean "we actually found at least one
@@ -1981,10 +2803,30 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // somewhere in the system" — pinToUserId.has(own pin) was always
         // true for anyone with a pin configured, even with zero punches on
         // file, which is what made the "Synced" badge show up falsely.
-        const hasAttendanceData = !!(e.user_id && presentDaysByUser.has(Number(e.user_id)));
-        const present = hasAttendanceData ? (presentDaysByUser.get(Number(e.user_id))?.size || 0) : workingDays;
-        const leave = e.user_id ? Math.min(workingDays, leaveDaysByUser.get(Number(e.user_id)) || 0) : 0;
-        const absent = Math.max(0, workingDays - present - leave);
+        const workingDays = workingDaysByEmployeeId.get(Number(e.id)) || 1;
+        const presentDates = new Set<string>([
+          ...(e.user_id ? presentDaysByUser.get(Number(e.user_id)) || [] : []),
+          ...(sitePresentByEmployee.get(Number(e.id)) || [])
+        ]);
+        const siteLeaveDays = [...(siteLeaveByEmployee.get(Number(e.id)) || [])].filter((d) => !presentDates.has(d)).length;
+        const hasAttendanceData = presentDates.size > 0 || siteTracked.has(Number(e.id));
+        const upcomingDays = upcomingDaysOf(e);
+        const hol = holidaysOf(e);
+        const appLeaveDays = [...(e.user_id ? leaveDatesByUser.get(Number(e.user_id)) || [] : [])].filter((d) => !hol.has(d) && !presentDates.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)).length;
+        const leave = Math.min(workingDays, appLeaveDays + siteLeaveDays);
+        // Approved Leave Without Pay: working days with no attendance, not
+        // already counted as paid leave (a day is only ever one of them).
+        const paidLeaveDates = e.user_id ? leaveDatesByUser.get(Number(e.user_id)) : undefined;
+        const lwp = Math.min(
+          workingDays - leave,
+          [...(e.user_id ? lwpDatesByUser.get(Number(e.user_id)) || [] : [])].filter(
+            (d) => !hol.has(d) && !presentDates.has(d) && !paidLeaveDates?.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)
+          ).length
+        );
+        // A leave day still to come was also counted among the upcoming
+        // "expected present" days: present + leave never pass the working days.
+        const present = Math.min(workingDays - leave - lwp, hasAttendanceData ? presentDates.size + upcomingDays : workingDays);
+        const absent = Math.max(0, workingDays - present - leave - lwp);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);
         const extremeLateCount = extremeLateDatesByEmployee.get(e.id)?.length || 0;
@@ -1996,10 +2838,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           department: e.department,
           designation: e.designation,
           total_working_days: workingDays,
-          present_days: hasAttendanceData ? present : workingDays,
+          present_days: present,
           absent_days: hasAttendanceData ? absent : 0,
           leave_days: leave,
-          lwp_days: 0,
+          lwp_days: lwp,
           overtime_hours: 0,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,
@@ -2014,8 +2856,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
       res.json({
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         days_in_month: daysInMonth,
-        working_days: workingDays,
+        working_days: workingDaysDisplay,
         late_policy: {
           shift_start_time: latePolicy.shift_start_time,
           grace_minutes: latePolicy.grace_minutes,
@@ -2074,6 +2918,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const otAmount = money(num(row.overtime_amount));
         const bonus = money(num(row.bonus_amount));
         const otherDed = money(num(row.other_deduction));
+        const daysProblem = payDaysProblem({ workingDays, present, absent, leave: Math.max(0, Math.round(num(row.leave_days))), lwp, lateDeductionDays });
+        if (daysProblem) {
+          results.push({ employee_id: employeeId, error: daysProblem });
+          continue;
+        }
 
         const grossSalary = Number(structure.gross_salary);
         const basicSalary = Number(structure.basic_salary);
@@ -2085,8 +2934,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // separate line item.
         const unpaidDays = absent + lwp + lateDeductionDays;
         const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-        const basicAmount = money(basicSalary * (present / workingDays));
-        const allowancesEarned = money(allowancesTotal * (present / workingDays));
+        // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+        const allowancesEarned = money(allowancesTotal);
         const absentDeduction = money(perDayGross * unpaidDays);
         const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
         const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2104,8 +2957,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         }
         advanceDeduction = money(advanceDeduction);
 
-        const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-        const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+        // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+        const pay = await computePayLines(queryDB, employeeId, monthYear);
+        const grossWithItems = money(grossEarned + pay.earnings);
+        const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+        const netSalary = money(grossWithItems - totalDeduction);
+        if (netSalary < 0) {
+          results.push({ employee_id: employeeId, error: negativeNetMessage(netSalary) });
+          continue;
+        }
+        const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
 
         results.push({
           employee_id: employeeId,
@@ -2113,7 +2974,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           allowances_earned: allowancesEarned,
           overtime_amount: otAmount,
           bonus_amount: bonus,
-          gross_earned: grossEarned,
+          item_earnings: pay.earnings,
+          item_deductions: pay.deductions,
+          pay_lines: pay.lines,
+          gross_earned: grossWithItems,
           absent_deduction: absentDeduction,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,
@@ -2123,7 +2987,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           advance_deduction: advanceDeduction,
           other_deduction: otherDed,
           total_deduction: totalDeduction,
-          net_salary: netSalary
+          net_salary: netSalary,
+          payment_split: paymentSplit
         });
       }
 
@@ -2143,6 +3008,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const monthYear = String(req.body?.month_year || "");
       if (!MONTH_YEAR_RE.test(monthYear)) return res.status(400).json({ error: "month_year must be in 'YYYY-MM' format." });
+      const lock = await monthLocked(queryDB, monthYear);
+      if (lock) return res.status(400).json({ error: lockedMessage(lock) });
       const rows: any[] = Array.isArray(req.body?.employees) ? req.body.employees : [];
       const method = typeof req.body?.payment_method === "string" && req.body.payment_method.trim() ? req.body.payment_method.trim().slice(0, 50) : "Bank Transfer";
 
@@ -2154,9 +3021,18 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           continue;
         }
         try {
-          const empRows = await queryDB("SELECT id FROM all_employees WHERE id = ?", [employeeId]);
+          const empRows = await queryDB("SELECT id, company_id FROM all_employees WHERE id = ?", [employeeId]);
           if (empRows.length === 0) {
             results.push({ employee_id: employeeId, success: false, error: "Employee not found." });
+            continue;
+          }
+          if (Number(empRows[0].company_id ?? 1) !== activeCompanyId()) {
+            results.push({ employee_id: employeeId, success: false, error: "This employee's salary is run by their own company." });
+            continue;
+          }
+          const blocked = negativeAmount(row) || (await inactiveEmployeeBlock(queryDB, employeeId, monthYear));
+          if (blocked) {
+            results.push({ employee_id: employeeId, success: false, error: blocked });
             continue;
           }
           const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
@@ -2185,6 +3061,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const otAmount = money(num(row.overtime_amount));
           const bonus = money(num(row.bonus_amount));
           const otherDed = money(num(row.other_deduction));
+          const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays });
+          if (daysProblem) {
+            results.push({ employee_id: employeeId, success: false, error: daysProblem });
+            continue;
+          }
           const note = typeof row.remarks === "string" ? row.remarks.trim().slice(0, 1000) : null;
 
           const grossSalary = Number(structure.gross_salary);
@@ -2193,8 +3074,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const perDayGross = grossSalary / workingDays;
           const unpaidDays = absent + lwp + lateDeductionDays;
           const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-          const basicAmount = money(basicSalary * (present / workingDays));
-          const allowancesEarned = money(allowancesTotal * (present / workingDays));
+          // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+          const allowancesEarned = money(allowancesTotal);
           const absentDeduction = money(perDayGross * unpaidDays);
           const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
           const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2212,8 +3097,21 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           }
           advanceDeduction = money(advanceDeduction);
 
-          const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-          const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+          // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+          const pay = await computePayLines(queryDB, employeeId, monthYear);
+          const grossWithItems = money(grossEarned + pay.earnings);
+          const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+          const netSalary = money(grossWithItems - totalDeduction);
+          if (netSalary < 0) {
+            results.push({ employee_id: employeeId, success: false, error: negativeNetMessage(netSalary) });
+            continue;
+          }
+          const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
+          // An employee with a configured Bank/MFS split is paid out that
+          // way regardless of the run's single global Payment Method
+          // dropdown — that dropdown only applies as the fallback for
+          // employees with no split configured (see buildPaymentSplit).
+          const effectiveMethod = paymentSplit.length > 0 ? "Split (Bank/MFS)" : method;
 
           const result = await queryDB(
             `INSERT INTO payrolls
@@ -2221,20 +3119,32 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
                 basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
                 absent_deduction, late_count, late_deduction_days, late_deduction_amount,
                 tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
-                net_salary, payment_status, payment_method, remarks, generated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+                net_salary, payment_status, payment_method, remarks, generated_by, item_earnings, item_deductions)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?, ?, ?)`,
             [
               employeeId, monthYear, workingDays, present, absent, leave, lwp, otHours,
-              basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+              basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
               absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
               taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-              netSalary, method, note, req.user.id
+              netSalary, effectiveMethod, note, req.user.id, pay.earnings, pay.deductions
             ]
           );
+          await savePayLines(queryDB, Number(result.insertId), employeeId, monthYear, pay.lines);
+          for (const split of paymentSplit) {
+            await queryDB(
+              `INSERT INTO payroll_payment_splits
+                 (payroll_id, account_type, account_label, bank_name, branch_name, provider, account_number, percentage, amount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                result.insertId, split.account_type, split.account_label, split.bank_name, split.branch_name,
+                split.provider, split.account_number, split.percentage, split.amount
+              ]
+            );
+          }
           // Consume any staged bonus for this employee/month now that a
           // real run exists — prevents it from being offered/applied again.
           await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
-          results.push({ employee_id: employeeId, success: true, id: result.insertId, net_salary: netSalary });
+          results.push({ employee_id: employeeId, success: true, id: result.insertId, net_salary: netSalary, payment_split: paymentSplit });
         } catch (rowErr: any) {
           results.push({ employee_id: employeeId, success: false, error: rowErr?.code === "ER_DUP_ENTRY" ? "Payroll for this employee/month has already been generated." : (rowErr?.message || "Failed to generate payroll.") });
         }
@@ -2274,11 +3184,19 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       } = req.body || {};
 
       if (!employee_id) return res.status(400).json({ error: "employee_id is required." });
+      const lockG = month_year ? await monthLocked(queryDB, String(month_year)) : null;
+      if (lockG) return res.status(400).json({ error: lockedMessage(lockG) });
       if (!month_year || !MONTH_YEAR_RE.test(String(month_year))) {
         return res.status(400).json({ error: "month_year must be in 'YYYY-MM' format." });
       }
-      const empRows = await queryDB("SELECT id, name FROM all_employees WHERE id = ?", [Number(employee_id)]);
+      const empRows = await queryDB("SELECT id, name, company_id FROM all_employees WHERE id = ?", [Number(employee_id)]);
       if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
+      if (Number(empRows[0].company_id ?? 1) !== activeCompanyId())
+        return res.status(400).json({ error: "This employee's salary is run by their own company." });
+      const negG = negativeAmount(req.body);
+      if (negG) return res.status(400).json({ error: negG });
+      const goneG = await inactiveEmployeeBlock(queryDB, Number(employee_id), String(month_year));
+      if (goneG) return res.status(400).json({ error: goneG });
 
       const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [Number(employee_id), String(month_year)]);
       if (existing.length > 0) {
@@ -2307,6 +3225,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const otAmount = money(num(overtime_amount));
       const bonus = money(num(bonus_amount));
       const otherDed = money(num(other_deduction));
+      const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays });
+      if (daysProblem) return res.status(400).json({ error: daysProblem });
       const method = typeof payment_method === "string" && payment_method.trim() ? payment_method.trim().slice(0, 50) : "Bank Transfer";
       const note = typeof remarks === "string" ? remarks.trim().slice(0, 1000) : null;
 
@@ -2320,8 +3240,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // are paid, hence excluded here).
       const unpaidDays = absent + lwp + lateDeductionDays;
       const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-      const basicAmount = money(basicSalary * (present / workingDays));
-      const allowancesEarned = money(allowancesTotal * (present / workingDays));
+      // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+      const allowancesEarned = money(allowancesTotal);
       const absentDeduction = money(perDayGross * unpaidDays);
       const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
 
@@ -2343,8 +3267,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       advanceDeduction = money(advanceDeduction);
 
-      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+      // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+      const pay = await computePayLines(queryDB, Number(employee_id), String(month_year));
+      const grossWithItems = money(grossEarned + pay.earnings);
+      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+      const netSalary = money(grossWithItems - totalDeduction);
+      if (netSalary < 0) return res.status(400).json({ error: negativeNetMessage(netSalary) });
 
       const result = await queryDB(
         `INSERT INTO payrolls
@@ -2352,16 +3280,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
             absent_deduction, late_count, late_deduction_days, late_deduction_amount,
             tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
-            net_salary, payment_status, payment_method, remarks, generated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+            net_salary, payment_status, payment_method, remarks, generated_by, item_earnings, item_deductions)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?, ?, ?)`,
         [
           Number(employee_id), month_year, workingDays, present, absent, leave, lwp, otHours,
-          basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+          basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
           absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
           taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-          netSalary, method, note, req.user.id
+          netSalary, method, note, req.user.id, pay.earnings, pay.deductions
         ]
       );
+      await savePayLines(queryDB, Number(result.insertId), Number(employee_id), String(month_year), pay.lines);
       // Consume any staged bonus for this employee/month now that a real
       // run exists — prevents it from being offered/applied again.
       await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [Number(employee_id), month_year]);
@@ -2387,12 +3316,18 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (existing.payment_status === "paid") {
         return res.status(400).json({ error: "A Paid payroll run can't be edited." });
       }
+      const lockE = await monthLocked(queryDB, String(existing.month_year));
+      if (lockE) return res.status(400).json({ error: lockedMessage(lockE) });
+      const negE = negativeAmount(req.body);
+      if (negE) return res.status(400).json({ error: negE });
 
       const workingDays = Math.max(1, Math.round(num(req.body?.total_working_days, existing.total_working_days)));
       const present = Math.max(0, Math.round(num(req.body?.present_days, existing.present_days)));
       const absent = Math.max(0, Math.round(num(req.body?.absent_days, existing.absent_days)));
       const leave = Math.max(0, Math.round(num(req.body?.leave_days, existing.leave_days)));
       const lwp = Math.max(0, Math.round(num(req.body?.lwp_days, existing.lwp_days)));
+      const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays: Math.max(0, Math.round(num(existing.late_deduction_days))) });
+      if (daysProblem) return res.status(400).json({ error: daysProblem });
       const otHours = num(req.body?.overtime_hours, existing.overtime_hours);
       const otAmount = money(num(req.body?.overtime_amount, existing.overtime_amount));
       const bonus = money(num(req.body?.bonus_amount, existing.bonus_amount));
@@ -2414,10 +3349,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const basicSalary = Number(structure.basic_salary);
       const allowancesTotal = money(grossSalary - basicSalary);
       const perDayGross = grossSalary / workingDays;
-      const unpaidDays = absent + lwp;
+      // Keep the Late-policy days this run was generated with.
+      const unpaidDays = absent + lwp + Math.max(0, Math.round(num(existing.late_deduction_days)));
 
-      const basicAmount = money(basicSalary * (present / workingDays));
-      const allowancesEarned = money(allowancesTotal * (present / workingDays));
+      // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+      const allowancesEarned = money(allowancesTotal);
       const absentDeduction = money(perDayGross * unpaidDays);
       const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
       const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2435,38 +3375,56 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       advanceDeduction = money(advanceDeduction);
 
-      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+      // Allowance & Adjustment lines, worked out again for this run (its own
+      // earlier lines don't count against an adjustment's balance).
+      const pay = await computePayLines(queryDB, Number(existing.employee_id), String(existing.month_year), Number(existing.id));
+      const grossWithItems = money(grossEarned + pay.earnings);
+      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+      const netSalary = money(grossWithItems - totalDeduction);
+      if (netSalary < 0) return res.status(400).json({ error: negativeNetMessage(netSalary) });
 
       await queryDB(
         `UPDATE payrolls SET
            total_working_days = ?, present_days = ?, absent_days = ?, leave_days = ?, lwp_days = ?, overtime_hours = ?,
            basic_amount = ?, allowances_total = ?, overtime_amount = ?, bonus_amount = ?, gross_earned = ?,
            absent_deduction = ?, tax_deduction = ?, pf_deduction = ?, advance_deduction = ?, other_deduction = ?, total_deduction = ?,
-           net_salary = ?, payment_method = ?, remarks = ?
+           net_salary = ?, payment_method = ?, remarks = ?, item_earnings = ?, item_deductions = ?, last_edited_by = ?
          WHERE id = ?`,
         [
           workingDays, present, absent, leave, lwp, otHours,
-          basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+          basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
           absentDeduction, taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-          netSalary, method, note, req.params.id
+          netSalary, method, note, pay.earnings, pay.deductions, req.user.id, req.params.id
         ]
       );
+      await savePayLines(queryDB, Number(existing.id), Number(existing.employee_id), String(existing.month_year), pay.lines);
       res.json({ success: true, net_salary: netSalary });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update payroll." });
     }
   });
 
-  // Intermediate step before disbursement — lets Payroll flag a batch as
-  // reviewed/ready without yet committing the irreversible advance-recovery
-  // bookkeeping that only happens on "mark as paid" below.
-  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+  // One employee's salary, outside the month's own approval (e.g. a salary
+  // released from hold after Audit approved the month): Audit processes it
+  // (Payroll layer "audit_approve"), Accounts pays it ("accounts_pay").
+  // The month's batch has to be with Audit already (PayrollApprovalRoutes.ts).
+  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       if (rows[0].payment_status !== "unpaid") return res.status(400).json({ error: "Only an Unpaid payroll run can be marked Processed." });
-      await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ?", [req.params.id]);
+      if (Number(rows[0].is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
+      const b = await batchFor(queryDB, String(rows[0].month_year));
+      if (!b || !["submitted", "approved", "paid"].includes(b.status)) {
+        return res.status(400).json({ error: "Submit this month's salary for Audit first (Payroll → Approval)." });
+      }
+      // Same duty split as approving the month (PayrollApprovalRoutes.ts).
+      const me = Number(req.user.id);
+      if (req.user.role !== "superadmin" && [rows[0].generated_by, rows[0].last_edited_by, b.submitted_by].some((u) => Number(u) === me)) {
+        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else from Audit has to approve it." });
+      }
+      const pr: any = await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ? AND payment_status = 'unpaid' AND COALESCE(is_held, 0) = 0", [req.params.id]);
+      if (pr && pr.affectedRows === 0) return res.status(409).json({ error: "This payroll run was just changed by someone else — reload it." });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2475,47 +3433,32 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
   // Marks the run as actually disbursed AND, in the same step, applies its
   // advance_deduction against the employee's active advance(s) — the one
-  // moment this app permanently records that money as recovered, mirroring
-  // how Conveyance Disbursement is the one place is_disbursed flips.
-  app.post("/api/payroll/:id/mark-paid", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+  // moment this app permanently records that money as recovered. Only
+  // Accounts, and only once Audit has processed it.
+  app.post("/api/payroll/:id/mark-paid", authenticateToken, requireAdmin, requireModuleLayer("payroll", "accounts_pay"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       const payroll = rows[0];
       if (payroll.payment_status === "paid") return res.status(400).json({ error: "This payroll run is already marked Paid." });
-
-      let remainingToRecover = Number(payroll.advance_deduction) || 0;
-      if (remainingToRecover > 0) {
-        const advances = await queryDB(
-          "SELECT * FROM employee_advances WHERE employee_id = ? AND status = 'active' ORDER BY created_at ASC",
-          [payroll.employee_id]
-        );
-        for (const adv of advances) {
-          if (remainingToRecover <= 0) break;
-          const outstanding = Number(adv.total_amount) - Number(adv.paid_amount);
-          if (outstanding <= 0) continue;
-          const recover = money(Math.min(Number(adv.monthly_installment), outstanding, remainingToRecover));
-          if (recover <= 0) continue;
-          const newPaid = money(Number(adv.paid_amount) + recover);
-          const newStatus = newPaid >= Number(adv.total_amount) ? "completed" : "active";
-          await queryDB("UPDATE employee_advances SET paid_amount = ?, status = ? WHERE id = ?", [newPaid, newStatus, adv.id]);
-          remainingToRecover = money(remainingToRecover - recover);
-        }
+      if (Number(payroll.is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
+      if (payroll.payment_status !== "processed") return res.status(400).json({ error: "Audit has to approve (process) this salary before it can be paid." });
+      const bp = await batchFor(queryDB, String(payroll.month_year));
+      const meP = Number(req.user.id);
+      if (req.user.role !== "superadmin" && [payroll.generated_by, payroll.last_edited_by, bp?.submitted_by, bp?.audited_by].some((u) => Number(u) === meP)) {
+        return res.status(403).json({ error: "You ran, changed, submitted or approved this salary — someone else from Accounts has to pay it." });
       }
-
-      await queryDB(
-        "UPDATE payrolls SET payment_status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [req.user.id, req.params.id]
-      );
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.payment_date || "")) ? String(req.body.payment_date) : todayInDhakaStr();
+      const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
+      const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;
+      const paidNow = await settlePaidPayroll(queryDB, payroll, req.user.id, { date, method, reference });
+      if (!paidNow) return res.status(409).json({ error: "This payroll run was just marked Paid by someone else." });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to mark payroll as paid." });
+      res.status(500).json({ error: err.message || "Failed to mark as paid." });
     }
   });
 
-  // A duplicate/mistaken run can be removed before it's Paid; once Paid it's
-  // part of the disbursed record (and its advance recovery already
-  // happened), so it can no longer be deleted from here.
   app.delete("/api/payroll/:id", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
@@ -2523,6 +3466,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (rows[0].payment_status === "paid") {
         return res.status(400).json({ error: "A Paid payroll run can't be deleted." });
       }
+      const lockD = await monthLocked(queryDB, String(rows[0].month_year));
+      if (lockD) return res.status(400).json({ error: lockedMessage(lockD) });
       await queryDB("DELETE FROM payrolls WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {

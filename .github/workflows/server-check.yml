@@ -1,0 +1,70 @@
+# Checks the live server from the internet: the HTTPS certificate (valid,
+# trusted chain, matches the domain, days left), TLS versions, http -> https
+# redirect, and that the app, its API and real-time chat (Socket.IO) answer
+# through the domain. Also checks the public IP. Run it from Actions ->
+# "Server check" -> Run workflow, or it runs when this file changes.
+
+name: Server check
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Domain to check"
+        required: false
+        default: "hr.credencehousinglimited.com"
+  push:
+    branches: [main, claude/nice-fermi-0tale9]
+    paths:
+      - ".github/workflows/server-check.yml"
+
+env:
+  DOMAIN: ${{ github.event.inputs.domain || 'hr.credencehousinglimited.com' }}
+  IP_URL: "http://203.95.222.58:3000"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: DNS
+        run: |
+          getent hosts "$DOMAIN" || { echo "::error::$DOMAIN does not resolve"; exit 1; }
+
+      - name: Certificate
+        run: |
+          set -o pipefail
+          echo | openssl s_client -connect "$DOMAIN:443" -servername "$DOMAIN" -showcerts 2>/dev/null > chain.txt || true
+          openssl x509 -in chain.txt -noout -subject -issuer -dates -ext subjectAltName
+          echo "Certificates sent by the server: $(grep -c 'BEGIN CERTIFICATE' chain.txt)"
+          grep -E "Verify return code" chain.txt || true
+          end=$(openssl x509 -in chain.txt -noout -enddate | cut -d= -f2)
+          days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+          echo "Days until expiry: $days"
+          [ "$days" -gt 14 ] || echo "::warning::Certificate expires in $days days"
+          # Full trust check the way phones do it (system CA store, hostname).
+          curl -sS -o /dev/null -w "HTTPS %{http_code}, verified=%{ssl_verify_result}, %{time_total}s\n" "https://$DOMAIN/"
+
+      - name: TLS versions
+        run: |
+          for v in tls1 tls1_1 tls1_2 tls1_3; do
+            if echo | openssl s_client -connect "$DOMAIN:443" -servername "$DOMAIN" -$v 2>/dev/null | grep -q "Cipher is [A-Z0-9]"; then echo "$v: accepted"; else echo "$v: refused"; fi
+          done
+
+      - name: Headers and http -> https
+        run: |
+          curl -sS -I "https://$DOMAIN/" | grep -iE "^(HTTP|strict-transport-security|server|content-type)" || true
+          curl -sS -o /dev/null -w "http://$DOMAIN -> %{http_code} %{redirect_url}\n" "http://$DOMAIN/" || true
+
+      - name: App, API and chat through the domain
+        run: |
+          curl -sS "https://$DOMAIN/" | grep -o "<title>[^<]*</title>" || { echo "::error::App page not served"; exit 1; }
+          echo "Workspace API: $(curl -sS "https://$DOMAIN/api/public/workspaces/credence")"
+          echo "System page: $(curl -sS -o /dev/null -w '%{http_code}' "https://$DOMAIN/system")"
+          echo "Socket.IO polling: $(curl -sS "https://$DOMAIN/socket.io/?EIO=4&transport=polling" | head -c 120)"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" --max-time 5 "https://$DOMAIN/socket.io/?EIO=4&transport=websocket" || true)
+          echo "WebSocket upgrade: HTTP $code (101 = works through the proxy)"
+
+      - name: Public IP
+        run: |
+          curl -sS -o /dev/null -w "$IP_URL -> %{http_code}\n" --max-time 10 "$IP_URL/" || echo "::warning::$IP_URL not reachable"

@@ -14,7 +14,7 @@ Holiday Calendar, Role-based Admin Panel, এবং Capacitor দিয়ে An
 
 | জিনিস | ভার্সন / নোট |
 |---|---|
-| Node.js | v18 বা তার উপরে (recommend: v20 LTS) — `node -v` দিয়ে চেক করুন |
+| Node.js | **v22 বা তার উপরে** (v20 এ আর চলবে না) — `node -v` দিয়ে চেক করুন |
 | npm | Node.js এর সাথেই আসে |
 | MySQL | XAMPP (Windows) অথবা standalone MySQL 8.x — যেকোনো একটা |
 | (ঐচ্ছিক) Android Studio | শুধু APK বিল্ড করতে চাইলে লাগবে |
@@ -32,8 +32,8 @@ profileRoutes.ts           ← Employee Profile module (server.ts থেকে i
 Alerts.ts                  ← Personal Alerts/Bell module (server.ts থেকে import হয়)
 zkSync.ts                  ← ZKTeco Office Attendance sync (server.ts থেকে import হয়)
 zklib.d.ts                 ← node-zklib এর জন্য TypeScript type declaration
-schema.sql                 ← মূল ডাটাবেজ স্কিমা (নিচে ২ নং ধাপ দেখুন)
-zk_office_attendance_schema.sql  ← ঐচ্ছিক (শুধু ZK ডিভাইস ব্যবহার করলে)
+schema.sql                 ← মূল ডাটাবেজ স্কিমা — খালি database-এ app নিজেই চালায় (২ নং ধাপ)
+zk_office_attendance_schema.sql  ← দরকার নেই (app নিজেই বানায়), শুধু reference
 .env.example               ← কপি করে .env বানাতে হবে
 src/                        ← React frontend (App.tsx, components/, lib/)
 android/, capacitor.config.ts  ← APK বিল্ডের জন্য (৬ নং ধাপ দেখুন)
@@ -53,34 +53,24 @@ android/, capacitor.config.ts  ← APK বিল্ডের জন্য (৬ �
 2. `http://localhost/phpmyadmin` এ গিয়ে একটি নতুন database বানান, নাম
    `mpr_tracker_db` (অথবা `.env` এ `DB_NAME` এ অন্য নাম দিলে সেটাই)।
 
-### ধাপ ২: `schema.sql` Import করুন
-Import ট্যাব থেকে root এর `schema.sql` ফাইলটি আপলোড করে রান করুন। এটি
-মূল টেবিলগুলো (users, projects, jobs, entries, mpr_numbers, budgets,
-claims, leave_applications, notices, attendance, ইত্যাদি — মোট ২৫টি
-টেবিল) তৈরি করে।
+### ধাপ ২: আর কিছু লাগবে না — app নিজেই table বানায়
+খালি database-এ (যেখানে `users` table নেই) app প্রথমবার চালু হলে নিজেই
+`schema.sql` চালিয়ে মূল table-গুলো বানিয়ে নেয়। তারপর বাকি সব table ও column
+(`ensureSchemaMigrations()` আর প্রতিটা module-এর নিজের) আপনা থেকে তৈরি হয়।
+তাই নতুন server-এ শুধু:
+1. খালি database বানান (নাম `.env`-এর `DB_NAME`-এর মতো)।
+2. `.env` ঠিক করুন (নিচে ৩ নং ধাপ)।
+3. `npm install` → `npm run build` → `npm start` (বা `npm run dev`)।
 
-### ⚠️ গুরুত্বপূর্ণ — schema.sql কি এককভাবে যথেষ্ট?
-**প্রায় সম্পূর্ণ যথেষ্ট, ১০০% না — কিন্তু এটা কোনো সমস্যা তৈরি করে না।**
-কোড চেক করে দেখা গেছে `schema.sql` এর বাইরে আরও কিছু টেবিল app এ ব্যবহার
-হয় (`rate_list`, `material_categories`, `rate_file_meta`,
-`conveyance_bills`, `conveyance_bill_items`, `attendance_corrections`,
-`alerts`, `budget_submissions`, `user_profile_details`,
-`holiday_calendar` ইত্যাদি) — কিন্তু **`server.ts` (এবং
-`holidayRoutes.ts` / `Alerts.ts`) নিজে থেকেই প্রতিবার স্টার্টআপে
-`CREATE TABLE IF NOT EXISTS` চালিয়ে এই টেবিলগুলো "self-heal" করে
-(`ensureSchemaMigrations()` ফাংশন)।** তাই `schema.sql` import করার পর
-প্রথমবার `npm run dev` / `npm start` চালালেই এই টেবিলগুলো নিজে থেকে
-তৈরি হয়ে যাবে — আলাদা করে কোনো SQL রান করার দরকার নেই।
+Log-এ দেখাবে: `✅ Empty database: created the base tables from schema.sql.`
 
-**Update:** ZKTeco Office Attendance (`all_employees.zk_device_pin`,
-`zk_devices`, `zk_attendance_logs`) এখন আর ব্যতিক্রম না — এগুলোও
-`ensureSchemaMigrations()` এর ভেতরে self-heal হয় (একটা backfill সহ:
-`zk_device_pin` খালি থাকলে সেটা `employee_id` দিয়ে ভরে দেয়)। আলাদা করে
-`zk_office_attendance_schema.sql` import করার দরকার নেই — **তবে এটা
-কাজ করবে শুধু তখনই যখন `npm start` চালানোর আগে `npm run build` দিয়ে
-`dist/server.cjs` rebuild করা থাকে** (পুরনো `dist/server.cjs` এই fix ছাড়াই
-build হয়েছিল)। `npm run dev` চালালে এটা rebuild ছাড়াই সাথে সাথে কাজ করবে,
-কারণ সেটা সরাসরি `server.ts` থেকে চলে।
+**হাতে import করতে চাইলে:** phpMyAdmin-এ আগে নিজের database বাছাই করে
+`schema.sql` import করুন (ফাইলটা আর নিজে কোনো database বানায় বা বদলায় না),
+অথবা: `mysql -u root -p your_db_name < schema.sql`
+
+`payroll_schema.sql`, `zk_office_attendance_schema.sql` আর
+`chat_core_schema.sql` import করার দরকার নেই — প্রথম দুটোর table app নিজেই
+বানায়, আর `chat_core_schema.sql` একটা পুরনো নকশা, app ব্যবহার করে না।
 
 ---
 
@@ -228,6 +218,38 @@ APK(s)** ক্লিক করে APK জেনারেট করুন। App
 npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBackgroundColorDark '#415EB4'
 ```
 
+### iPhone: "Add to Home Screen" (App Store ছাড়া)
+
+iPhone/iPad-এ login পাতায় APK-এর বদলে **"iPhone Home Screen"** বোতাম দেখায়
+(`src/components/AddToHomeScreen.tsx`)। চাপলে Safari-তে Share → Add to Home
+Screen → Add, এই তিন ধাপ দেখায়। Home Screen-এর আইকন থেকে খুললে app পুরো
+পর্দায় খোলে (`public/manifest.webmanifest`, `public/icons/`, `index.html`-এর
+`apple-*` tag)। Notification iOS 16.4 থেকে চলে। Background location tracking
+আর APK-এর fingerprint login এখানে নেই।
+
+### Login পাতার "Android (APK)" বোতাম
+
+বোতামটা `/downloads/CredenceHR.apk` নামায় (`AndroidApkRoute.ts`)। ফাইলটা
+সার্ভারে রাখুন **অ্যাপ ফোল্ডারের `downloads/` ফোল্ডারে**
+(`<অ্যাপ ফোল্ডার>/downloads/CredenceHR.apk`, অথবা `.env`-এ `APK_DIR=` দিয়ে
+অন্য ফোল্ডার)। `dist/downloads`-এ রাখবেন না: পরের `npm run build` সেটা
+মুছে দেয়।
+
+- নাম বদলানো লাগবে না: `CredenceHR.apk` না থাকলে বোতাম `downloads/`-এর
+  সবচেয়ে নতুন `.apk` পাঠায়, অথবা GitHub-এর **Android build** থেকে নামানো
+  `CredenceHR-android-debug.zip`-এর ভেতরের APK। ফোনে নাম হয়
+  `CredenceHR.apk`। শুধু যে version দিতে চান সেটাই রাখুন।
+- ফোন পায় `application/vnd.android.package-archive` ধরন আর
+  `CredenceHR.apk` নাম, তাই zip বা web পাতা হয়ে নামে না।
+- ফাইল না থাকলে বা সেটা APK না হলে 404 আর একটা লেখা আসে
+  (সার্ভারের log-এ কারণ লেখা থাকে)। আগের মতো web পাতা "CredenceHR.apk"
+  নামে নামে না।
+- পরীক্ষা: `npm run test:apk`
+- **App-এর ভেতরে "Update available" popup:** এখানে রাখা APK যদি কর্মীর ফোনের
+  app-এর চেয়ে নতুন হয়, app খুললেই popup দেখায়। প্রতিটা build-এর
+  versionCode নিজে থেকে বাড়ে, তাই নতুন APK রাখলেই হলো। পুরনো app-এ link
+  copy/share করে browser-এ খুলতে বলে, নতুন app-এ এক চাপে "Update now"।
+
 ---
 
 ## 8. Troubleshooting
@@ -239,6 +261,8 @@ npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBa
 | `Table 'xxx' doesn't exist` কোনো নতুন ফিচারে | `zk_devices`/`zk_attendance_logs` হলে ৫ নং ধাপ অনুসরণ করুন; অন্য টেবিল হলে সার্ভার একবার রিস্টার্ট দিন (self-healing migration আবার চলবে) |
 | APK তে লগইন/ডাটা লোড হচ্ছে না | Sign In স্ক্রিনে Server Address ঠিক দিয়েছেন কিনা দেখুন (PC এর LAN IP:PORT, একই WiFi তে থাকা লাগবে), Windows Firewall এ Node.js/পোর্ট 3000 allow করা আছে কিনা চেক করুন |
 | Employee Tracking কাজ করছে না (APK) | `capacitor.config.ts` এ `useLegacyBridge: true` আছে কিনা, ফোনে background location permission দেওয়া আছে কিনা দেখুন |
+| Web থেকে APK নামালে install হয় না / zip হয়ে নামে | ফাইলটা `<অ্যাপ ফোল্ডার>/downloads/CredenceHR.apk`-এ আছে কিনা দেখুন (৭ নং ধাপের শেষে)। `curl -I https://<domain>/downloads/CredenceHR.apk`-এ `Content-Type: application/vnd.android.package-archive` আসা উচিত; 404 এলে ফাইল নেই বা APK নয়, সার্ভারের log দেখুন |
+| APK-তে ওপরে status bar-এর নিচে বড় ফাঁকা / ওপরে-নিচে কালো দাগ (Vivo, Oppo… পুরনো Android System WebView) | `capacitor.config.ts`-এ `SystemBars.insetsHandling: 'disable'` আছে কিনা দেখুন, তারপর নতুন APK বানান। app নিজেই (MainActivity.java) status bar-এর মাপ দেয়; Capacitor-এর নিজের padding চালু থাকলে জায়গা দুবার ছাড়ে |
 | Port 3000 already in use | `.env` এ `PORT` বদলে অন্য একটা ফ্রি পোর্ট দিন |
 
 ---

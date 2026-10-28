@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import { LeaveApplication, LeaveBalance } from '../types';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import beachAnimation from '../assets/Beach.json';
 
 interface LeaveSummaryCardProps {
@@ -30,20 +31,25 @@ interface LeaveSummaryCardProps {
 // live in LeaveReviewPage — mirrors how the Conveyance Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
+  // The Total Leave strip's blur is on in the app too (half the old
+  // strength: 20px), with glass-mask-fix + translateZ(0) keeping the strip
+  // from dropping out on Android reloads.
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = async () => {
     try {
-      const [appsRes, balRes] = await Promise.all([
-        fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/leave-balances/mine'), { headers: { Authorization: `Bearer ${token}` } })
+      // This card mounts twice on every Dashboard load (mobile + desktop
+      // copies, see UserPanel.tsx) — dedupedFetchJson means only one of the
+      // two actually hits the network.
+      const [apps, rows] = await Promise.all([
+        dedupedFetchJson(apiUrl('/api/leave-applications/mine'), token),
+        dedupedFetchJson(apiUrl('/api/leave-balances/mine'), token)
       ]);
-      if (appsRes.ok) setApplications(await appsRes.json());
-      if (balRes.ok) {
-        const rows = await balRes.json();
-        setBalance(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
-      }
+      if (apps) setApplications(apps);
+      if (rows) setBalance(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
     } catch {
       // Offline/unreachable — the card just shows whatever it already had (or
       // stays empty).
@@ -80,8 +86,24 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         // grid (see the same note on AttendanceCard). The violet header
         // inside stays either way — that's this card's own identity, not the
         // mobile surface treatment.
-        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm"
+        className="glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
+      {/* No backdrop-blur on this outer shell (there used to be one, split
+          onto its own absolutely-positioned -z-10 child layer to work
+          around an Android compositor gap) — confirmed on real hardware
+          that this device's WebView doesn't render backdrop-filter at all,
+          so that layer was dead weight, and the negative-z-index child was
+          the likely cause of a separate bug where the card's background
+          would render correctly on first paint and then disappear after a
+          reload.
+          That reload bug, it turns out, wasn't really about the -z-10 child
+          at all — it's a broader Android/WebKit rounded-corner +
+          translucent-background compositor bug (see glass-mask-fix in
+          index.css), and it can hit this shell's own rounded gradient
+          background too, blur or no blur, hence glass-mask-fix being
+          applied here as well now. The "Total Leave" strip below doesn't
+          depend on blur to read as a distinct panel — see the note on it
+          further down. */}
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
           since it sits inline among other cards rather than at the very top
@@ -105,15 +127,22 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          Same liquid-glass treatment as the outer card (translucent white +
-          backdrop-blur instead of a flat white box), so the violet header
-          shows softly through it. backdrop-blur-lg to match My Attendance's
-          own tiles (that card's outer shell is blur-xl, its inner tiles are
-          blur-lg — this strip is the same kind of inner tile). Shorter
-          (py-2.5, tighter gaps) than the last pass so the card doesn't run
-          as tall.  */}
+          backdrop-blur-xl is close to invisible here on its own, since the
+          violet header right behind this strip is a flat gradient with no
+          texture to blur — the bright inset top-edge highlight below (same
+          trick the floating action buttons use) is what mainly sells
+          "glass" on this screen. bg-white/75: /50 read as a washed-out
+          purple smear (no separation from the header); /95 swung the other
+          way — flat opaque white, no glass feel. /75 is the middle ground.
+          The blur (20px) is on in the app as well as the web.
+          glass-mask-fix (index.css) covers the broader version of that same
+          bug for this strip's own rounded translucent background,
+          independent of whether blur is present at all. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/50 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
+        <div
+          style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
+          className={`glass-mask-fix bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
+        >
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-1.5 flex items-center gap-6">

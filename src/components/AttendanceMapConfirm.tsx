@@ -214,7 +214,7 @@ export default function AttendanceMapConfirm({
       .bindPopup('You are here');
 
     if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: PROJECT_ZOOM });
+      map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
     }
 
     setTimeout(() => {
@@ -304,7 +304,7 @@ export default function AttendanceMapConfirm({
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
         if (bounds.length > 1) {
-          mapRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: PROJECT_ZOOM });
+          mapRef.current.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
         } else {
           mapRef.current.panTo([fresh.latitude, fresh.longitude]);
         }

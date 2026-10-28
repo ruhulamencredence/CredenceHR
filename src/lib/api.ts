@@ -13,16 +13,38 @@
 // origin it was loaded from, on both platforms, with zero base-URL
 // bookkeeping needed here.
 //
-// Switching an Android device to a DIFFERENT deployment (see GlobalSidebar's
-// "Set Server" -> ServerSwitcherModal.tsx, fed by the catalog a Superadmin
-// manages from the WEB Admin Panel -> Servers / ServerProfileRoutes.ts) is a
-// full page navigation (window.location.href = thatServer'sUrl) — the
-// WebView just loads that other server's app fresh, exactly like opening a
-// different website, rather than this file quietly redirecting only SOME
-// fetch() calls to a different origin than the one the page (and everything
-// on it — login, assets, everything) actually came from. That split — UI
-// from server A, API calls from server B — was the earlier design here and
-// is exactly what caused "switching doesn't actually switch" confusion.
 export function apiUrl(path: string): string {
   return path;
+}
+
+// De-dupes identical concurrent authenticated GETs. UserPanel's Dashboard
+// mounts several cards (AttendanceCard, LeaveSummaryCard,
+// PendingApprovalsCard, HolidayCalendarWidget) TWICE on every load — once
+// for the mobile layout, once for the md+ desktop grid, toggled visible via
+// CSS rather than actually swapping which copy is in the DOM (so both are
+// always mounted, whichever viewport is active) — so each card's own fetch
+// on mount would otherwise fire twice, doubling the Dashboard's network
+// calls for no benefit. Both callers here get the exact same in-flight
+// promise/result instead; the entry is dropped once it settles, so a later
+// genuine reload (a manual refresh, a token change, ...) still hits the
+// network fresh rather than ever serving stale data.
+//
+// Caches the PARSED JSON (a plain value), not the raw Response — a raw
+// fetch Response's body can only be read once, so handing the same Response
+// to two callers would need response.clone() timed exactly right; caching
+// the already-awaited JSON sidesteps that entirely.
+const inFlightJsonRequests = new Map<string, Promise<any>>();
+
+export function dedupedFetchJson(url: string, token: string): Promise<any> {
+  const key = `${token}::${url}`;
+  const existing = inFlightJsonRequests.get(key);
+  if (existing) return existing;
+  const promise = fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null)
+    .finally(() => {
+      inFlightJsonRequests.delete(key);
+    });
+  inFlightJsonRequests.set(key, promise);
+  return promise;
 }

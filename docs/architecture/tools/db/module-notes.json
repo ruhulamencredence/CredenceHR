@@ -1,0 +1,15 @@
+{
+ "K. Communication: Notices, Chat, Mail, Assistant, Feedback": "নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।\n\nমূল টেবিল: `notices`, `chat_*`, `mail_*`, `assistant_*`",
+ "H. HR Operations, Onboarding & Recruitment": "HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), নতুন কর্মীর onboarding, নিয়োগ।\n\nমূল টেবিল: `hr_actions`, `hr_letters`, `onboarding_applications`, `job_postings`, `job_candidates`",
+ "D. Attendance, Roster, Breaks & Tracking": "তিন ধরনের উপস্থিতি (রিমোট GPS, অফিস ZKTeco, সাইট muster roll), রোস্টার, বিরতি, লাইভ লোকেশন।\n\nমূল টেবিল: `attendance`, `zk_attendance_logs`, `site_attendance_*`, `duty_roster`, `employee_breaks`",
+ "A. Accounts, Access & Security": "লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র `users` (১৫৮টি foreign key এখানে এসে মেলে)।\n\nমূল টেবিল: `users` (লগইন), `user_sessions`, `user_devices`, `admin_module_permissions`(+`_layers`), `login_attempts`, `password_reset_*`",
+ "M. PEPM: MPR, Jobs, Budget & Materials": "প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।\n\nমূল টেবিল: `jobs`, `entries`, `budgets`, `mpr_numbers`, `mpr_dispatches`",
+ "F. Claims, Conveyance & Mobile Bill": "Movement claim, Conveyance Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।\n\nমূল টেবিল: `claims`, `user_claims`, `conveyance_bills`, `mobile_sims`, `bill_claim_*`",
+ "B. Company, Organisation & Employees": "কোম্পানি-গ্রুপ, সংগঠন কাঠামো আর কর্মীর মূল রেকর্ড। `users` = লগইন, `all_employees` = HR-এর কর্মী-রেকর্ড; `all_employees.user_id` দিয়ে জোড়া।\n\nমূল টেবিল: `companies`, `departments`, `branches`, `projects`, `all_employees`, `employee_*`, `hr_emp_*`",
+ "C. Leave": "ছুটির ধরন, নীতি, ব্যালেন্স ও আবেদন।\n\nমূল টেবিল: `leave_applications`, `leave_balances`, `leave_categories`, `leave_category_policies`",
+ "L. Assets & Vehicles": "অফিস সম্পদ ও গাড়ি।\n\nমূল টেবিল: `assets`, `asset_requisitions`, `vehicles`, `vehicle_requisitions`",
+ "J. Documents & E-Signature": "Document Vault আর ডিজিটাল স্বাক্ষর।\n\nমূল টেবিল: `employee_documents`, `document_signers`, `document_signatures`, `esign_certificates`",
+ "E. Payroll & Salary": "বেতন কাঠামো থেকে payslip ও final settlement পর্যন্ত। `payrolls` একজন কর্মী ও একটি মাসে একটি (UNIQUE)।\n\nমূল টেবিল: `salary_structures`, `payrolls`, `payroll_batches`, `final_settlements`, `employee_advances`",
+ "I. Performance, Grievance, Exit, Targets & Tasks": "কর্মজীবনের বাকি অংশ: মূল্যায়ন, অভিযোগ, শৃঙ্খলা, বিদায়, লক্ষ্য ও কাজ।\n\nমূল টেবিল: `performance_*`, `grievances`, `exit_requests`, `final_settlements`, `targets`, `tasks`",
+ "G. Approvals & Alerts": "সব অনুমোদন-প্রবাহের সাধারণ ইঞ্জিন আর নোটিফিকেশন।\n\nমূল টেবিল: `approval_templates`, `approval_requests`, `alerts`"
+}

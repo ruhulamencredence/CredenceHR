@@ -41,7 +41,10 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface LoanAdvanceManagementPanelProps {
   token: string;
 }
@@ -68,8 +71,15 @@ interface AdvanceRequest {
   total_amount: number;
   monthly_installment: number;
   reason: string | null;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   created_at: string;
+  // Self Service requests (LoanRequestRoutes.ts): loan or salary advance,
+  // how many installments, and where its approval chain is — 'in_progress'
+  // = still with the approvers (decided there first), 'approved' = they
+  // recommended it, 'none' = no chain.
+  request_kind?: 'loan' | 'advance';
+  installments?: number | null;
+  chain_status?: 'in_progress' | 'approved' | 'rejected' | 'none' | null;
 }
 
 interface EmployeeLite {
@@ -85,7 +95,17 @@ const money = (n: number | null | undefined) =>
 
 export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [subTab, setSubTab] = useState<'requests' | 'approvals' | 'tracker'>('requests');
+  const [subTab, setSubTab] = useState<'requests' | 'approvals' | 'tracker'>(() => {
+    // A "Loan / Advance request" alert opens Approvals.
+    try {
+      const t = sessionStorage.getItem('loans_subtab');
+      sessionStorage.removeItem('loans_subtab');
+      if (t === 'approvals') return 'approvals';
+    } catch {
+      // storage unavailable
+    }
+    return 'requests';
+  });
 
   const [advances, setAdvances] = useState<AdvanceRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('active');
@@ -148,7 +168,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   }, []);
 
   const decideRequest = async (request: AdvanceRequest, action: 'approve' | 'reject') => {
-    if (action === 'reject' && !window.confirm(`Reject ${request.employee_name}'s loan/advance request?`)) return;
+    if (action === 'reject' && !(await confirmDialog(`Reject ${request.employee_name}'s loan/advance request?`))) return;
     setDecidingId(request.id);
     setRequestsError('');
     try {
@@ -172,7 +192,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   };
 
   const markCompleted = async (a: AdvanceRecord) => {
-    if (!window.confirm(`Mark "${a.employee_name}"'s advance as fully settled (Completed)?`)) return;
+    if (!(await confirmDialog(`Mark "${a.employee_name}"'s advance as fully settled (Completed)?`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/advances/${a.id}`), {
@@ -192,7 +212,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   };
 
   const remove = async (a: AdvanceRecord) => {
-    if (!window.confirm(`Delete this advance for "${a.employee_name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this advance for "${a.employee_name}"? This cannot be undone.`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/advances/${a.id}`), { method: 'DELETE', headers: authHeaders });
@@ -316,7 +336,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
             </button>
           </div>
           {requestsLoading ? (
-            <div className="flex justify-center py-16"><Spinner size={26} /></div>
+            <LoadingBlock />
           ) : pendingRequests.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-16">No pending requests.</p>
           ) : (
@@ -324,23 +344,35 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
               {pendingRequests.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{r.employee_name}</p>
+                    <p className="text-sm font-medium text-slate-800 truncate">
+                      {r.employee_name}
+                      <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                        {r.request_kind === 'advance' ? 'Salary Advance' : 'Loan'}
+                      </span>
+                      {r.chain_status === 'in_progress' && (
+                        <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">With approvers</span>
+                      )}
+                      {r.chain_status === 'approved' && (
+                        <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">Recommended by approvers</span>
+                      )}
+                    </p>
                     <p className="text-[11px] text-slate-400">
                       {r.employee_code || '—'} &middot; {money(r.total_amount)} total &middot; EMI {money(r.monthly_installment)}/mo
+                      {r.installments ? ` × ${r.installments}` : ''}
                       {r.reason ? ` · ${r.reason}` : ''}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0" title={r.chain_status === 'in_progress' ? 'Still with its approvers in Approve Applications' : undefined}>
                     <button
                       onClick={() => decideRequest(r, 'approve')}
-                      disabled={decidingId === r.id}
+                      disabled={decidingId === r.id || r.chain_status === 'in_progress'}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50"
                     >
                       {decidingId === r.id ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
                     </button>
                     <button
                       onClick={() => decideRequest(r, 'reject')}
-                      disabled={decidingId === r.id}
+                      disabled={decidingId === r.id || r.chain_status === 'in_progress'}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50"
                     >
                       {decidingId === r.id ? <Spinner size={14} /> : <XCircle className="w-3.5 h-3.5" />} Reject
@@ -372,7 +404,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><Spinner size={26} /></div>
+          <LoadingBlock />
         ) : error ? (
           <p className="text-xs text-rose-600 text-center py-16">{error}</p>
         ) : advances.length === 0 ? (
@@ -582,7 +614,7 @@ const AdvanceFormModal: React.FC<{
           {!advance && (
             <div>
               <label className="block text-[11px] text-slate-500 mb-1">Employee</label>
-              <select
+              <SearchSelect
                 value={employeeId}
                 onChange={(e) => setEmployeeId(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -593,7 +625,7 @@ const AdvanceFormModal: React.FC<{
                     {e.name}{e.employee_code ? ` (${e.employee_code})` : ''}{e.department ? ` — ${e.department}` : ''}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
           )}
           {!advance && (

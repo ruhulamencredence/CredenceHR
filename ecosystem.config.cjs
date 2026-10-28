@@ -14,6 +14,18 @@
 // in production. See server.ts around `new SocketIOServer` for the adapter
 // wiring itself.
 //
+// Before switching a server to cluster mode:
+//   1. Redis running, and REDIS_URL in this server's .env / environment
+//      (e.g. redis://127.0.0.1:6379). Every worker logs "Socket.IO Redis
+//      adapter connected" when it works. Without it chat, notifications,
+//      presence and calls between workers break.
+//   2. If nginx (or another proxy) sits in front, it must pass WebSocket
+//      upgrades for /socket.io/ (proxy_http_version 1.1; Upgrade /
+//      Connection headers). The app connects over WebSocket first; plain
+//      HTTP long-polling does not work across several workers.
+//   3. Nothing else: background jobs (reminders, leave-year rollover,
+//      ZKTeco sync…) run only in worker 0 by themselves (jobRunner.ts).
+//
 // Usage: npm run pm2:start (first run) / npm run pm2:reload (zero-downtime
 // deploy of a new build) / npm run pm2:stop / npm run pm2:logs.
 module.exports = {

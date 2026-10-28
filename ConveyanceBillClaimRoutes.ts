@@ -27,6 +27,9 @@
 // in server.ts's ensureSchemaMigrations(), same as every other table.
 
 import type { Express } from "express";
+import { isAppSession } from "./SessionSecurity";
+import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
+import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./ConveyanceClaimHistory";
 
 interface ConveyanceBillClaimRouteDeps {
   authenticateToken: any;
@@ -45,6 +48,10 @@ interface ConveyanceBillClaimRouteDeps {
   // Superadmin always passes; an Admin/User passes only once granted
   // can_view_conveyance_claims.
   requireConveyanceClaimAccess: any;
+  // Conveyance -> "Claim on Behalf" layer (explicit-only, see
+  // CONVEYANCE_LAYER_KEYS in server.ts).
+  requireModuleLayer: (moduleKey: "conveyance", layer: "on_behalf") => any;
+  hasModuleLayer: (user: any, moduleKey: "conveyance", layer: "on_behalf") => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   createAlert: (queryDB: (sql: string, params?: any[]) => Promise<any>, alert: any) => Promise<any>;
   // Every account's Admin Panel module grants — used directly here (not just
@@ -55,7 +62,7 @@ interface ConveyanceBillClaimRouteDeps {
   // (leave/timesheet/attendance) routes through.
   createTemplateApprovalRequest: (
     requestType: "conveyance" | "leave" | "timesheet",
-    sourceType: string,
+    sourceType: "user_claim",
     sourceId: number,
     employeeUserId: number
   ) => Promise<{ autoApproved: boolean; [key: string]: any }>;
@@ -71,9 +78,6 @@ interface ConveyanceBillClaimRouteDeps {
   rejectUserClaimRecord: (userClaimId: number, rejectedBy: number, remarks: string | null) => Promise<void>;
   toDateOnlyString: (value: any) => string | null;
   todayInDhaka: () => string;
-  // Valid Category values for a Conveyance Bill Claim — same
-  // USER_CLAIM_CATEGORIES array defined once in server.ts.
-  userClaimCategories: readonly string[];
   // Department-wise scope for the 'conveyance' module (Admin Panel -> Users
   // -> Module Access -> "Conveyance Claim Departments") — same
   // getAttendanceReportDeptScope/getLeaveApplicationDeptScope convention
@@ -84,6 +88,63 @@ interface ConveyanceBillClaimRouteDeps {
   getConveyanceClaimDeptScope: (userId: number) => Promise<string[] | null>;
 }
 
+// Marks a Bill paid out: voucher no + who/when, and tells the claimant. Used
+// by Conveyance Disbursement and by a Conveyance Template's "Conveyance
+// Disburser" Layer (server.ts performApprovalAction). Errors carry statusCode.
+export async function disburseConveyanceBill(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  createAlert: (queryDB: (sql: string, params?: any[]) => Promise<any>, alert: any) => Promise<any>,
+  todayInDhaka: () => string,
+  id: number,
+  userId: number,
+  voucherNo?: unknown
+): Promise<string> {
+  const fail = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
+  const bills = await queryDB("SELECT * FROM conveyance_bills WHERE id = ?", [id]);
+  if (bills.length === 0) throw fail(404, "Bill not found");
+  const bill = bills[0];
+  if (!!Number(bill.is_disbursed)) throw fail(400, "This Bill has already been disbursed.");
+  // Nobody pays out their own bill — not even the Superadmin.
+  if (Number(bill.user_id) === Number(userId)) throw fail(403, "You can't disburse a bill in your own name. Someone else has to pay it out.");
+
+  const itemCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM conveyance_bill_items WHERE bill_id = ?", [id]);
+  if (Number(itemCountRows[0]?.cnt || 0) === 0) {
+    throw fail(400, "This Bill has no line items yet — add at least one before disbursing.");
+  }
+
+  // Auto-suggested if the client didn't send one (or sent blank) — same
+  // "PV-<billId>-<YYYYMMDD>" shape the frontend pre-fills, computed here too
+  // so a bulk-disburse call (which sends no voucher_no per bill) still gets
+  // one, and a single manual disburse can still override it.
+  let voucher_no = typeof voucherNo === "string" ? voucherNo.trim().slice(0, 100) : "";
+  if (!voucher_no) voucher_no = `PV-${id}-${todayInDhaka().replace(/-/g, "")}`;
+
+  // Only if still not paid out: a second click (or bulk + single at the same
+  // moment) pays nothing twice.
+  const paid: any = await queryDB("UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ? AND COALESCE(is_disbursed, 0) = 0", [
+    voucher_no,
+    userId,
+    id
+  ]);
+  if (paid && paid.affectedRows === 0) throw fail(409, "This Bill was just disbursed by someone else.");
+
+  try {
+    const totalRows = await queryDB("SELECT COALESCE(SUM(amount), 0) AS total FROM conveyance_bill_items WHERE bill_id = ?", [id]);
+    const total = Number(totalRows[0]?.total || 0);
+    await createAlert(queryDB, {
+      userId: bill.user_id,
+      type: "conveyance_disbursed",
+      title: "Conveyance Bill Disbursed",
+      message: `Your conveyance bill CB-${id} of ৳${total.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been disbursed (Voucher ${voucher_no}).`,
+      relatedType: "conveyance_bill",
+      relatedId: id
+    });
+  } catch (alertErr: any) {
+    console.warn("⚠️ Could not notify the claimant for disbursed Bill #" + id + ": " + alertErr.message);
+  }
+  return voucher_no;
+}
+
 export function registerConveyanceBillClaimRoutes(app: Express, deps: ConveyanceBillClaimRouteDeps) {
   const {
     authenticateToken,
@@ -91,6 +152,8 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     requireModule,
     requireAnyModule,
     requireConveyanceClaimAccess,
+    requireModuleLayer,
+    hasModuleLayer,
     queryDB,
     createAlert,
     getAdminModules,
@@ -102,9 +165,42 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES,
     getConveyanceClaimDeptScope
   } = deps;
+
+  // Bills are made only from approved claims now (finalizeUserClaimApproval
+  // in server.ts). What an Admin with the "conveyance" module may still do
+  // to a bill, and what it may not:
+  //   - nothing at all to a bill in their own name (Superadmin included),
+  //   - nothing to a disbursed bill until the disbursement is undone,
+  //   - lower an amount, never raise it (a Layer's approved amount is the cap),
+  //   - add a check-in/out only once its approval is through.
+  // Returns the bill, or sends the error and returns null.
+  const loadBillForChange = async (id: any, req: any, res: any): Promise<any | null> => {
+    const bills = await queryDB("SELECT * FROM conveyance_bills WHERE id = ?", [id]);
+    if (bills.length === 0) {
+      res.status(404).json({ error: "Bill not found" });
+      return null;
+    }
+    const bill = bills[0];
+    if (Number(bill.user_id) === Number(req.user.id)) {
+      res.status(403).json({ error: "You can't change a bill in your own name." });
+      return null;
+    }
+    if (!!Number(bill.is_disbursed)) {
+      res.status(400).json({ error: "This Bill has been disbursed and is locked. Undo the disbursement first." });
+      return null;
+    }
+    return bill;
+  };
+
+  // A check-in/out (Movement Claim) can go on a bill only once every approval
+  // request on it (check-in and check-out) is approved; one with no approval
+  // chain at all counts as approved.
+  const movementClaimApproved = async (claimId: number): Promise<boolean> => {
+    const reqs = await queryDB("SELECT status FROM approval_requests WHERE source_type = 'claim' AND source_id = ?", [claimId]);
+    return reqs.every((r: any) => r.status === "approved");
+  };
 
   // ---- Conveyance Bill Claim (Superadmin + explicitly-granted Admins only) ----
   // See the conveyance_bills/conveyance_bill_items table comments above for the
@@ -114,6 +210,63 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
   app.get("/api/conveyance-bills", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req, res) => {
     try {
+      // ?slim=1 (with ?since=YYYY-MM-DD): disbursed bills only, as id/date/disbursed/total —
+      // all the Admin Dashboard adds up.
+      if (String(req.query.slim || "") === "1") {
+        const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
+        const slim = await queryDB(
+          `SELECT b.id, b.user_id, b.bill_date, b.is_disbursed,
+              (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+           FROM conveyance_bills b
+           WHERE b.is_disbursed = 1 ${since ? "AND b.bill_date >= ?" : ""}
+           ORDER BY b.id DESC`,
+          since ? [since] : []
+        );
+        return res.json(slim.map((r: any) => ({ ...r, is_disbursed: true, total_amount: Number(r.total_amount) })));
+      }
+      // ?page=&limit= : one page, filtered in SQL (user_id, status=pending|disbursed, from, to)
+      // — { rows, total, page, limit }. The Disbursement tab reads it this way.
+      if (req.query.limit !== undefined) {
+        const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const where: string[] = [];
+        const params: any[] = [];
+        if (req.query.user_id) {
+          where.push("b.user_id = ?");
+          params.push(Number(req.query.user_id));
+        }
+        if (req.query.status === "pending") where.push("COALESCE(b.is_disbursed, 0) = 0");
+        if (req.query.status === "disbursed") where.push("b.is_disbursed = 1");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+          where.push("b.bill_date >= ?");
+          params.push(String(req.query.from));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+          where.push("b.bill_date <= ?");
+          params.push(String(req.query.to));
+        }
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [totalRows, pageRows]: any[] = await Promise.all([
+          queryDB(`SELECT COUNT(*) AS n FROM conveyance_bills b ${w}`, params),
+          queryDB(
+            `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
+                (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+             FROM conveyance_bills b
+             LEFT JOIN users u ON u.id = b.user_id
+             LEFT JOIN users du ON du.id = b.disbursed_by
+             ${w}
+             ORDER BY b.id DESC LIMIT ? OFFSET ?`,
+            [...params, limit, (page - 1) * limit]
+          )
+        ]);
+        return res.json({
+          total: Number(totalRows[0]?.n || 0),
+          page,
+          limit,
+          rows: pageRows.map((r: any) => ({ ...r, is_disbursed: !!Number(r.is_disbursed), item_count: Number(r.item_count), total_amount: Number(r.total_amount) }))
+        });
+      }
       const rows = await queryDB(
         `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
             (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
@@ -146,6 +299,134 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
+  // The Conveyance Bill Claim table: Bills and the Claims not yet in a Bill, one row each,
+  // newest date first — ONE PAGE at a time (?page=&limit=&user_id=&from=&to=). Each Bill
+  // comes with its items' particulars, so the screen needs no request per Bill.
+  // Claims are included only for an account with the "conveyance" module and inside its
+  // Department scope, like GET /api/user-claims; Bills follow GET /api/conveyance-bills.
+  // Registered before /api/conveyance-bills/:id so "combined" is not taken for an id.
+  app.get("/api/conveyance-bills/combined/list", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req: any, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+      const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+      const userId = req.query.user_id ? Number(req.query.user_id) : null;
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(req.query.from) ? String(req.query.from) : null;
+      const to = isDate(req.query.to) ? String(req.query.to) : null;
+
+      const billWhere: string[] = [];
+      const billParams: any[] = [];
+      const claimWhere: string[] = ["NOT EXISTS (SELECT 1 FROM conveyance_bill_items ci WHERE ci.user_claim_id = uc.id)"];
+      const claimParams: any[] = [];
+      if (userId) {
+        billWhere.push("b.user_id = ?");
+        billParams.push(userId);
+        claimWhere.push("uc.user_id = ?");
+        claimParams.push(userId);
+      }
+      if (from) {
+        billWhere.push("b.bill_date >= ?");
+        billParams.push(from);
+        claimWhere.push("uc.claim_date >= ?");
+        claimParams.push(from);
+      }
+      if (to) {
+        billWhere.push("b.bill_date <= ?");
+        billParams.push(to);
+        claimWhere.push("uc.claim_date <= ?");
+        claimParams.push(to);
+      }
+
+      const modules = req.user.role === "superadmin" ? ["conveyance"] : await getAdminModules(req.user.id);
+      let includeClaims = modules.includes("conveyance");
+      if (includeClaims && req.user.role !== "superadmin") {
+        const scope = await getConveyanceClaimDeptScope(req.user.id);
+        if (scope) {
+          if (scope.length === 0) includeClaims = false;
+          else {
+            claimWhere.push(`uc.user_id IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL AND department IN (${scope.map(() => "?").join(",")}))`);
+            claimParams.push(...scope);
+          }
+        }
+      }
+
+      const billSql = `SELECT 'bill' AS kind, b.id AS id, b.bill_date AS d FROM conveyance_bills b ${billWhere.length ? "WHERE " + billWhere.join(" AND ") : ""}`;
+      const claimSql = `SELECT 'claim' AS kind, uc.id AS id, uc.claim_date AS d FROM user_claims uc WHERE ${claimWhere.join(" AND ")}`;
+      const unionSql = includeClaims ? `${billSql} UNION ALL ${claimSql}` : billSql;
+      const unionParams = includeClaims ? [...billParams, ...claimParams] : billParams;
+
+      const [totalRows, pageRows]: any[] = await Promise.all([
+        queryDB(`SELECT COUNT(*) AS n FROM (${unionSql}) x`, unionParams),
+        queryDB(`SELECT kind, id, d FROM (${unionSql}) x ORDER BY d DESC, id DESC LIMIT ? OFFSET ?`, [...unionParams, limit, (page - 1) * limit])
+      ]);
+      const billIds = pageRows.filter((r: any) => r.kind === "bill").map((r: any) => Number(r.id));
+      const claimIds = pageRows.filter((r: any) => r.kind === "claim").map((r: any) => Number(r.id));
+
+      const bills: any[] = billIds.length
+        ? await queryDB(
+            `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
+                (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+             FROM conveyance_bills b
+             LEFT JOIN users u ON u.id = b.user_id
+             LEFT JOIN users du ON du.id = b.disbursed_by
+             WHERE b.id IN (${billIds.map(() => "?").join(",")})`,
+            billIds
+          )
+        : [];
+      const itemRows: any[] = billIds.length
+        ? await queryDB(`SELECT id, bill_id, particulars FROM conveyance_bill_items WHERE bill_id IN (${billIds.map(() => "?").join(",")}) ORDER BY entry_date ASC, id ASC`, billIds)
+        : [];
+      const itemsByBill = new Map<number, any[]>();
+      for (const it of itemRows) itemsByBill.set(Number(it.bill_id), [...(itemsByBill.get(Number(it.bill_id)) || []), it]);
+      const billById = new Map<number, any>(
+        bills.map((b: any) => [
+          Number(b.id),
+          { ...b, is_disbursed: !!Number(b.is_disbursed), item_count: Number(b.item_count), total_amount: Number(b.total_amount), items: itemsByBill.get(Number(b.id)) || [] }
+        ])
+      );
+
+      let claimById = new Map<number, any>();
+      if (claimIds.length) {
+        const [claimRows, employees]: any[] = await Promise.all([
+          queryDB(
+            `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
+                    uc.description, uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
+                    uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
+                    uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id, uc.filed_by, fb.name AS filed_by_name,
+                    uc.version, uc.edit_state, uc.return_reason, uc.reclaim_allowed, uc.first_submitted_at
+               FROM user_claims uc
+               LEFT JOIN users u ON u.id = uc.user_id
+               LEFT JOIN users r ON r.id = uc.reviewed_by
+               LEFT JOIN users fb ON fb.id = uc.filed_by
+               LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
+              WHERE uc.id IN (${claimIds.map(() => "?").join(",")})`,
+            claimIds
+          ),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const dept = new Map<number, string>();
+        for (const e of employees) if (e.user_id != null && e.department) dept.set(Number(e.user_id), e.department);
+        const withRefs = await attachUserClaimRefs(
+          claimRows.map((r: any) => ({ ...r, amount: Number(r.amount), has_file: !!r.has_file, department: dept.get(Number(r.user_id)) || null }))
+        );
+        const withApproval = await attachUserClaimApproval(withRefs);
+        const full = await attachEditState(await attachClaimItems(queryDB, withApproval));
+        claimById = new Map<number, any>(full.map((c: any) => [Number(c.id), c]));
+      }
+
+      res.json({
+        total: Number(totalRows[0]?.n || 0),
+        page,
+        limit,
+        bills: pageRows.filter((r: any) => r.kind === "bill").map((r: any) => billById.get(Number(r.id))).filter(Boolean),
+        claims: pageRows.filter((r: any) => r.kind === "claim").map((r: any) => claimById.get(Number(r.id))).filter(Boolean)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/conveyance-bills/:id", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req, res) => {
     try {
       const { id } = req.params;
@@ -159,35 +440,106 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       );
       if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
       const items = await queryDB(`SELECT * FROM conveyance_bill_items WHERE bill_id = ? ORDER BY entry_date ASC, id ASC`, [id]);
+      // The claimant's Employee record — the Payment Voucher prints their
+      // code, designation and department.
+      const emp: any[] = (await queryDB("SELECT employee_id, designation, department FROM all_employees WHERE user_id = ?", [bills[0].user_id])) || [];
+      // An item that came from a Conveyance Bill Claim carries that claim's
+      // category lines (user_claim_items: category, date, amount,
+      // description) so the voucher can group the bill by category.
+      const ucIds = items.map((it: any) => Number(it.user_claim_id)).filter((v: number) => v > 0);
+      const [ucRows, ucItemRows]: any[] = ucIds.length
+        ? await Promise.all([
+            queryDB(`SELECT id, category FROM user_claims WHERE id IN (${ucIds.map(() => "?").join(",")})`, ucIds),
+            queryDB(`SELECT * FROM user_claim_items WHERE user_claim_id IN (${ucIds.map(() => "?").join(",")}) ORDER BY bill_date, id`, ucIds)
+          ])
+        : [[], []];
+      const ucCategory = new Map<number, string>((ucRows || []).map((r: any) => [Number(r.id), r.category]));
       res.json({
         ...bills[0],
+        employee_code: emp[0]?.employee_id || null,
+        designation: emp[0]?.designation || null,
+        department: emp[0]?.department || null,
         is_disbursed: !!Number(bills[0].is_disbursed),
-        items: items.map((it: any) => ({ ...it, distance_km: it.distance_km !== null ? Number(it.distance_km) : null, rate_per_km: it.rate_per_km !== null ? Number(it.rate_per_km) : null, amount: Number(it.amount) }))
+        items: items.map((it: any) => ({
+          ...it,
+          distance_km: it.distance_km !== null ? Number(it.distance_km) : null,
+          rate_per_km: it.rate_per_km !== null ? Number(it.rate_per_km) : null,
+          amount: Number(it.amount),
+          claim_category: it.user_claim_id ? ucCategory.get(Number(it.user_claim_id)) || null : null,
+          claim_lines: it.user_claim_id
+            ? (ucItemRows || [])
+                .filter((l: any) => Number(l.user_claim_id) === Number(it.user_claim_id))
+                .map((l: any) => ({ category: l.category_name, bill_date: l.bill_date, amount: Number(l.amount), description: l.description || null }))
+            : []
+        }))
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post("/api/conveyance-bills", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
+  // Who approved the claims on this bill, Layer by Layer, with the signature each
+  // kept when approving (Bill Claim Policy -> "Put each approver's signature on
+  // the Bill and Voucher"; off -> enabled:false and nothing else). One entry per
+  // approver and Layer even when several claims on the bill went through the
+  // same people. For the "Approved By" block of the Bill and Payment Voucher PDFs.
+  app.get("/api/conveyance-bills/:id/approver-signatures", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req, res) => {
     try {
-      const { user_id, bill_date, remarks } = req.body;
-      if (!user_id) return res.status(400).json({ error: "Select a User for this bill." });
-      const users = await queryDB("SELECT id FROM users WHERE id = ?", [user_id]);
-      if (users.length === 0) return res.status(404).json({ error: "User not found" });
-      const result = await queryDB(
-        "INSERT INTO conveyance_bills (user_id, bill_date, remarks, created_by) VALUES (?, ?, ?, ?)",
-        [user_id, bill_date || todayInDhaka(), remarks || null, req.user.id]
-      );
-      res.json({ success: true, id: result.insertId });
+      const policy = await loadPolicy(queryDB);
+      if (!policy.approver_signature) return res.json({ enabled: false, approvers: [] });
+      const items: any[] = (await queryDB("SELECT user_claim_id FROM conveyance_bill_items WHERE bill_id = ?", [req.params.id])) || [];
+      const ucIds = [...new Set(items.map((it) => Number(it.user_claim_id)).filter((v) => v > 0))];
+      if (!ucIds.length) return res.json({ enabled: true, approvers: [] });
+      const ph = ucIds.map(() => "?").join(",");
+      const requests: any[] = (await queryDB(`SELECT * FROM approval_requests WHERE source_type = 'user_claim' AND source_id IN (${ph})`, ucIds)) || [];
+      const reqIds = requests.map((r) => Number(r.id));
+      const sigs: any[] = reqIds.length ? (await queryDB(`SELECT * FROM claim_approval_signatures WHERE approval_request_id IN (${reqIds.map(() => "?").join(",")})`, reqIds).catch(() => [])) || [] : [];
+      const tmplIds = [...new Set(requests.map((r) => Number(r.template_id)).filter((v) => v > 0))];
+      const steps: any[] = tmplIds.length ? (await queryDB(`SELECT template_id, step_order, label FROM approval_template_steps WHERE template_id IN (${tmplIds.map(() => "?").join(",")})`, tmplIds)) || [] : [];
+      const out = new Map<string, any>();
+      for (const r of requests) {
+        let actions: any[] = [];
+        try { actions = JSON.parse(r.actions_json || "[]"); } catch { actions = []; }
+        const offset = Number(r.supervisor_step_user_id) > 0 ? 1 : 0;
+        for (const a of actions) {
+          if (a.action !== "approved") continue;
+          const step = Number(a.step_order);
+          const key = `${step}:${a.approver_id}`;
+          const sig = sigs.find((x) => Number(x.approval_request_id) === Number(r.id) && Number(x.step_order) === step && Number(x.approver_user_id) === Number(a.approver_id));
+          const prev = out.get(key);
+          if (prev && (prev.image || !sig)) continue;
+          const tmpl = steps.find((t) => Number(t.template_id) === Number(r.template_id) && Number(t.step_order) === step - offset);
+          const img = sig?.image ? (Buffer.isBuffer(sig.image) ? sig.image : Buffer.from(sig.image)) : null;
+          out.set(key, {
+            step_order: step,
+            label: step === 1 && offset ? "Supervisor" : tmpl?.label || `Layer ${step}`,
+            approver_id: Number(a.approver_id),
+            approver_name: a.approver_name || null,
+            approved_at: a.acted_at || null,
+            image: img ? `data:image/png;base64,${img.toString("base64")}` : null
+          });
+        }
+      }
+      res.json({ enabled: true, approvers: [...out.values()].sort((x, y) => x.step_order - y.step_order || String(x.approver_name).localeCompare(String(y.approver_name))) });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to create bill" });
+      res.status(500).json({ error: err.message });
     }
   });
 
-  app.put("/api/conveyance-bills/:id", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  // "New Bill" is gone: a bill is made only when a Conveyance Bill Claim is
+  // approved through its chain. To claim for someone else, use
+  // POST /api/user-claims/on-behalf/:userId (that claim gets approved like
+  // any other). Kept as a clear refusal for older app versions.
+  app.post("/api/conveyance-bills", authenticateToken, requireAdmin, requireModule("conveyance"), async (_req: any, res) => {
+    res.status(410).json({
+      error: "Bills can't be created by hand any more. File a Conveyance Bill Claim (Claim on Behalf) — the bill is made when it is approved."
+    });
+  });
+
+  app.put("/api/conveyance-bills/:id", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
       const { id } = req.params;
+      if (!(await loadBillForChange(id, req, res))) return;
       const { bill_date, remarks } = req.body;
       const result = await queryDB(
         "UPDATE conveyance_bills SET bill_date = COALESCE(?, bill_date), remarks = ? WHERE id = ?",
@@ -206,11 +558,14 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   // disbursed (money actually paid out — see .../disburse below) can't be
   // deleted from here; it has to be undone first (POST .../undisburse), so a
   // paid-out Bill never just vanishes from the record without a trace.
-  app.delete("/api/conveyance-bills/:id", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  app.delete("/api/conveyance-bills/:id", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const bills = await queryDB("SELECT is_disbursed FROM conveyance_bills WHERE id = ?", [id]);
+      const bills = await queryDB("SELECT is_disbursed, user_id FROM conveyance_bills WHERE id = ?", [id]);
       if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
+      if (Number(bills[0].user_id) === Number(req.user.id)) {
+        return res.status(403).json({ error: "You can't change a bill in your own name." });
+      }
       if (!!Number(bills[0].is_disbursed)) {
         return res.status(400).json({ error: "This Bill has already been disbursed and can't be deleted. Undo the disbursement first." });
       }
@@ -233,55 +588,10 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
   app.post("/api/conveyance-bills/:id/disburse", authenticateToken, requireAdmin, requireModule("disbursement"), async (req: any, res) => {
     try {
-      const { id } = req.params;
-      const bills = await queryDB(
-        `SELECT b.*, u.name AS user_name FROM conveyance_bills b LEFT JOIN users u ON u.id = b.user_id WHERE b.id = ?`,
-        [id]
-      );
-      if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
-      const bill = bills[0];
-      if (!!Number(bill.is_disbursed)) {
-        return res.status(400).json({ error: "This Bill has already been disbursed." });
-      }
-
-      const itemCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM conveyance_bill_items WHERE bill_id = ?", [id]);
-      if (Number(itemCountRows[0]?.cnt || 0) === 0) {
-        return res.status(400).json({ error: "This Bill has no line items yet — add at least one before disbursing." });
-      }
-
-      // Auto-suggested if the client didn't send one (or sent blank) — same
-      // "PV-<billId>-<YYYYMMDD>" shape the frontend pre-fills, computed here too
-      // so a bulk-disburse call (which sends no voucher_no per bill) still gets
-      // one, and a single manual disburse can still override it.
-      let voucher_no = typeof req.body?.voucher_no === "string" ? req.body.voucher_no.trim().slice(0, 100) : "";
-      if (!voucher_no) {
-        const today = todayInDhaka().replace(/-/g, "");
-        voucher_no = `PV-${id}-${today}`;
-      }
-
-      await queryDB(
-        "UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ?",
-        [voucher_no, req.user.id, id]
-      );
-
-      try {
-        const totalRows = await queryDB("SELECT COALESCE(SUM(amount), 0) AS total FROM conveyance_bill_items WHERE bill_id = ?", [id]);
-        const total = Number(totalRows[0]?.total || 0);
-        await createAlert(queryDB, {
-          userId: bill.user_id,
-          type: "conveyance_disbursed",
-          title: "Conveyance Bill Disbursed",
-          message: `Your conveyance bill CB-${id} of \u09f3${total.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been disbursed (Voucher ${voucher_no}).`,
-          relatedType: "conveyance_bill",
-          relatedId: Number(id)
-        });
-      } catch (alertErr: any) {
-        console.warn("⚠️ Could not notify the claimant for disbursed Bill #" + id + ": " + alertErr.message);
-      }
-
+      const voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, Number(req.params.id), req.user.id, req.body?.voucher_no);
       res.json({ success: true, voucher_no });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to disburse bill" });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to disburse bill" });
     }
   });
 
@@ -321,7 +631,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
          ORDER BY c.check_in_at DESC`,
         [userId]
       );
-      res.json(rows.map((r: any) => ({ ...r, distance_km: r.distance_km !== null ? Number(r.distance_km) : null })));
+      const approved: any[] = [];
+      for (const r of rows) if (await movementClaimApproved(Number(r.id))) approved.push(r);
+      res.json(approved.map((r: any) => ({ ...r, distance_km: r.distance_km !== null ? Number(r.distance_km) : null })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -332,12 +644,11 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   // given Rate/KM unless an explicit Amount override is sent) or
   // `source: "manual"` (every field typed in directly; Distance/Rate are optional
   // there since not every conveyance expense is KM-based).
-  app.post("/api/conveyance-bills/:id/items", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  app.post("/api/conveyance-bills/:id/items", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const bills = await queryDB("SELECT * FROM conveyance_bills WHERE id = ?", [id]);
-      if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
-      const bill = bills[0];
+      const bill = await loadBillForChange(id, req, res);
+      if (!bill) return;
       const { source } = req.body;
 
       if (source === "movement_claim") {
@@ -354,6 +665,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }
         const already = await queryDB("SELECT id FROM conveyance_bill_items WHERE claim_id = ?", [claim_id]);
         if (already.length > 0) return res.status(400).json({ error: "That Movement Claim has already been billed." });
+        if (!(await movementClaimApproved(Number(claim_id)))) {
+          return res.status(400).json({ error: "That check-in/out hasn't been approved yet — it can go on a bill once its approval is through." });
+        }
 
         const distanceKm = claim.distance_km !== null && claim.distance_km !== undefined ? Number(claim.distance_km) : null;
         const rate = rate_per_km !== undefined && rate_per_km !== null && rate_per_km !== "" ? Number(rate_per_km) : null;
@@ -378,40 +692,18 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         return res.json({ success: true, id: result.insertId });
       }
 
-      // Manual entry — no source Movement Claim at all.
-      const { entry_date, particulars, from_location, to_location, distance_km, rate_per_km, amount, remarks } = req.body;
-      if (!entry_date || !particulars) {
-        return res.status(400).json({ error: "Date and Particulars are required." });
-      }
-      const distanceKm = distance_km !== undefined && distance_km !== null && distance_km !== "" ? Number(distance_km) : null;
-      const rate = rate_per_km !== undefined && rate_per_km !== null && rate_per_km !== "" ? Number(rate_per_km) : null;
-      let finalAmount: number;
-      if (amount !== undefined && amount !== null && amount !== "") {
-        finalAmount = Number(amount);
-      } else if (distanceKm !== null && rate !== null) {
-        finalAmount = Math.round(distanceKm * rate * 100) / 100;
-      } else {
-        return res.status(400).json({ error: "Enter an Amount (or both Distance and Rate per KM)." });
-      }
-      if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
-        return res.status(400).json({ error: "Amount must be a positive number." });
-      }
-
-      const result = await queryDB(
-        `INSERT INTO conveyance_bill_items
-           (bill_id, source, claim_id, entry_date, particulars, from_location, to_location, distance_km, rate_per_km, amount, remarks)
-         VALUES (?, 'manual', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, entry_date, particulars, from_location || null, to_location || null, distanceKm, rate, finalAmount, remarks || null]
-      );
-      res.json({ success: true, id: result.insertId });
+      // Hand-typed lines are off: every amount on a bill comes from an
+      // approved claim or an approved check-in/out.
+      return res.status(403).json({ error: "Manual lines can't be added. File a Conveyance Bill Claim for it instead." });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to add item" });
     }
   });
 
-  app.put("/api/conveyance-bills/:billId/items/:itemId", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  app.put("/api/conveyance-bills/:billId/items/:itemId", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
       const { billId, itemId } = req.params;
+      if (!(await loadBillForChange(billId, req, res))) return;
       const items = await queryDB("SELECT * FROM conveyance_bill_items WHERE id = ? AND bill_id = ?", [itemId, billId]);
       if (items.length === 0) return res.status(404).json({ error: "Item not found" });
       const { entry_date, particulars, from_location, to_location, distance_km, rate_per_km, amount, remarks } = req.body;
@@ -429,6 +721,14 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
         return res.status(400).json({ error: "Amount must be a positive number." });
       }
+      // An amount on a bill was approved (or worked out from an approved
+      // check-in/out): it may be lowered here, never raised.
+      const currentAmount = Number(items[0].amount);
+      if (finalAmount > currentAmount + 0.005) {
+        return res.status(400).json({
+          error: `The amount can only be lowered — it can't go above the approved ৳${currentAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        });
+      }
 
       await queryDB(
         `UPDATE conveyance_bill_items SET
@@ -444,9 +744,10 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  app.delete("/api/conveyance-bills/:billId/items/:itemId", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  app.delete("/api/conveyance-bills/:billId/items/:itemId", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
       const { billId, itemId } = req.params;
+      if (!(await loadBillForChange(billId, req, res))) return;
       const result = await queryDB("DELETE FROM conveyance_bill_items WHERE id = ? AND bill_id = ?", [itemId, billId]);
       if (result.affectedRows === 0) return res.status(404).json({ error: "Item not found" });
       res.json({ success: true });
@@ -511,20 +812,166 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     return rows.map((r: any) => ({ ...r, claim_refs: byClaim[Number(r.id)] || [] }));
   }
 
-  app.post("/api/user-claims", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
+  // The save half of an edit (see submitUserClaim): the checks have passed;
+  // rewrite the claim, its bills and check-in/out references, record the
+  // change, and put it (back) in front of the right approver.
+  async function saveClaimEdit(
+    req: any,
+    res: any,
+    editing: any,
+    mode: ClaimEditMode,
+    request: any | null,
+    checked: { lines: any[] },
+    claimCategory: string,
+    amt: number,
+    desc: string | null,
+    fileBuffer: Buffer | null,
+    refs: { claim_id: number; amount: number }[],
+    dates: { from: string; to: string },
+    actor: { id: number; name: string }
+  ) {
+    const id = Number(editing.id);
+    const { file_name, file_mimetype } = req.body || {};
+    const fileSql = fileBuffer
+      ? ", file_name = ?, file_mimetype = ?, file_data = ?"
+      : req.body?.remove_file
+        ? ", file_name = NULL, file_mimetype = NULL, file_data = NULL"
+        : "";
+    const fileParams = fileBuffer ? [String(file_name || "attachment").slice(0, 255), String(file_mimetype || "application/octet-stream"), fileBuffer] : [];
+    await queryDB(
+      `UPDATE user_claims SET from_date = ?, to_date = ?, category = ?, amount = ?, description = ?${fileSql},
+              status = 'pending', approved_amount = NULL, edit_state = NULL, reclaim_allowed = 0, version = version + 1
+              ${mode !== "pending" ? ", admin_remarks = NULL, reviewed_by = NULL, reviewed_at = NULL" : ""}
+        WHERE id = ?`,
+      [dates.from, dates.to, claimCategory, amt, desc, ...fileParams, id]
+    );
+    await queryDB("DELETE FROM user_claim_items WHERE user_claim_id = ?", [id]);
+    for (const l of checked.lines) {
+      await queryDB(
+        "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, l.category_id, l.category_name, l.bill_date, l.amount, l.description]
+      );
+    }
+    const oldRefs: any[] = await queryDB("SELECT claim_id, amount FROM user_claim_references WHERE user_claim_id = ?", [id]);
+    await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [id]);
     try {
-      const { claim_date, from_date, to_date, category, amount, description, file_base64, file_name, file_mimetype, claim_refs } =
+      for (const r of refs) {
+        await queryDB("INSERT INTO user_claim_references (user_claim_id, claim_id, amount) VALUES (?, ?, ?)", [id, r.claim_id, r.amount]);
+      }
+    } catch {
+      await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [id]);
+      for (const r of oldRefs) {
+        await queryDB("INSERT INTO user_claim_references (user_claim_id, claim_id, amount) VALUES (?, ?, ?)", [id, r.claim_id, r.amount]).catch(() => {});
+      }
+      return res.status(409).json({ error: "One of the selected check-in/outs was just referenced elsewhere — please refresh and try again." });
+    }
+    await recordClaimHistory(queryDB, id, mode === "pending" ? "edited" : "resubmitted", actor, null);
+
+    const claimantId = Number(editing.user_id);
+    let current = request;
+    if (!current) {
+      // A claim with no approval request (filed before the chain existed, or
+      // rejected through the legacy decision route) is routed now.
+      if (mode !== "pending") {
+        const { autoApproved } = await createTemplateApprovalRequest("conveyance", "user_claim", id, claimantId);
+        if (autoApproved) {
+          await finalizeUserClaimApproval(id, claimantId, null, null);
+          return res.json({ success: true, id, auto_approved: true });
+        }
+        current = (await claimRequests(queryDB, [id])).get(id) || null;
+      }
+    } else if (mode !== "pending" || Number(current.current_step) > 1) {
+      // After a Return / re-claim, or once past Layer 1: Layer 1 sees it again.
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(current.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+      actions.push({
+        step_order: Number(current.current_step),
+        approver_id: actor.id,
+        approver_name: actor.name,
+        action: "resubmitted",
+        remarks: null,
+        acted_at: new Date().toISOString()
+      });
+      await queryDB("UPDATE approval_requests SET status = 'pending', current_step = 1, actions_json = ? WHERE id = ?", [JSON.stringify(actions), current.id]);
+      current = { ...current, status: "pending", current_step: 1 };
+    }
+    if (current) {
+      try {
+        const approvers = await getCurrentStepApprovers(current);
+        for (const approver of approvers) {
+          await createAlert(queryDB, {
+            userId: approver.user_id,
+            type: "conveyance_approval",
+            title: mode === "pending" ? "Conveyance Bill Claim Edited" : "Conveyance Bill Claim Resubmitted",
+            message: `${actor.name} ${mode === "pending" ? "edited" : "resubmitted"} Conveyance Bill Claim #${id} (now \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). Please review the changes.`,
+            relatedType: "user_claim",
+            relatedId: id
+          });
+        }
+      } catch (alertErr: any) {
+        console.warn("⚠️ Could not notify the approver about edited Conveyance Bill Claim #" + id + ": " + alertErr.message);
+      }
+    }
+    return res.json({ success: true, id });
+  }
+
+  // Files a Conveyance Bill Claim for `claimant` — the employee's own
+  // (filedBy null) or one an Admin files for them (Claim on Behalf). Either
+  // way it is checked against the claimant's Bill Claim Policy and goes
+  // through the claimant's approval chain; nothing skips approval.
+  //
+  // `editing` (a user_claims row) re-saves that claim instead, with the same
+  // checks: allowed only while claimEditState() says so (before the lock
+  // Layer approves, after a Return, or after a Reject with re-claim allowed).
+  // An edit after a Return/Reject — or once the request has moved past
+  // Layer 1 — starts the chain again from Layer 1.
+  async function submitUserClaim(
+    req: any,
+    res: any,
+    claimant: { id: number; name: string },
+    filedBy: { id: number; name: string } | null,
+    editing: any | null = null,
+    actor: { id: number; name: string } | null = null
+  ) {
+    try {
+      const { claim_date, from_date, to_date, category, amount, description, file_base64, file_name, file_mimetype, claim_refs, items } =
         req.body || {};
 
-      if (!claim_date) return res.status(400).json({ error: "Claim Date is required." });
-      const from = from_date || claim_date;
-      const to = to_date || claim_date;
+      // A claim is filed today; its bills (items) carry their own dates.
+      // Older app versions still send one Category + Amount instead of
+      // items — that becomes a single bill dated From Date.
+      const today = todayInDhaka();
+      const policyNow = await loadPolicy(queryDB);
+      let editMode: ClaimEditMode | null = null;
+      let editRequest: any = null;
+      if (editing) {
+        editRequest = (await claimRequests(queryDB, [Number(editing.id)])).get(Number(editing.id)) || null;
+        const st = claimEditState(editing, editRequest, policyNow);
+        if (!st.editable) return res.status(400).json({ error: st.reason || "This claim can't be edited any more." });
+        if (req.body?.version != null && Number(req.body.version) !== Number(editing.version)) {
+          return res.status(409).json({ error: "This claim was changed in the meantime — reopen it and try again." });
+        }
+        editMode = st.mode;
+      } else if (policyNow.one_claim_per_day) {
+        // One new claim a day: more bills today go in today's claim.
+        const todays = await claimFiledOn(queryDB, claimant.id, today);
+        if (todays) {
+          return res.status(400).json({
+            error: `A claim was already filed today (#${todays}). One claim a day — edit that claim to add or change bills.`,
+            today_claim_id: todays
+          });
+        }
+      }
+      const from = toDateOnlyString(from_date || claim_date || today) || today;
+      const to = toDateOnlyString(to_date || from_date || claim_date || today) || from;
       if (String(to) < String(from)) {
         return res.status(400).json({ error: "To Date can't be before From Date." });
       }
-      if (!(USER_CLAIM_CATEGORIES as readonly string[]).includes(category)) {
-        return res.status(400).json({ error: "Select a valid Category." });
-      }
+      const usesItems = Array.isArray(items);
 
       // Optional Check In/Out references — each one is a completed Movement Claim
       // (claims table) the User owns, carrying its OWN Amount. A given check-in/
@@ -549,35 +996,36 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           refs.push({ claim_id: claimId, amount: refAmount });
         }
 
-        const claimRows = await queryDB(`SELECT id, user_id, status FROM claims WHERE id IN (${refs.map(() => "?").join(",")})`, [
-          ...refs.map((r) => r.claim_id)
-        ]);
+        const claimRows = await queryDB(
+          `SELECT id, user_id, status, DATE_FORMAT(check_in_at, '%Y-%m-%d') AS check_in_day FROM claims WHERE id IN (${refs.map(() => "?").join(",")})`,
+          [...refs.map((r) => r.claim_id)]
+        );
         for (const r of refs) {
           const claimRow = claimRows.find((c: any) => Number(c.id) === r.claim_id);
-          if (!claimRow || Number(claimRow.user_id) !== Number(req.user.id)) {
-            return res.status(400).json({ error: "One of the referenced check-in/outs doesn't belong to you." });
+          if (!claimRow || Number(claimRow.user_id) !== Number(claimant.id)) {
+            return res.status(400).json({ error: "One of the referenced check-in/outs doesn't belong to this employee." });
           }
           if (claimRow.status !== "completed") {
             return res.status(400).json({ error: "A referenced Movement Claim must be checked out first." });
           }
+          // Only check-ins inside the claim's own From–To range.
+          const day = String(claimRow.check_in_day || "").slice(0, 10);
+          if (usesItems && day && (day < String(from) || day > String(to))) {
+            return res.status(400).json({ error: `A referenced check-in/out (${day}) is outside this claim's dates (${from} to ${to}).` });
+          }
         }
         const alreadyUsed = await queryDB(
-          `SELECT claim_id FROM user_claim_references WHERE claim_id IN (${refs.map(() => "?").join(",")})
+          `SELECT claim_id FROM user_claim_references WHERE claim_id IN (${refs.map(() => "?").join(",")}) AND user_claim_id <> ?
            UNION
            SELECT claim_id FROM conveyance_bill_items WHERE claim_id IN (${refs.map(() => "?").join(",")})`,
-          [...refs.map((r) => r.claim_id), ...refs.map((r) => r.claim_id)]
+          [...refs.map((r) => r.claim_id), editing ? Number(editing.id) : 0, ...refs.map((r) => r.claim_id)]
         );
         if (alreadyUsed.length > 0) {
           return res.status(409).json({ error: "One of the selected check-in/outs has already been referenced on another claim." });
         }
       }
 
-      // When references are attached, the Claim Amount is always their sum — a
-      // free-typed Amount is only used when there are none.
-      const amt = refs.length > 0 ? refs.reduce((sum, r) => sum + r.amount, 0) : Number(amount);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        return res.status(400).json({ error: "Claim Amount must be a positive number." });
-      }
+      const refsTotal = refs.reduce((sum, r) => sum + r.amount, 0);
       const desc = typeof description === "string" ? description.trim().slice(0, 1000) : null;
 
       let fileBuffer: Buffer | null = null;
@@ -587,24 +1035,99 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           return res.status(400).json({ error: "Attachment must be 5MB or smaller." });
         }
       }
+      // Editing: the attachment already on the claim stays unless replaced or
+      // removed (remove_file).
+      const keepOldFile = !!editing && !fileBuffer && !req.body?.remove_file && !!editing.file_data;
 
+      // Bill Claim Policy (BillClaimPolicy.ts): dates, closed dates, limits,
+      // categories, receipts. When references are attached and no bills, the
+      // Claim Amount is their sum (older app versions).
+      let lines = usesItems ? items : refs.length > 0 ? [] : [{ category, bill_date: from, amount, description: desc }];
+      // With bills, check-in/out references belong to a Transport bill and
+      // ARE its amount — the claim total counts them once, not on top of it.
+      let extraTotal = refsTotal;
+      if (usesItems && refs.length > 0) {
+        const cats = await loadCategories(queryDB);
+        const isTransport = (l: any) => {
+          const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
+          return !!c && /transport/i.test(c.name);
+        };
+        const at = lines.findIndex(isTransport);
+        if (at < 0) {
+          return res.status(400).json({ error: "Check-in/out references go with a Transport bill — choose Transport as a bill's category." });
+        }
+        lines = lines.map((l: any, i: number) => (i === at ? { ...l, amount: Math.round(refsTotal * 100) / 100 } : l));
+        extraTotal = 0;
+      }
+      const checked = await checkClaimBills(queryDB, {
+        userId: claimant.id,
+        today,
+        from,
+        to,
+        lines,
+        extraTotal,
+        hasAttachment: !!fileBuffer || keepOldFile,
+        editingClaimId: editing ? Number(editing.id) : null,
+        firstFiled: editing ? dhakaDate(editing.first_submitted_at || editing.created_at) : null
+      });
+      if ("error" in checked) return res.status(400).json({ error: checked.error });
+      let claimCategory = checked.categorySummary;
+      if (!claimCategory) {
+        // References only: the category the older form sent, else "Check In/Out".
+        const known = (await loadCategories(queryDB)).find((c) => c.is_active && c.name.toLowerCase() === String(category || "").toLowerCase());
+        claimCategory = known ? known.name : "Check In/Out";
+      }
+      const amt = checked.total;
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return res.status(400).json({ error: "Claim Amount must be a positive number." });
+      }
+
+      if (editing) {
+        return await saveClaimEdit(req, res, editing, editMode!, editRequest, checked, claimCategory, amt, desc, fileBuffer, refs, { from, to }, actor || claimant);
+      }
       const result = await queryDB(
         `INSERT INTO user_claims
-           (user_id, claim_date, from_date, to_date, category, amount, description, file_name, file_mimetype, file_data, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+           (user_id, claim_date, from_date, to_date, category, amount, description, file_name, file_mimetype, file_data, status, filed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [
-          req.user.id,
-          claim_date,
+          claimant.id,
+          today,
           from,
           to,
-          category,
+          claimCategory,
           amt,
           desc,
           fileBuffer ? String(file_name || "attachment").slice(0, 255) : null,
           fileBuffer ? String(file_mimetype || "application/octet-stream") : null,
-          fileBuffer
+          fileBuffer,
+          filedBy ? filedBy.id : null
         ]
       );
+      // One claim a day: two sent at the same moment both pass the check
+      // above; the later one is taken back here (works across server workers).
+      if (policyNow.one_claim_per_day) {
+        const rows: any[] = (await queryDB("SELECT id, claim_date FROM user_claims WHERE user_id = ? AND id < ?", [claimant.id, result.insertId])) || [];
+        const earlier = rows.find((r: any) => dhakaDate(r.claim_date) === today);
+        if (earlier) {
+          await queryDB("DELETE FROM user_claims WHERE id = ?", [result.insertId]);
+          return res.status(400).json({
+            error: `A claim was already filed today (#${earlier.id}). One claim a day — edit that claim to add or change bills.`,
+            today_claim_id: Number(earlier.id)
+          });
+        }
+      }
+
+      try {
+        for (const l of checked.lines) {
+          await queryDB(
+            "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+            [result.insertId, l.category_id, l.category_name, l.bill_date, l.amount, l.description]
+          );
+        }
+      } catch (itemErr: any) {
+        await queryDB("DELETE FROM user_claims WHERE id = ?", [result.insertId]);
+        throw itemErr;
+      }
 
       if (refs.length > 0) {
         try {
@@ -626,16 +1149,19 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }
       }
 
+      await queryDB("UPDATE user_claims SET first_submitted_at = NOW() WHERE id = ?", [result.insertId]);
+      await recordClaimHistory(queryDB, result.insertId, "submitted", filedBy || claimant, null);
+
       // Dynamic Approval Engine (Part 3) — Conveyance Bill Claims are routed
       // through this Employee's assigned Template for request_type
       // 'conveyance' (falling back to that request_type's default, and to a
       // straight auto-approve if neither exists). This REPLACES the old
       // global-chain routing this endpoint used before — see the long
       // comment above createTemplateApprovalRequest().
-      const { autoApproved } = await createTemplateApprovalRequest("conveyance", "user_claim", result.insertId, req.user.id);
+      const { autoApproved } = await createTemplateApprovalRequest("conveyance", "user_claim", result.insertId, claimant.id);
       if (autoApproved) {
         try {
-          await finalizeUserClaimApproval(result.insertId, req.user.id, null, null);
+          await finalizeUserClaimApproval(result.insertId, claimant.id, null, null);
         } catch (finalizeErr: any) {
           console.warn("⚠️ Could not auto-process Conveyance Bill Claim #" + result.insertId + ": " + finalizeErr.message);
         }
@@ -658,9 +1184,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
             for (const approver of approvers) {
               await createAlert(queryDB, {
                 userId: approver.user_id,
-                type: "conveyance_claim",
+                type: "conveyance_approval",
                 title: "New Conveyance Bill Claim Awaiting Your Approval",
-                message: `${req.user.name} submitted a ${category} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${toDateOnlyString(claim_date)}). Please review it.`,
+                message: `${filedBy ? `${filedBy.name} filed (for ${claimant.name})` : claimant.name} submitted a ${claimCategory} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${today}). Please review it.`,
                 relatedType: "user_claim",
                 relatedId: result.insertId
               });
@@ -675,27 +1201,233 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to submit claim" });
     }
+  }
+
+  app.post("/api/user-claims", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
+    await submitUserClaim(req, res, { id: Number(req.user.id), name: req.user.name }, null);
   });
 
+  // Self-service Conveyance Bill Claim access (same rule as
+  // requireConveyanceClaimAccess in server.ts), as a yes/no.
+  const hasConveyanceClaimAccess = async (user: any): Promise<boolean> => {
+    if (user.role === "superadmin") return true;
+    const rows: any[] = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [user.id]);
+    if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return true;
+    return (await getAdminModules(user.id)).includes("conveyance");
+  };
+
+  // Edit (or resubmit) a claim — the employee, or the Admin who filed it for
+  // them with Claim on Behalf. Same body as POST /api/user-claims, plus
+  // `version` (the one the form was opened with) and optional `remove_file`.
+  app.post("/api/user-claims/:id/edit", authenticateToken, async (req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Claim not found" });
+      const uc = rows[0];
+      const me = { id: Number(req.user.id), name: String(req.user.name || "") };
+      if (Number(uc.user_id) === me.id) {
+        if (!(await hasConveyanceClaimAccess(req.user))) {
+          return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
+        }
+      } else if (!(Number(uc.filed_by) === me.id && (await hasModuleLayer(req.user, "conveyance", "on_behalf")))) {
+        return res.status(403).json({ error: "Only the employee, or whoever filed it for them, can edit this claim." });
+      }
+      const owner: any[] = await queryDB("SELECT id, name FROM users WHERE id = ?", [uc.user_id]);
+      await submitUserClaim(req, res, { id: Number(uc.user_id), name: String(owner[0]?.name || "") }, null, uc, me);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to save the claim" });
+    }
+  });
+
+  // A claim's edit trail: submit / edit / return / reject / resubmit, who,
+  // when, why, and what changed each time. Open to the employee, whoever filed
+  // it for them, its approvers, and accounts with the Conveyance module.
+  app.get("/api/user-claims/:id/history", authenticateToken, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows = await queryDB("SELECT id, user_id, filed_by FROM user_claims WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Claim not found" });
+      const uc = rows[0];
+      const me = Number(req.user.id);
+      let allowed = req.user.role === "superadmin" || Number(uc.user_id) === me || Number(uc.filed_by) === me;
+      if (!allowed) allowed = (await getAdminModules(me)).some((m) => m === "conveyance" || m === "approvals" || m === "disbursement");
+      if (!allowed) {
+        const request = (await claimRequests(queryDB, [id])).get(id);
+        if (request) {
+          let acted = false;
+          try {
+            acted = JSON.parse(request.actions_json || "[]").some((a: any) => Number(a.approver_id) === me);
+          } catch {
+            acted = false;
+          }
+          allowed = acted || (await getCurrentStepApprovers(request)).some((a) => Number(a.user_id) === me);
+        }
+      }
+      if (!allowed) return res.status(403).json({ error: "You can't see this claim." });
+      const hist: any[] = await queryDB(
+        "SELECT id, action, actor_id, actor_name, reason, version, snapshot_json, created_at FROM user_claim_history WHERE user_claim_id = ? ORDER BY id",
+        [id]
+      );
+      let prev: any = null;
+      const out = hist.map((h: any) => {
+        let snap: any = null;
+        try {
+          snap = JSON.parse(h.snapshot_json || "null");
+        } catch {
+          snap = null;
+        }
+        const changes = prev && snap && (h.action === "edited" || h.action === "resubmitted") ? diffSnapshots(prev, snap) : [];
+        if (snap) prev = snap;
+        return { id: h.id, action: h.action, actor_name: h.actor_name, reason: h.reason, version: h.version, created_at: h.created_at, changes, amount: snap?.amount ?? null };
+      });
+      res.json(out);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Conveyance -> Claim on Behalf. Finds the employee the claim is for; never
+  // the filer themself (that is the normal self-service claim, and nobody —
+  // the Superadmin included — makes a bill in their own name from here).
+  const loadOnBehalfClaimant = async (req: any, res: any): Promise<{ id: number; name: string } | null> => {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      res.status(400).json({ error: "Select an employee." });
+      return null;
+    }
+    if (userId === Number(req.user.id)) {
+      res.status(403).json({ error: "You can't file a claim on behalf of yourself. Use your own Conveyance Bill Claim." });
+      return null;
+    }
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [userId]);
+    if (rows.length === 0) {
+      res.status(404).json({ error: "Employee not found." });
+      return null;
+    }
+    return { id: Number(rows[0].id), name: String(rows[0].name) };
+  };
+
+  app.get("/api/user-claims/on-behalf/access", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
+    res.json({ on_behalf: await hasModuleLayer(req.user, "conveyance", "on_behalf") });
+  });
+
+  // The employee's Bill Claim Policy (date window, categories, dates already
+  // claimed) — what GET /api/bill-claim-policy/mine gives the employee.
+  app.get(
+    "/api/user-claims/on-behalf/:userId/policy",
+    authenticateToken,
+    requireAdmin,
+    requireModule("conveyance"),
+    requireModuleLayer("conveyance", "on_behalf"),
+    async (req: any, res) => {
+      try {
+        const claimant = await loadOnBehalfClaimant(req, res);
+        if (!claimant) return;
+        const policy = await loadPolicy(queryDB);
+        const today = todayInDhaka();
+        // ?claim_id=: that employee's claim being edited (see /mine's twin).
+        let editing: any = null;
+        if (req.query.claim_id) {
+          const rows: any[] = await queryDB("SELECT id, user_id, first_submitted_at, created_at FROM user_claims WHERE id = ?", [Number(req.query.claim_id)]);
+          if (rows.length && Number(rows[0].user_id) === claimant.id) editing = rows[0];
+        }
+        const win = dateWindow(policy, today, editing ? dhakaDate(editing.first_submitted_at || editing.created_at) : null);
+        res.json({
+          today,
+          min_date: win.min,
+          max_date: win.max,
+          values: policy,
+          categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
+          locked_dates: await lockedDates(queryDB, claimant.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
+          today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, claimant.id, today) : null
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  // The employee's own check-in/outs that can still be referenced — what
+  // GET /api/claims/available gives the employee.
+  app.get(
+    "/api/user-claims/on-behalf/:userId/available-claims",
+    authenticateToken,
+    requireAdmin,
+    requireModule("conveyance"),
+    requireModuleLayer("conveyance", "on_behalf"),
+    async (req: any, res) => {
+      try {
+        const claimant = await loadOnBehalfClaimant(req, res);
+        if (!claimant) return;
+        const rows = await queryDB(
+          `SELECT c.* FROM claims c
+            WHERE c.user_id = ? AND c.status = 'completed'
+              AND NOT EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.claim_id = c.id)
+              AND NOT EXISTS (SELECT 1 FROM user_claim_references r WHERE r.claim_id = c.id)
+            ORDER BY c.check_in_at DESC`,
+          [claimant.id]
+        );
+        res.json(rows.map((r: any) => ({ ...r, distance_km: r.distance_km !== null ? Number(r.distance_km) : null })));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/user-claims/on-behalf/:userId",
+    authenticateToken,
+    requireAdmin,
+    requireModule("conveyance"),
+    requireModuleLayer("conveyance", "on_behalf"),
+    async (req: any, res) => {
+      try {
+        const claimant = await loadOnBehalfClaimant(req, res);
+        if (!claimant) return;
+        await submitUserClaim(req, res, claimant, { id: Number(req.user.id), name: req.user.name });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || "Failed to submit claim" });
+      }
+    }
+  );
+
+  // Adds `editable` / `lock_reason` (claimEditState) to each claim row, so the
+  // employee's list shows Edit only where the server would accept it.
+  async function attachEditState(rows: any[]): Promise<any[]> {
+    if (!rows.length) return rows;
+    const policy = await loadPolicy(queryDB);
+    const requests = await claimRequests(queryDB, rows.map((r: any) => Number(r.id)));
+    return rows.map((r: any) => {
+      const st = claimEditState(r, requests.get(Number(r.id)) || null, policy);
+      return { ...r, reclaim_allowed: !!Number(r.reclaim_allowed), version: Number(r.version || 1), editable: st.editable, edit_mode: st.mode, lock_reason: st.reason };
+    });
+  }
+
   // The calling user's own submission history, most recent first — powers the
-  // "My Conveyance Claims" list on the Conveyance Bill Claim card.
+  // "My Conveyance Claims" list on the Conveyance Bill Claim card. In the phone
+  // app only the last 3 months are sent (plus any claim not yet settled, whatever
+  // its age); the website gets the whole history.
   app.get("/api/user-claims/mine", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
     try {
+      const inApp = isAppSession(req.user, req);
+      res.setHeader("X-History-Limited", inApp ? "3-months" : "none");
       const rows = await queryDB(
         `SELECT uc.id, uc.user_id, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount, uc.description,
                 uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
                 uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
-                uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id
+                uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id, uc.filed_by, fb.name AS filed_by_name,
+                uc.version, uc.edit_state, uc.return_reason, uc.reclaim_allowed, uc.first_submitted_at
            FROM user_claims uc
            LEFT JOIN users r ON r.id = uc.reviewed_by
+           LEFT JOIN users fb ON fb.id = uc.filed_by
            LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
-          WHERE uc.user_id = ?
+          WHERE uc.user_id = ?${inApp ? " AND (uc.status NOT IN ('approved', 'rejected') OR COALESCE(uc.claim_date, uc.created_at) >= NOW() - INTERVAL 3 MONTH)" : ""}
           ORDER BY uc.id DESC`,
         [req.user.id]
       );
       const withRefs = await attachUserClaimRefs(rows.map((r: any) => ({ ...r, amount: Number(r.amount), has_file: !!r.has_file })));
       const withApproval = await attachUserClaimApproval(withRefs);
-      res.json(withApproval);
+      res.json(await attachEditState(await attachClaimItems(queryDB, withApproval)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -714,17 +1446,47 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   // viewer.
   app.get("/api/user-claims", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
+      // ?since=YYYY-MM-DD: only claims dated on/after that day (the Admin
+      // Dashboard's last three months).
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
+      // ?slim=1: just id, user, date, amount, status — no joins, attachments or approval
+      // lookups (the Admin Dashboard only adds amounts up). Same Department scope as below.
+      if (String(req.query.slim || "") === "1") {
+        const [slimRows, slimEmployees] = await Promise.all([
+          queryDB(
+            `SELECT id, user_id, claim_date, amount, status FROM user_claims ${since ? "WHERE claim_date >= ?" : ""} ORDER BY id DESC`,
+            since ? [since] : []
+          ),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const slimDept = new Map<number, string>();
+        for (const e of slimEmployees) if (e.user_id != null && e.department) slimDept.set(Number(e.user_id), e.department);
+        const slimScope = req.user.role === "superadmin" ? null : await getConveyanceClaimDeptScope(req.user.id);
+        return res.json(
+          slimRows
+            .filter((r: any) => {
+              if (!slimScope) return true;
+              const dept = slimDept.get(Number(r.user_id)) || null;
+              return !!dept && slimScope.includes(dept);
+            })
+            .map((r: any) => ({ ...r, amount: Number(r.amount) }))
+        );
+      }
       const [rows, employees] = await Promise.all([
         queryDB(
           `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
                   uc.description, uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
                   uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
-                  uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id
+                  uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id, uc.filed_by, fb.name AS filed_by_name,
+                uc.version, uc.edit_state, uc.return_reason, uc.reclaim_allowed, uc.first_submitted_at
              FROM user_claims uc
              LEFT JOIN users u ON u.id = uc.user_id
              LEFT JOIN users r ON r.id = uc.reviewed_by
+             LEFT JOIN users fb ON fb.id = uc.filed_by
              LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
-            ORDER BY uc.id DESC`
+            ${since ? "WHERE uc.claim_date >= ?" : ""}
+            ORDER BY uc.id DESC`,
+          since ? [since] : []
         ),
         queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
       ]);
@@ -754,7 +1516,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }))
       );
       const withApproval = await attachUserClaimApproval(withRefs);
-      res.json(withApproval);
+      res.json(await attachEditState(await attachClaimItems(queryDB, withApproval)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -797,6 +1559,13 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Claim not found" });
       const uc = rows[0];
+      // Same lock as the employee's own edit: nothing once the lock Layer has
+      // approved it, never one's own claim, and never a higher amount.
+      if (Number(uc.user_id) === Number(req.user.id)) {
+        return res.status(403).json({ error: "You can't change a claim in your own name." });
+      }
+      const ucState = claimEditState(uc, (await claimRequests(queryDB, [Number(uc.id)])).get(Number(uc.id)) || null, await loadPolicy(queryDB));
+      if (!ucState.editable) return res.status(400).json({ error: ucState.reason || "This claim is locked." });
 
       const { claim_date, from_date, to_date, category, amount, description } = req.body || {};
       if (!claim_date) return res.status(400).json({ error: "Claim Date is required." });
@@ -805,13 +1574,26 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       if (String(to) < String(from)) {
         return res.status(400).json({ error: "To Date can't be before From Date." });
       }
-      if (!(USER_CLAIM_CATEGORIES as readonly string[]).includes(category)) {
-        return res.status(400).json({ error: "Select a valid Category." });
+      // A claim with bill lines keeps its categories and total from those
+      // lines; the Admin edits its dates and description here.
+      const itemRows = await queryDB("SELECT amount, category_name FROM user_claim_items WHERE user_claim_id = ?", [uc.id]);
+      const hasItems = itemRows.length > 0;
+      const editCategory = hasItems ? uc.category : category;
+      if (!hasItems && editCategory !== uc.category) {
+        const known = (await loadCategories(queryDB)).some((c) => c.is_active && c.name === editCategory);
+        if (!known) return res.status(400).json({ error: "Select a valid Category." });
       }
 
       const refRows = await queryDB("SELECT amount FROM user_claim_references WHERE user_claim_id = ?", [uc.id]);
       let amt: number;
-      if (refRows.length > 0) {
+      if (hasItems) {
+        const refsSum = refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+        // Claims filed since references became the Transport bill's own
+        // amount already carry them in that bill — count them once.
+        const inTransportBill =
+          refRows.length > 0 && itemRows.some((r: any) => /transport/i.test(String(r.category_name || "")) && Math.abs(Number(r.amount) - refsSum) < 0.005);
+        amt = itemRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0) + (inTransportBill ? 0 : refsSum);
+      } else if (refRows.length > 0) {
         // Referenced check-in/outs still drive the total — an Admin edits the
         // date/category/description here, not the Amount itself.
         amt = refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
@@ -820,18 +1602,22 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         if (!Number.isFinite(amt) || amt <= 0) {
           return res.status(400).json({ error: "Claim Amount must be a positive number." });
         }
+        if (amt > Number(uc.amount) + 0.005) {
+          return res.status(400).json({ error: "The amount can only be lowered here, not raised." });
+        }
       }
       const desc = typeof description === "string" ? description.trim().slice(0, 1000) : null;
 
       await queryDB(
-        "UPDATE user_claims SET claim_date = ?, from_date = ?, to_date = ?, category = ?, amount = ?, description = ? WHERE id = ?",
-        [claim_date, from, to, category, amt, desc, uc.id]
+        "UPDATE user_claims SET claim_date = ?, from_date = ?, to_date = ?, category = ?, amount = ?, description = ?, version = version + 1 WHERE id = ?",
+        [claim_date, from, to, editCategory, amt, desc, uc.id]
       );
+      await recordClaimHistory(queryDB, Number(uc.id), "edited", { id: Number(req.user.id), name: String(req.user.name || "") }, "Edited by an Admin");
 
       if (uc.status === "approved") {
         const itemRows = await queryDB("SELECT id FROM conveyance_bill_items WHERE user_claim_id = ?", [uc.id]);
         if (itemRows.length > 0) {
-          const particulars = String(desc || `${category} claim`).slice(0, 255);
+          const particulars = String(desc || `${editCategory} claim`).slice(0, 255);
           await queryDB("UPDATE conveyance_bill_items SET entry_date = ?, particulars = ?, amount = ? WHERE id = ?", [
             toDateOnlyString(claim_date),
             particulars,
@@ -871,13 +1657,26 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }
       }
 
+      const request = (await claimRequests(queryDB, [Number(uc.id)])).get(Number(uc.id)) || null;
       if (isOwner) {
-        if (uc.status !== "pending") return res.status(400).json({ error: "Only a Pending claim can be withdrawn." });
+        // Withdrawing is an edit too: only while the claim may still be edited.
+        const st = claimEditState(uc, request, await loadPolicy(queryDB));
+        if (!st.editable || uc.status === "rejected") {
+          return res.status(400).json({ error: st.reason || "Only a claim that's still open for editing can be withdrawn." });
+        }
       } else if (!isAdmin) {
         return res.status(403).json({ error: "This claim doesn't belong to you." });
+      } else {
+        // An Admin can't delete a claim whose bill has been paid out.
+        const paid = await queryDB(
+          "SELECT b.id FROM conveyance_bill_items i JOIN conveyance_bills b ON b.id = i.bill_id WHERE i.user_claim_id = ? AND b.is_disbursed = 1",
+          [req.params.id]
+        );
+        if (paid.length > 0) return res.status(400).json({ error: "This claim's bill has been disbursed — undo the disbursement first." });
       }
 
       await queryDB("DELETE FROM conveyance_bill_items WHERE user_claim_id = ?", [req.params.id]);
+      if (request) await queryDB("DELETE FROM approval_requests WHERE source_type = 'user_claim' AND source_id = ?", [req.params.id]);
       await queryDB("DELETE FROM user_claims WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {

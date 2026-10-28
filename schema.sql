@@ -1,8 +1,18 @@
--- MPR Tracker Database Schema & Seed Data
--- Import this SQL file into XAMPP MySQL / phpMyAdmin
-
-CREATE DATABASE IF NOT EXISTS mpr_tracker_db;
-USE mpr_tracker_db;
+-- CredenceHR — base database schema & seed data
+--
+-- A new installation doesn't need to import this by hand: on its first start
+-- against an EMPTY database (no `users` table) the server runs this file
+-- itself (server.ts -> bootstrapBaseSchema), then adds everything newer
+-- (schemaMigrations.ts and each module's own tables).
+--
+-- To import it by hand instead (phpMyAdmin / mysql CLI), select your database
+-- first (the one in DB_NAME) — this file no longer creates or switches to a
+-- database of its own:
+--   mysql -u root -p your_db_name < schema.sql
+--
+-- Tables refer to each other in an order that doesn't always match the order
+-- they're created in, so foreign-key checks are off while it runs.
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- Users Table
 -- email: NULL for bulk-created (Project Name + Password) users, which have no email.
@@ -113,6 +123,11 @@ CREATE TABLE IF NOT EXISTS branches (
   location_lng DECIMAL(10, 7) NULL,
   location_label VARCHAR(255) NULL,
   location_radius INT NULL,
+  -- Project this Branch is kept in step with (name + map pin) — see
+  -- schemaMigrations.ts. At most one Branch per Project.
+  project_id INT NULL,
+  UNIQUE KEY unique_branch_project (project_id),
+  CONSTRAINT fk_branches_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -496,6 +511,21 @@ CREATE TABLE IF NOT EXISTS asset_requisitions (
   FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (admin_decided_by) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_asset_id) REFERENCES assets(id) ON DELETE SET NULL
+);
+
+-- Line items on a requisition (New Requisition can ask for several things
+-- at once — e.g. "Stapler x2" + "A4 Paper x5 reams" — each with its own
+-- purpose/unit/quantity). asset_requisitions.asset_category/reason still
+-- hold a one-line summary of these for anything that only needs a label.
+CREATE TABLE IF NOT EXISTS asset_requisition_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT NOT NULL,
+  item_name VARCHAR(150) NOT NULL,
+  purpose TEXT NOT NULL,
+  unit VARCHAR(50) NOT NULL,
+  quantity DECIMAL(10,2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (requisition_id) REFERENCES asset_requisitions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS asset_assignments (
@@ -944,7 +974,7 @@ CREATE TABLE IF NOT EXISTS user_claim_references (
 CREATE TABLE IF NOT EXISTS approval_templates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150) NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
   -- Company-wide fallback for this request_type — used whenever a submitting
   -- Employee has no row in employee_template_assignments for this
   -- request_type. "At most one default per request_type" is enforced in the
@@ -995,7 +1025,7 @@ CREATE TABLE IF NOT EXISTS approval_template_step_approvers (
 CREATE TABLE IF NOT EXISTS employee_template_assignments (
   id INT AUTO_INCREMENT PRIMARY KEY,
   employee_user_id INT NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
   template_id INT NOT NULL,
   assigned_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1362,3 +1392,20 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 -- nothing shows to an Admin or User until the Superadmin explicitly grants it:
 -- ALTER TABLE users ADD COLUMN can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0;
 -- ALTER TABLE users ADD COLUMN can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0;
+
+-- Session security (SessionSecurity.ts; Admin Panel -> Active Users, Superadmin
+-- only): how long a sign-in lasts, plus what ends one early. The server
+-- creates / adds these on startup too.
+CREATE TABLE IF NOT EXISTS session_policy (
+  id INT PRIMARY KEY,
+  web_hours INT NOT NULL DEFAULT 12,
+  web_idle_minutes INT NOT NULL DEFAULT 60,
+  app_days INT NOT NULL DEFAULT 7,
+  app_idle_days INT NOT NULL DEFAULT 3,
+  updated_by INT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+-- ALTER TABLE user_sessions ADD COLUMN revoked_at DATETIME NULL, ADD COLUMN revoked_reason VARCHAR(20) NULL;
+-- ALTER TABLE users ADD COLUMN sessions_valid_after DATETIME(3) NULL;
+
+SET FOREIGN_KEY_CHECKS = 1;

@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- maximum-scale=1: the iPhone zooms the whole page in when a field is
+         tapped and stays zoomed (text and icons then sit outside the screen). -->
     <!-- Colors the browser chrome (Android Chrome's top strip, iOS Safari
          status bar, PWA install) to match the app header's purple gradient
          (linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%) — see
@@ -11,6 +13,16 @@
          StatusBar.setBackgroundColor() in App.tsx, so web and native match. -->
     <meta name="theme-color" content="#6300C6" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- "Add to Home Screen" (iPhone Safari, Android Chrome): opens full
+         screen like an app, with the CredenceHR icon and name. The iPhone
+         reads the apple-* tags; everything else reads the manifest. The
+         layout already leaves room for the status bar / home indicator via
+         env(safe-area-inset-*). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CredenceHR" />
+    <link rel="apple-touch-icon" href="/icons/app-180.png" />
     <title>CredenceHR</title>
     <meta name="description" content="CredenceHR by Credence." />
     <meta property="og:title" content="CredenceHR" />

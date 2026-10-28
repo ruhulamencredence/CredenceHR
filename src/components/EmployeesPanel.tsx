@@ -1,28 +1,47 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
-  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight
+  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
+  Landmark, GraduationCap
 } from 'lucide-react';
-import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
-import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
+import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
+import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
+import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
+import { useMyCompanies } from '../lib/company';
 
+import { SearchSelect } from './Combobox';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
-// Contact / Supervisor), just restyled to this app's own design.
-type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor';
+// Contact / Supervisor), just restyled to this app's own design. "payment"
+// (Bank/MFS payroll disbursement split) is this app's own addition, not part
+// of that reference split.
+// "career" (previous experience + education) saves into HR Operations'
+// Employee 360 records (HrOps360Routes.ts) right after the Employee itself.
+type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' | 'payment' | 'history';
 
 const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
-  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> }
+  { key: 'career', label: 'Experience & Education', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
+  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
+  // Read-only audit trail: Department/Designation changes (employee_transfers)
+  // merged with every other field changed by an Edit save (employee_change_log).
+  { key: 'history', label: 'History', icon: <History className="w-3.5 h-3.5" /> }
 ];
 
 interface EmployeesPanelProps {
   token: string;
   user: User;
+  // Opens this login account's Module Access page (Users). Left out for
+  // accounts that can't grant module access.
+  onOpenModuleAccess?: (userId: number) => void;
 }
 
 interface EmployeeFormState {
@@ -34,8 +53,14 @@ interface EmployeeFormState {
   // linked to — the Department dropdown writes here; department (above)
   // stays only as the legacy free-text mirror the backend fills in from it.
   department_id: number | null;
+  // The structured Branch (Admin Panel -> Branches) this Employee is linked
+  // to — the Branch dropdown writes here; branch (below) stays only as the
+  // legacy free-text mirror kept in sync when a real Branch is picked.
+  branch_id: number | null;
   email: string;
   phone: string;
+  // Office Attendance (ZKTeco) device PIN — see checkZkDevicePin in server.ts.
+  zk_device_pin: string;
   is_active: boolean;
   // "Also create a login account" — only offered on the New Employee form (an
   // existing row that still has none gets the same option later via the
@@ -55,6 +80,7 @@ interface EmployeeFormState {
   middle_name: string;
   gender: string;
   date_of_birth: string;
+  joining_date: string;
   nid_ssn: string;
   nationality: string;
   marital_status: string;
@@ -98,8 +124,10 @@ const emptyForm: EmployeeFormState = {
   designation: '',
   department: '',
   department_id: null,
+  branch_id: null,
   email: '',
   phone: '',
+  zk_device_pin: '',
   is_active: true,
   create_login: false,
   login_username: '',
@@ -110,6 +138,7 @@ const emptyForm: EmployeeFormState = {
   middle_name: '',
   gender: '',
   date_of_birth: '',
+  joining_date: '',
   nid_ssn: '',
   nationality: '',
   marital_status: '',
@@ -178,6 +207,31 @@ interface SupervisorFormState {
 
 const emptySupervisorForm: SupervisorFormState = { supervisor_id: '', effective_date: '', is_direct: false };
 
+// Payment tab's own small "add/edit one row" form — see
+// /api/employees/:id/payment-accounts. bank_name/branch_name apply to
+// account_type 'bank'; provider applies to 'mfs' (bKash/Nagad/Rocket/…).
+interface PaymentAccountFormState {
+  account_type: 'bank' | 'mfs' | 'cash';
+  account_label: string;
+  bank_name: string;
+  branch_name: string;
+  provider: string;
+  account_number: string;
+  percentage: string;
+}
+
+const emptyPaymentAccountForm: PaymentAccountFormState = {
+  account_type: 'bank',
+  account_label: '',
+  bank_name: '',
+  branch_name: '',
+  provider: '',
+  account_number: '',
+  percentage: ''
+};
+
+const MFS_PROVIDERS = ['bKash', 'Nagad', 'Rocket', 'Upay', 'SureCash'];
+
 // "Transfer / Change Role" modal form (Admin Panel -> Employees -> row
 // action) — POST /api/employees/:id/transfer. New Department/New Supervisor
 // left blank means "keep as-is"; only New Designation and Effective Date are
@@ -199,11 +253,84 @@ const emptyTransferForm: TransferFormState = {
   reason: ''
 };
 
-export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) => {
+// Loading placeholder for the directory: the same white card, header row
+// and columns as the real table, so nothing jumps when the list arrives.
+const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Contact', 'Status', 'Login', 'Actions'];
+const EmployeesTableSkeleton: React.FC = () => {
+  const bar = (w: string, tone = 'bg-slate-200/80') => <div className={`h-3 rounded ${tone} ${w}`} />;
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-pulse" aria-busy="true" aria-label="Loading employees">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              {SKELETON_COLS.map((c) => (
+                <th key={c} className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 ${c === 'Actions' ? 'text-right' : 'text-left'}`}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <tr key={i}>
+                <td className="px-4 py-3.5">
+                  <div className="space-y-1.5">
+                    {bar(i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-24' : 'w-28')}
+                    {bar('w-16 h-2.5', 'bg-slate-100')}
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">{bar(i % 2 ? 'w-24' : 'w-32')}</td>
+                <td className="px-4 py-3.5">{bar(i % 2 ? 'w-28' : 'w-20')}</td>
+                <td className="px-4 py-3.5">
+                  <div className="space-y-1.5">
+                    {bar('w-36', 'bg-slate-100')}
+                    {bar('w-24', 'bg-slate-100')}
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="h-5 w-14 rounded-full bg-emerald-50 border border-emerald-100" />
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="h-5 w-20 rounded-full bg-slate-100" />
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="flex justify-end gap-1.5">
+                    {[0, 1, 2].map((k) => (
+                      <div key={k} className="w-7 h-7 rounded-lg bg-slate-100" />
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onOpenModuleAccess }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState('');
+  // The directory shows one page at a time — drawing every employee at once
+  // made the tab (and typing in the edit form above it) slow.
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  // Department filter: '' = all, '__none__' = no department, else the department's name.
+  const [deptFilter, setDeptFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  // The server pages and searches the directory; `employees` is just the page on screen.
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ all: 0, active: 0, inactive: 0 });
+  // Who's who for the Supervisor / Transfer pickers (light: id, code, name…).
+  const [pickerEmployees, setPickerEmployees] = useState<Employee[]>([]);
+  const empReq = useRef(0);
+  const listQuery = useRef({ page: 1, pageSize: 50, q: '', status: 'all', department: '' });
+  // Directory (the employee table) vs. all-employees Change History.
+  const [view, setView] = useState<'directory' | 'history'>('directory');
 
   // Project list for the Project Access checklist offered alongside "create a
   // login" — same source Admin Panel -> Users' own Project Access modal uses.
@@ -212,6 +339,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // open to any signed-in account, so this loads regardless of whether this
   // account has the separate "departments" module itself.
   const [departments, setDepartments] = useState<Department[]>([]);
+  // Branch dropdown (Admin Panel -> Branches) — GET /api/branches is open to
+  // any signed-in account, same reasoning as departments above.
+  const [branches, setBranches] = useState<Branch[]>([]);
   const isSuperAdmin = user?.role === 'superadmin';
 
   const [showForm, setShowForm] = useState(false);
@@ -220,6 +350,16 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [formTab, setFormTab] = useState<EmployeeFormTab>('info');
+  // Experience & Education tab — rows typed here are added on Save; the
+  // Employee's already-saved ones are listed (read-only) above them.
+  const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
+  const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
+  const nameSuggestions = useNameSuggestions(token);
+  // All companies mode (switcher): the list mixes companies, so each row
+  // shows whose employee it is.
+  const myCompanies = useMyCompanies(token);
+  const companyCode = (id: any) =>
+    myCompanies?.all_companies ? myCompanies.companies.find((c) => c.id === Number(id ?? 1))?.short_code || null : null;
 
   // Supervisor tab — loaded on demand for the employee currently being
   // edited (a brand-new, not-yet-saved employee has no id yet, so the tab
@@ -229,6 +369,15 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [supervisorForm, setSupervisorForm] = useState<SupervisorFormState>(emptySupervisorForm);
   const [editingSupervisorRowId, setEditingSupervisorRowId] = useState<number | null>(null);
   const [savingSupervisor, setSavingSupervisor] = useState(false);
+
+  // Payment tab — same "loaded on demand for the employee currently being
+  // edited" shape as Supervisor above.
+  const [paymentAccounts, setPaymentAccounts] = useState<EmployeePaymentAccount[]>([]);
+  const [loadingPaymentAccounts, setLoadingPaymentAccounts] = useState(false);
+  const [paymentAccountForm, setPaymentAccountForm] = useState<PaymentAccountFormState>(emptyPaymentAccountForm);
+  const [editingPaymentAccountRowId, setEditingPaymentAccountRowId] = useState<number | null>(null);
+  const [savingPaymentAccount, setSavingPaymentAccount] = useState(false);
+  const [paymentAccountError, setPaymentAccountError] = useState<string | null>(null);
 
   // "Create Login" modal — for an existing Employee row that has no linked
   // user_id yet. Separate from the New Employee form's own create_login
@@ -259,6 +408,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferHistory, setTransferHistory] = useState<EmployeeTransfer[]>([]);
   const [loadingTransferHistory, setLoadingTransferHistory] = useState(false);
+
+  // Edit modal -> History tab (GET /transfers + GET /change-log, merged).
+  const [formTransfers, setFormTransfers] = useState<EmployeeTransfer[]>([]);
+  const [formChangeLog, setFormChangeLog] = useState<EmployeeChangeLogEntry[]>([]);
+  const [loadingFormHistory, setLoadingFormHistory] = useState(false);
+  const [formHistoryError, setFormHistoryError] = useState<string | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -298,28 +454,57 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }));
   };
 
-  const fetchAll = useCallback(async () => {
+  // One page of the directory, as the search / status / page currently say.
+  const fetchEmployees = useCallback(async () => {
+    const req = ++empReq.current;
+    const { page: p, pageSize: size, q, status, department } = listQuery.current;
     setLoading(true);
     try {
-      const [empRes, projRes, deptRes] = await Promise.all([
-        fetch(apiUrl('/api/employees'), { headers: authHeaders }),
-        fetch(apiUrl('/api/projects'), { headers: authHeaders }),
-        fetch(apiUrl('/api/departments'), { headers: authHeaders })
-      ]);
-      if (empRes.ok) setEmployees(await empRes.json());
-      if (projRes.ok) setProjects(await projRes.json());
-      if (deptRes.ok) setDepartments(await deptRes.json());
+      const params = new URLSearchParams({ page: String(p), limit: String(size), q, status });
+      if (department) params.set('department', department);
+      const res = await fetch(apiUrl(`/api/employees?${params.toString()}`), { headers: authHeaders });
+      if (req !== empReq.current) return; // a newer request is on its way
+      if (res.ok) {
+        const data = await res.json();
+        setEmployees(Array.isArray(data) ? data : data.rows || []);
+        setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+        if (data.counts) setCounts(data.counts);
+      }
     } catch {
       setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
     } finally {
-      setLoading(false);
+      if (req === empReq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Projects, Departments, Branches and the picker list.
+  const fetchMeta = useCallback(async () => {
+    try {
+      const [projRes, deptRes, branchRes, pickRes] = await Promise.all([
+        fetch(apiUrl('/api/projects'), { headers: authHeaders }),
+        fetch(apiUrl('/api/departments'), { headers: authHeaders }),
+        fetch(apiUrl('/api/branches'), { headers: authHeaders }),
+        fetch(apiUrl('/api/employees?slim=1'), { headers: authHeaders })
+      ]);
+      if (projRes.ok) setProjects(await projRes.json());
+      if (deptRes.ok) setDepartments(await deptRes.json());
+      if (branchRes.ok) setBranches(await branchRes.json());
+      if (pickRes.ok) setPickerEmployees(await pickRes.json());
+    } catch {
+      setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // After a change: refresh the page on screen and the lists around it.
+  const fetchAll = useCallback(async () => {
+    await Promise.all([fetchEmployees(), fetchMeta()]);
+  }, [fetchEmployees, fetchMeta]);
+
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    fetchMeta();
+  }, [fetchMeta]);
 
   useEffect(() => {
     if (!message) return;
@@ -331,14 +516,62 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // driver — trim to the plain 'YYYY-MM-DD' an <input type="date"> expects.
   const toDateInput = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '');
 
+  // Loads both halves of an Employee's edit history. Unlike the Transfer
+  // modal's list this one surfaces a failure, since the tab has nothing else
+  // to show — an empty list would read as "no history" when it's really an
+  // error.
+  const fetchFormHistory = useCallback(async (employeeId: number) => {
+    setLoadingFormHistory(true);
+    setFormHistoryError(null);
+    try {
+      const [tRes, cRes] = await Promise.all([
+        fetch(apiUrl(`/api/employees/${employeeId}/transfers`), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl(`/api/employees/${employeeId}/change-log`), { headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      if (!tRes.ok || !cRes.ok) throw new Error('Could not load history');
+      setFormTransfers(await tRes.json());
+      setFormChangeLog(await cRes.json());
+    } catch (err: any) {
+      setFormHistoryError(err.message || 'Could not load history');
+    } finally {
+      setLoadingFormHistory(false);
+    }
+  }, [token]);
+
+  // Refetch every time the History tab is opened, so it's never stale.
+  useEffect(() => {
+    if (showForm && editingId && formTab === 'history') fetchFormHistory(editingId);
+  }, [showForm, editingId, formTab, fetchFormHistory]);
+
+  // Newest-first merge of both sources — see buildHistoryTimeline.
+  const historyTimeline = useMemo(() => buildHistoryTimeline(formTransfers, formChangeLog), [formTransfers, formChangeLog]);
+
   const openCreateForm = () => {
     setEditingId(null);
     setForm(emptyForm);
     setFormTab('info');
+    setCareerDrafts([]);
+    setSavedCareer(null);
     setSupervisors([]);
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccounts([]);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
+    setFormTransfers([]);
+    setFormChangeLog([]);
+    setFormHistoryError(null);
+    setHistoryFilter('all');
     setShowForm(true);
+    // Multi-company: suggest the next Employee ID of the selected company
+    // (its short code + the next number), editable as before.
+    fetch('/api/companies/next-employee-code', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.code) setForm((f) => (f.employee_id ? f : { ...f, employee_id: d.code }));
+      })
+      .catch(() => {});
   };
 
   const openEditForm = (e: Employee) => {
@@ -349,8 +582,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       designation: e.designation || '',
       department: e.department || '',
       department_id: e.department_id ?? null,
+      branch_id: e.branch_id ?? null,
       email: e.email || '',
       phone: e.phone || '',
+      zk_device_pin: e.zk_device_pin || '',
       is_active: e.is_active,
       create_login: false,
       login_username: '',
@@ -361,6 +596,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       middle_name: e.middle_name || '',
       gender: e.gender || '',
       date_of_birth: toDateInput(e.date_of_birth),
+      joining_date: toDateInput(e.joining_date),
       nid_ssn: e.nid_ssn || '',
       nationality: e.nationality || '',
       marital_status: e.marital_status || '',
@@ -398,8 +634,22 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setFormTab('info');
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
+    setFormTransfers([]);
+    setFormChangeLog([]);
+    setFormHistoryError(null);
+    setHistoryFilter('all');
     setShowForm(true);
     fetchSupervisors(e.id);
+    fetchPaymentAccounts(e.id);
+    setCareerDrafts([]);
+    setSavedCareer(null);
+    fetch(apiUrl(`/api/hr-ops/p360/${e.id}/career`), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSavedCareer(d))
+      .catch(() => {});
   };
 
   const closeForm = () => {
@@ -409,6 +659,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setSupervisors([]);
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccounts([]);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
   };
 
   // --- Supervisor tab ---
@@ -490,15 +744,118 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }
   };
 
+  // --- Payment tab (Bank/MFS/Cash payroll disbursement split) ---
+
+  const fetchPaymentAccounts = useCallback(async (employeeId: number) => {
+    setLoadingPaymentAccounts(true);
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${employeeId}/payment-accounts`), { headers: authHeaders });
+      if (res.ok) setPaymentAccounts(await res.json());
+    } catch {
+      // Leave the previous list up rather than blanking it on a blip.
+    } finally {
+      setLoadingPaymentAccounts(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const openAddPaymentAccount = () => {
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setPaymentAccountError(null);
+  };
+
+  const openEditPaymentAccount = (row: EmployeePaymentAccount) => {
+    setEditingPaymentAccountRowId(row.id);
+    setPaymentAccountForm({
+      account_type: row.account_type,
+      account_label: row.account_label,
+      bank_name: row.bank_name || '',
+      branch_name: row.branch_name || '',
+      provider: row.provider || '',
+      account_number: row.account_number,
+      percentage: String(row.percentage)
+    });
+    setPaymentAccountError(null);
+  };
+
+  const activePaymentAccountsTotal = paymentAccounts
+    .filter((a) => a.is_active && a.id !== editingPaymentAccountRowId)
+    .reduce((sum, a) => sum + a.percentage, 0);
+
+  // Same "plain click handler inside the Employee modal's own <form>" reason
+  // as handleSaveSupervisor above — no nested <form>.
+  const handleSavePaymentAccount = async () => {
+    if (!editingId) return;
+    setPaymentAccountError(null);
+    if (!paymentAccountForm.account_label.trim()) {
+      if (paymentAccountForm.account_type !== 'cash') {
+        return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Give this MFS account a label (e.g. bKash 1).' : 'Give this Bank account a label (e.g. Bank 1).');
+      }
+    }
+    if (paymentAccountForm.account_type !== 'cash' && !paymentAccountForm.account_number.trim()) {
+      return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Mobile/Wallet number is required.' : 'Account number is required.');
+    }
+    const pct = Number(paymentAccountForm.percentage);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      return setPaymentAccountError('Percentage must be greater than 0 and at most 100.');
+    }
+    setSavingPaymentAccount(true);
+    try {
+      const url = editingPaymentAccountRowId
+        ? apiUrl(`/api/employees/${editingId}/payment-accounts/${editingPaymentAccountRowId}`)
+        : apiUrl(`/api/employees/${editingId}/payment-accounts`);
+      const res = await fetch(url, {
+        method: editingPaymentAccountRowId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          account_type: paymentAccountForm.account_type,
+          account_label: paymentAccountForm.account_label.trim() || (paymentAccountForm.account_type === 'cash' ? 'Cash' : ''),
+          bank_name: paymentAccountForm.bank_name.trim() || null,
+          branch_name: paymentAccountForm.branch_name.trim() || null,
+          provider: paymentAccountForm.provider.trim() || null,
+          account_number: paymentAccountForm.account_number.trim(),
+          percentage: pct
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this payment account');
+      setPaymentAccountForm(emptyPaymentAccountForm);
+      setEditingPaymentAccountRowId(null);
+      fetchPaymentAccounts(editingId);
+    } catch (err: any) {
+      setPaymentAccountError(err.message || 'Something went wrong');
+    } finally {
+      setSavingPaymentAccount(false);
+    }
+  };
+
+  const handleDeletePaymentAccount = async (rowId: number) => {
+    if (!editingId) return;
+    if (!(await confirmDialog('Remove this payment account?'))) return;
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${editingId}/payment-accounts/${rowId}`), { method: 'DELETE', headers: authHeaders });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
+      fetchPaymentAccounts(editingId);
+      if (editingPaymentAccountRowId === rowId) {
+        setEditingPaymentAccountRowId(null);
+        setPaymentAccountForm(emptyPaymentAccountForm);
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong' });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return setMessage({ type: 'error', text: 'Please enter the employee name.' });
     if (!editingId && form.create_login) {
-      if (!form.login_username.trim() && !form.email.trim()) {
-        return setMessage({ type: 'error', text: 'Enter a login username, or an Email above, to create this employee\u2019s login.' });
+      if (!form.employee_id.trim() && !form.login_username.trim() && !form.email.trim()) {
+        return setMessage({ type: 'error', text: 'Enter the Employee ID above — it is the employee\u2019s Login ID.' });
       }
-      if (form.login_password.length < 6) {
-        return setMessage({ type: 'error', text: 'Login password must be at least 6 characters.' });
+      const pwBad = passwordProblem(form.login_password);
+      if (pwBad) {
+        return setMessage({ type: 'error', text: pwBad });
       }
     }
 
@@ -509,13 +866,16 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         name: form.name.trim(),
         designation: form.designation.trim() || null,
         department_id: form.department_id || null,
+        branch_id: form.branch_id || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
+        zk_device_pin: form.zk_device_pin.trim() || null,
         is_active: form.is_active,
 
         middle_name: form.middle_name.trim() || null,
         gender: form.gender || null,
         date_of_birth: form.date_of_birth || null,
+        joining_date: form.joining_date || null,
         nid_ssn: form.nid_ssn.trim() || null,
         nationality: form.nationality.trim() || null,
         marital_status: form.marital_status || null,
@@ -524,7 +884,6 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         is_foreigner: form.is_foreigner,
 
         division: form.division.trim() || null,
-        branch: form.branch.trim() || null,
         unit: form.unit.trim() || null,
         status_effective_date: form.status_effective_date || null,
         job_status: form.job_status || null,
@@ -570,9 +929,27 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save employee');
 
+      // Experience & Education rows typed on this form — added once the
+      // Employee row exists. Blank rows are skipped.
+      let careerNote = '';
+      const savedId = editingId || Number(data.id);
+      const items = careerDrafts
+        .filter((d) => (d.kind === 'experience' ? String(d.data.company_name || '').trim() : String(d.data.degree || '').trim()))
+        .map((d) => ({ kind: d.kind, ...d.data }));
+      if (savedId && items.length > 0) {
+        const cr = await fetch(apiUrl(`/api/hr-ops/p360/${savedId}/records`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({ items })
+        });
+        const cd = await cr.json().catch(() => ({}));
+        refreshNameSuggestions();
+        careerNote = !cr.ok ? ` Experience/education not saved: ${cd.error || 'failed'}.` : cd.errors?.length ? ` Some experience/education rows were not saved: ${cd.errors.join('; ')}.` : ` ${cd.created} experience/education record(s) added.`;
+      }
+
       setMessage({
-        type: 'success',
-        text: editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.'
+        type: careerNote.includes('not saved') ? 'error' : 'success',
+        text: (editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.') + careerNote
       });
       closeForm();
       fetchAll();
@@ -588,7 +965,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // anyone else is set to Resigned / Terminated (EmployeeRecordsGuard.ts).
   const canDeleteEmployee = user.role === 'superadmin' || !!user.module_permission_layers?.employees?.includes('employee_delete');
   const handleDelete = async (id: number) => {
-    if (!(await confirmDialog('Delete this employee record? Only an employee added by mistake (no salary, advance, letter or other kept records) can be deleted. This cannot be undone.', { tone: 'danger' }))) return;
+    if (!(await confirmDialog('Delete this employee record? Only an employee added by mistake (no salary, advance, letter or other kept records) can be deleted. This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -660,7 +1037,15 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to transfer employee');
-      setMessage({ type: 'success', text: `${transferringFor.name} transferred successfully.` });
+      // A future-dated Effective Date is recorded but not applied yet (see
+      // EmployeeTransferRoutes.ts) — the employee's current position stays
+      // as-is until that date arrives, so the message here shouldn't imply
+      // it already happened.
+      setMessage(
+        data.applied
+          ? { type: 'success', text: `${transferringFor.name} transferred successfully.` }
+          : { type: 'success', text: `Transfer for ${transferringFor.name} scheduled for ${transferForm.effective_date}. Current position stays unchanged until then.` }
+      );
       await fetchAll();
       await fetchTransferHistory(transferringFor.id);
       setTransferForm((f) => ({ ...f, to_supervisor_id: '', effective_date: '', reason: '' }));
@@ -688,11 +1073,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const handleCreateLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!creatingLoginFor) return;
-    if (!loginForm.login_username.trim() && !creatingLoginFor.email) {
-      return setMessage({ type: 'error', text: 'Enter a login username — this employee has no Email on file to fall back to.' });
+    if (!creatingLoginFor.employee_id && !loginForm.login_username.trim() && !creatingLoginFor.email) {
+      return setMessage({ type: 'error', text: 'Give this employee an Employee ID first — it is their Login ID.' });
     }
-    if (loginForm.login_password.length < 6) {
-      return setMessage({ type: 'error', text: 'Login password must be at least 6 characters.' });
+    const pwBad = passwordProblem(loginForm.login_password);
+    if (pwBad) {
+      return setMessage({ type: 'error', text: pwBad });
     }
 
     setCreatingLogin(true);
@@ -804,18 +1190,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     return d?.supervisor_name ? `Supervisor: ${d.supervisor_name}` : '';
   };
 
-  const filtered = employees.filter((e) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      e.name.toLowerCase().includes(q) ||
-      (e.employee_id || '').toLowerCase().includes(q) ||
-      (e.designation || '').toLowerCase().includes(q) ||
-      (e.department || '').toLowerCase().includes(q) ||
-      (e.email || '').toLowerCase().includes(q) ||
-      (e.phone || '').toLowerCase().includes(q)
-    );
-  });
+  // The search waits for a pause in typing; any change of search / status / size goes back to page 1.
+  const [appliedSearch, setAppliedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setAppliedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => setPage(1), [appliedSearch, statusFilter, deptFilter, pageSize]);
+  useEffect(() => {
+    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter };
+    fetchEmployees();
+  }, [page, pageSize, appliedSearch, statusFilter, deptFilter, fetchEmployees]);
+  const filtered = employees;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = employees;
 
   return (
     <div className="space-y-5">
@@ -847,26 +1236,71 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         </div>
       )}
 
-      <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, ID, designation, department, email, phone…"
-          className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-        />
+      <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-1">
+        {([
+          ['directory', 'Directory', <Contact key="d" className="w-3.5 h-3.5" />],
+          ['history', 'Change History', <History key="h" className="w-3.5 h-3.5" />]
+        ] as [typeof view, string, React.ReactNode][]).map(([k, label, icon]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setView(k)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {icon} {label}
+          </button>
+        ))}
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-          <Spinner size={16} /> Loading employees…
+      {view === 'directory' && (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search employees"
+              placeholder="Search by name, ID, designation, department, email, phone…"
+              className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+          </div>
+          <select
+            aria-label="Status filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            <option value="all">All ({counts.all})</option>
+            <option value="active">Active ({counts.active})</option>
+            <option value="inactive">Inactive ({counts.inactive})</option>
+          </select>
+          <SearchSelect
+            aria-label="Department filter"
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            <option value="">All departments</option>
+            {[...new Set(departments.map((d) => d.name))].sort((a, b) => a.localeCompare(b)).map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+            <option value="__none__">No department</option>
+          </SearchSelect>
         </div>
+      )}
+
+      {view === 'history' ? (
+        <EmployeeChangeHistory token={token} />
+      ) : loading ? (
+        <EmployeesTableSkeleton />
       ) : filtered.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <Contact className="w-8 h-8 text-slate-300 mx-auto mb-2" />
           <p className="text-sm text-slate-500">
-            {employees.length === 0 ? 'No employees yet. Add the first one to get started.' : 'No employees match your search.'}
+            {counts.all === 0 ? 'No employees yet. Add the first one to get started.' : 'No employees match your search.'}
           </p>
         </div>
       ) : (
@@ -885,10 +1319,17 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((emp) => (
+                {pageRows.map((emp) => (
                   <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="font-semibold text-slate-900 text-xs">{emp.name}</div>
+                      <div className="font-semibold text-slate-900 text-xs">
+                        {emp.name}
+                        {companyCode((emp as any).company_id) && (
+                          <span className="ml-1.5 align-middle text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                            {companyCode((emp as any).company_id)}
+                          </span>
+                        )}
+                      </div>
                       {emp.employee_id && (
                         <div className="text-[11px] text-slate-400 font-mono">{emp.employee_id}</div>
                       )}
@@ -925,6 +1366,17 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                             <ShieldCheck className="w-3 h-3" /> Has Login
                           </span>
+                          {onOpenModuleAccess && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenModuleAccess(emp.user_id!)}
+                              className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Open this account's Module Access"
+                              aria-label="Open Module Access"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleUnlinkUser(emp)}
@@ -992,6 +1444,30 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               </tbody>
             </table>
           </div>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 bg-slate-50/60 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, total)} of {total}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="py-1 px-2 bg-white border border-slate-200 rounded-lg text-xs"
+                aria-label="Rows per page"
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setPage(1)} disabled={currentPage === 1} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">First</button>
+              <button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Prev</button>
+              <span className="px-2">Page {currentPage} of {pageCount}</span>
+              <button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === pageCount} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Next</button>
+              <button type="button" onClick={() => setPage(pageCount)} disabled={currentPage === pageCount} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Last</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1015,7 +1491,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 saved once (it needs a real employee id to attach rows to). */}
             <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 overflow-x-auto sticky top-[65px] bg-white z-10">
               {FORM_TABS.map((t) => {
-                const disabled = t.key === 'supervisor' && !editingId;
+                const disabled = (t.key === 'supervisor' || t.key === 'payment' || t.key === 'history') && !editingId;
                 const active = formTab === t.key;
                 return (
                   <button
@@ -1023,7 +1499,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     type="button"
                     disabled={disabled}
                     onClick={() => setFormTab(t.key)}
-                    title={disabled ? 'Save the employee first to manage Supervisors' : undefined}
+                    title={disabled ? `Save the employee first to manage ${t.label}` : undefined}
                     className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
                       active
                         ? 'border-blue-600 text-blue-700'
@@ -1078,7 +1554,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
-                  <select
+                  <SearchSelect
                     value={form.department_id ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null }))}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -1087,7 +1563,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>{d.name}{d.supervisor_name ? ` (Supervisor: ${d.supervisor_name})` : ''}</option>
                     ))}
-                  </select>
+                  </SearchSelect>
                   {departments.length === 0 && (
                     <p className="mt-1 text-[11px] text-slate-400">
                       No Departments set up yet — add one from Admin Panel -&gt; Departments.
@@ -1116,6 +1592,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     placeholder="e.g. 01877772209"
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                </div>
+                <div>
+                  <DateField label="Joining Date" value={form.joining_date} onChange={(v) => setForm((f) => ({ ...f, joining_date: v }))} />
+                  <p className="text-[11px] text-slate-400 mt-1">Days before this aren't counted as Absent.</p>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Attendance Device PIN</label>
+                  <input
+                    type="text"
+                    value={form.zk_device_pin}
+                    onChange={(e) => setForm((f) => ({ ...f, zk_device_pin: e.target.value }))}
+                    placeholder="e.g. 1045"
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">The User ID this person is enrolled under on the office fingerprint/face machine — links their punches to Office Attendance.</p>
                 </div>
               </div>
 
@@ -1190,14 +1681,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   {form.create_login && (
                     <div className="grid sm:grid-cols-2 gap-3 pl-11">
                       <div>
-                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Username (optional)</label>
-                        <input
-                          type="text"
-                          value={form.login_username}
-                          onChange={(e) => setForm((f) => ({ ...f, login_username: e.target.value }))}
-                          placeholder="Falls back to Email above"
-                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        />
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login ID</label>
+                        {form.employee_id.trim() ? (
+                          <div className="px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-900 text-sm font-mono">{form.employee_id.trim()}</div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={form.login_username}
+                            onChange={(e) => setForm((f) => ({ ...f, login_username: e.target.value }))}
+                            placeholder="Enter the Employee ID above"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login Password *</label>
@@ -1205,12 +1700,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           type="text"
                           value={form.login_password}
                           onChange={(e) => setForm((f) => ({ ...f, login_password: e.target.value }))}
-                          placeholder="At least 6 characters"
+                          placeholder={PASSWORD_HINT}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         />
                       </div>
                       <p className="sm:col-span-2 text-[11px] text-slate-400">
-                        Signs in with the Email above (or this Username) + this password, as a regular User.
+                        Signs in with the Employee ID as Login ID (the Email above works too) + this password, as a regular User.
                       </p>
 
                       {/* Project Access — same user_project_permissions grant Admin Panel ->
@@ -1281,7 +1776,26 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Division, Department &amp; Branch</p>
                     <div className="grid sm:grid-cols-2 gap-4">
                       <TextField label="Division" value={form.division} onChange={(v) => setForm((f) => ({ ...f, division: v }))} placeholder="e.g. Corporate Office" />
-                      <TextField label="Branch" value={form.branch} onChange={(v) => setForm((f) => ({ ...f, branch: v }))} placeholder="e.g. Admin Office" />
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
+                        <SearchSelect
+                          value={form.branch_id ?? ''}
+                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null }))}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">— None —</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project' : 'Head Office'})
+                            </option>
+                          ))}
+                        </SearchSelect>
+                        {branches.length === 0 && (
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            No Branches set up yet — add one from Admin Panel -&gt; Branches.
+                          </p>
+                        )}
+                      </div>
                       <TextField label="Unit" value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} placeholder="Unit" />
                       <DateField label="Effective Date" value={form.status_effective_date} onChange={(v) => setForm((f) => ({ ...f, status_effective_date: v }))} />
                     </div>
@@ -1289,7 +1803,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Job Status &amp; Base</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <SelectField label="Job Status" value={form.job_status} onChange={(v) => setForm((f) => ({ ...f, job_status: v }))} options={JOB_STATUS_OPTIONS} />
+                      <SelectField
+                        label="Job Status"
+                        value={form.job_status}
+                        // Resigned / Terminated / Inactive: no longer an active employee (the server enforces it too).
+                        onChange={(v) => setForm((f) => ({ ...f, job_status: v, is_active: ['Resigned', 'Terminated', 'Inactive'].includes(v) ? false : f.is_active }))}
+                        options={JOB_STATUS_OPTIONS}
+                      />
                       <DateField label="Job Status Effective Date" value={form.job_status_effective_date} onChange={(v) => setForm((f) => ({ ...f, job_status_effective_date: v }))} />
                       <SelectField label="Job Base" value={form.job_base} onChange={(v) => setForm((f) => ({ ...f, job_base: v }))} options={JOB_BASE_OPTIONS} />
                       <DateField label="Job Base Effective Date" value={form.job_base_effective_date} onChange={(v) => setForm((f) => ({ ...f, job_base_effective_date: v }))} />
@@ -1344,6 +1864,103 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
               )}
 
+              {formTab === 'career' && (
+                <div className="space-y-4">
+                  {savedCareer && (savedCareer.experience.length > 0 || savedCareer.education.length > 0) && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Already recorded</p>
+                      {savedCareer.experience.map((x: any) => (
+                        <div key={`e${x.id}`} className="text-xs text-slate-700">
+                          <Briefcase className="w-3 h-3 inline mr-1 text-slate-400" />
+                          {x.designation ? `${x.designation}, ` : ''}
+                          {x.company_name} <span className="text-slate-400">({x.from_date || '?'} – {x.to_date || 'present'})</span>
+                        </div>
+                      ))}
+                      {savedCareer.education.map((x: any) => (
+                        <div key={`d${x.id}`} className="text-xs text-slate-700">
+                          <GraduationCap className="w-3 h-3 inline mr-1 text-slate-400" />
+                          {x.degree}
+                          {x.institute ? `, ${x.institute}` : ''} {x.passing_year && <span className="text-slate-400">({x.passing_year})</span>}
+                        </div>
+                      ))}
+                      <p className="text-[10px] text-slate-400">Edit, verify or attach certificates from HR Operations → Service Book.</p>
+                    </div>
+                  )}
+                  {careerDrafts.map((d, i) => (
+                    <div key={i} className="rounded-xl border border-slate-200 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">{d.kind === 'experience' ? 'Previous Experience' : 'Education'}</p>
+                        <button type="button" onClick={() => setCareerDrafts((ds) => ds.filter((_, j) => j !== i))} className="p-1 text-slate-400 hover:text-rose-600" aria-label="Remove">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <RecordFields kind={d.kind} form={d.data} suggestions={nameSuggestions} onChange={(data) => setCareerDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, data } : x)))} />
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setCareerDrafts((ds) => [...ds, { kind: 'experience', data: {} }])} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                      <Plus className="w-3.5 h-3.5" /> Add Previous Experience
+                    </button>
+                    <button type="button" onClick={() => setCareerDrafts((ds) => [...ds, { kind: 'education', data: {} }])} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                      <Plus className="w-3.5 h-3.5" /> Add Education
+                    </button>
+                  </div>
+                  {careerDrafts.length === 0 && <p className="text-[11px] text-slate-400">Add the employee's previous jobs and degrees — saved together with the employee.</p>}
+                </div>
+              )}
+
+              {formTab === 'history' && editingId && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <History className="w-3.5 h-3.5 text-slate-400" /> Change History
+                    </p>
+                    <div className="flex items-center gap-1">
+                      {HISTORY_FILTERS.map(([k, label]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setHistoryFilter(k)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                            historyFilter === k ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {loadingFormHistory && historyTimeline.length === 0 ? (
+                    <p className="text-xs text-slate-400">Loading…</p>
+                  ) : formHistoryError ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 flex items-center justify-between gap-2">
+                      <span>{formHistoryError}</span>
+                      <button type="button" onClick={() => fetchFormHistory(editingId)} className="font-semibold underline">Retry</button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const visible = historyTimeline.filter((h) => historyFilter === 'all' || h.kind === historyFilter);
+                      if (visible.length === 0) {
+                        return (
+                          <p className="text-xs text-slate-400">
+                            Nothing recorded yet. Changes saved from now on will appear here; edits made before this
+                            history existed were not captured.
+                          </p>
+                        );
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {visible.map((h) => (
+                            <HistoryEntryCard key={h.key} entry={h} />
+                          ))}
+                        </ol>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
               {formTab === 'supervisor' && editingId && (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-slate-200 p-3.5 space-y-3">
@@ -1354,7 +1971,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Employee (Supervisor) *</label>
                         <EmployeeSearchSelect
-                          employees={employees}
+                          employees={pickerEmployees}
                           value={supervisorForm.supervisor_id}
                           onChange={(v) => setSupervisorForm((f) => ({ ...f, supervisor_id: v }))}
                           excludeId={editingId ?? undefined}
@@ -1390,9 +2007,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     {loadingSupervisors ? (
-                      <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
-                        <Spinner size={14} /> Loading supervisors…
-                      </div>
+                      <LoadingBlock />
                     ) : supervisors.length === 0 ? (
                       <p className="text-xs text-slate-400 text-center py-8">No supervisor assigned yet.</p>
                     ) : (
@@ -1439,15 +2054,197 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
               )}
 
+              {formTab === 'payment' && editingId && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 p-3.5 space-y-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5 text-slate-400" /> {editingPaymentAccountRowId ? 'Edit Account' : 'Add Bank / MFS / Cash'}
+                    </p>
+                    <div className="flex items-center gap-4">
+                      {(['bank', 'mfs', 'cash'] as const).map((t) => (
+                        <label key={t} className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={paymentAccountForm.account_type === t}
+                            onChange={() => setPaymentAccountForm((f) => ({ ...f, account_type: t, provider: t === 'mfs' ? f.provider : '', bank_name: t === 'bank' ? f.bank_name : '', account_number: t === 'cash' ? '' : f.account_number }))}
+                            className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-600 cursor-pointer"
+                          />
+                          {t === 'bank' ? 'Bank' : t === 'mfs' ? 'MFS (bKash/Nagad/Rocket)' : 'Cash'}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Label{paymentAccountForm.account_type === 'cash' ? '' : ' *'}</label>
+                        <input
+                          type="text"
+                          value={paymentAccountForm.account_label}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, account_label: e.target.value }))}
+                          placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. bKash 1' : paymentAccountForm.account_type === 'cash' ? 'Cash (optional)' : 'e.g. Bank 1'}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Percentage of Net Salary *</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.01"
+                          value={paymentAccountForm.percentage}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, percentage: e.target.value }))}
+                          placeholder="e.g. 70"
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    {paymentAccountForm.account_type === 'bank' ? (
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Bank Name</label>
+                          <input
+                            type="text"
+                            value={paymentAccountForm.bank_name}
+                            onChange={(e) => setPaymentAccountForm((f) => ({ ...f, bank_name: e.target.value }))}
+                            placeholder="e.g. Dutch-Bangla Bank"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
+                          <input
+                            type="text"
+                            value={paymentAccountForm.branch_name}
+                            onChange={(e) => setPaymentAccountForm((f) => ({ ...f, branch_name: e.target.value }))}
+                            placeholder="e.g. Gulshan Branch"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    ) : paymentAccountForm.account_type === 'cash' ? (
+                      <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">Paid in cash — no account number needed. The payment voucher gets a signature column for this part of the salary.</p>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Provider</label>
+                        <select
+                          value={paymentAccountForm.provider}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, provider: e.target.value }))}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Select provider…</option>
+                          {MFS_PROVIDERS.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {paymentAccountForm.account_type !== 'cash' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                        {paymentAccountForm.account_type === 'mfs' ? 'Mobile / Wallet Number *' : 'Account Number *'}
+                      </label>
+                      <input
+                        type="text"
+                        value={paymentAccountForm.account_number}
+                        onChange={(e) => setPaymentAccountForm((f) => ({ ...f, account_number: e.target.value }))}
+                        placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. 01XXXXXXXXX' : 'e.g. 1234567890123'}
+                        className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                    </div>
+                    )}
+                    {paymentAccountError && <p className="text-xs text-rose-600">{paymentAccountError}</p>}
+                    <p className="text-[11px] text-slate-500">
+                      Active accounts so far total <span className="font-semibold">{activePaymentAccountsTotal}%</span>
+                      {paymentAccountForm.percentage && Number.isFinite(Number(paymentAccountForm.percentage))
+                        ? ` — adding this one makes ${(Math.round((activePaymentAccountsTotal + Number(paymentAccountForm.percentage)) * 100) / 100)}%.`
+                        : ' of Net Salary.'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSavePaymentAccount}
+                        disabled={savingPaymentAccount}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-all disabled:opacity-50"
+                      >
+                        {savingPaymentAccount ? 'Saving…' : editingPaymentAccountRowId ? 'Save Changes' : 'Add Account'}
+                      </button>
+                      {editingPaymentAccountRowId && (
+                        <button type="button" onClick={openAddPaymentAccount} className="px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    {loadingPaymentAccounts ? (
+                      <LoadingBlock />
+                    ) : paymentAccounts.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-8">
+                        No Bank/MFS/Cash account set up yet — Payroll will use the Run Payroll wizard's single Payment Method for this employee.
+                      </p>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Account</th>
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Details</th>
+                            <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider text-slate-500">%</th>
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                            <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paymentAccounts.map((a) => (
+                            <tr key={a.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-3 py-2.5 font-semibold text-slate-900">
+                                {a.account_label}
+                                <span className="ml-1.5 inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                                  {a.account_type === 'mfs' ? (a.provider || 'MFS') : a.account_type === 'cash' ? 'Cash' : 'Bank'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-500">
+                                {a.account_type === 'bank' ? [a.bank_name, a.branch_name].filter(Boolean).join(' — ') || '—' : a.account_type === 'cash' ? 'Cash in hand' : a.provider || '—'}
+                                <span className="ml-1.5 font-mono text-slate-400">{a.account_number}</span>
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{a.percentage}%</td>
+                              <td className="px-3 py-2.5">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${a.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                  {a.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button type="button" onClick={() => openEditPaymentAccount(a)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button type="button" onClick={() => handleDeletePaymentAccount(a.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Remove">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Net Salary is split across these active accounts by percentage each payroll run. Leave this empty to keep paying this
+                    employee via Run Payroll's single Payment Method instead.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={closeForm}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
                 >
-                  {formTab === 'supervisor' ? 'Close' : 'Cancel'}
+                  {formTab === 'supervisor' || formTab === 'payment' || formTab === 'history' ? 'Close' : 'Cancel'}
                 </button>
-                {formTab !== 'supervisor' && (
+                {formTab !== 'supervisor' && formTab !== 'payment' && formTab !== 'history' && (
                   <button
                     type="submit"
                     disabled={saving}
@@ -1482,7 +2279,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <label className={fieldLabelClass}>New Department</label>
-                  <select
+                  <SearchSelect
                     value={transferForm.to_department_id}
                     onChange={(e) => setTransferForm((f) => ({ ...f, to_department_id: e.target.value }))}
                     className={fieldInputClass}
@@ -1493,7 +2290,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
                 <TextField
                   label="New Designation"
@@ -1506,7 +2303,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               <div>
                 <label className={fieldLabelClass}>New Supervisor</label>
                 <EmployeeSearchSelect
-                  employees={employees}
+                  employees={pickerEmployees}
                   value={transferForm.to_supervisor_id}
                   onChange={(v) => setTransferForm((f) => ({ ...f, to_supervisor_id: v }))}
                   excludeId={transferringFor.id}
@@ -1555,7 +2352,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {transferHistory.map((t) => (
                       <div key={t.id} className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-700">{toDateInput(t.effective_date) || '—'}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-semibold text-slate-700">{toDateInput(t.effective_date) || '—'}</span>
+                            {t.applied === false && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-semibold uppercase tracking-wide">
+                                Scheduled
+                              </span>
+                            )}
+                          </span>
                           {t.action_by_name && <span className="text-slate-400">by {t.action_by_name}</span>}
                         </div>
                         {(t.from_department_name || t.to_department_name) && (
@@ -1610,14 +2414,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 Creates a User account for <span className="font-semibold text-slate-700">{creatingLoginFor.name}</span>.
               </p>
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Username (optional)</label>
-                <input
-                  type="text"
-                  value={loginForm.login_username}
-                  onChange={(e) => setLoginForm((f) => ({ ...f, login_username: e.target.value }))}
-                  placeholder={creatingLoginFor.email ? `Falls back to ${creatingLoginFor.email}` : 'Required — no Email on file'}
-                  className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                />
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login ID</label>
+                {creatingLoginFor.employee_id ? (
+                  <>
+                    <div className="px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-900 text-sm font-mono">{creatingLoginFor.employee_id}</div>
+                    <p className="mt-1 text-[11px] text-slate-400">Their Employee ID{creatingLoginFor.email ? ` — ${creatingLoginFor.email} signs in too` : ''}.</p>
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    value={loginForm.login_username}
+                    onChange={(e) => setLoginForm((f) => ({ ...f, login_username: e.target.value }))}
+                    placeholder={creatingLoginFor.email ? `No Employee ID — falls back to ${creatingLoginFor.email}` : 'No Employee ID — give them one first'}
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Login Password *</label>
@@ -1625,7 +2436,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   type="text"
                   value={loginForm.login_password}
                   onChange={(e) => setLoginForm((f) => ({ ...f, login_password: e.target.value }))}
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 />
               </div>

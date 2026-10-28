@@ -22,6 +22,7 @@ import { apiUrl } from '../lib/api';
 import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { SearchSelect } from './Combobox';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
   | 'can_job_edit'
@@ -43,7 +44,6 @@ export const ROLE_BADGE: Record<string, string> = {
 export const ROLE_LABEL: Record<string, string> = { superadmin: 'Superadmin', admin: 'Admin', user: 'User' };
 
 const FEATURE_NAME: Record<string, string> = {
-  can_use_chat: 'Chat',
   can_edit_delivery_date: 'Edit Delivery Date',
   can_job_edit: 'Job Edit',
   can_use_attendance: 'Remote Attendance',
@@ -57,15 +57,20 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_conveyance_claims: 'Conveyance Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
+  can_use_chat: 'Chat',
   can_use_calls: 'Audio / Video Calls',
   can_use_mail: 'Credence Mail',
   can_view_mail_directory: 'Mail: Email Directory',
   can_use_mail_groups: 'Mail: My groups',
   can_receive_material: 'Material Receive',
   can_return_dispatch: 'Take back / Confirm in Dispatch',
+  can_give_feedback: 'Give feedback',
+  can_use_fingerprint: 'Fingerprint login',
   can_view_roster: 'My Duty Roster',
+  can_take_break: 'Break Time',
   can_sign_documents: 'Documents to Sign',
   can_view_payslip: 'My Payslip',
+  can_request_items: 'SIM & ID Card requests',
   can_email_reports: 'Email reports',
   can_view_group_dashboard: 'Admin Dashboard: all companies',
   can_view_tasks: 'My Tasks',
@@ -347,16 +352,32 @@ export function UserAccessDrawer({
   const delivery = u.can_edit_delivery_date ?? true;
   const selfService: { label: string; on: boolean }[] = [
     { label: 'Leave Application', on: !!u.can_view_leave_application },
-    { label: 'My Leave', on: !!u.can_view_my_leave },
     { label: 'Leave balance edit', on: !!u.can_manage_leave },
     { label: 'Timesheet', on: !!u.can_view_timesheet },
+    { label: 'Chat', on: u.can_use_chat !== false },
+    { label: 'Audio / Video Calls', on: !!u.can_use_calls },
+    { label: 'Credence Mail', on: !!u.can_use_mail },
+    { label: 'Mail: Email Directory', on: !!u.can_view_mail_directory },
+    { label: 'Mail: My groups', on: !!u.can_use_mail_groups },
     { label: 'Material Receive', on: !!u.can_receive_material },
     { label: 'Take back / Confirm in Dispatch', on: !!u.can_return_dispatch },
+    { label: 'Give feedback', on: !!u.can_give_feedback },
+    { label: 'Fingerprint login', on: !!u.can_use_fingerprint },
+    { label: 'My Duty Roster', on: !!u.can_view_roster },
+    { label: 'Break Time', on: !!u.can_take_break },
+    { label: 'Documents to Sign', on: !!u.can_sign_documents },
+    { label: 'My Payslip', on: !!u.can_view_payslip },
+    { label: 'SIM & ID Card requests', on: !!u.can_request_items },
+    { label: 'Email reports', on: !!u.can_email_reports },
+    { label: 'Admin Dashboard: all companies', on: !!u.can_view_group_dashboard },
+    { label: 'My Tasks', on: !!u.can_view_tasks },
+    { label: 'My Mobile SIM', on: !!u.can_view_mobile_bill },
+    { label: 'My Service Book', on: !!u.can_view_service_book },
+    { label: 'Loan / Advance Request', on: !!u.can_view_loan_request },
+    { label: 'My Targets', on: !!u.can_view_targets },
     { label: 'Movement Claim', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
-    { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true },
-    { label: 'Chat', on: u.can_use_chat !== false },
-    { label: 'AI Assistant', on: u.can_use_ai_assistant !== false }
+    { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
 
   const featureOn = [!!u.can_use_attendance, !!u.can_use_tracking, !!u.can_view_leave_summary, delivery, !!u.can_job_edit].filter(Boolean).length;
@@ -608,7 +629,7 @@ export function UserAccessDrawer({
               {canEdit && templates.length > 0 && (
                 <div className="mt-3 flex items-center gap-2">
                   <LayoutTemplate className="w-4 h-4 text-slate-400 shrink-0" />
-                  <select
+                  <SearchSelect
                     value=""
                     disabled={busy === 'template'}
                     onChange={(e) => applyTemplate(e.target.value)}
@@ -620,7 +641,7 @@ export function UserAccessDrawer({
                         {t.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                   {busy === 'template' && <Spinner size={14} />}
                 </div>
               )}
@@ -640,7 +661,7 @@ export function UserAccessDrawer({
                     {u.can_use_attendance && (
                       <label className="block">
                         <span className="text-[11px] text-slate-500">Allowed project for check-in</span>
-                        <select
+                        <SearchSelect
                           value={u.attendance_project_id ?? ''}
                           disabled={busy === 'attendance_project'}
                           onChange={(e) => run('attendance_project', () => onAttendanceProject(e.target.value ? Number(e.target.value) : null))}
@@ -652,7 +673,7 @@ export function UserAccessDrawer({
                               {p.project_name}
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                       </label>
                     )}
                   </FeatureRow>

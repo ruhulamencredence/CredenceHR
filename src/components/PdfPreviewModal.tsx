@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { X, FileDown, ZoomIn, ZoomOut, RotateCcw, ListChecks, FileStack } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Entry } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
