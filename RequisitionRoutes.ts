@@ -65,7 +65,12 @@ export async function ensureRequisitionSchema(queryDB: QueryDB) {
     INDEX idx_req_application (application_id)
   )`);
   try {
-    await queryDB("ALTER TABLE users ADD COLUMN can_request_items TINYINT(1) NOT NULL DEFAULT 0");
+    // Added only when missing: queryDB logs every failed query, so trying
+    // the ALTER on each start printed a "Duplicate column" error every time.
+    const has: any[] = (await queryDB(
+      "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'can_request_items'"
+    )) || [];
+    if (has.length === 0) await queryDB("ALTER TABLE users ADD COLUMN can_request_items TINYINT(1) NOT NULL DEFAULT 0");
   } catch (err: any) {
     if (err?.code !== "ER_DUP_FIELDNAME" && !/Duplicate column/i.test(String(err?.message))) console.warn("⚠️ Could not add users.can_request_items: " + err.message);
   }
