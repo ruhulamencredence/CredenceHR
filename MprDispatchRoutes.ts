@@ -108,12 +108,24 @@ export async function ensureMprDispatchSchema(dbPool: any): Promise<void> {
     ["md_queued_at", "TIMESTAMP NULL DEFAULT NULL"],
     ["md_queued_by", "INT NULL"]
   ];
+  // What the project fills in on receiving (Material Receive form).
+  const recvCols: [string, string][] = [
+    ["received_time", "TIME NULL"],
+    ["received_supplier", "VARCHAR(255) NULL"],
+    ["truck_no", "VARCHAR(40) NULL"],
+    ["po_status", "VARCHAR(40) NULL"],
+    ["received_by_text", "VARCHAR(255) NULL"]
+  ];
+  for (const [c, d] of recvCols) await run(`mpr_dispatches.${c}`, `ALTER TABLE mpr_dispatches ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   for (const [c, d] of cols) await run(`entries.${c}`, `ALTER TABLE entries ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   // Self Service switch: confirm material received for one's own projects.
   await run("users.can_receive_material", "ALTER TABLE users ADD COLUMN can_receive_material TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // Self Service switch: take one's own MPR rows back out of Dispatch Material.
   await run("users.can_return_dispatch", "ALTER TABLE users ADD COLUMN can_return_dispatch TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
+
+// PO Status choices on the Material Receive form.
+export const PO_STATUSES = ["PO Received", "PO Pending", "Without PO"];
 
 export const MD_STATUS_LABEL: Record<string, string> = {
   pending: "Not dispatched",
@@ -299,6 +311,11 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     receivedDate: toDateOnlyString(d.received_date),
     receivedNote: d.received_note || "",
     receivedBy: d.received_by_name || "",
+    receivedTime: d.received_time ? String(d.received_time).slice(0, 5) : "",
+    receivedSupplier: d.received_supplier || "",
+    truckNo: d.truck_no || "",
+    poStatus: d.po_status || "",
+    receivedByText: d.received_by_text || "",
     cancelReason: d.cancel_reason || ""
   });
   const DISPATCH_SQL = `
@@ -674,48 +691,142 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     })
   );
 
-  // Confirms one dispatch arrived: { receivedQty, receivedDate, note }.
-  // Less than was sent needs a note (short / damaged).
+  // ---- Receiving -------------------------------------------------------------
+  // What the project fills in once per delivery (one truck / challan):
+  // { receivedDate, receivedTime, supplier, truckNo, poStatus, receivedBy }.
+  // Project, MPR No, material and Qty come from each dispatch; Supplier too
+  // when Purchase gave one, else the project types it. Truck No is numbers
+  // only. Per item: { receivedQty, note } — less than was sent needs a note.
+  function deliveryOf(body: any) {
+    const date = body?.receivedDate ? dateOf(body.receivedDate) : todayInDhaka();
+    if (!date) throw bad("Received date isn't a date.");
+    if (date > todayInDhaka()) throw bad("Received date can't be in the future.");
+    const time = str(body?.receivedTime, 8);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw bad("Enter the receiving time.");
+    const nowTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false });
+    if (date === todayInDhaka() && time > nowTime) throw bad("Receiving time can't be in the future.");
+    const truckNo = str(body?.truckNo, 40).replace(/^-+|-+$/g, "");
+    if (!truckNo) throw bad("Enter the truck number.");
+    if (!/^[0-9]+(-[0-9]+)*$/.test(truckNo)) throw bad("Truck No can only have numbers (e.g. 11-2345).");
+    const poStatus = str(body?.poStatus, 40);
+    if (!PO_STATUSES.includes(poStatus)) throw bad("Pick the PO status.");
+    const receivedBy = str(body?.receivedBy);
+    if (!receivedBy) throw bad("Enter who received it.");
+    return { date, time, truckNo, poStatus, receivedBy, supplier: str(body?.supplier) };
+  }
+  type Delivery = ReturnType<typeof deliveryOf>;
+
+  // Checks one dispatch against the delivery; throws with the reason.
+  async function checkReceipt(user: any, dispatchId: number, line: any, dl: Delivery) {
+    const d: any = ((await queryDB("SELECT * FROM mpr_dispatches WHERE id = ?", [dispatchId])) || [])[0];
+    if (!d) throw bad("Dispatch not found.", 404);
+    const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [Number(d.entry_id)])) || [])[0];
+    if (!entry) throw bad("MPR row not found.", 404);
+    const ids = await myProjectIds(user);
+    if (ids && !ids.includes(Number(entry.project_id))) throw bad("This isn't one of your projects.", 403);
+    if (d.status !== "sent") throw bad(d.status === "received" ? "Already received." : "This dispatch was cancelled by Purchase.");
+    const qty = num(line?.receivedQty);
+    if (qty === null || qty < 0) throw bad("Enter the Qty that arrived.");
+    if (qty > Number(d.qty) + EPS) throw bad(`More than was sent (${Number(d.qty)}).`);
+    const sentOn = toDateOnlyString(d.dispatch_date);
+    if (sentOn && dl.date < sentOn) throw bad(`Received date can't be before it was sent (${sentOn}).`);
+    const supplier = str(d.supplier) || dl.supplier;
+    if (!supplier) throw bad("Enter the supplier name.");
+    const note = str(line?.note, 1000);
+    const short = qty < Number(d.qty) - EPS;
+    if (short && !note) throw bad("Less than was sent — say why (short, damaged…).");
+    return { d, entry, qty: r2(qty), note, short, supplier };
+  }
+  type Receipt = Awaited<ReturnType<typeof checkReceipt>>;
+
+  // Saves one checked receipt; false when someone received it meanwhile.
+  async function saveReceipt(userId: number, c: Receipt, dl: Delivery): Promise<boolean> {
+    const { d, qty, note, short, supplier } = c;
+    const done: any = await queryDB(
+      `UPDATE mpr_dispatches SET status = 'received', received_qty = ?, received_date = ?, received_time = ?, received_supplier = ?, truck_no = ?, po_status = ?,
+         received_by_text = ?, received_note = ?, received_by = ?, received_at = NOW() WHERE id = ? AND status = 'sent'`,
+      [qty, dl.date, dl.time, str(d.supplier) ? null : supplier, dl.truckNo, dl.poStatus, dl.receivedBy, note || null, userId, Number(d.id)]
+    );
+    if (!Number(done?.affectedRows)) return false;
+    const recvDetail = [dl.time, `Truck ${dl.truckNo}`, dl.poStatus, `Received by ${dl.receivedBy}`, !str(d.supplier) && `Supplier ${supplier}`].filter(Boolean).join(" · ");
+    await log(Number(d.entry_id), Number(d.id), "receive", qty, short ? `${recvDetail} · Short by ${r2(Number(d.qty) - qty)} — ${note}` : [recvDetail, note].filter(Boolean).join(" · "), userId);
+    return true;
+  }
+
+  // Purchase hears about short receipts — one alert per Purchase account.
+  async function alertShort(list: Receipt[]) {
+    const byUser = new Map<number, string[]>();
+    for (const c of list) {
+      if (!c.short || !c.d.created_by) continue;
+      const lines = byUser.get(Number(c.d.created_by)) || [];
+      lines.push(`${c.entry.project_name} · ${c.entry.mpr_no} ${c.entry.item_name}: ${c.qty} of ${Number(c.d.qty)} arrived — ${c.note}`);
+      byUser.set(Number(c.d.created_by), lines);
+    }
+    for (const [userId, lines] of byUser) {
+      await createAlert(queryDB, {
+        userId,
+        type: "mpr_dispatch",
+        title: "Material received short",
+        message: `${lines.slice(0, 4).join("; ")}${lines.length > 4 ? ` and ${lines.length - 4} more` : ""}`,
+        relatedType: "mpr_dispatch"
+      }).catch(() => {});
+    }
+  }
+
+  // Several items of one delivery (same P.O. / challan) at once:
+  // { items: [{ dispatchId, receivedQty, note }], ...delivery }. Every item
+  // is checked first; nothing is saved unless all of them are right.
+  app.post(
+    "/api/material-receive/bulk",
+    authenticateToken,
+    handler(async (req, res) => {
+      await receiveGate(req);
+      const items: any[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+      if (!items.length) throw bad("Pick at least one item.");
+      const dl = deliveryOf(req.body);
+      const seen = new Set<number>();
+      const errors: { dispatchId: number; error: string }[] = [];
+      const ok: Receipt[] = [];
+      for (const it of items) {
+        const dispatchId = Number(it?.dispatchId);
+        if (seen.has(dispatchId)) continue;
+        seen.add(dispatchId);
+        try {
+          ok.push(await checkReceipt(req.user, dispatchId, it, dl));
+        } catch (e: any) {
+          errors.push({ dispatchId, error: e.message });
+        }
+      }
+      if (errors.length) {
+        res.status(400).json({ error: `${errors.length} item${errors.length === 1 ? " needs" : "s need"} fixing — nothing was received.`, errors });
+        return;
+      }
+      const saved: Receipt[] = [];
+      const entries = new Set<number>();
+      for (const c of ok) {
+        if (await saveReceipt(Number(req.user.id), c, dl)) {
+          saved.push(c);
+          entries.add(Number(c.d.entry_id));
+        }
+      }
+      let complete = 0;
+      for (const id of entries) if ((await refreshEntry(id)).status === "received") complete++;
+      await alertShort(saved);
+      res.json({ received: saved.length, skipped: ok.length - saved.length, complete });
+    })
+  );
+
+  // One dispatch: { receivedQty, note, ...delivery }.
   app.post(
     "/api/material-receive/:dispatchId",
     authenticateToken,
     handler(async (req, res) => {
       await receiveGate(req);
-      const d: any = ((await queryDB("SELECT * FROM mpr_dispatches WHERE id = ?", [Number(req.params.dispatchId)])) || [])[0];
-      if (!d) throw bad("Dispatch not found.", 404);
-      const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [Number(d.entry_id)])) || [])[0];
-      if (!entry) throw bad("MPR row not found.", 404);
-      const ids = await myProjectIds(req.user);
-      if (ids && !ids.includes(Number(entry.project_id))) throw bad("This isn't one of your projects.", 403);
-      if (d.status !== "sent") throw bad(d.status === "received" ? "Already received." : "This dispatch was cancelled by Purchase.");
-      const qty = num(req.body?.receivedQty);
-      if (qty === null || qty < 0) throw bad("Enter the Qty that arrived.");
-      if (qty > Number(d.qty) + EPS) throw bad(`More than was sent (${Number(d.qty)}).`);
-      const date = req.body?.receivedDate ? dateOf(req.body.receivedDate) : todayInDhaka();
-      if (!date) throw bad("Received date isn't a date.");
-      if (date > todayInDhaka()) throw bad("Received date can't be in the future.");
-      const sentOn = toDateOnlyString(d.dispatch_date);
-      if (sentOn && date < sentOn) throw bad(`Received date can't be before it was sent (${sentOn}).`);
-      const note = str(req.body?.note, 1000);
-      const short = qty < Number(d.qty) - EPS;
-      if (short && !note) throw bad("Less than was sent — say why (short, damaged…).");
-      const done: any = await queryDB(
-        "UPDATE mpr_dispatches SET status = 'received', received_qty = ?, received_date = ?, received_note = ?, received_by = ?, received_at = NOW() WHERE id = ? AND status = 'sent'",
-        [r2(qty), date, note || null, Number(req.user.id), Number(d.id)]
-      );
-      if (!Number(done?.affectedRows)) throw bad("Already received.");
-      await log(Number(d.entry_id), Number(d.id), "receive", r2(qty), short ? `Short by ${r2(Number(d.qty) - qty)} — ${note}` : note || "", Number(req.user.id));
-      const now = await refreshEntry(Number(d.entry_id));
-      // Purchase hears about a short receipt.
-      if (short && d.created_by) {
-        await createAlert(queryDB, {
-          userId: Number(d.created_by),
-          type: "mpr_dispatch",
-          title: "Material received short",
-          message: `${entry.project_name} · ${entry.mpr_no} ${entry.item_name}: ${r2(qty)} of ${Number(d.qty)} arrived — ${note}`,
-          relatedType: "mpr_dispatch"
-        });
-      }
+      const dl = deliveryOf(req.body);
+      const c = await checkReceipt(req.user, Number(req.params.dispatchId), req.body, dl);
+      if (!(await saveReceipt(Number(req.user.id), c, dl))) throw bad("Already received.");
+      const now = await refreshEntry(Number(c.d.entry_id));
+      await alertShort([c]);
       res.json(now);
     })
   );

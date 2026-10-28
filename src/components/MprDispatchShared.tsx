@@ -33,8 +33,29 @@ export interface MdDispatch {
   receivedDate: string | null;
   receivedNote: string;
   receivedBy: string;
+  // Filled in by the project on the Material Receive form.
+  receivedTime: string;
+  receivedSupplier: string;
+  truckNo: string;
+  poStatus: string;
+  receivedByText: string;
   cancelReason: string;
 }
+
+// PO Status choices on the Material Receive form (PO_STATUSES in MprDispatchRoutes.ts).
+export const PO_STATUSES = ['PO Received', 'PO Pending', 'Without PO'] as const;
+
+// "Received 200 Cft on 24-Oct-2026 10:30 · Truck 11-2345 · PO Received · by Karim"
+export const receiptText = (d: MdDispatch, unit: string) =>
+  [
+    `Received ${qtyText(d.receivedQty, unit)} on ${d.receivedDate ? formatDate(d.receivedDate) : '—'}${d.receivedTime ? ` ${d.receivedTime}` : ''}`,
+    d.receivedSupplier && `Supplier ${d.receivedSupplier}`,
+    d.truckNo && `Truck ${d.truckNo}`,
+    d.poStatus,
+    (d.receivedByText || d.receivedBy) && `by ${d.receivedByText || d.receivedBy}`
+  ]
+    .filter(Boolean)
+    .join(' · ') + (d.receivedNote ? ` — ${d.receivedNote}` : '');
 
 export interface MdRow {
   id: number;
@@ -167,9 +188,8 @@ export const MdTimelinePopup: React.FC<{
                         </div>
                         {d.status === 'received' && (
                           <div className={d.receivedQty !== null && d.receivedQty < d.qty ? 'text-amber-700' : 'text-emerald-700'}>
-                            Received {qtyText(d.receivedQty, r.unit)} on {d.receivedDate ? formatDate(d.receivedDate) : '—'}
-                            {d.receivedBy ? ` by ${d.receivedBy}` : ''}
-                            {d.receivedNote ? ` — ${d.receivedNote}` : ''}
+                            {receiptText(d, r.unit)}
+                            {d.receivedByText && d.receivedBy ? <span className="text-slate-400"> (entered by {d.receivedBy})</span> : null}
                           </div>
                         )}
                         {d.status === 'sent' && <div className="text-sky-700">On the way — not received yet</div>}
