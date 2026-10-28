@@ -10,6 +10,8 @@ import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { NewLeaveApplicationModal } from './NewLeaveApplicationModal';
+import { useIsPhone } from './TimesheetPhone';
+import { LeaveGauge, LeavePhoneCard, LeaveTypeInfo, leaveTypeStyle } from './LeavePhone';
 
 interface LeaveReviewPageProps {
   token: string;
@@ -119,7 +121,88 @@ useLiveRefresh(() => load(true));
   // segmented control.
   const countFor = (key: ReviewTab) => applications.filter((a) => a.status === key).length;
 
+  // Phone layout (LeavePhone.tsx): always this calendar year — a gauge of
+  // days left / taken per leave type, whose type buttons filter the list.
+  const isPhone = useIsPhone();
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const thisYear = new Date().getFullYear();
+  const inThisYear = (a: LeaveApplication) =>
+    a.status === 'pending' || Number(String(a.start_date).slice(0, 4)) === thisYear || Number(String(a.end_date).slice(0, 4)) === thisYear;
+  const takenThisYear = (key: string) =>
+    applications
+      .filter((a) => a.leave_type === key && a.status === 'approved' && Number(String(a.start_date).slice(0, 4)) === thisYear)
+      .reduce((n, a) => n + Number(a.day_count || 0), 0);
+  const leaveTypes: LeaveTypeInfo[] = balance
+    ? [
+        { key: 'casual', label: 'Casual leave', short: 'Casual', left: Number(balance.casual_leave), taken: takenThisYear('casual') },
+        { key: 'sick', label: 'Sick leave', short: 'Sick', left: Number(balance.sick_leave), taken: takenThisYear('sick') },
+        { key: 'without_pay', label: 'Leave without pay', short: 'No pay', left: null, taken: takenThisYear('without_pay') },
+        ...(balance.custom_leaves || []).map((c) => ({
+          key: c.key,
+          label: c.label,
+          short: c.label.replace(/\s+leave$/i, ''),
+          left: Number(c.balance),
+          taken: takenThisYear(c.key)
+        }))
+      ]
+    : [];
+  const typeKeys = leaveTypes.map((t) => t.key);
+  const phoneApps = applications
+    .filter((a) => inThisYear(a) && (!typeFilter || a.leave_type === typeFilter))
+    .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)) || Number(b.id) - Number(a.id));
+  const phoneCount = (key: ReviewTab) => phoneApps.filter((a) => a.status === key).length;
+
   return (
+    <>
+    {isPhone ? (
+      <div className="flex flex-col gap-3 px-1 pt-1 pb-8">
+        {!balanceLoading && leaveTypes.length === 0 && (
+          <button type="button" onClick={() => setShowNewModal(true)} className="liquid-glass-button w-full min-h-[46px] rounded-full text-sm font-extrabold flex items-center justify-center gap-1.5">
+            <Plus className="w-4 h-4" /> Submit leave
+          </button>
+        )}
+        {balanceLoading ? null : leaveTypes.length > 0 && (
+          <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} onSubmit={() => setShowNewModal(true)} />
+        )}
+        <div className="liquid-glass-inset grid grid-cols-3 gap-1 p-1 rounded-full">
+          {TABS.map((t) => {
+            const on = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setTab(t.key)}
+                className={`min-h-[38px] rounded-full text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                  on ? 'bg-white/95 text-[color:var(--g-accent,#7f00ff)] shadow-sm' : 'text-zinc-600'
+                }`}
+              >
+                {t.label}
+                <span
+                  className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-extrabold inline-flex items-center justify-center ${
+                    on ? 'bg-[color:color-mix(in_srgb,var(--g-accent,#7f00ff)_12%,transparent)]' : 'bg-slate-900/[.06]'
+                  }`}
+                >
+                  {phoneCount(t.key)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {loading ? (
+          <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
+        ) : phoneApps.filter((a) => a.status === tab).length === 0 ? (
+          <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">
+            {tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved leave here.' : 'No rejected leave.'}
+            {tab === 'pending' && !typeFilter && <p className="mt-1 text-xs text-zinc-400">Ready for some time off? Tap "Submit leave".</p>}
+          </div>
+        ) : (
+          phoneApps
+            .filter((a) => a.status === tab)
+            .map((a) => <LeavePhoneCard key={a.id} app={a} typeLabel={leaveTypeLabel(a)} style={leaveTypeStyle(a.leave_type, typeKeys)} />)
+        )}
+      </div>
+    ) : (
     <>
     {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
         big rounded corners) — same Dashboard mobile look as Select a
@@ -356,22 +439,11 @@ useLiveRefresh(() => load(true));
       </div>
 
     </div>
+    </>
+    )}
 
-      {/* Floating "Submit Leave" — mobile only, same design/position/color as
-          Movement Claim's "Add Check In/Out" and Conveyance's "New Claim"
-          floating buttons (bottom-right, above BottomNav's fixed bar). */}
-      <button
-        type="button"
-        onClick={() => setShowNewModal(true)}
-        // Liquid glass pill — same translucent gradient + blur + glossy inset
-        // highlight + colored drop shadow treatment as Check In/Out's and
-        // New Claim's floating buttons, instead of the old flat solid color.
-        className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-blue-400/90 via-blue-600/90 to-indigo-700/90 shadow-[0_10px_28px_-6px_rgba(37,99,235,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(37,99,235,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
-        style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
-      >
-        <Plus className="w-3.5 h-3.5" /> Submit Leave
-      </button>
-
+      {/* On a phone, Submit leave sits in the gauge card (LeavePhone.tsx);
+          desktop has it in the header row above. */}
       {showNewModal && (
         <NewLeaveApplicationModal
           token={token}
