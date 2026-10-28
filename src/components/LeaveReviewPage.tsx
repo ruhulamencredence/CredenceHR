@@ -155,7 +155,7 @@ useLiveRefresh(() => load(true));
   return (
     <>
     {isPhone ? (
-      <div className="flex flex-col gap-3 px-1 pt-1 pb-8">
+      <div className="flex flex-col gap-3.5 px-1 pt-1 pb-8">
         {!balanceLoading && leaveTypes.length === 0 && (
           <button type="button" onClick={() => setShowNewModal(true)} className="liquid-glass-button w-full min-h-[46px] rounded-full text-sm font-extrabold flex items-center justify-center gap-1.5">
             <Plus className="w-4 h-4" /> Submit leave

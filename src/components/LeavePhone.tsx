@@ -78,9 +78,14 @@ export const LeaveGauge: React.FC<{
   const centerColor = picked ? leaveTypeStyle(picked.key, keys).fg : '#18181b';
 
   return (
-    <div className="liquid-glass rounded-[28px] px-3.5 pt-4 pb-3.5 flex flex-col items-center gap-2.5">
-      <div className="relative w-[220px] h-[118px]">
-        <svg width="220" height="118" viewBox="0 0 200 108" role="img" aria-label={`${big} ${caption}`}>
+    // A shorter drop shadow than .liquid-glass's own, so it doesn't spill
+    // over the Review / Approved / Rejected switch below.
+    <div
+      className="liquid-glass rounded-[26px] px-3 pt-3 pb-3 flex flex-col items-center gap-2"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.35), 0 10px 22px -16px rgba(15,23,42,.35)' }}
+    >
+      <div className="relative w-[168px] h-[90px]">
+        <svg width="168" height="90" viewBox="0 0 200 108" role="img" aria-label={`${big} ${caption}`}>
           <path d={ARC} fill="none" stroke="rgba(99,0,198,.10)" strokeWidth="14" strokeLinecap="round" />
           {[...arcs].reverse().map((a) =>
             a.len > 0 ? (
@@ -97,8 +102,8 @@ export const LeaveGauge: React.FC<{
           )}
         </svg>
         <div className="absolute inset-x-0 bottom-1 text-center">
-          <div className="text-[30px] font-extrabold leading-none tracking-tight" style={{ color: centerColor }}>{big}</div>
-          <div className="text-[11px] text-zinc-500 mt-[3px] px-2 truncate">{caption}</div>
+          <div className="text-[22px] font-extrabold leading-none tracking-tight" style={{ color: centerColor }}>{big}</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{caption}</div>
         </div>
       </div>
       {/* One row: up to five types share the width; more scroll sideways. */}
@@ -116,7 +121,7 @@ export const LeaveGauge: React.FC<{
               aria-pressed={on}
               onClick={() => onFilter(on ? null : t.key)}
               title={t.left == null ? `${t.label}: ${plural(t.taken)} taken` : `${t.label}: ${plural(t.left)} left`}
-              className="min-w-0 min-h-[48px] flex flex-col items-center justify-center gap-[3px] px-0.5 py-1 rounded-2xl border whitespace-nowrap"
+              className="min-w-0 min-h-[40px] flex flex-col items-center justify-center gap-[3px] px-0.5 py-1 rounded-xl border whitespace-nowrap"
               style={{ color: on ? s.fg : '#3f3f46', background: on ? s.soft : 'rgba(255,255,255,.45)', borderColor: on ? s.color : 'rgba(255,255,255,.8)' }}
             >
               <span className="flex items-center gap-1 text-sm font-extrabold tabular-nums leading-none">
@@ -128,8 +133,7 @@ export const LeaveGauge: React.FC<{
           );
         })}
       </div>
-      <p className="text-[11px] text-zinc-500 text-center">Days left (No pay: days taken) · tap one to filter</p>
-      <button type="button" onClick={onSubmit} className="liquid-glass-button w-full min-h-[46px] rounded-full text-sm font-extrabold flex items-center justify-center gap-1.5">
+      <button type="button" onClick={onSubmit} className="liquid-glass-button w-full min-h-[40px] rounded-full text-[13px] font-extrabold flex items-center justify-center gap-1.5">
         <Plus className="w-4 h-4" /> Submit leave
       </button>
     </div>
