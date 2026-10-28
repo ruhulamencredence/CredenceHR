@@ -44,7 +44,7 @@ CredenceHR/
 ├── package.json               ← composer.json-এর মতো (npm প্যাকেজ আর কমান্ড)
 ├── tests/                     ← টেস্ট
 ├── docs/                      ← ডকুমেন্ট (এই ফাইল সহ)
-├── CHANGES_*.md               ← কোন ফিচারে কী বদলেছে তার লগ
+├── docs/changes/CHANGES_*.md  ← কোন ফিচারে কী বদলেছে তার লগ
 ├── CLAUDE.md                  ← প্রজেক্টের নিয়ম (নতুন ফিচারে permission বাধ্যতামূলক ইত্যাদি)
 │
 ├── src/                       ← Frontend (এখানেই সব পেজ)
@@ -330,7 +330,7 @@ npm run lint         # tsc --noEmit (শুধু টাইপ চেক)
 4. **`await` ভুলবেন না।** সব ডাটাবেস কল asynchronous।
 5. **`req.user`:** JWT থেকে আসে (`id`, `role` ইত্যাদি)। সব ডাটা এতে নেই, দরকারে ডাটাবেসে দেখে নিতে হয়।
 6. **Permission দুই জায়গায়:** Backend-এ `requireModule`/`requireModuleLayer`, Frontend-এ `canSee`/`canSeeModule`। একটা ছাড়লে ফাঁক থেকে যায়।
-7. **`CHANGES_*.md`:** কোনো ফিচার কেন ও কীভাবে বদলানো হয়েছে তার লগ। ওই ফিচার বুঝতে প্রথমে এগুলো পড়ুন।
+7. **`docs/changes/CHANGES_*.md`:** কোনো ফিচার কেন ও কীভাবে বদলানো হয়েছে তার লগ। ওই ফিচার বুঝতে প্রথমে এগুলো পড়ুন।
 
 ---
 

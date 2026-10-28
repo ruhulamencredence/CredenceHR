@@ -180,8 +180,8 @@ function findApk(name: string): string | null {
 // The login page's button (CredenceHR.apk) when no file has that name: the
 // newest APK — or zip holding one — in the first folder that has any, so an
 // app-debug.apk or CredenceHR-android-debug.zip dropped in works unrenamed.
-// Only APK_DIR and <app folder>/downloads: dist/ and public/ still carry an
-// old pre-rebrand MBO.apk that must never go out as CredenceHR.apk.
+// Only APK_DIR and <app folder>/downloads: any other APK lying in dist/ or
+// public/ (an old build, a test file) must never go out as CredenceHR.apk.
 function newestApk(): string | null {
   for (const d of apkDirs().slice(0, 2)) {
     if (!d) continue;

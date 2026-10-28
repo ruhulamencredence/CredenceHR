@@ -11,7 +11,7 @@
 // Renders nothing if the account has no one reporting to them.
 //
 // NOT wired into the app shell yet — suggested spot: Self Service header
-// menu, next to Leave Approvals. See CHANGES_asset_management.md.
+// menu, next to Leave Approvals. See docs/changes/CHANGES_asset_management.md.
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';

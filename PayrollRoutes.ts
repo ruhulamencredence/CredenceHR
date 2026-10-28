@@ -229,7 +229,7 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
       )
     `);
     // ---- Loan/Advance Requests (employee submit -> Admin approve/reject) --
-    // Fills the gap called out in PayrollModule_wiring_notes.md: logs a
+    // Fills the gap called out in docs/changes/PayrollModule_wiring_notes.md: logs a
     // *request* separately from the actual employee_advances row. Approving
     // one INSERTs into employee_advances (advance_id records which row) —
     // rejecting just closes the request out with a remark. Modeled on
@@ -503,7 +503,7 @@ function fmtMoney(v: number): string {
 }
 
 // One employee's payslip as an HTML email body — the "Email Payslips" gap
-// called out in PayrollModule_wiring_notes.md. Deliberately a plain HTML
+// called out in docs/changes/PayrollModule_wiring_notes.md. Deliberately a plain HTML
 // table rather than a re-creation of the branded jsPDF letterhead (that
 // PDF is built client-side using the browser's Image/Canvas APIs, which
 // aren't available in this Node server) — the figures are identical, just
@@ -1351,7 +1351,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // ---- Loan/Advance Requests (employee submit -> Admin approve/reject) -----
-  // Fills the gap called out in PayrollModule_wiring_notes.md: an employee
+  // Fills the gap called out in docs/changes/PayrollModule_wiring_notes.md: an employee
   // with a linked login (all_employees.user_id) can submit a request here
   // without needing 'payroll' module access; an Admin with that access then
   // approves it (which creates the real employee_advances row — identical
@@ -1655,7 +1655,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // ---- Email Payslips -------------------------------------------------------
-  // Fills the "Email Payslips" gap called out in PayrollModule_wiring_notes.md
+  // Fills the "Email Payslips" gap called out in docs/changes/PayrollModule_wiring_notes.md
   // for PayslipManagementPanel.tsx. Sends the payslip figures as an HTML
   // email (buildPayslipEmailHtml above) via the shared SMTP mailer
   // (mailer.ts) to the employee's Employee Directory email (falling back to

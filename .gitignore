@@ -14,3 +14,13 @@ coverage/
 # is in git, the APK put in it on the server by hand is not.
 /downloads/*
 !/downloads/README.md
+
+# Tool caches and IDE / build leftovers — never part of the code.
+.vite/
+android/.idea/
+android/app/debug/
+android/app/release/
+# Phone apps are put on the server (downloads/), never committed; no app
+# file belongs in public/ either, or every build ships it.
+public/**/*.apk
+public/**/*.aab
