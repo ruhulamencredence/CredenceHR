@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Book a Ride -> "Set On Map" (pickup or destination): a full-screen map with
+// Book a Ride -> "Set On Map" (pickup or destination): a full-screen OpenStreetMap with
 // a fixed pin in the centre and a sheet at the bottom. The user drags the
 // map until the pin sits on the place they want; the address under the pin
 // is looked up (GET /api/vehicles/places/reverse) each time the map stops.
@@ -117,14 +117,12 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { zoomControl: false, attributionControl: false }).setView(start ? [start.lat, start.lng] : DHAKA, start ? 17 : 13);
-    // CARTO Voyager: the same OpenStreetMap data, drawn cleaner (roads and
-    // place names stand out, like the phone map apps).
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      maxZoom: 20
+    // OpenStreetMap tiles, same as every other map in the app.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
     }).addTo(map);
     // Top right, clear of the sheet and its buttons.
-    L.control.attribution({ position: 'topright', prefix: false }).addAttribution('&copy; OpenStreetMap contributors &copy; CARTO').addTo(map);
+    L.control.attribution({ position: 'topright', prefix: false }).addAttribution('&copy; OpenStreetMap contributors').addTo(map);
     map.on('movestart', () => setMoving(true));
     map.on('moveend', () => {
       const c = map.getCenter();
