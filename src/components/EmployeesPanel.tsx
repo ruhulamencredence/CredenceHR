@@ -311,18 +311,35 @@ const EmployeesTableSkeleton: React.FC = () => {
   );
 };
 
+// Where the list was (search, filters, page, scroll) when a row's key button
+// opened Module Access; read back once when Back returns here.
+const RETURN_VIEW_KEY = 'credence_employees_return_view';
+interface EmployeesReturnView { search: string; status: 'all' | 'active' | 'inactive'; dept: string; page: number; pageSize: number; scrollY: number }
+function takeReturnView(): EmployeesReturnView | null {
+  try {
+    const raw = sessionStorage.getItem(RETURN_VIEW_KEY);
+    sessionStorage.removeItem(RETURN_VIEW_KEY);
+    return raw ? (JSON.parse(raw) as EmployeesReturnView) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onOpenModuleAccess }) => {
+  const returnView = useRef<EmployeesReturnView | null | undefined>(undefined);
+  if (returnView.current === undefined) returnView.current = takeReturnView();
+  const rv = returnView.current;
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(rv?.search ?? '');
   // The directory shows one page at a time — drawing every employee at once
   // made the tab (and typing in the edit form above it) slow.
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(rv?.status ?? 'all');
   // Department filter: '' = all, '__none__' = no department, else the department's name.
-  const [deptFilter, setDeptFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [deptFilter, setDeptFilter] = useState(rv?.dept ?? '');
+  const [page, setPage] = useState(rv?.page ?? 1);
+  const [pageSize, setPageSize] = useState(rv?.pageSize ?? 50);
   // The server pages and searches the directory; `employees` is just the page on screen.
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ all: 0, active: 0, inactive: 0 });
@@ -1192,12 +1209,28 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   };
 
   // The search waits for a pause in typing; any change of search / status / size goes back to page 1.
-  const [appliedSearch, setAppliedSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState((rv?.search ?? '').trim());
   useEffect(() => {
     const t = setTimeout(() => setAppliedSearch(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [appliedSearch, statusFilter, deptFilter, pageSize]);
+  // Not on the first run when coming back from Module Access — keep its page.
+  const keepPage = useRef(!!rv);
+  useEffect(() => {
+    if (keepPage.current) {
+      keepPage.current = false;
+      return;
+    }
+    setPage(1);
+  }, [appliedSearch, statusFilter, deptFilter, pageSize]);
+  // Back at the same place in the list once it has loaded.
+  const restoreScroll = useRef(rv?.scrollY ?? 0);
+  useEffect(() => {
+    if (!restoreScroll.current || loading) return;
+    const y = restoreScroll.current;
+    restoreScroll.current = 0;
+    requestAnimationFrame(() => window.scrollTo({ top: y }));
+  }, [loading]);
   useEffect(() => {
     listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter };
     fetchEmployees();
@@ -1370,7 +1403,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           {onOpenModuleAccess && (
                             <button
                               type="button"
-                              onClick={() => onOpenModuleAccess(emp.user_id!)}
+                              onClick={() => {
+                                try {
+                                  sessionStorage.setItem(RETURN_VIEW_KEY, JSON.stringify({ search, status: statusFilter, dept: deptFilter, page, pageSize, scrollY: window.scrollY }));
+                                } catch {
+                                  // storage unavailable — Back opens the list from the top
+                                }
+                                onOpenModuleAccess(emp.user_id!);
+                              }}
                               className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               title="Open this account's Module Access"
                               aria-label="Open Module Access"

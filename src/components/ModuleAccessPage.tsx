@@ -336,12 +336,14 @@ interface ModuleAccessPageProps {
   initialIds: number[];
   departments: Department[];
   viewer: AccessViewer;
+  // The page Back returns to (Users, or Employees when opened from there).
+  backTo?: 'Users' | 'Employees';
   onClose: () => void;
   // After a save: reload the accounts and say how it went.
   onSaved: (text: string, ok: boolean) => void;
 }
 
-export function ModuleAccessPage({ token, users, initialIds, departments, viewer, onClose, onSaved }: ModuleAccessPageProps) {
+export function ModuleAccessPage({ token, users, initialIds, departments, viewer, backTo = 'Users', onClose, onSaved }: ModuleAccessPageProps) {
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const editable = useMemo(() => users.filter((u) => canEditUserModules(u, viewer)), [users, viewer]);
 
@@ -742,11 +744,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             <button
               type="button"
               onClick={back}
-              className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label="Back to Users"
-              title="Back to Users"
+              className={`h-9 shrink-0 rounded-full flex items-center justify-center gap-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 ${backTo === 'Users' ? 'w-9' : 'px-3 border border-slate-200 text-sm font-semibold'}`}
+              aria-label={`Back to ${backTo}`}
+              title={`Back to ${backTo}`}
             >
               <ArrowLeft className="w-5 h-5" />
+              {backTo !== 'Users' && <span>{backTo}</span>}
             </button>
             <div className="min-w-0 flex-1">
               <h2 className="text-base md:text-lg font-bold text-slate-900">Module Access</h2>

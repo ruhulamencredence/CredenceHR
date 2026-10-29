@@ -672,9 +672,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setManagingUserId(null);
     }
   }, [activeTab]);
-  const openManageModules = (u: User | User[]) => {
+  // Where Back on the Module Access page goes: the Users page, or Employees
+  // when it was opened from an Employees row's key button.
+  const [moduleAccessFrom, setModuleAccessFrom] = useState<'users' | 'employees'>('users');
+  const openManageModules = (u: User | User[], from: 'users' | 'employees' = 'users') => {
     const list = Array.isArray(u) ? u : [u];
     if (list.length === 0) return;
+    setModuleAccessFrom(from);
     setModuleAccessIds(list.map((x) => x.id));
     setManagingModulesFor(list[0]);
     // Opens as a page: start at its top.
@@ -744,7 +748,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const u = users.find((x) => x.id === pendingModuleAccessUser);
     if (!u) return;
     setPendingModuleAccessUser(null);
-    openManageModules(u);
+    openManageModules(u, 'employees');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingModuleAccessUser, activeTab, users]);
   const filteredUsers = useMemo(() => {
@@ -7516,7 +7520,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           initialIds={moduleAccessIds}
           departments={departments}
           viewer={{ isSuperAdmin, canGrantModuleAccess }}
-          onClose={() => setManagingModulesFor(null)}
+          backTo={moduleAccessFrom === 'employees' && canSee('employees') ? 'Employees' : 'Users'}
+          onClose={() => {
+            setManagingModulesFor(null);
+            if (moduleAccessFrom === 'employees' && canSee('employees')) setActiveTab('employees');
+          }}
           onSaved={(text, ok) => {
             fetchAllData();
             setMessage({ type: ok ? 'success' : 'error', text });
