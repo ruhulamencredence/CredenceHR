@@ -1526,7 +1526,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
       {/* Contact info (a direct chat) / Group & Community info */}
       {showInfoPanel && activeRoom && (
-        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-0 md:inset-auto z-10">
+        // Phone: covers the conversation, but inside .chat-shell's safe-area
+        // padding — `inset-0` would put its header under the status bar.
+        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-x-0 top-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] bottom-[var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))] md:inset-auto z-10">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2">
             <button type="button" onClick={() => setShowInfoPanel(false)} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
               <ArrowLeft className="w-5 h-5" />
