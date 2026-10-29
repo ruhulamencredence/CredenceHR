@@ -24,16 +24,17 @@ import { SearchSelect } from './Combobox';
 // Employee 360 records (HrOps360Routes.ts) right after the Employee itself.
 type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' | 'payment' | 'history';
 
-const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
-  { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
-  { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
-  { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
-  { key: 'career', label: 'Experience & Education', icon: <GraduationCap className="w-3.5 h-3.5" /> },
-  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
-  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
+// `short` is the phone label (the tabs sit in a grid there, no sideways scroll).
+const FORM_TABS: { key: EmployeeFormTab; label: string; short: string; icon: React.ReactNode }[] = [
+  { key: 'info', label: 'Employee Info', short: 'Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
+  { key: 'status', label: 'Status', short: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
+  { key: 'contact', label: 'Contact', short: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
+  { key: 'career', label: 'Experience & Education', short: 'Career', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+  { key: 'supervisor', label: 'Supervisor', short: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
+  { key: 'payment', label: 'Payment', short: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
   // Read-only audit trail: Department/Designation changes (employee_transfers)
   // merged with every other field changed by an Edit save (employee_change_log).
-  { key: 'history', label: 'History', icon: <History className="w-3.5 h-3.5" /> }
+  { key: 'history', label: 'History', short: 'History', icon: <History className="w-3.5 h-3.5" /> }
 ];
 
 interface EmployeesPanelProps {
@@ -1489,7 +1490,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                 to this app's own look (not the reference screenshots' purple
                 sidebar). Supervisor is disabled until the employee has been
                 saved once (it needs a real employee id to attach rows to). */}
-            <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 overflow-x-auto sticky top-[65px] bg-white z-10">
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 px-3 sm:px-5 pt-2 border-b border-slate-200 sticky top-[65px] bg-white z-10">
               {FORM_TABS.map((t) => {
                 const disabled = (t.key === 'supervisor' || t.key === 'payment' || t.key === 'history') && !editingId;
                 const active = formTab === t.key;
@@ -1500,7 +1501,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     disabled={disabled}
                     onClick={() => setFormTab(t.key)}
                     title={disabled ? `Save the employee first to manage ${t.label}` : undefined}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
+                    className={`flex flex-col items-center justify-start gap-0.5 px-1 py-1.5 text-[11px] leading-tight text-center font-semibold rounded-t-lg border-b-2 transition-colors ${
                       active
                         ? 'border-blue-600 text-blue-700'
                         : disabled
@@ -1508,7 +1509,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    {t.icon} {t.label}
+                    {t.icon}
+                    <span className="sm:hidden">{t.short}</span>
+                    <span className="hidden sm:inline">{t.label}</span>
                   </button>
                 );
               })}
