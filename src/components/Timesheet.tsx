@@ -327,12 +327,16 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => loadData());
-  const loadData = async (cancelledRef?: { cancelled: boolean }) => {
+  const lastLoadedAt = useRef(0);
+  const loadData =async (cancelledRef?: { cancelled: boolean }) => {
     try {
       // Which calendar (Head Office vs Project site) applies to THIS account
       // — fetched first since the holidays call below needs it.
-      const groupRes = await fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } });
-      const appliesTo = groupRes.ok ? (await groupRes.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office' : 'head_office';
+      // The rest don't depend on it, so they go out at the same time — on a
+      // slow phone connection that's one round trip less.
+      const groupReq = fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } })
+        .then(async (r) => (r.ok && (await r.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office'))
+        .catch(() => 'head_office');
 
       const [attRes, corrRes, projRes, holRes, leaveRes] = await Promise.all([
         fetch(apiUrl('/api/attendance/mine'), { headers: { Authorization: `Bearer ${token}` } }),
@@ -344,10 +348,11 @@ useLiveRefresh(() => loadData());
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } }),
+        groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })),
         fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
+      lastLoadedAt.current = Date.now();
       if (attRes.ok) setRecords(await attRes.json());
       if (corrRes.ok) setCorrections(await corrRes.json());
       if (projRes.ok) setProjects(await projRes.json());
@@ -375,13 +380,18 @@ useLiveRefresh(() => loadData());
 
   // Back on this page (bottom nav): what it had shows at once, and the
   // latest (e.g. a Check In just made) arrives quietly — no blank / loading
-  // step in between.
+  // step in between. Data under a minute old is kept as is (live refresh
+  // already brings changes), and "Updating…" shows only when a refresh is
+  // actually slow, so flipping between tabs doesn't flash it every time.
   const [updating, setUpdating] = useState(false);
   const wasActive = useRef(active);
   useEffect(() => {
-    if (active && !wasActive.current && !loading) {
-      setUpdating(true);
-      loadData().finally(() => setUpdating(false));
+    if (active && !wasActive.current && !loading && Date.now() - lastLoadedAt.current > 60_000) {
+      const slow = setTimeout(() => setUpdating(true), 1000);
+      loadData().finally(() => {
+        clearTimeout(slow);
+        setUpdating(false);
+      });
     }
     wasActive.current = active;
     // eslint-disable-next-line react-hooks/exhaustive-deps
