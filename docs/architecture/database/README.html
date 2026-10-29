@@ -30,11 +30,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,৩৭১</strong></td>
+<td><strong>২,৩৭০</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
-<td><strong>২৫৬</strong> (ON DELETE: CASCADE ১৪৭, SET NULL ৯৫, RESTRICT ১২, NO ACTION ২)</td>
+<td><strong>২৫৪</strong> (ON DELETE: CASCADE ১৪৭, SET NULL ৯৩, RESTRICT ১৪)</td>
 </tr>
 <tr>
 <td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
@@ -58,7 +58,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <ul>
 <li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
 <li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
-<li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৫৬<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
+<li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৫৪<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
 </ul>
 <p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.svg" /></p>
 <h2 id="_4">২. মডিউল মানচিত্র</h2>
