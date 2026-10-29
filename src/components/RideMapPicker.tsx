@@ -11,7 +11,8 @@
 // The sheet suggests, besides the address under the pin: the nearest
 // offices / project sites (GET /api/vehicles/places/nearby), the account's
 // saved places and recent destinations. The search icon opens a place search
-// (GET /api/vehicles/places/search). "Projects" lists every Project with a
+// (GET /api/vehicles/places/search) right on the map: the box sits at the
+// top, the results fill the sheet, and the map follows them. "Projects" lists every Project with a
 // location set, nearest to the pin first (GET /api/vehicles/places/projects).
 // "Add missing place" names the spot
 // under the pin by hand. The bookmark saves it as Home / Work / Other with a
@@ -132,12 +133,22 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
   const [saved, setSaved] = useState<SavedPlace[]>([]);
   const [recent, setRecent] = useState<Place[]>([]);
   const [canSave, setCanSave] = useState(false);
-  const [sheet, setSheet] = useState<'search' | 'projects' | 'missing' | 'save' | null>(null);
+  const [sheet, setSheet] = useState<'projects' | 'missing' | 'save' | null>(null);
+  // Search a place: the box sits on the map, the results fill the bottom
+  // sheet, and the map follows them (the pin on the first one, a numbered
+  // dot on each).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Place[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchErr, setSearchErr] = useState<string | null>(null);
+  const [activeResult, setActiveResult] = useState(0);
+  const resultLayerRef = useRef<L.LayerGroup | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Label of a place picked from a list — used instead of a reverse lookup once the map lands there.
   const pickedRef = useRef<{ key: string; label: string } | null>(null);
 
-  useBackButtonClose(true, () => (sheet ? setSheet(null) : onCancel()));
+  useBackButtonClose(true, () => (sheet ? setSheet(null) : searchOpen ? closeSearch() : onCancel()));
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -154,6 +165,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
       setMoving(false);
       setCenter({ lat: c.lat, lng: c.lng });
     });
+    resultLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 100);
     return () => {
@@ -223,10 +235,13 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center.lat, center.lng]);
-  const flyTo = (s: { key: string; label: string; lat: number; lng: number }) => {
+  const flyTo = (s: { key: string; label: string; lat: number; lng: number }, keepSearch = false) => {
     const map = mapRef.current;
     setSheet(null);
-    (document.activeElement as HTMLElement | null)?.blur();
+    if (!keepSearch) {
+      closeSearch();
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
     if (!map) return;
     const target = { lat: s.lat, lng: s.lng };
     if (sameSpot(map.getCenter(), target)) {
@@ -238,6 +253,69 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
     pickedRef.current = { key: s.key, label: s.label };
     map.setView([s.lat, s.lng], 17);
   };
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setQuery('');
+    setResults([]);
+    setSearchErr(null);
+    resultLayerRef.current?.clearLayers();
+  }
+
+  // Debounced place search while the box is open.
+  useEffect(() => {
+    const q = query.trim();
+    if (!searchOpen || q.length < 3) {
+      setResults([]);
+      setSearchErr(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(apiUrl(`/api/vehicles/places/search?q=${encodeURIComponent(q)}`), { headers: authHeaders(), signal: controller.signal });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || 'Place search failed.');
+        setResults(Array.isArray(data) ? data.filter((p: any) => p.lat != null && p.lng != null) : []);
+        setActiveResult(0);
+        setSearchErr(null);
+      } catch (e: any) {
+        if (!controller.signal.aborted) setSearchErr(e.message || 'Place search failed.');
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 450);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [query, searchOpen]);
+
+  // The map follows the results: a numbered dot on each (tap = pick it),
+  // and the pin moves onto the highlighted one.
+  useEffect(() => {
+    const layer = resultLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!searchOpen) return;
+    results.forEach((r, i) => {
+      const on = i === activeResult;
+      L.marker([r.lat, r.lng], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="width:24px;height:24px;border-radius:50%;background:${on ? '#7c3aed' : '#fff'};color:${on ? '#fff' : '#5b21b6'};border:2px solid ${on ? '#fff' : '#7c3aed'};box-shadow:0 2px 6px rgba(0,0,0,.3);font:700 12px system-ui;display:flex;align-items:center;justify-content:center">${i + 1}</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      })
+        .on('click', () => flyTo({ key: `q-${r.lat},${r.lng}`, label: r.label, lat: r.lat, lng: r.lng }))
+        .addTo(layer);
+    });
+    const a = results[activeResult];
+    if (a) flyTo({ key: `q-${a.lat},${a.lng}`, label: a.label, lat: a.lat, lng: a.lng }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, activeResult, searchOpen]);
 
   const locate = async () => {
     setLocating(true);
@@ -270,8 +348,40 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
 
   return (
     <div className="fixed inset-0 z-[60] bg-slate-100">
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* The map's centre — the point that is picked — is where the pin's tip
+          sits (38% down); the part under the sheet doesn't need map. */}
+      <div ref={containerRef} className="absolute inset-x-0 top-0 h-[76%]" />
 
+      {searchOpen ? (
+        <div className="absolute inset-x-3 z-[600] flex items-center gap-2 rounded-2xl bg-white px-2 py-1.5 shadow-lg ring-1 ring-violet-200" style={{ top: 'calc(12px + env(safe-area-inset-top, 0px))' }}>
+          <button type="button" onClick={closeSearch} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100" aria-label="Close search">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              const a = results[activeResult];
+              if (e.key === 'Enter' && a) flyTo({ key: `q-${a.lat},${a.lng}`, label: a.label, lat: a.lat, lng: a.lng });
+            }}
+            placeholder="Area, road, building…"
+            aria-label="Search a place"
+            className="min-w-0 flex-1 bg-transparent text-[15px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
+          />
+          {searching ? (
+            <span className="px-2">
+              <Spinner size={14} />
+            </span>
+          ) : (
+            query && (
+              <button type="button" onClick={() => setQuery('')} className="w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700" aria-label="Clear search">
+                <X className="w-4 h-4" />
+              </button>
+            )
+          )}
+        </div>
+      ) : (
       <button
         type="button"
         onClick={onCancel}
@@ -282,9 +392,11 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
       >
         <ArrowLeft className="w-5 h-5" />
       </button>
+      )}
 
-      {/* Fixed centre pin with its label — the map moves underneath. */}
-      <div className="pointer-events-none absolute left-1/2 z-[500] flex flex-col items-center" style={{ top: 'calc(38% - 92px)', transform: 'translateX(-50%)' }}>
+      {/* Fixed centre pin with its label; its tip is the map's centre (38%). */}
+      <div className="pointer-events-none absolute left-1/2 top-[38%] z-[500] -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/35 w-2.5 h-1" />
+      <div className="pointer-events-none absolute left-1/2 top-[38%] z-[500] flex flex-col items-center" style={{ transform: 'translate(-50%, -100%)' }}>
         <div className={`relative mb-1.5 rounded-full bg-white px-3.5 py-1.5 text-[13px] text-slate-800 shadow-lg whitespace-nowrap transition-opacity ${moving ? 'opacity-0' : 'opacity-100'}`}>
           This is your {word} point
           <span className="absolute left-1/2 -bottom-1 -ml-1 w-2 h-2 rotate-45 bg-white" />
@@ -293,11 +405,10 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
           <path d="M18 0C8 0 0 8 0 18c0 13 18 30 18 30s18-17 18-30C36 8 28 0 18 0z" fill="#7c3aed" stroke="#fff" strokeWidth="2.5" />
           <circle cx="18" cy="18" r="7" fill="#fff" />
         </svg>
-        <div className={`rounded-full bg-black/35 transition-all ${moving ? 'w-3.5 h-1 opacity-60' : 'w-2.5 h-1'}`} />
       </div>
 
       {/* The bottom sheet. */}
-      <div className="absolute inset-x-0 bottom-0 z-[550] max-h-[62%] flex flex-col rounded-t-[28px] bg-white/95 backdrop-blur-xl shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
+      <div className={`absolute inset-x-0 bottom-0 z-[550] ${searchOpen ? 'max-h-[50%]' : 'max-h-[62%]'} flex flex-col rounded-t-[28px] bg-white/95 backdrop-blur-xl shadow-[0_-10px_30px_rgba(0,0,0,0.12)]`}>
         <button
           type="button"
           onClick={locate}
@@ -307,6 +418,30 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
           {locating ? <Spinner size={16} /> : <LocateFixed className="w-5 h-5" />}
         </button>
         <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-slate-300" />
+        {searchOpen ? (
+          <div className="px-4 sm:px-5 pt-1 overflow-y-auto" style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
+            <h2 className="text-xl font-extrabold text-slate-900">Search a place</h2>
+            <div className="mt-2.5 space-y-2">
+              {results.map((r, i) => (
+                <button
+                  key={`${r.label}-${i}`}
+                  type="button"
+                  onClick={() => flyTo({ key: `q-${r.lat},${r.lng}`, label: r.label, lat: r.lat, lng: r.lng })}
+                  onMouseEnter={() => setActiveResult(i)}
+                  className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left ${i === activeResult ? 'bg-violet-50 ring-1 ring-violet-200' : 'bg-slate-100/80'}`}
+                >
+                  <span className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[12px] font-bold ${i === activeResult ? 'bg-violet-600 text-white' : 'bg-white text-violet-700 ring-1 ring-violet-300'}`}>{i + 1}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] font-semibold text-slate-900">{r.label}</span>
+                    {r.detail && <span className="block truncate text-[11.5px] text-slate-500">{r.detail}</span>}
+                  </span>
+                </button>
+              ))}
+              {query.trim().length >= 3 && !searching && results.length === 0 && <p className="px-1 py-2 text-sm text-slate-500">{searchErr || 'No matching places found.'}</p>}
+              {query.trim().length < 3 && <p className="px-1 py-2 text-sm text-slate-500">Type at least 3 letters — the map follows the results.</p>}
+            </div>
+          </div>
+        ) : (
         <div className="px-4 sm:px-5 pt-1 overflow-y-auto">
           <h2 className="text-xl font-extrabold text-slate-900">{kind === 'pickup' ? 'Pickup point' : 'Destination point'}</h2>
           <p className="mt-2.5 mb-2 text-[13px] font-semibold text-slate-500">Suggested addresses</p>
@@ -328,7 +463,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
                 </>
               )}
             </div>
-            <button type="button" onClick={() => setSheet('search')} className="p-1 text-slate-400 hover:text-slate-700" aria-label="Search a place">
+            <button type="button" onClick={() => setSearchOpen(true)} className="p-1 text-slate-400 hover:text-slate-700" aria-label="Search a place">
               <Search className="w-5 h-5" />
             </button>
           </div>
@@ -387,8 +522,10 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
             </button>
           </div>
         </div>
+        )}
 
-        <div className="flex items-center gap-2.5 border-t border-slate-100 px-4 sm:px-5 pt-3" style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
+        {/* While searching, a result is picked by tapping it. */}
+        <div className={`${searchOpen ? 'hidden' : 'flex'} items-center gap-2.5 border-t border-slate-100 px-4 sm:px-5 pt-3`} style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
           <button type="button" disabled={busy && !chosen} onClick={confirm} className="liquid-glass-button flex-1 rounded-full py-3.5 text-base font-bold disabled:opacity-50">
             Confirm {word}
           </button>
@@ -410,7 +547,6 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
       {sheet === 'projects' && (
         <ProjectsSheet at={center} onClose={() => setSheet(null)} onPick={(p) => flyTo({ key: `o-${p.lat},${p.lng}`, label: p.label, lat: p.lat, lng: p.lng })} />
       )}
-      {sheet === 'search' && <SearchSheet onClose={() => setSheet(null)} onPick={(p) => flyTo({ key: `q-${p.lat},${p.lng}`, label: p.label, lat: p.lat, lng: p.lng })} />}
       {sheet === 'missing' && (
         <MissingPlaceSheet
           address={label}
@@ -443,72 +579,6 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
     </div>
   );
 }
-
-// ---------- Search a place by name ----------
-const SearchSheet: React.FC<{ onClose: () => void; onPick: (p: Place) => void }> = ({ onClose, onPick }) => {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Place[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 3) {
-      setResults([]);
-      setErr(null);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const res = await fetch(apiUrl(`/api/vehicles/places/search?q=${encodeURIComponent(q)}`), { headers: authHeaders(), signal: controller.signal });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(data?.error || 'Place search failed.');
-        setResults(Array.isArray(data) ? data.filter((p: any) => p.lat != null && p.lng != null) : []);
-        setErr(null);
-      } catch (e: any) {
-        if (!controller.signal.aborted) setErr(e.message || 'Place search failed.');
-      } finally {
-        if (!controller.signal.aborted) setSearching(false);
-      }
-    }, 450);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [query]);
-  return (
-    <Sheet title="Search a place" onClose={onClose}>
-      <div className="flex items-center gap-2 rounded-2xl border-[1.5px] border-violet-600 bg-white px-3.5 py-2.5">
-        <Search className="w-4 h-4 text-slate-400 shrink-0" />
-        <input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && results[0]) onPick(results[0]);
-          }}
-          placeholder="Area, road, building…"
-          className="min-w-0 flex-1 bg-transparent text-[15px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
-        />
-        {searching && <Spinner size={14} />}
-      </div>
-      <div className="liquid-glass-inset mt-3 rounded-2xl divide-y divide-slate-200/60">
-        {results.map((p, i) => (
-          <button key={`${p.label}-${i}`} type="button" onClick={() => onPick(p)} className="flex w-full items-start gap-3 px-3.5 py-3 text-left">
-            <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-slate-800">{p.label}</span>
-              {p.detail && <span className="block truncate text-[11px] text-slate-500">{p.detail}</span>}
-            </span>
-          </button>
-        ))}
-        {query.trim().length >= 3 && !searching && results.length === 0 && <p className="px-3.5 py-3 text-sm text-slate-500">{err || 'No matching places found.'}</p>}
-        {query.trim().length < 3 && <p className="px-3.5 py-3 text-sm text-slate-500">Type at least 3 letters.</p>}
-      </div>
-    </Sheet>
-  );
-};
 
 // ---------- Projects with a location set ----------
 interface ProjectPlace extends Place {
