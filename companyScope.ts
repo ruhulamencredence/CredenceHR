@@ -204,6 +204,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["entry_permanent_delete_log", ["permanently_deleted_by", "users"]],
   ["job_candidates", ["posting_id", "job_postings"]],
   ["candidate_interviews", ["candidate_id", "job_candidates"]],
+  ["candidate_interview_events", ["candidate_id", "job_candidates"]],
+  ["candidate_emails", ["candidate_id", "job_candidates"]],
   ["chat_messages", ["room_id", "chat_rooms"]],
   ["chat_room_members", ["room_id", "chat_rooms"]],
   ["chat_room_reads", ["room_id", "chat_rooms"]],

@@ -33,7 +33,7 @@
 | MPR Edit Log | `editlog` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Exit / Offboarding | `exit_offboarding` | `read` Exit / Offboarding<br>🔒`exit_dues` Exit — Dues from other modules<br>🔒`exit_pdf` Exit — Clearance & Settlement PDF<br>🔒`exit_clearance_setup` Exit — Clearance Departments setup |
 | Performance Management | `performance_management` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Recruitment (ATS) | `recruitment` | শুধু মডিউলের অনুমতি (layer নেই) |
+| Recruitment (ATS) | `recruitment` | `read` Recruitment (postings, candidates, interviews)<br>🔒`email_candidates` Email candidates |
 | Grievance & Disciplinary | `grievance_disciplinary` | শুধু মডিউলের অনুমতি (layer নেই) |
 | HR Analytics | `hr_analytics` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Document Vault | `document_vault` | `read` Documents (upload, view, own signature)<br>🔒`sign_request` Request signatures from others<br>🔒`esign_settings` E-Signature settings (OTP, read to the end) |

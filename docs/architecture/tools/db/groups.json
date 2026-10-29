@@ -38,6 +38,8 @@
   "report_email_log"
  ],
  "H. HR Operations, Onboarding & Recruitment": [
+  "candidate_emails",
+  "candidate_interview_events",
   "candidate_interviews",
   "employee_requisitions",
   "hr_action_approval_steps",

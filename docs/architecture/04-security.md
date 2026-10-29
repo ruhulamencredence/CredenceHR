@@ -126,6 +126,7 @@
 | ই-স্বাক্ষর ঘটনা | `document_events` | — |
 | Mail অ্যাডমিন কাজ | `mail_admin_log` | — |
 | রিপোর্ট ইমেইল | `report_email_log` | — |
+| Recruitment: interview-এর প্রতিটি বদল (আগের/নতুন সময় ও জায়গা, কারণ, কে) ও candidate-কে পাঠানো প্রতিটি email (কাকে, বিষয়, লেখা, পাঠানো/ব্যর্থ) | `candidate_interview_events`, `candidate_emails` | — |
 | সেশন | `user_sessions` (token hash, শেষ ব্যবহার) | ৩০ দিন অব্যবহৃত হলে পরিষ্কার |
 
 ---

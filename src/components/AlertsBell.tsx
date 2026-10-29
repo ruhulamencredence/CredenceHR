@@ -344,6 +344,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'notice_draft'
         ? // Admin Panel -> Notices, where the draft waits to be published.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }))
+        : alert.type === 'interview'
+        ? // Admin Panel -> Recruitment (ATS); opens only for an account with that module.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'recruitment' }))
         : alert.type === 'password_request'
         ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
           () => {

@@ -282,6 +282,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Recruitment থেকে candidate-কে email কে পাঠাতে পারে, ভুল জায়গায় যেতে পারে কি?</td>
+<td>শুধু Recruitment-এর <strong>Email candidates</strong> অনুমতি যাঁর আছে (আলাদা টিক, কাউকে আপনাআপনি দেওয়া হয় না; Superadmin সবসময়) — বোতাম লুকানো আর API-তে 403। ঠিকানা নেওয়া হয় candidate-এর রেকর্ড থেকে, ব্যবহারকারী অন্য ঠিকানা দিতে পারেন না; বিষয়ের লাইনে নতুন লাইন বাদ দেওয়া হয় (header injection নয়), লেখা HTML-escape হয়ে যায়। প্রতিটি email <code>candidate_emails</code>-এ থাকে (<code>RecruitmentRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>লগইন পাতার APK download দিয়ে কি সার্ভারের অন্য ফাইল নামানো যায়?</td>
 <td>না। শুধু <code>downloads/</code> ফোল্ডারের <code>.apk</code> নামের ফাইল যায়, নামে <code>/</code> বা <code>..</code> থাকলে 404। ফাইলটা আসল Android APK না হলে পাঠানোই হয় না (<code>AndroidApkRoute.ts</code>, <code>npm run test:apk</code>)।</td>
 <td>✅</td>
