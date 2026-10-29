@@ -77,10 +77,32 @@ const savedLabel = (p: SavedPlace) => {
 const KIND_ICON = { home: Home, work: Briefcase, other: Star } as const;
 
 // Same liquid-glass sheet as every other popup (CLAUDE.md).
-const Sheet: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
-  <div className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose} role="presentation">
+// Every one of these has a text box, so on a phone it sits at the top of the
+// screen — at the bottom the keyboard covered it — and is never taller than
+// what the keyboard leaves visible.
+function useVisibleHeight(): number | null {
+  const [h, setH] = useState<number | null>(() => (typeof window !== 'undefined' && window.visualViewport ? window.visualViewport.height : null));
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const on = () => setH(vv.height);
+    vv.addEventListener('resize', on);
+    return () => vv.removeEventListener('resize', on);
+  }, []);
+  return h;
+}
+
+const Sheet: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => {
+  const visible = useVisibleHeight();
+  return (
+  <div
+    className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-start sm:items-center justify-center px-3 pb-3 sm:p-4"
+    style={{ paddingTop: 'calc(12px + env(safe-area-inset-top, 0px))' }}
+    onClick={onClose}
+    role="presentation"
+  >
     <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
-      <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[88vh] flex flex-col overflow-hidden">
+      <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[88vh] flex flex-col overflow-hidden" style={visible ? { maxHeight: Math.min(visible - 24, window.innerHeight * 0.88) } : undefined}>
         <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-2">
           <h3 className="text-lg font-bold text-slate-900">{title}</h3>
           <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close">
@@ -91,7 +113,8 @@ const Sheet: React.FC<{ title: string; onClose: () => void; children: React.Reac
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onConfirm }: RideMapPickerProps) {
   const kind: 'pickup' | 'destination' = point || (/pickup/i.test(title) ? 'pickup' : 'destination');
