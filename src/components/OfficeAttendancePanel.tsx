@@ -4,6 +4,8 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { PagerBar } from './PagerBar';
+import { SearchSelect } from './Combobox';
 import { Fingerprint, RefreshCw, LogIn, LogOut, AlertTriangle, Search, X, CheckCircle2, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
 import { OfficeAttendanceRow } from '../types';
 import { apiUrl } from '../lib/api';
@@ -176,6 +178,15 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
     () => Array.from(new Set(rows.map(r => r.attendance_date))).sort(),
     [rows]
   );
+
+  // One page of rows at a time, like the other tables; any filter / range
+  // change goes back to page 1.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  useEffect(() => setPage(1), [rows, search, employeeFilter, departmentFilter, dateFilter]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = useMemo(() => filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize), [filteredRows, currentPage, pageSize]);
 
   const hasColumnFilters = !!(employeeFilter || departmentFilter || dateFilter);
   const clearColumnFilters = () => {
@@ -532,14 +543,15 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
                 />
               </th>
               <th className="px-3 py-1.5">
-                <select
+                <SearchSelect
                   value={departmentFilter}
                   onChange={e => setDepartmentFilter(e.target.value)}
                   className="w-full text-xs border border-slate-200 rounded px-2 py-1 font-normal focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  aria-label="Department"
                 >
                   <option value="">All</option>
                   {departmentOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+                </SearchSelect>
               </th>
               <th className="px-3 py-1.5">
                 <select
@@ -586,7 +598,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
                 </td>
               </tr>
             )}
-            {filteredRows.map((r, i) => (
+            {pageRows.map((r, i) => (
               <tr key={`${r.employee_id}-${r.attendance_date}-${i}`} className="hover:bg-slate-50">
                 <td className="px-3 py-2 font-medium text-slate-800">{r.name}</td>
                 <td className="px-3 py-2 text-slate-500">{r.department || '—'}</td>
@@ -620,6 +632,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
             ))}
           </tbody>
         </table>
+        <PagerBar page={currentPage} pageSize={pageSize} total={filteredRows.length} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
       </div>
 
       {showPins && pinData && (
