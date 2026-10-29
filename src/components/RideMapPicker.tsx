@@ -98,7 +98,7 @@ const Sheet: React.FC<{ title: string; onClose: () => void; children: React.Reac
   return (
   <div
     className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-start sm:items-center justify-center px-3 pb-3 sm:p-4"
-    style={{ paddingTop: 'calc(12px + env(safe-area-inset-top, 0px))' }}
+    style={{ paddingTop: 'calc(12px + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
     onClick={onClose}
     role="presentation"
   >
@@ -157,8 +157,10 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
-    // Top right, clear of the sheet and its buttons.
+    // Top right, below the status bar and the search box, clear of the sheet.
     L.control.attribution({ position: 'topright', prefix: false }).addAttribution('&copy; OpenStreetMap contributors').addTo(map);
+    const topRight = map.getContainer().querySelector('.leaflet-top.leaflet-right') as HTMLElement | null;
+    if (topRight) topRight.style.marginTop = 'calc(64px + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))';
     map.on('movestart', () => setMoving(true));
     map.on('moveend', () => {
       const c = map.getCenter();
@@ -353,7 +355,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
       <div ref={containerRef} className="absolute inset-x-0 top-0 h-[76%]" />
 
       {searchOpen ? (
-        <div className="absolute inset-x-3 z-[600] flex items-center gap-2 rounded-2xl bg-white px-2 py-1.5 shadow-lg ring-1 ring-violet-200" style={{ top: 'calc(12px + env(safe-area-inset-top, 0px))' }}>
+        <div className="absolute inset-x-3 z-[600] flex items-center gap-2 rounded-2xl bg-white px-2 py-1.5 shadow-lg ring-1 ring-violet-200" style={{ top: 'calc(12px + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}>
           <button type="button" onClick={closeSearch} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100" aria-label="Close search">
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -386,7 +388,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
         type="button"
         onClick={onCancel}
         className="absolute left-4 z-[500] w-11 h-11 rounded-full bg-white/90 backdrop-blur shadow-lg flex items-center justify-center text-slate-800"
-        style={{ top: 'calc(14px + env(safe-area-inset-top, 0px))' }}
+        style={{ top: 'calc(14px + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
         aria-label="Back"
         title={title}
       >
@@ -419,7 +421,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
         </button>
         <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-slate-300" />
         {searchOpen ? (
-          <div className="px-4 sm:px-5 pt-1 overflow-y-auto" style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
+          <div className="px-4 sm:px-5 pt-1 overflow-y-auto" style={{ paddingBottom: 'calc(14px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
             <h2 className="text-xl font-extrabold text-slate-900">Search a place</h2>
             <div className="mt-2.5 space-y-2">
               {results.map((r, i) => (
@@ -525,7 +527,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
         )}
 
         {/* While searching, a result is picked by tapping it. */}
-        <div className={`${searchOpen ? 'hidden' : 'flex'} items-center gap-2.5 border-t border-slate-100 px-4 sm:px-5 pt-3`} style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
+        <div className={`${searchOpen ? 'hidden' : 'flex'} items-center gap-2.5 border-t border-slate-100 px-4 sm:px-5 pt-3`} style={{ paddingBottom: 'calc(14px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
           <button type="button" disabled={busy && !chosen} onClick={confirm} className="liquid-glass-button flex-1 rounded-full py-3.5 text-base font-bold disabled:opacity-50">
             Confirm {word}
           </button>
