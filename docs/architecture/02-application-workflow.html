@@ -389,6 +389,8 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <h2 id="workflow-">১৬. যা এই workflow-তে ধরা নেই</h2>
 <p>আসল ফোন অ্যাপের ভেতরের প্রবাহ (GPS, ক্যামেরা), প্রতিটি ছোট রিপোর্ট ও পেজ, মডিউলভিত্তিক সব এজ-কেস। বিস্তারিত দেখতে <code>docs/CredenceHR-Code-Guide-for-Laravel-Developers-BN.md</code> ও সংশ্লিষ্ট <code>*Routes.ts</code> ফাইলের শুরুর মন্তব্য পড়ুন (প্রতিটি ফাইলে প্রবাহ লেখা আছে)।</p>
 <hr />
+<h2 id="android-app-back">Android app: ফোনের Back বোতাম</h2>
+<p>ফোনের Back প্রথমে সবচেয়ে উপরের খোলা popup / sheet / ধাপ বন্ধ করে (<code>backButtonStack.ts</code>, প্রতিটা popup <code>useBackButtonClose</code> দিয়ে নিজেকে রাখে)। কিছু খোলা না থাকলে পুরো পাতা এক ধাপ পেছায় (<code>App.tsx</code>): Chat / Alerts / Profile / যেকোনো Self Service পাতা → যেখান থেকে খোলা হয়েছিল (Dashboard); Admin Panel-এর কোনো পাতা → Admin Dashboard → User Dashboard। শুধু User Dashboard-এ "Press back again to exit", ২ সেকেন্ডের মধ্যে আবার চাপলে app বন্ধ।</p>
 <h2 id="android-app-update">Android app update</h2>
 <pre class="mermaid">flowchart TD
   A([HR: নতুন APK রাখে server-এর downloads/ ফোল্ডারে]) --&gt; V[&quot;server APK-এর ভেতর থেকে versionCode পড়ে&lt;br/&gt;GET /api/app/android-latest&quot;]

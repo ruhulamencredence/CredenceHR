@@ -351,6 +351,9 @@ export default function App() {
 
         const subscription = await CapacitorApp.addListener('backButton', () => {
           if (closeTopmostOrReturnFalse()) return;
+          // No popup / drill-down of its own is open: a full page steps back
+          // towards the dashboard before the app offers to exit.
+          if (pageBackRef.current()) return;
 
           if (awaitingExitConfirmRef.current) {
             CapacitorApp.exitApp();
@@ -730,6 +733,53 @@ export default function App() {
   // always sees Admin Panel" case, since Superadmin now starts on the User
   // Panel dashboard like everyone else and switches in the same way.
   const isAdminView = hasAdminPanel && viewMode === 'admin';
+
+  // The phone's Back on a full page (see the backButton listener above):
+  // Chat / Alerts / Profile / a Self Service page close back to where they
+  // were opened from; an Admin Panel page goes to the Admin dashboard, and
+  // that to the User dashboard. Returns false on the User dashboard, where
+  // the app then offers to exit. A page's own popups, and Book a Ride
+  // (VehicleManagement keeps its own steps), are handled first by the
+  // back-button stack.
+  const adminTabRef = useRef(adminActiveTab);
+  adminTabRef.current = adminActiveTab;
+  const pageBackRef = useRef<() => boolean>(() => false);
+  pageBackRef.current = () => {
+    if (showChat) {
+      setShowChat(false);
+      return true;
+    }
+    if (showAlertsPage) {
+      setShowAlertsPage(false);
+      return true;
+    }
+    if (showProfilePage) {
+      setShowProfilePage(false);
+      return true;
+    }
+    if (selfServiceView) {
+      setSelfServiceView(null);
+      return true;
+    }
+    if (isAdminView) {
+      if (adminTabRef.current !== 'dashboard') {
+        setAdminNavRequest({ target: 'dashboard', ts: Date.now() });
+        // An account without the Admin dashboard stays on its page — then
+        // Back goes to the User dashboard instead.
+        setTimeout(() => {
+          if (adminTabRef.current !== 'dashboard') {
+            setViewMode('user');
+            setDashboardNavRequest({ ts: Date.now() });
+          }
+        }, 150);
+      } else {
+        setViewMode('user');
+        setDashboardNavRequest({ ts: Date.now() });
+      }
+      return true;
+    }
+    return false;
+  };
   // An /admin/... address with no Admin Panel showing (no access, or the User
   // Panel is open) has nothing to point at — back to /.
   useEffect(() => {
