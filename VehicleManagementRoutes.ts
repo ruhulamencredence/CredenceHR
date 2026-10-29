@@ -1723,6 +1723,30 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
+  // Projects (offices / sites) that have a location set, each with its
+  // distance from a point when one is given — for the map picker.
+  const projectPlaces = async (lat: number | null, lng: number | null) => {
+    const rows: any = await queryDB("SELECT id, project_name, location_lat, location_lng, location_label FROM projects");
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dist = (aLat: number, aLng: number) => {
+      if (lat == null || lng == null) return null;
+      const dLat = toRad(aLat - lat);
+      const dLng = toRad(aLng - lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(aLat)) * Math.sin(dLng / 2) ** 2;
+      return Math.round(2 * 6371000 * Math.asin(Math.sqrt(h)));
+    };
+    return rows
+      .filter((p: any) => p.location_lat != null && p.location_lng != null && Number.isFinite(Number(p.location_lat)) && Number.isFinite(Number(p.location_lng)))
+      .map((p: any) => ({
+        id: Number(p.id),
+        label: p.project_name,
+        detail: p.location_label || null,
+        lat: Number(p.location_lat),
+        lng: Number(p.location_lng),
+        distance_m: dist(Number(p.location_lat), Number(p.location_lng))
+      }));
+  };
+
   // The map picker's suggestions around the pin: the nearest offices /
   // project sites (Projects with a location), within 5 km, nearest first.
   app.get("/api/vehicles/places/nearby", authenticateToken, async (req: any, res: any) => {
@@ -1730,27 +1754,25 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const lat = Number(req.query.lat);
       const lng = Number(req.query.lng);
       if (!validLatLng(lat, lng)) return res.status(400).json({ error: "Invalid coordinates." });
-      const rows: any = await queryDB("SELECT id, project_name, location_lat, location_lng, location_label FROM projects");
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const dist = (aLat: number, aLng: number) => {
-        const dLat = toRad(aLat - lat);
-        const dLng = toRad(aLng - lng);
-        const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(aLat)) * Math.sin(dLng / 2) ** 2;
-        return 2 * 6371000 * Math.asin(Math.sqrt(h));
-      };
-      const near = rows
-        .filter((p: any) => p.location_lat != null && p.location_lng != null && Number.isFinite(Number(p.location_lat)) && Number.isFinite(Number(p.location_lng)))
-        .map((p: any) => ({
-          label: p.project_name,
-          detail: p.location_label || null,
-          lat: Number(p.location_lat),
-          lng: Number(p.location_lng),
-          distance_m: Math.round(dist(Number(p.location_lat), Number(p.location_lng)))
-        }))
+      const near = (await projectPlaces(lat, lng))
         .filter((p: any) => p.distance_m <= 5000)
         .sort((a: any, b: any) => a.distance_m - b.distance_m)
         .slice(0, 3);
       res.json({ offices: near, can_save: await canSavePlaces(req.user) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The map picker's "Projects" list: every Project with a location, nearest
+  // to the pin first (by name when no point is given).
+  app.get("/api/vehicles/places/projects", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
+      const lng = req.query.lng !== undefined ? Number(req.query.lng) : null;
+      const at = lat != null && lng != null && validLatLng(lat, lng);
+      const list = await projectPlaces(at ? lat : null, at ? lng : null);
+      res.json(list.sort((a: any, b: any) => (at ? a.distance_m - b.distance_m : String(a.label).localeCompare(String(b.label)))));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -11,7 +11,9 @@
 // The sheet suggests, besides the address under the pin: the nearest
 // offices / project sites (GET /api/vehicles/places/nearby), the account's
 // saved places and recent destinations. The search icon opens a place search
-// (GET /api/vehicles/places/search). "Add missing place" names the spot
+// (GET /api/vehicles/places/search). "Projects" lists every Project with a
+// location set, nearest to the pin first (GET /api/vehicles/places/projects).
+// "Add missing place" names the spot
 // under the pin by hand. The bookmark saves it as Home / Work / Other with a
 // note for the driver — only with users.can_save_ride_places (the server
 // checks it too).
@@ -76,7 +78,7 @@ const KIND_ICON = { home: Home, work: Briefcase, other: Star } as const;
 
 // Same liquid-glass sheet as every other popup (CLAUDE.md).
 const Sheet: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
-  <div className="liquid-glass-backdrop fixed inset-0 z-[700] flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose} role="presentation">
+  <div className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose} role="presentation">
     <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
       <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[88vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-2">
@@ -107,7 +109,7 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
   const [saved, setSaved] = useState<SavedPlace[]>([]);
   const [recent, setRecent] = useState<Place[]>([]);
   const [canSave, setCanSave] = useState(false);
-  const [sheet, setSheet] = useState<'search' | 'missing' | 'save' | null>(null);
+  const [sheet, setSheet] = useState<'search' | 'projects' | 'missing' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Label of a place picked from a list — used instead of a reverse lookup once the map lands there.
   const pickedRef = useRef<{ key: string; label: string } | null>(null);
@@ -349,9 +351,18 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
             })}
           </div>
 
-          <button type="button" onClick={() => setSheet('missing')} className="mt-1 flex items-center gap-2 px-1 py-3 text-[14.5px] font-bold text-violet-700">
-            <Plus className="w-4.5 h-4.5" /> Add missing place
-          </button>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <button type="button" onClick={() => setSheet('missing')} className="flex items-center gap-2 px-1 py-3 text-[14.5px] font-bold text-violet-700">
+              <Plus className="w-4.5 h-4.5" /> Add missing place
+            </button>
+            <button
+              type="button"
+              onClick={() => setSheet('projects')}
+              className="flex items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-2 text-[13px] font-bold text-violet-800 hover:bg-violet-100"
+            >
+              <Building2 className="w-4 h-4" /> Projects
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2.5 border-t border-slate-100 px-4 sm:px-5 pt-3" style={{ paddingBottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}>
@@ -373,6 +384,9 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
         </div>
       </div>
 
+      {sheet === 'projects' && (
+        <ProjectsSheet at={center} onClose={() => setSheet(null)} onPick={(p) => flyTo({ key: `o-${p.lat},${p.lng}`, label: p.label, lat: p.lat, lng: p.lng })} />
+      )}
       {sheet === 'search' && <SearchSheet onClose={() => setSheet(null)} onPick={(p) => flyTo({ key: `q-${p.lat},${p.lng}`, label: p.label, lat: p.lat, lng: p.lng })} />}
       {sheet === 'missing' && (
         <MissingPlaceSheet
@@ -468,6 +482,61 @@ const SearchSheet: React.FC<{ onClose: () => void; onPick: (p: Place) => void }>
         ))}
         {query.trim().length >= 3 && !searching && results.length === 0 && <p className="px-3.5 py-3 text-sm text-slate-500">{err || 'No matching places found.'}</p>}
         {query.trim().length < 3 && <p className="px-3.5 py-3 text-sm text-slate-500">Type at least 3 letters.</p>}
+      </div>
+    </Sheet>
+  );
+};
+
+// ---------- Projects with a location set ----------
+interface ProjectPlace extends Place {
+  id: number;
+  distance_m: number | null;
+}
+const ProjectsSheet: React.FC<{ at: LatLng; onClose: () => void; onPick: (p: ProjectPlace) => void }> = ({ at, onClose, onPick }) => {
+  const [list, setList] = useState<ProjectPlace[] | null>(null);
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    fetch(apiUrl(`/api/vehicles/places/projects?lat=${at.lat}&lng=${at.lng}`), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setList(Array.isArray(rows) ? rows : []))
+      .catch(() => setList([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const q = query.trim().toLowerCase();
+  const shown = (list || []).filter((p) => !q || p.label.toLowerCase().includes(q) || String(p.detail || '').toLowerCase().includes(q));
+  return (
+    <Sheet title="Projects" onClose={onClose}>
+      <div className="flex items-center gap-2 rounded-2xl border-[1.5px] border-violet-600 bg-white px-3.5 py-2.5">
+        <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && shown[0]) onPick(shown[0]);
+          }}
+          placeholder="Type a project name or area"
+          className="min-w-0 flex-1 bg-transparent text-[15px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
+          aria-label="Search projects"
+        />
+      </div>
+      <div className="liquid-glass-inset mt-3 rounded-2xl divide-y divide-slate-200/60">
+        {list === null && (
+          <p className="flex items-center gap-2 px-3.5 py-3 text-sm text-slate-500">
+            <Spinner size={14} /> Loading…
+          </p>
+        )}
+        {shown.map((p) => (
+          <button key={p.id} type="button" onClick={() => onPick(p)} className="flex w-full items-center gap-3 px-3.5 py-3 text-left">
+            <Building2 className="w-5 h-5 text-violet-600 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-slate-800">{p.label}</span>
+              <span className="block truncate text-[11.5px] text-slate-500">{[p.detail, p.distance_m != null ? fmtDistance(p.distance_m) : null].filter(Boolean).join(' · ')}</span>
+            </span>
+          </button>
+        ))}
+        {list !== null && shown.length === 0 && (
+          <p className="px-3.5 py-3 text-sm text-slate-500">{list.length === 0 ? 'No project has its location set yet.' : 'No project matches.'}</p>
+        )}
       </div>
     </Sheet>
   );
