@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { Eye, FileSpreadsheet, LogIn, MousePointerClick, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
+import { SearchSelect } from './Combobox';
 
 interface LogRow {
   id: number;
@@ -99,12 +100,12 @@ export const PayrollActivityLog: React.FC<{ token: string }> = ({ token }) => {
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-slate-500 mb-1">User</label>
-          <select value={who} onChange={(e) => setWho(e.target.value)} className={input}>
+          <SearchSelect value={who} onChange={(e) => setWho(e.target.value)} className={input}>
             <option value="">Everyone</option>
             {people.map((p) => (
-              <option key={p}>{p}</option>
+              <option key={p} value={p}>{p}</option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-slate-500 mb-1">Type</label>

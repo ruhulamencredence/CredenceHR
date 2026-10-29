@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { X, CalendarClock, Mail, MapPin, Video, Phone, History, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
+import { SearchSelect } from './Combobox';
 
 export interface RecruitmentAccess {
   email_candidates: boolean;
@@ -275,7 +276,7 @@ export const InterviewModal: React.FC<{
   const [interview, setInterview] = useState<Interview | null>(null);
   const [events, setEvents] = useState<HistoryEvent[]>([]);
   const [emails, setEmails] = useState<HistoryEmail[]>([]);
-  const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
+  const [people, setPeople] = useState<{ id: number; name: string; employee_id: string | null; designation: string | null; department: string | null }[]>([]);
   const [when, setWhen] = useState('');
   const [duration, setDuration] = useState('60');
   const [mode, setMode] = useState<'in_person' | 'online' | 'phone'>('in_person');
@@ -481,14 +482,15 @@ export const InterviewModal: React.FC<{
             )}
             <div>
               <label className={labelCls} htmlFor="iv-who">Interviewer</label>
-              <select id="iv-who" value={interviewerId} onChange={(e) => setInterviewerId(e.target.value)} className={inputCls}>
-                <option value="">{interview ? '— keep as is —' : 'Me'}</option>
+              {/* Type a name, Employee ID, designation or department to find them. */}
+              <SearchSelect id="iv-who" value={interviewerId} onChange={(e) => setInterviewerId(e.target.value)} className={inputCls}>
+                <option value="">{interview ? '— Keep as is —' : '— Me —'}</option>
                 {people.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name}
+                    {[u.name, u.employee_id, u.designation, u.department].filter(Boolean).join(' · ')}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
               <p className="text-[11px] text-slate-500 mt-1">The interviewer gets an alert whenever the interview is set, moved or cancelled.</p>
             </div>
             <div>

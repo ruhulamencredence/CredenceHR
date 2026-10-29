@@ -302,14 +302,24 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
     }
   });
 
-  // People who can be picked as the interviewer (active logins).
+  // People who can be picked as the interviewer (active logins), with their
+  // Employee ID, designation and department so the picker can be searched
+  // by any of them.
   app.get("/api/recruitment/interviewers", ...gate, async (_req: any, res: any) => {
     try {
-      const rows: any = await queryDB("SELECT id, name, is_blocked, is_onboarding FROM users");
+      const [users, emps]: [any, any] = await Promise.all([
+        queryDB("SELECT id, name, is_blocked, is_onboarding FROM users"),
+        queryDB("SELECT user_id, employee_id, designation, department, is_active FROM all_employees").catch(() => [])
+      ]);
+      const empByUser = new Map<number, any>();
+      for (const e of emps || []) if (e.user_id && (!empByUser.has(Number(e.user_id)) || Number(e.is_active))) empByUser.set(Number(e.user_id), e);
       res.json(
-        rows
+        users
           .filter((u: any) => !Number(u.is_blocked) && !Number(u.is_onboarding))
-          .map((u: any) => ({ id: Number(u.id), name: u.name }))
+          .map((u: any) => {
+            const e = empByUser.get(Number(u.id));
+            return { id: Number(u.id), name: u.name, employee_id: e?.employee_id || null, designation: e?.designation || null, department: e?.department || null };
+          })
           .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
       );
     } catch (err: any) {
