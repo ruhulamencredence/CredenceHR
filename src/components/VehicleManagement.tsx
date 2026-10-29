@@ -20,8 +20,10 @@ import { RideDetails } from './RideDetails';
 import { RideBookingMap } from './RideBookingMap';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
+import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
-import { ArrowRight, CalendarDays, Car, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarDays, ChevronRight, Car, X, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
 import { SearchSelect } from './Combobox';
 import {
   RIDE_CARD,
@@ -149,9 +151,11 @@ interface VehicleManagementProps {
   // Book" tab (the Vehicle Maintainer bypass) shows at all. A Superadmin
   // implicitly has every module, same convention as requireModule server-side.
   user?: { id?: number; role?: string; module_permissions?: string[] } | null;
+  // Leave Book a Ride (the phone's Back on the booking screen).
+  onBack?: () => void;
 }
 
-export function VehicleManagement({ user }: VehicleManagementProps) {
+export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
   // Opened from a "ride needs a vehicle" alert: start on Approved by Me; if
   // nothing there is this account's to assign, go to Direct Book (Vehicle
@@ -606,6 +610,25 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     </div>
   );
 
+  // Phone: the title sits in the header (in the logo's place), the tabs
+  // fold into one "My rides" button, and the phone's Back steps out of a
+  // rides list to booking, then out of Book a Ride.
+  const phone = !wideWeb;
+  const [ridesMenu, setRidesMenu] = useState(false);
+  useEffect(() => {
+    if (!phone) return;
+    setHeaderPageTitle('Book a Ride');
+    return () => setHeaderPageTitle(null);
+  }, [phone]);
+  const backRef = useRef<() => void>(() => {});
+  backRef.current = () => {
+    if (ridesMenu) setRidesMenu(false);
+    else if (tab !== 'book') setTab('book');
+    else onBack?.();
+  };
+  useBackButtonClose(phone, () => backRef.current());
+  const openRides = requisitions.filter((r) => r.status === 'pending' || r.status === 'approved' || r.status === 'assigned' || r.status === 'ongoing').length;
+
   const TABS = [
     { key: 'book' as const, label: 'Book a Ride', icon: Car, count: 0 },
     { key: 'status' as const, label: 'Ride Status', icon: ListChecks, count: 0 },
@@ -615,12 +638,71 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     ...(isVehicleMaintainer ? [{ key: 'maintainer' as const, label: 'Direct Book', icon: Zap, count: 0 }] : [])
   ];
 
+  const rideTabs = TABS.filter((t) => t.key !== 'book');
+  const ridesBadge = openRides + rideTabs.reduce((n, t) => n + t.count, 0);
+
   return (
     <div className="w-full">
+      {phone && tab === 'book' && (
+        <div className="flex justify-end mb-2.5">
+          <button
+            type="button"
+            onClick={() => setRidesMenu(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[12.5px] font-bold text-[color:var(--g-accent-700)] shadow-[0_2px_8px_rgba(91,33,182,0.12)]"
+          >
+            <ListChecks className="w-4 h-4" /> My rides
+            {ridesBadge > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--g-accent)] text-white text-[10.5px] inline-flex items-center justify-center">{ridesBadge}</span>}
+          </button>
+        </div>
+      )}
+      {phone && tab !== 'book' && (
+        <button
+          type="button"
+          onClick={() => { setTab('book'); setSubmittedNotice(null); }}
+          className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[12.5px] font-bold text-[color:var(--g-accent-700)] shadow-[0_2px_8px_rgba(91,33,182,0.12)]"
+        >
+          <ArrowLeft className="w-4 h-4" /> Book a ride
+        </button>
+      )}
+      {phone && ridesMenu && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-end justify-center p-3" onClick={() => setRidesMenu(false)} role="presentation">
+          <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="My rides">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] p-5" style={{ paddingBottom: 'calc(20px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold text-slate-900">My rides</h3>
+                <button type="button" onClick={() => setRidesMenu(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="liquid-glass-inset rounded-2xl divide-y divide-slate-200/60">
+                {rideTabs.map(({ key, label, icon: Icon, count }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { setTab(key); setSubmittedNotice(null); setRidesMenu(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
+                  >
+                    <span className="w-9 h-9 rounded-xl bg-[var(--g-accent-soft)] flex items-center justify-center shrink-0">
+                      <Icon className="w-[18px] h-[18px] text-[color:var(--g-accent)]" />
+                    </span>
+                    <span className="flex-1 text-[15px] font-semibold text-slate-900">
+                      {key === 'status' ? 'Ride Status' : key === 'assign' ? 'Approved by Me' : key === 'trips' ? 'My Trips' : label}
+                      {key === 'status' && openRides > 0 && <span className="block text-[11.5px] font-normal text-slate-500">{openRides} open</span>}
+                    </span>
+                    {count > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--g-accent)] text-white text-[11px] font-bold inline-flex items-center justify-center">{count}</span>}
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {(!phone || tab !== 'book') && (
       <div
         className={`${wideWeb ? 'inline-flex' : 'flex'} gap-1 p-1 mb-4 rounded-full bg-white/70 border border-white/80 backdrop-blur-sm shadow-[0_6px_18px_-10px_rgba(85,0,170,0.4)]`}
       >
-        {TABS.map(({ key, label, icon: Icon, count }) => {
+        {(phone ? rideTabs : TABS).map(({ key, label, icon: Icon, count }) => {
           const on = tab === key;
           return (
             <button
@@ -645,6 +727,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           );
         })}
       </div>
+      )}
 
       {error && (
         <div className="mb-3">
@@ -652,7 +735,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
         </div>
       )}
 
-      {tab === 'book' && (
+      {tab === 'book' && !phone && (
         <div className="flex items-center gap-2 mb-3 text-xs font-semibold">
           {[
             ['1', 'Route', true],

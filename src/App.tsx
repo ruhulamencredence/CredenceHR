@@ -76,6 +76,7 @@ import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
+import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
 import { usePullToRefresh } from './lib/usePullToRefresh';
@@ -101,6 +102,8 @@ export default function App() {
   });
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   useBackButtonClose(isApkModalOpen, () => setIsApkModalOpen(false));
+  // Book a Ride keeps its own title row only on a desktop browser.
+  const bookRideWide = useWideWeb();
 
   // Navbar's web-only "Claims" header menu — see ClaimsNavRequest in types.ts.
   const [claimsNavRequest, setClaimsNavRequest] = useState<ClaimsNavRequest | null>(null);
@@ -1592,8 +1595,10 @@ export default function App() {
             {/* Web: full content width (map beside the booking panel, Ride Status
                 in two columns) instead of a narrow phone-width column. */}
             <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
-              {!Capacitor.isNativePlatform() && <ModulePath path={['Self Service', 'Book a Ride']} />}
-              <div className="flex items-center gap-2 mb-3">
+              {!Capacitor.isNativePlatform() && bookRideWide && <ModulePath path={['Self Service', 'Book a Ride']} />}
+              {/* Phone: the title is in the header (VehicleManagement sets it)
+                  and the phone's Back leaves — no row of its own here. */}
+              <div className={`items-center gap-2 mb-3 ${bookRideWide ? 'flex' : 'hidden'}`}>
                 <button
                   type="button"
                   onClick={() => setSelfServiceView(null)}
@@ -1607,7 +1612,7 @@ export default function App() {
                   <Car className="w-5 h-5 text-blue-600 shrink-0" /> Book a Ride
                 </h1>
               </div>
-              <VehicleManagement user={user} />
+              <VehicleManagement user={user} onBack={() => setSelfServiceView(null)} />
             </div>
           </div>
         ) : isAdminView ? (

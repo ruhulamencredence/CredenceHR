@@ -38,7 +38,7 @@ interface Place {
   lat: number;
   lng: number;
 }
-interface SavedPlace {
+export interface SavedPlace {
   id: number;
   kind: 'home' | 'work' | 'other';
   name: string;
@@ -65,13 +65,15 @@ interface RideMapPickerProps {
   onLocateMe: () => Promise<LatLng | null>;
   onCancel: () => void;
   onConfirm: (place: { label: string; lat: number; lng: number }) => void;
+  // Open straight on the Projects view (Book a Ride's "Projects" chip).
+  openWith?: 'projects';
 }
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('mpr_token')}` });
 const fmtDistance = (m: number) => (m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} m away` : `${(m / 1000).toFixed(1)} km away`);
 const sameSpot = (a: LatLng, b: LatLng) => Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lng - b.lng) < 1e-5;
 // What goes on the ride: "Home — House 15, Road 13/A (wait at the gate)".
-const savedLabel = (p: SavedPlace) => {
+export const savedLabel = (p: SavedPlace) => {
   const base = p.address && p.address !== p.name ? `${p.name} — ${p.address}` : p.name;
   return (p.driver_note ? `${base} (${p.driver_note})` : base).slice(0, 255);
 };
@@ -118,7 +120,7 @@ const Sheet: React.FC<{ title: string; onClose: () => void; children: React.Reac
   );
 };
 
-export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onConfirm }: RideMapPickerProps) {
+export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onConfirm, openWith }: RideMapPickerProps) {
   const kind: 'pickup' | 'destination' = point || (/pickup/i.test(title) ? 'pickup' : 'destination');
   const word = kind === 'pickup' ? 'pickup' : 'destination';
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -182,6 +184,11 @@ export function RideMapPicker({ title, point, start, onLocateMe, onCancel, onCon
       map.remove();
       mapRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (openWith === 'projects') openBrowse('projects');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
