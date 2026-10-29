@@ -13,6 +13,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
 import { downloadAssistantExcel, downloadAssistantPdf, type AssistantReport } from '../lib/assistantReportExport';
@@ -210,6 +211,8 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const allowed = !!user && !user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false);
   const storeKey = user ? `credence_assistant_${user.id}` : '';
   const [open, setOpen] = useState(false);
+  // Pixels the on-screen keyboard covers (0 when closed) — see the sheet below.
+  const keyboardInset = useKeyboardInset();
   const isPhone = useIsPhone();
   const [msgs, setMsgs] = useState<Msg[]>(() => {
     try {
@@ -436,12 +439,22 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
             close. On a computer the page stays sharp and usable next to the
             Assistant — no backdrop at all. */}
         <div className="md:hidden fixed inset-0 z-[80] liquid-glass-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
-        <div className="fixed inset-0 z-[81] pointer-events-none flex items-end sm:items-center md:items-end justify-center md:justify-end p-2 sm:p-4 md:p-6">
+        {/* With the keyboard open the sheet sits right on top of it and is
+            only as tall as what is left below the status bar, so the message
+            box never goes under the keyboard (useKeyboardInset). */}
+        <div
+          className={`fixed inset-0 z-[81] pointer-events-none flex ${keyboardInset ? 'items-end' : 'items-end sm:items-center md:items-end'} justify-center md:justify-end p-2 sm:p-4 md:p-6`}
+          style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
+        >
           <div
             role="dialog"
             aria-label="Credence Assistant"
             className="pointer-events-auto liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md flex flex-col overflow-hidden shadow-2xl"
-            style={{ height: 'min(640px, 88vh)' }}
+            style={{
+              height: keyboardInset
+                ? `min(640px, calc(100vh - ${keyboardInset + 24}px - var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))))`
+                : 'min(640px, 88vh)'
+            }}
           >
             <div className="flex items-center gap-3 px-5 pt-5 pb-3">
               <span className="liquid-glass-inset w-10 h-10 rounded-2xl flex items-center justify-center text-violet-700 shrink-0">
