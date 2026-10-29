@@ -214,6 +214,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["chat_message_reactions", ["message_id", "chat_messages"]],
   ["chat_pinned_messages", ["room_id", "chat_rooms"]],
   ["chat_wallpapers", ["user_id", "users"]],
+  ["ride_saved_places", ["user_id", "users"]],
   ["app_feedback", ["user_id", "users"]],
   ["feedback_prompts", ["user_id", "users"]],
   ["fingerprint_logins", ["user_id", "users"]],

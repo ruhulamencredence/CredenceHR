@@ -257,6 +257,15 @@ erDiagram
     text recipients_json
     text failed_json
   }
+  ride_saved_places {
+    int id PK
+    int user_id FK
+    varchar kind
+    varchar name
+    varchar address
+    decimal lat
+    decimal lng
+  }
   all_employees {
     int id PK
   }
@@ -298,3 +307,4 @@ erDiagram
   users ||--o{ notice_dismissals : "user_id"
   notices ||--o{ notice_targets : "notice_id"
   users ||--o{ notice_targets : "user_id"
+  users ||--o{ ride_saved_places : "user_id"

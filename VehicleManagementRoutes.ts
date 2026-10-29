@@ -82,6 +82,32 @@ interface VehicleManagementRouteDeps {
 
 export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> {
   if (!dbPool) return;
+  // Book a Ride -> saved places (Home / Work / Other + a note for the
+  // driver), one account's own. users.can_save_ride_places, OFF by default.
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_save_ride_places TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_save_ride_places column: " + err.message);
+  }
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS ride_saved_places (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        kind VARCHAR(10) NOT NULL DEFAULT 'other',
+        name VARCHAR(120) NOT NULL,
+        address VARCHAR(255) NULL,
+        lat DECIMAL(10, 7) NOT NULL,
+        lng DECIMAL(10, 7) NOT NULL,
+        driver_note VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_rsp_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure ride_saved_places table exists: " + err.message);
+  }
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS vehicles (
@@ -1619,6 +1645,114 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       res.json({ label: hit && !hit.error ? shortPlaceLabel(hit) : null });
     } catch {
       res.json({ label: null });
+    }
+  });
+
+  // ---------- Book a Ride -> saved places (users.can_save_ride_places) ----------
+  const canSavePlaces = async (user: any): Promise<boolean> => {
+    if (user?.role === "superadmin") return true;
+    const rows: any = await queryDB("SELECT can_save_ride_places, is_onboarding FROM users WHERE id = ?", [user.id]);
+    return !!rows[0] && Number(rows[0].can_save_ride_places) === 1 && !Number(rows[0].is_onboarding);
+  };
+  const requireSavePlaces = async (req: any, res: any, next: any) => {
+    try {
+      if (await canSavePlaces(req.user)) return next();
+      res.status(403).json({ error: "Saved places aren't turned on for your account." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+  const placeOut = (p: any) => ({
+    id: Number(p.id),
+    kind: p.kind,
+    name: p.name,
+    address: p.address,
+    lat: Number(p.lat),
+    lng: Number(p.lng),
+    driver_note: p.driver_note
+  });
+  const validLatLng = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+
+  app.get("/api/vehicles/places/saved", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM ride_saved_places WHERE user_id = ?", [req.user.id]);
+      const order: Record<string, number> = { home: 0, work: 1, other: 2 };
+      res.json(rows.sort((a: any, b: any) => (order[a.kind] ?? 3) - (order[b.kind] ?? 3) || Number(b.id) - Number(a.id)).map(placeOut));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/vehicles/places/saved", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const b = req.body || {};
+      const kind = ["home", "work", "other"].includes(b.kind) ? b.kind : "other";
+      const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
+      const address = typeof b.address === "string" ? b.address.trim().slice(0, 255) || null : null;
+      const note = typeof b.driver_note === "string" ? b.driver_note.trim().slice(0, 255) || null : null;
+      const lat = Number(b.lat);
+      const lng = Number(b.lng);
+      if (!name) return res.status(400).json({ error: "Give the place a name." });
+      if (!validLatLng(lat, lng)) return res.status(400).json({ error: "Invalid coordinates." });
+      const mine: any = await queryDB("SELECT id, kind FROM ride_saved_places WHERE user_id = ?", [req.user.id]);
+      if (mine.length >= 30) return res.status(400).json({ error: "You can keep up to 30 saved places. Remove one first." });
+      // One Home and one Work: saving a new one replaces the old.
+      if (kind !== "other") {
+        for (const old of mine.filter((m: any) => m.kind === kind)) await queryDB("DELETE FROM ride_saved_places WHERE id = ?", [Number(old.id)]);
+      }
+      const r: any = await queryDB(
+        "INSERT INTO ride_saved_places (user_id, kind, name, address, lat, lng, driver_note) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [req.user.id, kind, name, address, lat, lng, note]
+      );
+      const rows: any = await queryDB("SELECT * FROM ride_saved_places WHERE id = ?", [Number(r.insertId)]);
+      res.status(201).json(placeOut(rows[0]));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/vehicles/places/saved/:id", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT id, user_id FROM ride_saved_places WHERE id = ?", [id]);
+      if (!rows.length || Number(rows[0].user_id) !== Number(req.user.id)) return res.status(404).json({ error: "Saved place not found." });
+      await queryDB("DELETE FROM ride_saved_places WHERE id = ?", [id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The map picker's suggestions around the pin: the nearest offices /
+  // project sites (Projects with a location), within 5 km, nearest first.
+  app.get("/api/vehicles/places/nearby", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      if (!validLatLng(lat, lng)) return res.status(400).json({ error: "Invalid coordinates." });
+      const rows: any = await queryDB("SELECT id, project_name, location_lat, location_lng, location_label FROM projects");
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dist = (aLat: number, aLng: number) => {
+        const dLat = toRad(aLat - lat);
+        const dLng = toRad(aLng - lng);
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(aLat)) * Math.sin(dLng / 2) ** 2;
+        return 2 * 6371000 * Math.asin(Math.sqrt(h));
+      };
+      const near = rows
+        .filter((p: any) => p.location_lat != null && p.location_lng != null && Number.isFinite(Number(p.location_lat)) && Number.isFinite(Number(p.location_lng)))
+        .map((p: any) => ({
+          label: p.project_name,
+          detail: p.location_label || null,
+          lat: Number(p.location_lat),
+          lng: Number(p.location_lng),
+          distance_m: Math.round(dist(Number(p.location_lat), Number(p.location_lng)))
+        }))
+        .filter((p: any) => p.distance_m <= 5000)
+        .sort((a: any, b: any) => a.distance_m - b.distance_m)
+        .slice(0, 3);
+      res.json({ offices: near, can_save: await canSavePlaces(req.user) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

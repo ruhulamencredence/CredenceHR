@@ -35,7 +35,8 @@
   "notice_dismissals",
   "notice_targets",
   "notices",
-  "report_email_log"
+  "report_email_log",
+  "ride_saved_places"
  ],
  "H. HR Operations, Onboarding & Recruitment": [
   "candidate_emails",

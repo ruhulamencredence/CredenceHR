@@ -419,6 +419,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
         <RideMapPicker
           key={mapFor}
           title={mapFor === 'pickup' ? 'Choose pickup location' : 'Choose destination'}
+          point={mapFor}
           start={pickupCoords}
           onLocateMe={locateCoords}
           onCancel={() => {

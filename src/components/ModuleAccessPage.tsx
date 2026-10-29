@@ -83,6 +83,7 @@ type FlagKey =
   | 'can_use_fingerprint'
   | 'can_view_roster'
   | 'can_take_break'
+  | 'can_save_ride_places'
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_request_items'
@@ -127,6 +128,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
   { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
   { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
+  { key: 'can_save_ride_places', label: 'Book a Ride — saved places', desc: 'Save pickup / drop places (Home, Work…) with a note for the driver, and pick them first next time.', section: 'general', endpoint: 'ride-places-access' },
   { key: 'can_give_feedback', label: 'Give feedback', desc: 'Rate the app and send problems or ideas (and the 7-day "How do you like the app?").', section: 'general', endpoint: 'feedback-access' },
   { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 

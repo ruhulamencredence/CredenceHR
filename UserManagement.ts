@@ -363,7 +363,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -457,6 +457,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_use_fingerprint: u.role === "superadmin" ? true : !!Number(u.can_use_fingerprint || 0),
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
         can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
+        can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
         can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
         can_view_payslip: u.role === "superadmin" ? true : !!Number(u.can_view_payslip),
         can_request_items: u.role === "superadmin" ? true : !!Number(u.can_request_items),
@@ -1507,6 +1508,23 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       }
       await queryDB("UPDATE users SET can_take_break = ? WHERE id = ?", [enabled ? 1 : 0, id]);
       res.json({ success: true, can_take_break: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Book a Ride -> saved places (VehicleManagementRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/ride-places-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_save_ride_places;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Saved places only apply to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_save_ride_places = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_save_ride_places: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

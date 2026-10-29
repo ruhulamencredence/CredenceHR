@@ -803,6 +803,8 @@ export interface User {
   can_view_roster?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.
   can_take_break?: boolean;
+  // Book a Ride -> save places (Home / Work…) with a note for the driver — off by default.
+  can_save_ride_places?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
   can_sign_documents?: boolean;
   can_view_payslip?: boolean;

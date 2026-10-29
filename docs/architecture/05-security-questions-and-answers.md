@@ -75,6 +75,7 @@
 | Analytics/ট্র্যাকার? | তৃতীয় পক্ষের analytics নেই (নিজস্ব `platform_visits` টেবিল আছে)। | ✅ |
 | থার্ড-পার্টি লাইব্রেরির তালিকা ও লাইসেন্স? | `dependency-sbom.csv` (৭২৬ প্যাকেজ, লাইসেন্সসহ) ও `03-technology-and-libraries.md`। অব্যবহৃত GPL-3.0 লাইব্রেরিটি (`@mlightcad/libredwg-web`) ২৫ অক্টোবর ২০২৬-এ বাদ দেওয়া হয়েছে। | ✅ |
 | Recruitment থেকে candidate-কে email কে পাঠাতে পারে, ভুল জায়গায় যেতে পারে কি? | শুধু Recruitment-এর **Email candidates** অনুমতি যাঁর আছে (আলাদা টিক, কাউকে আপনাআপনি দেওয়া হয় না; Superadmin সবসময়) — বোতাম লুকানো আর API-তে 403। ঠিকানা নেওয়া হয় candidate-এর রেকর্ড থেকে, ব্যবহারকারী অন্য ঠিকানা দিতে পারেন না; বিষয়ের লাইনে নতুন লাইন বাদ দেওয়া হয় (header injection নয়), লেখা HTML-escape হয়ে যায়। প্রতিটি email `candidate_emails`-এ থাকে (`RecruitmentRoutes.ts`)। | ✅ |
+| Book a Ride-এ save করা জায়গা (বাড়ির ঠিকানা) কে দেখতে পায়? | শুধু সেই account নিজে — প্রতিটা অনুরোধ নিজের `user_id`-এ সীমিত, অন্যের জায়গা মুছতে গেলে 404। আর save করা যায় শুধু Self Service switch **Book a Ride — saved places** চালু থাকলে (শুরুতে বন্ধ, API-তেও 403)। Account মুছলে তার জায়গাও মুছে যায় (`ride_saved_places`, `VehicleManagementRoutes.ts`)। | ✅ |
 | লগইন পাতার APK download দিয়ে কি সার্ভারের অন্য ফাইল নামানো যায়? | না। শুধু `downloads/` ফোল্ডারের `.apk` নামের ফাইল যায়, নামে `/` বা `..` থাকলে 404। ফাইলটা আসল Android APK না হলে পাঠানোই হয় না (`AndroidApkRoute.ts`, `npm run test:apk`)। | ✅ |
 | লাইব্রেরির দুর্বলতা পরীক্ষা (`npm audit`)? | নিয়মিত প্রক্রিয়া **লিখিত নেই**। (১৮ অক্টোবর "নিরাপত্তা আপডেট" commit আছে, প্রক্রিয়া হিসেবে নয়।) | ⚠️ |
 
