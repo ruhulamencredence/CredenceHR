@@ -157,6 +157,20 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
     }
   };
 
+  // Web map: a project picked from its Projects list / pins, under its own name.
+  const pickProject = (p: { label: string; lat: number; lng: number }) => {
+    setMessage(null);
+    const point = { lat: p.lat, lng: p.lng };
+    if (activePoint === 'pickup') {
+      setPickupCoords(point);
+      setPickup(p.label);
+      if (!destPlace) setActivePoint('destination');
+    } else {
+      setDestPlace({ label: p.label, lat: p.lat, lng: p.lng });
+      setDestinationBox(p.label);
+    }
+  };
+
   const locateCoords = async (): Promise<{ lat: number; lng: number } | null> => {
     try {
       const { latitude, longitude } = await getCurrentCoords();
@@ -188,15 +202,16 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
   };
 
   useEffect(() => {
+    // Projects: the phone's chip + suggestions, and the web map's Projects button.
+    fetch(apiUrl('/api/vehicles/places/projects'), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setProjects(Array.isArray(rows) ? rows : []))
+      .catch(() => setProjects([]));
     if (wideWeb) return;
     fetch(apiUrl('/api/vehicles/places/saved'), { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows) => setSaved(Array.isArray(rows) ? rows : []))
       .catch(() => setSaved([]));
-    fetch(apiUrl('/api/vehicles/places/projects'), { headers: authHeaders() })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows) => setProjects(Array.isArray(rows) ? rows : []))
-      .catch(() => setProjects([]));
   }, [wideWeb]);
 
   useEffect(() => {
@@ -459,6 +474,8 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
           active={activePoint}
           onPick={pickOnMap}
           onLocateMe={locate}
+          projects={projects}
+          onPickProject={pickProject}
         />
       )}
       <div className={wideWeb ? `${RIDE_CARD} p-5 lg:max-h-[calc(100vh-230px)] lg:overflow-y-auto` : `p-3 ${GLASS_CARD}`}>
