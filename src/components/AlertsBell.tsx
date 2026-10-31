@@ -438,7 +438,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
                   {loading && alerts.length === 0 ? (
                     <p className="py-8 text-center text-sm text-slate-500">Loading...</p>
                   ) : alerts.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-slate-500">No alerts yet.</p>
+                    <p className="py-8 px-4 text-center text-sm text-slate-500">No new alerts here.<br /><span className="text-xs text-slate-400">Every alert stays on the Alerts page — View all.</span></p>
                   ) : (
                     alerts.map((alert) => (
                       <div
@@ -521,7 +521,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
               </div>
             ) : alerts.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--g-text-muted)' }}>
-                No alerts yet.
+                No new alerts here.
+                <span className="block mt-1 text-xs text-slate-400">Every alert stays on the Alerts page — View all.</span>
               </div>
             ) : (
               alerts.map((alert) => (
