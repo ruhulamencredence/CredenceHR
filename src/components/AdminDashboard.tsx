@@ -28,6 +28,7 @@
 
 import { UserAvatar } from './UserAvatar';
 import { AdminDashboardWatch } from './AdminDashboardWatch';
+import { AdminDashboardReminders } from './AdminDashboardReminders';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
@@ -242,6 +243,9 @@ function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onNavigate }) => {
+  // "Coming up — next 60 days" is up (HR Operations reminders layer): it
+  // covers everything the shorter HR Alerts box would list.
+  const [remindersShown, setRemindersShown] = useState(false);
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   // Employees, attendance and leave: in the mother company the server answers
   // these for the whole group (mother + sister companies); in a sister
@@ -858,8 +862,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
             })}
           </div>
 
+          {/* Coming up — next 60 days (HR Operations "reminders_receive" only) */}
+          <AdminDashboardReminders token={token} user={user} onNavigate={onNavigate} onShown={setRemindersShown} />
+
           {/* HR alerts: probation / contract ends and document expiries */}
-          {extras && extras.alerts.length > 0 && (
+          {!remindersShown && extras && extras.alerts.length > 0 && (
             <div className="bg-white border border-amber-200 rounded-2xl p-5 shadow-sm">
               <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-500" /> HR Alerts
