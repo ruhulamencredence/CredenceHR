@@ -11,7 +11,7 @@ pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:
 img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
 details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="on" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="data-dictionary-credencehr">Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)</h1>
 <blockquote>
-<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২১৯টি টেবিল, ২৩৭০টি কলাম)।
+<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২২১টি টেবিল, ২৩৭৮টি কলাম)।
 <code>PK</code> = প্রাইমারি কী, <code>FK</code> = ঘোষিত foreign key (→ কোন টেবিল), <code>logical</code> = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।</p>
 </blockquote>
 <h2 id="k-communication-notices-chat-mail-assistant-feedback">K. Communication: Notices, Chat, Mail, Assistant, Feedback</h2>
@@ -6112,6 +6112,49 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
+<h3 id="tracking_department_access"><code>tracking_department_access</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td>FK → <code>users.id</code></td>
+</tr>
+<tr>
+<td><code>department</code></td>
+<td>varchar(150)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Unique: <code>unique_user_department</code>(user_id,department)</p>
 <h3 id="tracking_device_state"><code>tracking_device_state</code></h3>
 <table>
 <thead>
@@ -6182,6 +6225,49 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
+<h3 id="tracking_employee_access"><code>tracking_employee_access</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td>FK → <code>users.id</code></td>
+</tr>
+<tr>
+<td><code>employee_pk</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Unique: <code>unique_user_employee</code>(user_id,employee_pk)</p>
 <h3 id="tracking_notice_recipients"><code>tracking_notice_recipients</code></h3>
 <table>
 <thead>
