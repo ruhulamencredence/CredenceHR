@@ -996,6 +996,12 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
     if (!fresh || Number(fresh.awaiting_approver) === 1) return [];
     Object.assign(request, fresh);
   }
+  // An ad-hoc approver added by this Layer's approver: only they can act
+  // until they approve (it then comes back to this Layer).
+  if (request.adhoc_approver_id) {
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.adhoc_approver_id]);
+    return rows.length > 0 ? [{ user_id: Number(rows[0].id), user_name: rows[0].name }] : [];
+  }
   const hasSupervisorStep = !!request.supervisor_step_user_id;
   if (hasSupervisorStep && Number(request.current_step) === 1) {
     const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
@@ -1097,6 +1103,40 @@ async function performApprovalAction(
   const isAssignedApprover = currentApprovers.some((a) => Number(a.user_id) === Number(actorUser.id));
   if (actorUser.role !== "superadmin" && !isAssignedApprover) {
     throw new ApprovalActionError(403, "This request isn't waiting on you yet.");
+  }
+
+  // Ad-hoc approver (POST /api/my-approvals/:id/adhoc): their Approve only
+  // hands the request back to the Layer that asked — it doesn't move on.
+  // Reject / Return end the ad-hoc step and then work as usual.
+  if (request.adhoc_approver_id) {
+    const addedBy = Number(request.adhoc_added_by || 0);
+    const cleared: any = await queryDB(
+      "UPDATE approval_requests SET adhoc_approver_id = NULL, adhoc_added_by = NULL, adhoc_note = NULL WHERE id = ? AND status = 'pending' AND adhoc_approver_id = ?",
+      [requestId, request.adhoc_approver_id]
+    );
+    if (cleared && cleared.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
+    request.adhoc_approver_id = null;
+    request.adhoc_added_by = null;
+    if (action === "approved") {
+      let trail: any[] = [];
+      try {
+        trail = JSON.parse(request.actions_json || "[]");
+      } catch {
+        trail = [];
+      }
+      trail.push({
+        step_order: Number(request.current_step),
+        approver_id: actorUser.id,
+        approver_name: actorUser.name,
+        action: "approved",
+        adhoc: true,
+        remarks,
+        acted_at: new Date().toISOString()
+      });
+      await queryDB("UPDATE approval_requests SET actions_json = ? WHERE id = ?", [JSON.stringify(trail), requestId]);
+      if (addedBy > 0) notifyRecordChanged([addedBy], { relatedType: request.source_type, relatedId: Number(request.source_id) });
+      return { status: "pending", current_step: Number(request.current_step), billInfo: null };
+    }
   }
 
   // Conveyance Bill Claim review rules (Bill Claim Policy -> Editing & review).

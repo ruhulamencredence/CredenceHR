@@ -1891,6 +1891,23 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add approval_requests.supervisor_step_user_id column: " + err.message);
     }
   }
+  // Ad-hoc approver: the current Layer's approver asks one more person to
+  // approve first (POST /api/my-approvals/:id/adhoc). While adhoc_approver_id
+  // is set the request waits on that person only; their Approve hands it back
+  // to the same Layer (getCurrentStepApprovers / performApprovalAction).
+  for (const col of ["adhoc_approver_id INT NULL", "adhoc_added_by INT NULL", "adhoc_note VARCHAR(500) NULL"]) {
+    try {
+      await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN ${col}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add approval_requests." + col.split(" ")[0] + ": " + err.message);
+    }
+  }
+  // Who may add one (Module Access switch, off by default; Superadmin always).
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_add_adhoc_approver TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_add_adhoc_approver: " + err.message);
+  }
   // Approver Type override (Template editor's "Layer 1" card) — when a
   // Template is built with its first Layer explicitly set to something other
   // than the default virtual "Supervisor" position (i.e. an Employee or Admin

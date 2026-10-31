@@ -417,7 +417,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           // Still waiting for an approver (no Supervisor, no Template): nobody.
           if (r.status === "pending" && Number(r.awaiting_approver) !== 1) {
             const hasSupervisorStep = !!r.supervisor_step_user_id;
-            if (hasSupervisorStep && Number(r.current_step) === 1) {
+            if (r.adhoc_approver_id) {
+              // Asked in as an ad-hoc approver — waiting on them only.
+              const au = userMap.get(Number(r.adhoc_approver_id));
+              currentApprovers = [{ user_id: Number(r.adhoc_approver_id), user_name: au ? au.name : null }];
+            } else if (hasSupervisorStep && Number(r.current_step) === 1) {
               const su = userMap.get(Number(r.supervisor_step_user_id));
               currentApprovers = [{ user_id: Number(r.supervisor_step_user_id), user_name: su ? su.name : null }];
             } else if (r.template_id) {
@@ -554,6 +558,99 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // step's approvers — powers the Dashboard "Pending Approvals" card/alert
   // for a regular Employee (see PendingApprovalsCard.tsx), as well as the
   // same widget reused inside the Admin Panel queue for consistency.
+  // Approve Application -> "Add approver" (users.can_add_adhoc_approver,
+  // Module Access; Superadmin always).
+  const mayAddAdhoc = async (user: any): Promise<boolean> => {
+    if (user?.role === "superadmin") return true;
+    const rows: any[] = await queryDB("SELECT can_add_adhoc_approver FROM users WHERE id = ?", [user?.id]).catch(() => []);
+    return !!rows[0] && Number(rows[0].can_add_adhoc_approver) === 1;
+  };
+
+  // People that can be asked in: Name · Employee ID · Designation · Department.
+  app.get("/api/my-approvals/adhoc-candidates", authenticateToken, async (req: any, res) => {
+    try {
+      if (!(await mayAddAdhoc(req.user))) return res.status(403).json({ error: "Adding an approver isn't turned on for your account." });
+      const users: any[] = await queryDB("SELECT id, name, role, is_blocked FROM users ORDER BY name ASC");
+      const profiles = new Map<number, any>();
+      for (const e of (await queryDB("SELECT * FROM all_employees").catch(() => [])) as any[]) if (e.user_id) profiles.set(Number(e.user_id), e);
+      res.json(
+        users
+          .filter((u) => Number(u.id) !== Number(req.user.id) && !Number(u.is_blocked || 0))
+          .map((u) => {
+            const p = profiles.get(Number(u.id));
+            return { id: Number(u.id), name: u.name, employee_id: p?.employee_id || null, designation: p?.designation || null, department: p?.department || null };
+          })
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/my-approvals/:id/adhoc { approver_user_id, note } — this
+  // Layer's approver asks one more person to approve first. The request then
+  // waits on that person only; their Approve brings it back to this Layer
+  // (performApprovalAction), their Reject rejects it.
+  app.post("/api/my-approvals/:id/adhoc", authenticateToken, async (req: any, res) => {
+    try {
+      if (!(await mayAddAdhoc(req.user))) return res.status(403).json({ error: "Adding an approver isn't turned on for your account." });
+      const id = Number(req.params.id);
+      const targetId = Number(req.body?.approver_user_id);
+      const note = String(req.body?.note || "").trim().slice(0, 500);
+      if (!Number.isFinite(targetId) || targetId <= 0) return res.status(400).json({ error: "Pick who should approve." });
+      if (!note) return res.status(400).json({ error: "Write why their approval is needed." });
+      const rows: any[] = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [id]);
+      const request = rows[0];
+      if (!request) return res.status(404).json({ error: "Approval request not found." });
+      if (request.status !== "pending") return res.status(400).json({ error: `This request was already ${request.status}.` });
+      if (request.adhoc_approver_id) return res.status(400).json({ error: "This request is already waiting on an added approver." });
+      const current = await getCurrentStepApprovers(request);
+      if (req.user.role !== "superadmin" && !current.some((a) => Number(a.user_id) === Number(req.user.id))) {
+        return res.status(403).json({ error: "This request isn't waiting on you." });
+      }
+      if (targetId === Number(req.user.id)) return res.status(400).json({ error: "Pick someone other than yourself." });
+      if (targetId === Number(request.requested_by)) return res.status(400).json({ error: "The person who made the request can't approve it." });
+      const target: any[] = await queryDB("SELECT id, name, is_blocked FROM users WHERE id = ?", [targetId]);
+      if (target.length === 0 || Number(target[0].is_blocked || 0)) return res.status(404).json({ error: "That account wasn't found or is blocked." });
+
+      let trail: any[] = [];
+      try {
+        trail = JSON.parse(request.actions_json || "[]");
+      } catch {
+        trail = [];
+      }
+      trail.push({
+        step_order: Number(request.current_step),
+        approver_id: req.user.id,
+        approver_name: req.user.name,
+        action: "adhoc_added",
+        adhoc_to_id: targetId,
+        adhoc_to_name: target[0].name,
+        remarks: note,
+        acted_at: new Date().toISOString()
+      });
+      const upd: any = await queryDB(
+        "UPDATE approval_requests SET adhoc_approver_id = ?, adhoc_added_by = ?, adhoc_note = ?, actions_json = ? WHERE id = ? AND status = 'pending' AND adhoc_approver_id IS NULL AND current_step = ?",
+        [targetId, req.user.id, note, JSON.stringify(trail), id, Number(request.current_step)]
+      );
+      if (upd && upd.affectedRows === 0) return res.status(409).json({ error: "Someone acted on this request a moment ago — reload it." });
+
+      const mapping = SOURCE_TYPE_ALERT[request.source_type];
+      if (mapping) {
+        await createAlert(queryDB, {
+          userId: targetId,
+          type: mapping.type,
+          title: `${mapping.label}: your approval is needed`,
+          message: `${req.user.name} asks you to approve this ${mapping.label.toLowerCase()} before they decide: ${note}`,
+          relatedType: request.source_type,
+          relatedId: Number(request.source_id)
+        });
+      }
+      res.json({ success: true, adhoc_approver: { id: targetId, name: target[0].name } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/my-approvals", authenticateToken, async (req: any, res) => {
     try {
       const myId = Number(req.user.id);
@@ -628,6 +725,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const mine = pendingRequests.filter((r: any) => {
         // No approver yet: it shows in a Superadmin's queue (never their own).
         if (Number(r.awaiting_approver) === 1) return req.user.role === "superadmin" && Number(r.requested_by) !== myId;
+        // Ad-hoc approver asked in: only theirs until they approve.
+        if (r.adhoc_approver_id) return Number(r.adhoc_approver_id) === myId;
         // Department Supervisor auto-layer (Part 6) — step_order 1 is the
         // Supervisor when supervisor_step_user_id is set, same shift as
         // GET /api/approvals above.
@@ -753,6 +852,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const advanceMap = new Map<number, any>((advanceRows || []).map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
+      // Ad-hoc: names of who asked, and whether this account may ask someone in.
+      const adhocAdderIds: number[] = Array.from(new Set<number>(mine.filter((r: any) => r.adhoc_added_by).map((r: any) => Number(r.adhoc_added_by))));
+      const adhocNames = new Map<number, string>(((await fetchByIds("users", adhocAdderIds, "id, name")) as any[]).map((u: any) => [Number(u.id), u.name]));
+      const canAddAdhoc = await mayAddAdhoc(req.user);
 
       const combined = [
         ...mine.map((r: any) => {
@@ -825,7 +928,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           let vehicleMaintainerBypass = false;
           let assetFulfillerBypass = false;
           let conveyanceDisburserBypass = false;
-          if (Number(r.current_step) >= Number(r.total_steps) && r.template_id) {
+          if (Number(r.current_step) >= Number(r.total_steps) && r.template_id && !r.adhoc_approver_id) {
             const hasSupervisorStep = !!r.supervisor_step_user_id;
             const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
             const stepType = templateStepApproverType.get(`${r.template_id}:${templateStepOrder}`);
@@ -851,6 +954,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             total_steps: r.total_steps,
             // No Supervisor and no Approval Template: here only because this is a Superadmin.
             no_approver: Number(r.awaiting_approver) === 1,
+            // Asked in as an ad-hoc approver: who asked, and why.
+            adhoc: r.adhoc_approver_id
+              ? { added_by: Number(r.adhoc_added_by) || null, added_by_name: adhocNames.get(Number(r.adhoc_added_by)) || null, note: r.adhoc_note || null }
+              : null,
+            // This account may ask one more person in (not on an ad-hoc row itself).
+            can_add_adhoc: !r.adhoc_approver_id && Number(r.awaiting_approver) !== 1 && canAddAdhoc,
             vehicle_maintainer_bypass: vehicleMaintainerBypass,
             asset_fulfiller_bypass: assetFulfillerBypass,
             conveyance_disburser_bypass: conveyanceDisburserBypass,

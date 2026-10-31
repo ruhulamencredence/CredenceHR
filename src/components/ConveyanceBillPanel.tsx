@@ -1535,13 +1535,15 @@ const UserClaimDetailModal: React.FC<{
                       .sort((a, b) => a.step_order - b.step_order)
                       .map((a, i) => (
                         <div key={i} className="flex items-start gap-2 text-xs">
-                          {a.action === 'approved' ? (
+                          {a.action === 'approved' || (a as any).action === 'adhoc_added' ? (
                             <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
                           ) : (
                             <X className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
                           )}
-                          <div className={a.action === 'approved' ? 'text-emerald-700' : 'text-rose-700'}>
-                            {a.approver_name} {a.action === 'approved' ? 'approved' : 'rejected'} (Layer {a.step_order})
+                          <div className={(a as any).action === 'adhoc_added' ? 'text-violet-700' : a.action === 'approved' ? 'text-emerald-700' : 'text-rose-700'}>
+                            {(a as any).action === 'adhoc_added'
+                              ? `${a.approver_name} asked ${(a as any).adhoc_to_name || 'someone'} to approve first (Layer ${a.step_order})`
+                              : `${a.approver_name} ${a.action === 'approved' ? 'approved' : a.action === 'rejected' ? 'rejected' : a.action}${(a as any).adhoc ? ' as an added approver' : ''} (Layer ${a.step_order})`}
                             {a.acted_at && <span className="text-slate-400"> &middot; {formatDate(a.acted_at)}</span>}
                             {a.approved_amount != null && (
                               <div className="text-slate-500">

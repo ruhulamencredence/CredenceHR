@@ -6,7 +6,7 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -84,6 +84,11 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
   // here also pays it out (own Bill + voucher no).
   conveyance_disburser_bypass?: boolean;
+  // This account was asked in as an ad-hoc approver: who asked, and why.
+  // Approve sends it back to them; Reject rejects it.
+  adhoc?: { added_by: number | null; added_by_name: string | null; note: string | null } | null;
+  // This account may ask one more person to approve first ("Add approver").
+  can_add_adhoc?: boolean;
   // Requester's Supervisor Layer — may edit the items before approving.
   can_edit_asset_items?: boolean;
   // Only on an 'hr_action' item (HR Operations — Promotion, Increment,
@@ -197,6 +202,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   // forward as the next Layer's pre-fill.
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<string, string>>({});
   const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
+  // "Add approver" popup (ad-hoc approver) for one item.
+  const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
   // The referenced Movement Claim currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
   // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
@@ -494,7 +501,7 @@ useLiveRefresh(() => load(true));
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
                 // not just the last one — see the state comment above.
-                const editable = item.source_type === 'user_claim';
+                const editable = item.source_type === 'user_claim' && !item.adhoc;
                 const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
                 // Pre-fill: an earlier Layer's running draft if one exists,
                 // otherwise the full Claim Amount.
@@ -546,6 +553,13 @@ useLiveRefresh(() => load(true));
                           ) : null}
                           {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                         </p>
+                        {item.adhoc && (
+                          <div className="mt-2 max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                            <span className="font-semibold">{item.adhoc.added_by_name || 'An approver'} asks for your approval</span>
+                            {item.adhoc.note ? <>: “{item.adhoc.note}”</> : null}
+                            <span className="block text-amber-700 mt-0.5">Approve sends it back to {item.adhoc.added_by_name || 'them'}; Reject rejects the request.</span>
+                          </div>
+                        )}
 
                         {item.hr_action_details && (
                           <div className="mt-2 max-w-md">
@@ -719,8 +733,19 @@ useLiveRefresh(() => load(true));
                           >
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
-                          {item.source_type === 'user_claim' && (
+                          {item.source_type === 'user_claim' && !item.adhoc && (
                             <ReturnButton item={item} compact disabled={actingKey === key} onClick={() => handleAct(item, 'returned')} />
+                          )}
+                          {item.can_add_adhoc && (
+                            <button
+                              type="button"
+                              disabled={actingKey === key}
+                              onClick={() => setAdhocFor(item)}
+                              title="Ask one more person to approve before you decide"
+                              className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 font-semibold disabled:opacity-50 transition-colors"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Add approver
+                            </button>
                           )}
                           <button
                             type="button"
@@ -755,6 +780,20 @@ useLiveRefresh(() => load(true));
           )}
         </div>
       </div>
+
+      {adhocFor && (
+        <AddAdhocApproverModal
+          token={token}
+          item={adhocFor}
+          onClose={() => setAdhocFor(null)}
+          onDone={(name) => {
+            const k = keyFor(adhocFor);
+            setAdhocFor(null);
+            setItems((prev) => prev.filter((i) => keyFor(i) !== k));
+            setMessage({ type: 'success', text: `Sent to ${name} for approval — it comes back to you after they approve.` });
+          }}
+        />
+      )}
 
       {editingItems && (
         <AssetRequisitionEditItemsModal
@@ -895,6 +934,101 @@ useLiveRefresh(() => load(true));
           </div>
         </div>
       )}
+    </div>
+  );
+};
+// "Add approver": ask one more person to approve this request before you
+// decide (POST /api/my-approvals/:id/adhoc). Liquid-glass popup (house style).
+const AddAdhocApproverModal: React.FC<{
+  token: string;
+  item: MyApprovalItem;
+  onClose: () => void;
+  onDone: (name: string) => void;
+}> = ({ token, item, onClose, onDone }) => {
+  const [people, setPeople] = useState<{ id: number; name: string; employee_id: string | null; designation: string | null; department: string | null }[] | null>(null);
+  const [pick, setPick] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/my-approvals/adhoc-candidates'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        const data = await r.json().catch(() => []);
+        if (!r.ok) throw new Error(data?.error || 'Could not load people.');
+        setPeople((Array.isArray(data) ? data : []).filter((p: any) => Number(p.id) !== Number(item.requested_by)));
+      })
+      .catch((e) => {
+        setPeople([]);
+        setError(e.message);
+      });
+  }, [token, item.requested_by]);
+  const send = async () => {
+    const who = people?.find((p) => String(p.id) === pick);
+    if (!who || !note.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/my-approvals/${item.id}/adhoc`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ approver_user_id: who.id, note: note.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not add the approver.');
+      onDone(who.name);
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[95] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
+      <div role="dialog" aria-label="Add an approver" onClick={(e) => e.stopPropagation()} className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md">
+        <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 rounded-full text-slate-600 hover:text-slate-900">
+          <X className="w-4 h-4" />
+        </button>
+        <div className="px-6 pt-6 pb-5">
+          <div className="liquid-glass-inset w-12 h-12 rounded-[16px] flex items-center justify-center mb-3">
+            <UserPlus className="w-6 h-6 text-violet-600" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">Add an approver</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {item.source_label} — from {item.requested_by_name || 'the employee'}. The person you pick approves first; then it comes back to you to decide.
+          </p>
+          <label className="block mt-4 text-xs font-semibold text-slate-700">Who should approve</label>
+          <SearchSelect
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+            disabled={people === null}
+            className="mt-1 w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 focus:outline-none"
+          >
+            <option value="">{people === null ? 'Loading…' : '— Select employee —'}</option>
+            {(people || []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {[p.name, p.employee_id, p.designation, p.department].filter(Boolean).join(' · ')}
+              </option>
+            ))}
+          </SearchSelect>
+          <label className="block mt-3 text-xs font-semibold text-slate-700">Why their approval is needed</label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={500}
+            placeholder="e.g. Please check the budget before I approve."
+            className="mt-1 w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 focus:outline-none"
+          />
+          {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
+          <button
+            type="button"
+            onClick={send}
+            disabled={busy || !pick || !note.trim()}
+            className="liquid-glass-button w-full mt-4 py-3 rounded-full font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Sending…' : 'Send for approval'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

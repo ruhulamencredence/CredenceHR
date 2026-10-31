@@ -228,6 +228,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>অনুমোদনের মাঝখানে কেউ নিজের ইচ্ছামতো অন্য কাউকে approver বানাতে পারে?</td>
+<td>শুধু সেই মুহূর্তে যে Layer-এর approver, এবং যাঁর Module Access-এ <strong>Approvals — add an ad-hoc approver</strong> (<code>users.can_add_adhoc_approver</code>, শুরুতে বন্ধ) চালু; Superadmin সবসময়। আবেদনকারী নিজে বা নিজেকে বাছা যায় না, একসাথে একজনই, কারণ লেখা বাধ্যতামূলক; server-এ যাচাই হয় (<code>POST /api/my-approvals/:id/adhoc</code>) এবং পুরো ঘটনা approval trail-এ থাকে।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>সব ডাটা-পড়ার লগ আছে?</td>
 <td>না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)।</td>
 <td>⚠️</td>

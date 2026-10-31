@@ -287,7 +287,11 @@ export function RideDetails({ requisitionId, onClose }: RideDetailsProps) {
                       <li key={i} className="text-xs">
                         <div className="text-gray-800">
                           <span className="font-medium">{a.approver_name || 'Unknown'}</span>{' '}
-                          <span className={a.action === 'rejected' ? 'text-red-600' : 'text-green-700'}>{a.action}</span>
+                          <span className={a.action === 'rejected' ? 'text-red-600' : (a as any).action === 'adhoc_added' ? 'text-violet-700' : 'text-green-700'}>
+                            {(a as any).action === 'adhoc_added'
+                              ? `asked ${(a as any).adhoc_to_name || 'someone'} to approve first`
+                              : `${a.action}${(a as any).adhoc ? ' (added approver)' : ''}`}
+                          </span>
                         </div>
                         <div className="text-gray-400">{fmt(a.acted_at)}</div>
                         {a.remarks && <div className="text-gray-600">“{a.remarks}”</div>}

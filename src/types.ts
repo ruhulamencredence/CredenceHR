@@ -805,6 +805,9 @@ export interface User {
   can_take_break?: boolean;
   // Book a Ride -> save places (Home / Work…) with a note for the driver — off by default.
   can_save_ride_places?: boolean;
+  // Approve Application -> "Add approver": ask one more person to approve a
+  // request waiting on them first (ApprovalRoutes.ts) — off by default.
+  can_add_adhoc_approver?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
   can_sign_documents?: boolean;
   can_view_payslip?: boolean;
