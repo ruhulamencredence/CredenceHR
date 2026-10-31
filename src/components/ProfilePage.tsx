@@ -313,12 +313,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           A hero header with a large photo, then a menu on the left (icons as
           in the app's own sidebar) and what it opens on the right — My
           Service Book first. */}
-      <div className="hidden md:block max-w-[1400px] mx-auto px-6 py-6">
+      <div className="hidden md:block w-full px-4 lg:px-6 py-4">
         <ModulePath path={['Profile']} />
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm mb-4 hover:opacity-70 transition-opacity"
+          className="flex items-center gap-1.5 text-sm mb-3 hover:opacity-70 transition-opacity"
           style={{ color: 'var(--g-text-muted)' }}
         >
           <ChevronLeft className="w-4 h-4" />
@@ -327,17 +327,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
 
         <section className="gemini-card overflow-hidden">
           <div
-            className="relative h-28 overflow-hidden"
+            className="relative h-24 overflow-hidden"
             style={{ background: 'linear-gradient(120deg, var(--g-banner-1, #7F00FF) 0%, var(--g-banner-2, #6300C6) 55%, var(--g-banner-3, #47008E) 100%)' }}
           >
             <span className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-white/10" />
             <span className="absolute right-40 -bottom-20 w-48 h-48 rounded-full bg-white/10" />
             <span className="absolute left-1/3 -top-10 w-28 h-28 rounded-full bg-white/5" />
           </div>
-          <div className="px-7 pb-5 flex items-end gap-5 -mt-16">
+          <div className="px-6 pb-4 flex items-end gap-5 -mt-14">
             <div className="relative shrink-0">
               <div
-                className="w-36 h-36 rounded-full p-[5px] shadow-[0_18px_40px_-12px_rgba(71,0,142,0.55)]"
+                className="w-32 h-32 rounded-full p-[5px] shadow-[0_18px_40px_-12px_rgba(71,0,142,0.55)]"
                 style={{ background: 'linear-gradient(140deg, #ffffff 0%, var(--g-accent-100, #EDE9FE) 100%)' }}
               >
                 <div
@@ -383,7 +383,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           </div>
         </section>
 
-        <div className="grid grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] gap-5 mt-5 items-start">
+        <div className="grid grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[230px_minmax(0,1fr)] gap-4 mt-4 items-start">
           <nav className="gemini-card p-2.5 sticky top-4" aria-label="Profile menu">
             <MenuHeading>Profile</MenuHeading>
             {canServiceBook && <MenuItem icon={BookOpen} label="My Service Book" active={panel === 'book'} onClick={() => setPanel('book')} />}
