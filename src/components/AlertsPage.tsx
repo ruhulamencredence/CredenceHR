@@ -6,8 +6,7 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, ChevronLeft, Mail, MailOpen, Trash2 } from 'lucide-react';
-import { confirmDialog } from '../lib/confirmDialog';
+import { BellRing, Check, ChevronLeft, Mail, MailOpen } from 'lucide-react';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
@@ -15,6 +14,7 @@ import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
 import { LoadingBlock } from './LoadingBlock';
+import { PagerBar } from './PagerBar';
 
 interface AlertsPageProps {
   token: string;
@@ -55,21 +55,33 @@ interface AlertsPageProps {
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
 export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+  // Every alert this account ever got, 50 (or the chosen size) per page;
+  // nothing is ever removed from here.
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
+  const [show, setShow] = useState<'all' | 'unread' | 'read'>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [counts, setCounts] = useState({ total: 0, unread: 0, read: 0, shown: 0 });
 
   const fetchAlerts = useCallback(async () => {
-    setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/alerts'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setAlerts(await res.json());
+      const res = await fetch(apiUrl(`/api/alerts?page=${page}&page_size=${pageSize}&show=${show}`), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+        setCounts({ total: Number(data.total) || 0, unread: Number(data.unread) || 0, read: Number(data.read) || 0, shown: Number(data.shown_total) || 0 });
+        // A page past the end (e.g. after marking the last unread one read) -> last page.
+        const last = Math.max(1, Math.ceil((Number(data.shown_total) || 0) / pageSize));
+        if (page > last) setPage(last);
+      }
     } catch {
       // Offline or server unreachable — page just stays empty/stale.
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, page, pageSize, show]);
   // New alerts appear without a page reload.
   useLiveRefresh(() => fetchAlerts());
 
@@ -77,29 +89,23 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     fetchAlerts();
   }, [fetchAlerts]);
 
-  const unreadCount = alerts.filter((a) => !a.is_read).length;
-  const [show, setShow] = useState<'all' | 'unread' | 'read'>('all');
-  const shown = alerts.filter((a) => (show === 'unread' ? !a.is_read : show === 'read' ? a.is_read : true));
+  const unreadCount = counts.unread;
+
+  const setRead = async (id: number, read: boolean) => {
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, is_read: read } : a)));
+    try {
+      await fetch(apiUrl(`/api/alerts/${id}/${read ? 'read' : 'unread'}`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // Best-effort — the next refresh shows the real state.
+    }
+    fetchAlerts();
+  };
+  const markRead = (id: number) => setRead(id, true);
 
   // Read <-> Unread on one alert (the row's envelope button).
-  const toggleRead = async (alert: Alert, e: React.MouseEvent) => {
+  const toggleRead = (alert: Alert, e: React.MouseEvent) => {
     e.stopPropagation();
-    const nowRead = !alert.is_read;
-    setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, is_read: nowRead } : a)));
-    try {
-      await fetch(apiUrl(`/api/alerts/${alert.id}/${nowRead ? 'read' : 'unread'}`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort, same as markRead below.
-    }
-  };
-
-  const markRead = async (id: number) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, is_read: true } : a)));
-    try {
-      await fetch(apiUrl(`/api/alerts/${id}/read`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort — a failed mark-read just means it may show unread again next refresh.
-    }
+    setRead(alert.id, !alert.is_read);
   };
 
   const markAllRead = async () => {
@@ -107,28 +113,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     try {
       await fetch(apiUrl('/api/alerts/read-all'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {
-      // Best-effort, same as markRead above.
+      // Best-effort, same as setRead above.
     }
-  };
-
-  const clearAll = async () => {
-    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
-    setAlerts([]);
-    try {
-      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort, same as markRead above.
-    }
-  };
-
-  const removeAlert = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-    try {
-      await fetch(apiUrl(`/api/alerts/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort, same as markRead above.
-    }
+    fetchAlerts();
   };
 
   const handleAlertClick = (alert: Alert) => {
@@ -355,16 +342,6 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-            {alerts.length > 0 && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors shrink-0 max-sm:rounded-full max-sm:font-semibold max-sm:bg-white/60 max-sm:border max-sm:border-white/80"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Clear all
-              </button>
-            )}
             {unreadCount > 0 && (
               <button
                 type="button"
@@ -383,19 +360,19 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               liquid-glass Alerts sheet in AlertsBell.tsx) with a dot while
               unread; no backdrop blur per card, so long lists still scroll
               smoothly. */}
-          {alerts.length > 0 && (
+          {counts.total > 0 && (
             <div className="px-4 sm:px-6 py-3 max-sm:px-3 sm:border-b border-slate-100 flex items-center gap-1.5">
               {(
                 [
-                  ['all', `All (${alerts.length})`],
-                  ['unread', `Unread (${unreadCount})`],
-                  ['read', `Read (${alerts.length - unreadCount})`]
+                  ['all', `All (${counts.total})`],
+                  ['unread', `Unread (${counts.unread})`],
+                  ['read', `Read (${counts.read})`]
                 ] as const
               ).map(([k, label]) => (
                 <button
                   key={k}
                   type="button"
-                  onClick={() => setShow(k)}
+                  onClick={() => { setShow(k); setPage(1); }}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${show === k ? 'text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}
                   style={show === k ? { background: 'var(--g-accent)' } : undefined}
                 >
@@ -407,12 +384,12 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
           <div className="max-sm:px-2 max-sm:space-y-2">
             {loading ? (
               <LoadingBlock />
-            ) : alerts.length === 0 ? (
+            ) : counts.total === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">No alerts yet.</div>
-            ) : shown.length === 0 ? (
+            ) : alerts.length === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">{show === 'unread' ? 'No unread alerts.' : 'No read alerts.'}</div>
             ) : (
-              shown.map((alert) => (
+              alerts.map((alert) => (
                 <div
                   key={alert.id}
                   onClick={() => handleAlertClick(alert)}
@@ -435,19 +412,11 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                   >
                     {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => removeAlert(alert.id, e)}
-                    className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    title="Remove"
-                    aria-label="Remove alert"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               ))
             )}
           </div>
+          <PagerBar page={page} pageSize={pageSize} total={counts.shown} onPage={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
         </div>
       </div>
     </div>

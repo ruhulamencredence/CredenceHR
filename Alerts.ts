@@ -156,6 +156,30 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
   const bellOnly = (req: any) => String(req.query?.bell || "") === "1";
   app.get("/api/alerts", authenticateToken, async (req: any, res) => {
     try {
+      // ?page= (the Alerts page): every alert this account ever got, a page
+      // at a time, with All / Unread / Read and their counts.
+      if (req.query?.page !== undefined) {
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const size = Math.min(200, Math.max(1, Math.floor(Number(req.query.page_size)) || 50));
+        const show = String(req.query.show || "all");
+        const where = show === "unread" ? " AND is_read = 0" : show === "read" ? " AND is_read = 1" : "";
+        const counts: any = await queryDB("SELECT COUNT(*) AS total, COALESCE(SUM(is_read = 0), 0) AS unread FROM alerts WHERE user_id = ?", [req.user.id]);
+        const total = Number(counts[0]?.total || 0);
+        const unread = Number(counts[0]?.unread || 0);
+        const rows: any = await queryDB(
+          `SELECT * FROM alerts WHERE user_id = ?${where} ORDER BY created_at DESC, id DESC LIMIT ${size} OFFSET ${(page - 1) * size}`,
+          [req.user.id]
+        );
+        return res.json({
+          alerts: rows.map((r: any) => ({ ...r, is_read: !!r.is_read })),
+          page,
+          page_size: size,
+          total,
+          unread,
+          read: total - unread,
+          shown_total: show === "unread" ? unread : show === "read" ? total - unread : total
+        });
+      }
       const rows: any = await queryDB(
         bellOnly(req)
           ? "SELECT * FROM alerts WHERE user_id = ? AND hidden_in_bell = 0 ORDER BY created_at DESC LIMIT 50"
@@ -237,24 +261,6 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
     }
   });
 
-  // DELETE /api/alerts — the Alerts page's "Clear all": empties THIS account's own inbox only.
-  app.delete("/api/alerts", authenticateToken, async (req: any, res) => {
-    try {
-      await queryDB("DELETE FROM alerts WHERE user_id = ?", [req.user.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // DELETE /api/alerts/:id — clear a single alert out of THIS account's own
-  // inbox.
-  app.delete("/api/alerts/:id", authenticateToken, async (req: any, res) => {
-    try {
-      await queryDB("DELETE FROM alerts WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // No DELETE: an alert is never removed — the bell popup only hides it
+  // (bell-clear / bell-hide above) and the Alerts page keeps every one.
 }
