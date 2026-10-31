@@ -313,17 +313,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           A hero header with a large photo, then a menu on the left (icons as
           in the app's own sidebar) and what it opens on the right — My
           Service Book first. */}
-      <div className="hidden md:block w-full px-4 lg:px-6 py-4">
-        <ModulePath path={['Profile']} />
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm mb-3 hover:opacity-70 transition-opacity"
-          style={{ color: 'var(--g-text-muted)' }}
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Back
-        </button>
+      <div className="hidden md:block w-full px-4 lg:px-6 pt-3 pb-4">
+        <ModulePath path={['Profile']} onBack={onBack} />
 
         <section className="gemini-card overflow-hidden">
           <div

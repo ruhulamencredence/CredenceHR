@@ -203,7 +203,7 @@ useLiveRefresh(() => load(true));
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
         {!isNativeApp && <ModulePath path={['Self Service', 'My Letters & Service Record']} />}
-        <div className="flex items-center gap-2 mb-4 mt-2">
+        <div className="flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />

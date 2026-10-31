@@ -152,16 +152,7 @@ useLiveRefresh(() => load(true));
     <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'My Resignation']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <ModulePath path={['Self Service', 'My Resignation']} onBack={onBack} />
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">

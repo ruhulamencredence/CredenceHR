@@ -158,14 +158,16 @@ const DateCard: React.FC<{
       // a blur layer each is what made other list pages stutter on Android
       // (see the Employee Directory / Job Entry Details fix). A flatter,
       // more opaque white gives the same glass look at no per-card cost.
-      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
+      // Desktop: one line per day (date | project | in | out | status) instead
+      // of a tall card with most of it empty; phone keeps the card.
+      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 md:px-4 md:py-2.5 md:flex md:items-center md:gap-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-2 md:contents">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 md:w-44 md:shrink-0">
           <Pencil className="w-3.5 h-3.5 text-slate-300" />
           {formatDate(dateStr)} <DayOfWeek dateStr={dateStr} />
         </span>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 md:order-3 md:ml-auto md:justify-end">
           {present ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
               <CheckCircle2 className="w-3 h-3" /> Present
@@ -202,18 +204,18 @@ const DateCard: React.FC<{
           )}
         </div>
       </div>
-      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Project</p>
-          <p className="font-semibold text-slate-700 mt-0.5 truncate">{present ? (projectNames || '—') : '—'}</p>
+      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs md:order-2 md:mt-0 md:flex-1 md:min-w-0 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Project</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0 truncate">{present ? (projectNames || '—') : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">In Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(earliestIn) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">In</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(earliestIn) : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Out Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(latestOut) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Out</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(latestOut) : '—'}</p>
         </div>
       </div>
     </div>
@@ -689,7 +691,7 @@ useLiveRefresh(() => loadData());
                       <p className="text-sm">This month hasn't started yet.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 md:space-y-1.5">
                       {monthDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
@@ -815,7 +817,7 @@ useLiveRefresh(() => loadData());
                       <p className="text-sm">Pick a valid From / To date to see the report.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 md:space-y-1.5">
                       {rangeDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}

@@ -52,16 +52,7 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 max-w-2xl mx-auto">
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'Notice Board']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <ModulePath path={['Self Service', 'Notice Board']} onBack={onBack} />
         )}
         {/* On the native Android app there's no on-screen Back button here —
             the hardware/gesture back navigates back to the tile menu on its
