@@ -135,6 +135,37 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     }
   });
 
+  // GET /api/employees/by-user/:userId — the Employee record linked to one
+  // login account (Admin Panel -> Users -> "Employee" on a row). Same fields
+  // the Employees list shows, so it needs the same "employees" module.
+  app.get("/api/employees/by-user/:userId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) return res.status(400).json({ error: "Bad account id." });
+      const rows: any[] = await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [userId]);
+      const e = rows[0];
+      if (!e) return res.json({ linked: false });
+      const out: Record<string, any> = {
+        id: e.id,
+        employee_id: e.employee_id || null,
+        name: e.name,
+        designation: e.designation || null,
+        department: e.department || null,
+        branch: e.branch || null,
+        email: e.email || null,
+        phone: e.phone || null,
+        is_active: !!Number(e.is_active),
+        user_id: e.user_id || null
+      };
+      for (const field of EMPLOYEE_EXT_FIELDS) {
+        out[field] = (EMPLOYEE_BOOL_FIELDS as readonly string[]).includes(field) ? !!Number(e[field]) : e[field] ?? null;
+      }
+      res.json({ linked: true, employee: out });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Users with no all_employees row pointing at them yet — the pool "Link
   // Existing User" (below) can attach to an Employee that was added to the
   // directory AFTER its login already existed (the reverse of create-login,

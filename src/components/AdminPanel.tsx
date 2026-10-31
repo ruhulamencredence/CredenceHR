@@ -21,6 +21,7 @@ import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ManagementDashboard } from './ManagementDashboard';
+import { UserEmployeeModal } from './UserEmployeeModal';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
@@ -679,6 +680,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Where Back on the Module Access page goes: the Users page, or Employees
   // when it was opened from an Employees row's key button.
   const [moduleAccessFrom, setModuleAccessFrom] = useState<'users' | 'employees'>('users');
+  // Users -> "Employee" on a row: that account's Employee record (needs the Employees module).
+  const [employeeOf, setEmployeeOf] = useState<{ id: number; name: string } | null>(null);
   const openManageModules = (u: User | User[], from: 'users' | 'employees' = 'users') => {
     const list = Array.isArray(u) ? u : [u];
     if (list.length === 0) return;
@@ -4806,6 +4809,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
       {activeTab === 'management_dashboard' && canSee('management_dashboard') && <ManagementDashboard token={token} />}
+      {employeeOf && canSee('employees') && (
+        <UserEmployeeModal
+          token={token}
+          account={employeeOf}
+          onClose={() => setEmployeeOf(null)}
+          onOpenEmployees={(search) => {
+            setEmployeeOf(null);
+            try {
+              sessionStorage.setItem('credence_employees_return_view', JSON.stringify({ search, status: 'all', dept: '', page: 1, pageSize: 50, scrollY: 0 }));
+            } catch {
+              // storage unavailable — Employees opens unsearched
+            }
+            setActiveTab('employees');
+          }}
+        />
+      )}
       {activeTab === 'reports_insights' && <ReportsInsights token={token} />}
       {/* TAB: DATA IMPORT — employees, leave, claims and attendance history from Excel/CSV (DataImport.tsx). */}
       {activeTab === 'data_import' && canSeeDataImport && <DataImport token={token} />}
@@ -6652,7 +6671,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           )}
                         </td>
                       )}
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-5 py-3 text-right whitespace-nowrap">
+                        {canSee('employees') && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEmployeeOf({ id: u.id, name: u.name });
+                            }}
+                            title="Show this account's Employee record"
+                            className="mr-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white hover:border-violet-300 hover:text-violet-700 transition-colors"
+                          >
+                            Employee
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -6705,6 +6737,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
+                      {canSee('employees') && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEmployeeOf({ id: u.id, name: u.name });
+                          }}
+                          className="mt-2 text-xs font-semibold text-violet-700"
+                        >
+                          Employee record →
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
