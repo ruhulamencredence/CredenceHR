@@ -1635,7 +1635,7 @@ export default function App() {
         ) : selfServiceView === 'myTargets' ? (
           <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
-          <MyLetters token={token} onBack={() => setSelfServiceView(null)} canServiceBook={!!user && (user.role === 'superadmin' || !!user.can_view_service_book)} />
+          <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'teamAttendance' ? (
           <TeamAttendance token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
@@ -1741,6 +1741,17 @@ export default function App() {
           const [kind, target] = nav.split(':');
           if (nav === 'home') return sidebarNavProps.onGoToDashboard();
           if (nav === 'profile') return sidebarNavProps.onOpenProfile();
+          // Profile -> My Service Book (ProfilePage.tsx).
+          if (nav === 'profile:service_book') {
+            try {
+              sessionStorage.setItem('profile_open', 'service_book');
+            } catch {
+              // storage unavailable — the event below still opens it
+            }
+            sidebarNavProps.onOpenProfile();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:profile-open', { detail: 'service_book' })), 0);
+            return;
+          }
           if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
           if (kind === 'claims') return sidebarNavProps.onGoToUserClaims(target as 'movementClaims' | 'conveyanceBill');
           if (kind === 'admin') {

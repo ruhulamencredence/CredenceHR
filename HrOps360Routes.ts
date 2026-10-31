@@ -1197,7 +1197,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     }
   }
 
-  // ---- Self Service -> My Letters & Service Record -> Service Book ----
+  // ---- Profile -> My Service Book ----
   // The employee's own book, read only, behind users.can_view_service_book
   // (Module Access; a Superadmin always). Salary and loans are their own, so
   // they show; no HR operations are offered.

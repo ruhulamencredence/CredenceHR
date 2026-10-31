@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, ArrowLeft } from 'lucide-react';
+import { Employee360 } from './HrOps360';
 import { FingerprintSettings } from './FingerprintSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { Capacitor } from '@capacitor/core';
@@ -54,6 +55,31 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showChangeUsername, setShowChangeUsername] = useState(false);
   const [showAssetManagement, setShowAssetManagement] = useState(false);
+  // My Service Book (own Employee 360, read only) — only with
+  // users.can_view_service_book (the server checks it too, /api/hr-ops/my/p360).
+  const canServiceBook = user.role === 'superadmin' || !!user.can_view_service_book;
+  const [showServiceBook, setShowServiceBook] = useState(() => {
+    try {
+      const open = sessionStorage.getItem('profile_open') === 'service_book';
+      sessionStorage.removeItem('profile_open');
+      return open && canServiceBook;
+    } catch {
+      return false;
+    }
+  });
+  // The Assistant's "My Service Book" button while this page is already open.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if ((e as CustomEvent).detail === 'service_book' && canServiceBook) setShowServiceBook(true);
+      try {
+        sessionStorage.removeItem('profile_open');
+      } catch {
+        // storage unavailable
+      }
+    };
+    window.addEventListener('credence:profile-open', onOpen);
+    return () => window.removeEventListener('credence:profile-open', onOpen);
+  }, [canServiceBook]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showFingerprint, setShowFingerprint] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -99,6 +125,25 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           onUsernameUpdated?.(newUsername);
         }}
       />
+    );
+  }
+
+  if (showServiceBook && canServiceBook) {
+    return (
+      <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
+        <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
+          {!Capacitor.isNativePlatform() && <ModulePath path={['Profile', 'My Service Book']} />}
+          <div className="flex items-center gap-2 mb-4 mt-2">
+            <button type="button" onClick={() => setShowServiceBook(false)} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
+              <ArrowLeft className="w-5 h-5 text-slate-500" />
+            </button>
+            <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
+              <BookOpen className="w-5 h-5 text-blue-600 shrink-0" /> My Service Book
+            </h1>
+          </div>
+          <Employee360 token={token} employeeId={null} self />
+        </div>
+      </div>
     );
   }
 
@@ -191,6 +236,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 label="Personal Data"
                 onClick={() => setShowPersonalData(true)}
               />
+              {canServiceBook && <ProfileRow icon={<BookOpen className="w-4 h-4" />} label="My Service Book" onClick={() => setShowServiceBook(true)} />}
               <ProfileRow
                 icon={<Package className="w-4 h-4" />}
                 label="My Asset"
@@ -301,22 +347,35 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 whenever this card was stretched to match the one beside it,
                 its heading sat lower than that card's and the two rows
                 visibly failed to line up. */}
-            <button
-              type="button"
-              onClick={() => setShowPersonalData(true)}
-              className="gemini-card p-5 block w-full text-left hover:opacity-80 transition-opacity"
-            >
+            <div className="gemini-card p-5 block w-full text-left">
               <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
                 Personal Data
               </p>
-              <div className="flex items-center justify-between gap-2.5 py-1.5 text-sm">
-                <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowPersonalData(true)}
+                className="w-full flex items-center justify-between gap-2.5 py-1.5 text-sm text-left hover:opacity-80 transition-opacity"
+              >
+                <span className="flex items-center gap-2.5">
                   <UserIcon className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
                   <span>Edit your details</span>
-                </div>
+                </span>
                 <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
-              </div>
-            </button>
+              </button>
+              {canServiceBook && (
+                <button
+                  type="button"
+                  onClick={() => setShowServiceBook(true)}
+                  className="w-full flex items-center justify-between gap-2.5 py-1.5 mt-1 text-sm text-left hover:opacity-80 transition-opacity"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <BookOpen className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
+                    <span>My Service Book</span>
+                  </span>
+                  <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
+                </button>
+              )}
+            </div>
           </div>
 
           <section className="gemini-card lg:col-span-2 overflow-hidden">

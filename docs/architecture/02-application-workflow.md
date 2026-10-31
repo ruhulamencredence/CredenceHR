@@ -401,6 +401,10 @@ Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `
 
 HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও চুক্তি শেষ, ডকুমেন্টের মেয়াদ, অবসর, increment; ৩০ দিন আগের মেয়াদোত্তীর্ণ থেকে ৬০ দিন সামনে, পাশে Confirm / Extend / Renew / Increment বোতাম) Admin Dashboard-এও দেখায় — শুধু যাঁদের HR Operations আর তার "Reminders — receive & view" layer আছে। এটা দেখালে ছোট "HR Alerts" (৩০ দিন) বক্সটা আর আলাদা করে দেখায় না; layer না থাকলে আগের মতো HR Alerts থাকে।
 
+## Profile → My Service Book
+
+কর্মীর নিজের Service Book (নিজের Employee 360, শুধু দেখা যায়) এখন **Profile** পাতায়: Personal Data-র নিচে "My Service Book" (ফোনে Account তালিকায়)। শুধু যাঁদের Module Access-এ "My Service Book" (`users.can_view_service_book`, ডিফল্টে বন্ধ) চালু, তাঁরাই দেখেন; server-এ `/api/hr-ops/my/p360` আগের মতোই এই সুইচ যাচাই করে। My Letters & Service Record-এ আর Service Book ট্যাব নেই — সেখানে সবার জন্য Service Record। Assistant-এর "My Service Book খুলুন" বোতাম সরাসরি Profile-এর Service Book খোলে।
+
 ## Employee Tracking: কে কাকে দেখবে
 
 Admin Panel → Users → Module Access → Employee Tracking টিক দিলে নিচে "Who they can see on Employee Tracking" খোলে: বিভাগের checklist আর "Add an employee" (নাম · Employee ID · পদ · বিভাগ লিখে খোঁজা)। কিছু বাছা না থাকলে ওই অ্যাকাউন্ট সবাইকে দেখে; বাছা থাকলে শুধু টিক দেওয়া বিভাগের কর্মী আর আলাদা করে যোগ করা কর্মীরা (`PUT /api/users/:id/tracking-scope`, `TrackingScope.ts`)। এই সীমা live map, Currently Tracked / Not Tracked, notice পাঠানো, Notice Report, path history, Stay Report ও Live Follow-এ সার্ভারেই বসে। বিভাগের নাম বদলালে সীমাও সাথে বদলায়।

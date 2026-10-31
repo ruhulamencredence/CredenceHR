@@ -874,7 +874,7 @@ const TOOLS: Tool[] = [
         text: `**${c.name}**\n` + lines.join("\n") + note,
         data: { employee_id: e?.employee_code || me?.employee_id, designation: e?.designation || me?.designation, department: e?.department || me?.department, branch: e?.branch || me?.branch,
           supervisor: e?.supervisor || me?.supervisor_name || null, ...(full ? { joining_date: e?.joining_date || null, service_months: Number.isFinite(months) ? months : null, job_base: e?.job_base || null, probation_end_date: e?.probation_end_date || null, confirmation_date: e?.confirmation_date || null } : { service_book: "not_enabled" }) },
-        actions: full ? [{ label: "My Service Book খুলুন", nav: "self:myLetters" }] : []
+        actions: full ? [{ label: "My Service Book খুলুন", nav: "profile:service_book" }] : []
       };
     }
   },

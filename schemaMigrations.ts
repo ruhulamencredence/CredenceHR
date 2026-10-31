@@ -754,7 +754,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_loan_request column: " + err.message);
   }
   try {
-    // Self Service -> My Letters & Service Record -> "Service Book" (the
+    // Profile -> "My Service Book" (the
     // employee's own read-only Employee 360, HrOps360Routes.ts) — OFF until
     // turned on per account in Module Access.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_service_book TINYINT(1) NOT NULL DEFAULT 0`);

@@ -349,7 +349,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Employee's own service record. Every account.
   selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
   // (Service Book has no menu item of its own: with users.can_view_service_book
-  // it is a tab of My Letters & Service Record, in place of Service Record.)
+  // it is a row on the Profile page — ProfilePage.tsx.)
   // Team Attendance (TeamAttendance.tsx) — only for accounts HR made the
   // supervisor (or backup) of a Site Attendance team.
   // My Tasks (MyTasks.tsx) — tasks given to me, requests to HR, a

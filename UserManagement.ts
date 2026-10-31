@@ -1229,7 +1229,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  // Self Service -> My Letters & Service Record -> Service Book: the
+  // Profile -> My Service Book: the
   // employee's own read-only Employee 360 (HrOps360Routes.ts). OFF by default.
   app.put("/api/users/:id/service-book-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
