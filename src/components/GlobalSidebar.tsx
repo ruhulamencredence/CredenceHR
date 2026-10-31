@@ -538,6 +538,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'recruitment', label: 'Recruitment (ATS)', icon: UserPlus, onClick: () => onGoToAdminModule('recruitment') },
     { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToAdminModule('grievance_disciplinary') },
     { key: 'hr_analytics', label: 'HR Analytics', icon: BarChart3, onClick: () => onGoToAdminModule('hr_analytics') },
+    { key: 'management_dashboard', label: 'Management Dashboard', icon: PieChart, onClick: () => onGoToAdminModule('management_dashboard') },
     { key: 'document_vault', label: 'Document Vault', icon: FolderLock, onClick: () => onGoToAdminModule('document_vault') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
@@ -687,7 +688,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
-  const adminTopItems: NavItem[] = [adminDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
+  const managementDashboardItem = itemByKey.get('management_dashboard') || null;
+  const adminTopItems: NavItem[] = [adminDashboardItem, managementDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
   const adminGroups = makeGroups([
     {
       key: 'g_employees',

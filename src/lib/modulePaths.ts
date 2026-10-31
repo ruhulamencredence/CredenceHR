@@ -47,6 +47,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   recruitment: [...HRM, 'HR Advanced', 'Recruitment (ATS)'],
   grievance_disciplinary: [...HRM, 'HR Advanced', 'Grievance & Disciplinary'],
   hr_analytics: [...HRM, 'HR Advanced', 'HR Analytics'],
+  management_dashboard: ['Admin Panel', 'Management Dashboard'],
   document_vault: [...HRM, 'HR Advanced', 'Document Vault'],
   hr_operations: [...HRM, 'HR Operations'],
   task_management: [...HRM, 'Task Management'],

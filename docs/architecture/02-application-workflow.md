@@ -339,6 +339,15 @@ flowchart LR
 
 ---
 
+## Management Dashboard (পুরো কোম্পানি, এক মাস)
+
+Admin Panel → **Management Dashboard** (মডিউল `management_dashboard`; Module Access-এ যাকে দেওয়া হয় সে-ই দেখে, Superadmin সবসময়)। একটা read-only API (`GET /api/management-dashboard?month=YYYY-MM&departments=…`, `ManagementDashboardRoutes.ts`) চালু টেবিলগুলো থেকে হিসাব করে, নিজের কোনো টেবিল নেই। মাস আর Department (একাধিক) বাছা যায়, সব সংখ্যা আগের মাসের সাথে তুলনাসহ:
+
+- **উপরের ৬টা সংখ্যা:** Headcount (সক্রিয় কর্মী), Attendance (Monthly Attendance report-এর একই হিসাব — office punch + remote + site + approved leave, roster ও late policy মেনে), Salary cost (Payroll-এর net, মাস run না হলে "Not run yet"), আজ ছুটিতে, অনুমোদনের অপেক্ষায় (৩+ দিন আটকে), Targets (task-এর weight ধরে অগ্রগতি)।
+- **কার্ড:** যোগদান/প্রস্থান (৬ মাস; প্রস্থান = বাতিল নয় এমন exit-এর last working day), department-ভিত্তিক হাজিরা, মাসের খরচ (donut: বেতন, লোন/অগ্রিম, disbursed conveyance, মোবাইল বিল), অনুমোদন কত দ্রুত (ধরন অনুযায়ী অপেক্ষায় আর গড় দিন), PEPM প্রজেক্টে এ মাসের MPR মূল্য ও পথে/পৌঁছানো মাল, department-ভিত্তিক টার্গেট, Workforce, Recruitment pipeline, গাড়ি ও সম্পদ।
+- **Needs attention:** নিয়ম দিয়ে তৈরি — ৩+ দিন আটকে থাকা অনুমোদন, ১০%+ দেরিতে আসা department, আগের মাসের চেয়ে ৩ pt-এর বেশি হাজিরা কমা, deadline পেরোনো টার্গেট, ৫%-এর বেশি বেতন বৃদ্ধি, চলমান resignation, খোলা grievance।
+- যেকোনো কার্ড বা সারিতে চাপলে ডান থেকে বিস্তারিত প্যানেল খোলে (department বা ব্যক্তি অনুযায়ী ভাঙা), সেখান থেকে Excel-এ export।
+
 ## ১৩. যোগাযোগ: Notice, Chat, Mail, Alerts
 
 | ব্যবস্থা | কীভাবে চলে |

@@ -289,6 +289,14 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <p>অনুমতি: Reports মডিউলের layer <code>dispatch_material</code>, <code>dispatch_all</code> (দুটোই 🔒)। Receive-এর সুইচ <code>can_receive_material</code>। ফাইল: <code>EntriesRoutes.ts</code>, <code>MprDispatchRoutes.ts</code>, <code>BudgetImportRoutes.ts</code>।</p>
 <p><strong>Job Edit অনুমোদন:</strong> Final Submit হয়ে যাওয়া Job-এ <code>can_job_edit</code> থাকা ব্যবহারকারী নতুন Job, Add MPR বা Delete MPR চাইলে সেটা সরাসরি হয় না, <code>job_edit_requests</code>-এ জমা থাকে। PEPM Manage → MPR Edit Log → Job Edit Approvals থেকে Approve/Reject (মডিউল <code>editlog</code>)। Details-এ দেখায় কী বদলাবে: মোছার সারির সব তথ্য (dispatch/receive হয়ে থাকলে সতর্কতা), যোগ হওয়া সারির Budget Qty আগে → পরে, আর Job-এর সব MPR সারি, বদলটা জায়গামতো চিহ্নিত (<code>GET /api/job-edits/:id/context</code>, একই <code>editlog</code> gate)। কয়েকটা অনুরোধ টিক দিয়ে একসাথে Approve/Reject করা যায় (প্রতিটা একই <code>POST /api/job-edits/:id/act</code> দিয়ে যায়; যেটা আর approve করা যায় না সেটা জানানো হয়, বাকিগুলো হয়ে যায়)।</p>
 <hr />
+<h2 id="management-dashboard">Management Dashboard (পুরো কোম্পানি, এক মাস)</h2>
+<p>Admin Panel → <strong>Management Dashboard</strong> (মডিউল <code>management_dashboard</code>; Module Access-এ যাকে দেওয়া হয় সে-ই দেখে, Superadmin সবসময়)। একটা read-only API (<code>GET /api/management-dashboard?month=YYYY-MM&amp;departments=…</code>, <code>ManagementDashboardRoutes.ts</code>) চালু টেবিলগুলো থেকে হিসাব করে, নিজের কোনো টেবিল নেই। মাস আর Department (একাধিক) বাছা যায়, সব সংখ্যা আগের মাসের সাথে তুলনাসহ:</p>
+<ul>
+<li><strong>উপরের ৬টা সংখ্যা:</strong> Headcount (সক্রিয় কর্মী), Attendance (Monthly Attendance report-এর একই হিসাব — office punch + remote + site + approved leave, roster ও late policy মেনে), Salary cost (Payroll-এর net, মাস run না হলে "Not run yet"), আজ ছুটিতে, অনুমোদনের অপেক্ষায় (৩+ দিন আটকে), Targets (task-এর weight ধরে অগ্রগতি)।</li>
+<li><strong>কার্ড:</strong> যোগদান/প্রস্থান (৬ মাস; প্রস্থান = বাতিল নয় এমন exit-এর last working day), department-ভিত্তিক হাজিরা, মাসের খরচ (donut: বেতন, লোন/অগ্রিম, disbursed conveyance, মোবাইল বিল), অনুমোদন কত দ্রুত (ধরন অনুযায়ী অপেক্ষায় আর গড় দিন), PEPM প্রজেক্টে এ মাসের MPR মূল্য ও পথে/পৌঁছানো মাল, department-ভিত্তিক টার্গেট, Workforce, Recruitment pipeline, গাড়ি ও সম্পদ।</li>
+<li><strong>Needs attention:</strong> নিয়ম দিয়ে তৈরি — ৩+ দিন আটকে থাকা অনুমোদন, ১০%+ দেরিতে আসা department, আগের মাসের চেয়ে ৩ pt-এর বেশি হাজিরা কমা, deadline পেরোনো টার্গেট, ৫%-এর বেশি বেতন বৃদ্ধি, চলমান resignation, খোলা grievance।</li>
+<li>যেকোনো কার্ড বা সারিতে চাপলে ডান থেকে বিস্তারিত প্যানেল খোলে (department বা ব্যক্তি অনুযায়ী ভাঙা), সেখান থেকে Excel-এ export।</li>
+</ul>
 <h2 id="notice-chat-mail-alerts">১৩. যোগাযোগ: Notice, Chat, Mail, Alerts</h2>
 <table>
 <thead>
