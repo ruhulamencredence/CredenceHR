@@ -352,6 +352,15 @@ Admin Panel → **Management Dashboard** (মডিউল `management_dashboard`
 - **Needs attention:** নিয়ম দিয়ে তৈরি — ৩+ দিন আটকে থাকা অনুমোদন, ১০%+ দেরিতে আসা department, আগের মাসের চেয়ে ৩ pt-এর বেশি হাজিরা কমা, deadline পেরোনো টার্গেট, ৫%-এর বেশি বেতন বৃদ্ধি, চলমান resignation, খোলা grievance।
 - যেকোনো কার্ড বা সারিতে চাপলে ডান থেকে বিস্তারিত প্যানেল খোলে (department বা ব্যক্তি অনুযায়ী ভাঙা), সেখান থেকে Excel-এ export।
 
+## HR Data Import: কে Excel থেকে ডাটা ঢোকাতে পারে
+
+Admin Panel → **HR Data Import** নিজস্ব মডিউল (`data_import`)। Employees, Leave বা Attendance মডিউল থাকা মানে শুধু দেখা/কাজ করা — Excel থেকে ঢোকানো নয়।
+
+- Module Access → HR Data Import চালু করে প্রতিটি ধরনের জন্য আলাদা টিক: Import Employee Details, Leave, Movement Claims, Conveyance Bill Claims, Remote Attendance, Office Attendance। সব শুরুতে বন্ধ।
+- একটা ধরন দেখা ও import করা যায় তখনই যখন ডাটার নিজের মডিউল **এবং** সেই টিক দুটোই আছে (`GET /api/data-import/kinds`, `POST /api/data-import/:kind` — না থাকলে 403)।
+- বেতন (Salary Setup bulk upload) আগের মতো Payroll layer `salary_bulk_upload` দিয়ে।
+- যাঁরা আগে শুধু মডিউল থাকায় import করতেন, তাঁদের নতুন টিক দিতে হবে।
+
 ## ১৩. যোগাযোগ: Notice, Chat, Mail, Alerts
 
 | ব্যবস্থা | কীভাবে চলে |

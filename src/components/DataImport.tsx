@@ -642,7 +642,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             the system are skipped, so a sheet can be uploaded again safely.
           </p>
           {kinds.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">You don't have access to any import. {error}</p>
+            <p className="mt-4 text-sm text-slate-500">No import is ticked for you yet — ask your Superadmin to tick it in Module Access → HR Data Import. {error}</p>
           ) : (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
               {kinds.map((k) => {

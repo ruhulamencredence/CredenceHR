@@ -299,6 +299,14 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li><strong>Needs attention:</strong> নিয়ম দিয়ে তৈরি — ৩+ দিন আটকে থাকা অনুমোদন, ১০%+ দেরিতে আসা department, আগের মাসের চেয়ে ৩ pt-এর বেশি হাজিরা কমা, deadline পেরোনো টার্গেট, ৫%-এর বেশি বেতন বৃদ্ধি, চলমান resignation, খোলা grievance।</li>
 <li>যেকোনো কার্ড বা সারিতে চাপলে ডান থেকে বিস্তারিত প্যানেল খোলে (department বা ব্যক্তি অনুযায়ী ভাঙা), সেখান থেকে Excel-এ export।</li>
 </ul>
+<h2 id="hr-data-import-excel">HR Data Import: কে Excel থেকে ডাটা ঢোকাতে পারে</h2>
+<p>Admin Panel → <strong>HR Data Import</strong> নিজস্ব মডিউল (<code>data_import</code>)। Employees, Leave বা Attendance মডিউল থাকা মানে শুধু দেখা/কাজ করা — Excel থেকে ঢোকানো নয়।</p>
+<ul>
+<li>Module Access → HR Data Import চালু করে প্রতিটি ধরনের জন্য আলাদা টিক: Import Employee Details, Leave, Movement Claims, Conveyance Bill Claims, Remote Attendance, Office Attendance। সব শুরুতে বন্ধ।</li>
+<li>একটা ধরন দেখা ও import করা যায় তখনই যখন ডাটার নিজের মডিউল <strong>এবং</strong> সেই টিক দুটোই আছে (<code>GET /api/data-import/kinds</code>, <code>POST /api/data-import/:kind</code> — না থাকলে 403)।</li>
+<li>বেতন (Salary Setup bulk upload) আগের মতো Payroll layer <code>salary_bulk_upload</code> দিয়ে।</li>
+<li>যাঁরা আগে শুধু মডিউল থাকায় import করতেন, তাঁদের নতুন টিক দিতে হবে।</li>
+</ul>
 <h2 id="notice-chat-mail-alerts">১৩. যোগাযোগ: Notice, Chat, Mail, Alerts</h2>
 <table>
 <thead>

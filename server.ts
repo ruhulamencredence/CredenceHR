@@ -335,7 +335,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -348,7 +348,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -459,6 +459,12 @@ const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete
 // "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
 // left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
 const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+// HR Data Import's layers: one tick per kind of data that can be imported.
+// Having a module (Employees, Leave, Payroll…) is NOT enough to import into
+// it — the account also needs the HR Data Import module and that kind's tick
+// here. All explicit-only: an account with no saved layers gets none.
+// (Salary import keeps its own explicit Payroll layer "salary_bulk_upload".)
+const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_conveyance", "import_attendance", "import_office_attendance"] as const;
 const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
@@ -489,6 +495,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   employees: EMPLOYEE_LAYER_KEYS,
   document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
+  data_import: DATA_IMPORT_LAYER_KEYS,
 };
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
@@ -2627,6 +2634,8 @@ async function startServer() {
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
+          : moduleKey === "data_import"
+            ? []
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
             : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment"
@@ -2655,7 +2664,9 @@ async function startServer() {
     const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
     if (granted.length > 0) return granted.includes(layer);
     const defaults: readonly string[] =
-      moduleKey === "tracking"
+      moduleKey === "data_import"
+        ? []
+      : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
         : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment"
           ? ["read"]

@@ -163,7 +163,7 @@ const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
-  hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', management_dashboard: 'hr', document_vault: 'hrops',
+  hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', management_dashboard: 'hr', data_import: 'hr', document_vault: 'hrops',
   payroll: 'payroll',
   mail_admin: 'mail',
   users: 'mis', projects: 'mis', branches: 'mis', user_feedback: 'mis'
@@ -172,6 +172,7 @@ const sectionOfModule = (k: AdminModuleKey): SectionKey => MODULE_SECTION[k] || 
 
 const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   admin_dashboard: 'Quick View, attendance and leave at a glance.',
+  data_import: 'Import from Excel. Tick each kind; having the module itself does not allow importing.',
   reports: 'MPR Entries Report, Budget Submission Status, Dispatch Material.',
   mprs: 'MPR numbers of each project.',
   imports: 'Bulk upload from Excel.',

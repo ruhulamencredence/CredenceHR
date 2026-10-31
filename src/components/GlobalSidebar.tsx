@@ -12,7 +12,7 @@ import {
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
   Coffee, MessageSquareHeart
 } from 'lucide-react';
-import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
+import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useSiteSupervisor } from './TeamAttendance';
@@ -423,9 +423,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const reportsInsightsItem: NavItem | null = REPORTS_INSIGHTS_MODULES.some((m) => canSeeModule(m))
     ? { key: 'reports_insights', label: 'Reports & Insights', icon: PieChart, onClick: () => onGoToAdminModule('reports_insights') }
     : null;
-  // Data Import — employees, leave, claims and attendance history from
-  // Excel/CSV; shown to anyone holding at least one module it writes into.
-  const dataImportItem: NavItem | null = DATA_IMPORT_MODULES.some((m) => canSeeModule(m))
+  // HR Data Import — employees, leave, claims and attendance history from
+  // Excel/CSV; its own module (Module Access -> HR Data Import), not shown
+  // just because an account has the modules it writes into.
+  const dataImportItem: NavItem | null = canSeeModule('data_import')
     ? { key: 'data_import', label: 'HR Data Import', icon: FileUp, onClick: () => onGoToAdminModule('data_import') }
     : null;
 

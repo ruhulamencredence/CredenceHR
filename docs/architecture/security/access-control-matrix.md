@@ -37,6 +37,7 @@
 | Grievance & Disciplinary | `grievance_disciplinary` | শুধু মডিউলের অনুমতি (layer নেই) |
 | HR Analytics | `hr_analytics` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Management Dashboard | `management_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |
+| HR Data Import | `data_import` | 🔒`import_employees` Import Employee Details<br>🔒`import_leave` Import Leave<br>🔒`import_movement_claims` Import Movement Claims<br>🔒`import_conveyance` Import Conveyance Bill Claims<br>🔒`import_attendance` Import Remote Attendance<br>🔒`import_office_attendance` Import Office Attendance |
 | Document Vault | `document_vault` | `read` Documents (upload, view, own signature)<br>🔒`sign_request` Request signatures from others<br>🔒`esign_settings` E-Signature settings (OTP, read to the end) |
 | HR Operations | `hr_operations` | `read` HR Operations<br>🔒`onboarding_create` Onboarding — Create login<br>🔒`onboarding_review` Onboarding — Review / Reject<br>🔒`onboarding_approve` Onboarding — Approve<br>🔒`reminders_receive` Reminders — receive & view<br>🔒`requisitions` SIM & ID card requisitions — issue / reject |
 | Task Management | `task_management` | শুধু মডিউলের অনুমতি (layer নেই) |

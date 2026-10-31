@@ -74,6 +74,9 @@ interface Kind {
   description: string;
   module: string;
   layer?: string;
+  // HR Data Import layer this kind needs (besides its module). Module access
+  // alone never allows importing.
+  importLayer?: string;
   fields: Field[];
 }
 
@@ -86,6 +89,7 @@ export const IMPORT_KINDS: Kind[] = [
     description:
       "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved. Fill Login ID and Password to create the employee's login in the same upload. Payment Type / Bank Name / Account Number add the salary Bank, MFS or Cash account (Employees -> Payment).",
     module: "employees",
+    importLayer: "import_employees",
     fields: [
       EMP,
       { key: "name", label: "Name", type: "text", required: true, aliases: ["employee name", "full name"], example: "Rahim Uddin" },
@@ -149,6 +153,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Leave History",
     description: "Past leave per employee. Approved / Pending leave in the current leave year is taken off the balance; older leave isn't. HR's Leave Summary Report sheet (one block per employee) can be uploaded as it is.",
     module: "leave_applications",
+    importLayer: "import_leave",
     fields: [
       EMP,
       { key: "leave_type", label: "Leave Type", type: "text", required: true, aliases: ["type"], example: "Casual", note: "Casual / Sick / Without Pay, or a Leave Category name" },
@@ -167,6 +172,7 @@ export const IMPORT_KINDS: Kind[] = [
     description:
       "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
     module: "claims",
+    importLayer: "import_movement_claims",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-08-12" },
@@ -186,6 +192,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Conveyance Bill Claim History",
     description: "Past Conveyance Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
     module: "conveyance",
+    importLayer: "import_conveyance",
     fields: [
       EMP,
       { key: "claim_no", label: "Claim No.", type: "text", aliases: ["claim no", "claim number"], example: "087703", note: "Same Claim No. again is skipped" },
@@ -206,6 +213,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Check In / Check Out",
     description: "Remote Attendance (project site) check in and check out times.",
     module: "attendance",
+    importLayer: "import_attendance",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-09-01" },
@@ -240,6 +248,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Attendance (Office In / Out)",
     description: "Daily office In and Out times, counted like device punches in every attendance report and payroll.",
     module: "office_attendance",
+    importLayer: "import_office_attendance",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-09-01" },
@@ -343,6 +352,9 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     for (const k of IMPORT_KINDS) {
       if (!mods.includes(k.module)) continue;
       if (k.layer && !(await hasModuleLayer(user, k.module, k.layer).catch(() => false))) continue;
+      // Separate import permission: Module Access -> HR Data Import -> that
+      // kind's tick. Having the data's own module is not enough.
+      if (k.importLayer && !(mods.includes("data_import") && (await hasModuleLayer(user, "data_import", k.importLayer).catch(() => false)))) continue;
       out.push(k);
     }
     return out;

@@ -68,6 +68,7 @@
 9. **নিয়ম (`CLAUDE.md`):** নতুন যেকোনো ফিচার/মেনু/বোতাম/API অনুমতির পেছনে থাকবে। UI লুকানো **এবং** API বন্ধ।
 10. **Admin Dashboard:** পাতাটা সব Admin খোলেন, কিন্তু প্রতিটি অংশ আসে শুধু সেই মডিউল থাকলে — জন্মদিন (Employees), probation/চুক্তি/ডকুমেন্টের মেয়াদ (Employees বা HR Operations), উপস্থিতির অনুমোদন (Attendance), প্রতিটি "অপেক্ষার কাজ"-এর সংখ্যা তার নিজের মডিউলে (`AdminDashboardRoutes.ts`; টেস্ট QA-01)। "Coming up — next 60 days" (probation, চুক্তি, ডকুমেন্ট, অবসর, increment) শুধু HR Operations-এর `reminders_receive` layer থাকলে আসে — UI-তে না দেখানোর পাশাপাশি `/api/hr-ops/reminders/upcoming`-ও বন্ধ (`AdminDashboardReminders.tsx`)।
 11. **কর্মীর তথ্য যাচাই:** ইমেইল `name@domain.tld` হতে হবে; জন্মতারিখ আসল, ভবিষ্যতের নয়, বয়স ১৪–১০০ (শ্রম আইন ২০০৬, ধারা ৩৪; `EmployeeValidation.ts`)। পুরনো রেকর্ডে শুধু বদলানো ঘরটা যাচাই হয়।
+12. **HR Data Import আলাদা অনুমতি:** কোনো মডিউল (Employees, Leave, Attendance…) থাকলেই সেখানে Excel থেকে ডাটা ঢোকানো যায় না। লাগে নিজস্ব মডিউল `data_import` আর প্রতিটি ধরনের 🔒 layer (`import_employees`, `import_leave`, `import_movement_claims`, `import_conveyance`, `import_attendance`, `import_office_attendance`) — সব ডিফল্টে বন্ধ। সার্ভারে `DataImportRoutes.ts` → `allowedKinds` মডিউল ও layer দুটোই দেখে (না থাকলে 403), মেনু ও পাতা `data_import` ছাড়া দেখায় না। বেতন import আগের মতো Payroll layer `salary_bulk_upload`।
 
 ---
 
