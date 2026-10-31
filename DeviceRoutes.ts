@@ -213,6 +213,16 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
       }
       await queryDB("UPDATE user_devices SET status = 'active', approved_by = ?, approved_at = ? WHERE id = ?", [req.user.id, new Date(), Number(d.id)]);
       forget([Number(d.id)]);
+      // The account hears it (its other phones get the push), so nobody keeps
+      // waiting on a phone that can already sign in.
+      await createAlert(queryDB, {
+        userId: Number(u.id),
+        type: "device_request",
+        title: "New phone approved",
+        message: `${d.device_name || "Your new phone"} can now sign in to the app.${mode === "replace" ? " Your other phone was signed out." : ""}`,
+        relatedType: "user_device_decision",
+        relatedId: Number(d.id)
+      }).catch(() => {});
       res.json({ success: true });
     } catch (err) {
       fail(res, err);
@@ -225,6 +235,16 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
       const { d } = await deviceOfGroup(Number(req.params.id));
       await queryDB("UPDATE user_devices SET status = 'removed' WHERE id = ?", [Number(d.id)]);
       forget([Number(d.id)]);
+      if (d.status === "pending") {
+        await createAlert(queryDB, {
+          userId: Number(d.user_id),
+          type: "device_request",
+          title: "New phone not approved",
+          message: `${d.device_name || "The new phone"} was not approved for this account. Ask your Superadmin if you need it.`,
+          relatedType: "user_device_decision",
+          relatedId: Number(d.id)
+        }).catch(() => {});
+      }
       res.json({ success: true });
     } catch (err) {
       fail(res, err);

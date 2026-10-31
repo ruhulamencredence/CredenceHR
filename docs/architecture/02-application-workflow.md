@@ -401,6 +401,12 @@ Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `
 
 কর্মী সংশোধনের আবেদন দিলে Approval Template / Supervisor-এর প্রথম ধাপের approver alert আর ফোনে push পান — "Attendance Correction Awaiting Your Approval" (click করলে Approve Application)। এক ধাপ approve হলে পরের ধাপের approver-ও একইভাবে জানেন (`ApprovalRoutes.ts` notifyNextStepApprovers)। শেষে approve বা reject হলে কর্মী নিজে alert পান, reject-এর কারণসহ; click করলে Timesheet খোলে (`server.ts` finalizeAttendanceCorrection / rejectAttendanceCorrection)।
 
+## আরও কিছু notification
+
+- **নতুন ফোন (Device Access):** Superadmin approve করলে অ্যাকাউন্টটা "New phone approved" পায়, ফিরিয়ে দিলে "New phone not approved" (`DeviceRoutes.ts`)।
+- **Asset ফেরত চাওয়া:** কর্মী My Asset থেকে ফেরত চাইলে Asset Management module-ওয়ালা সবাই আর Superadmin "Asset return requested" পান; click করলে Asset Management খোলে (`AssetManagementRoutes.ts`)।
+- **E-sign বাতিল:** HR সই নেওয়া বাতিল করলে যাঁর সইয়ের অপেক্ষায় ছিল তিনি "Signature no longer needed" পান (`ESignRoutes.ts`)।
+
 ## Admin Dashboard: Coming up — next 60 days
 
 HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও চুক্তি শেষ, ডকুমেন্টের মেয়াদ, অবসর, increment; ৩০ দিন আগের মেয়াদোত্তীর্ণ থেকে ৬০ দিন সামনে, পাশে Confirm / Extend / Renew / Increment বোতাম) Admin Dashboard-এও দেখায় — শুধু যাঁদের HR Operations আর তার "Reminders — receive & view" layer আছে। এটা দেখালে ছোট "HR Alerts" (৩০ দিন) বক্সটা আর আলাদা করে দেখায় না; layer না থাকলে আগের মতো HR Alerts থাকে।

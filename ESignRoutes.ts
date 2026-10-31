@@ -916,9 +916,15 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       const id = Number(req.params.id);
       const doc = await loadDoc(id);
       if (doc.sign_status !== "pending") throw bad("Only a document that is out for signing can be cancelled.");
+      const waiting: any[] = (await queryDB("SELECT signer_user_id FROM document_signers WHERE document_id = ? AND status = 'pending'", [id])) || [];
       await queryDB("UPDATE employee_documents SET sign_status = 'cancelled' WHERE id = ?", [id]);
       await queryDB("UPDATE document_signers SET status = 'cancelled' WHERE document_id = ? AND status IN ('pending', 'waiting')", [id]);
       await logDocEvent(queryDB, id, "cancelled", { userId: Number(req.user.id), req });
+      // Whoever it was waiting on no longer needs to sign it.
+      for (const w of waiting) {
+        if (Number(w.signer_user_id) === Number(req.user.id)) continue;
+        await notify(Number(w.signer_user_id), "Signature no longer needed", `${doc.doc_type} was cancelled by ${req.user.name || "HR"} — you don't need to sign it.`, id).catch(() => {});
+      }
       res.json(await docView(await loadDoc(id)));
     } catch (err) {
       fail(res, err);

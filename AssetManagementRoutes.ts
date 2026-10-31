@@ -703,6 +703,29 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       }
       if (assignment.returned_date) return res.status(400).json({ error: "This asset was already returned." });
       await queryDB("UPDATE asset_assignments SET return_requested_at = NOW() WHERE id = ?", [assignment.id]);
+      // Whoever runs Asset Management takes it back — tell them.
+      try {
+        const asset = (await queryDB("SELECT name, asset_tag FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+        const keepers: any[] =
+          (await queryDB(
+            `SELECT DISTINCT u.id FROM users u
+              WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
+                 OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'asset_management'))`
+          )) || [];
+        for (const k of keepers) {
+          if (Number(k.id) === Number(req.user.id)) continue;
+          await createAlert(queryDB, {
+            userId: Number(k.id),
+            type: "asset_requisition" as AlertType,
+            title: "Asset return requested",
+            message: `${req.user.name || "An employee"} wants to return ${asset ? `${asset.name} (${asset.asset_tag})` : "an asset"}. Take it back in Admin Panel -> Asset Management.`,
+            relatedType: "asset_return",
+            relatedId: Number(assignment.id)
+          }).catch(() => {});
+        }
+      } catch {
+        // Not telling HR never blocks the request itself.
+      }
       if (assignment.requisition_id) {
         const retAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
         await logEvent(

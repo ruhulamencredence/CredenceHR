@@ -198,7 +198,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? () => onOpenVehicleManagement('status')
         : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
         ? onOpenConveyanceClaim
-        : alert.type === 'asset_requisition' && onOpenMyAsset
+        : alert.type === 'asset_requisition' && alert.related_type !== 'asset_return' && onOpenMyAsset
         ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
         : alert.type === 'resignation'
         ? onOpenResignation
@@ -325,6 +325,10 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'mobile_bill'
         ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
+        : alert.type === 'device_request' && alert.related_type === 'user_device_decision'
+        ? undefined
+        : alert.type === 'asset_requisition' && alert.related_type === 'asset_return'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'asset_management' }))
         : alert.type === 'device_request'
         ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))
