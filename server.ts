@@ -1530,6 +1530,46 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     approvedBy,
     correctionId
   ]);
+  await createAlert(queryDB, {
+    userId: Number(c.user_id),
+    type: "hr_action",
+    title: "Attendance Correction Approved",
+    message: `Your attendance correction for ${toDateOnlyString(c.attendance_date)} was approved — the Timesheet now shows the corrected time.${remarks ? ` Note: ${remarks}` : ""}`,
+    relatedType: "attendance_correction",
+    relatedId: Number(correctionId)
+  }).catch(() => {});
+}
+
+// Timesheet -> Correct Attendance: tells the first step's approver(s) a
+// correction is waiting on them (Leave does the same with
+// notifyLeaveFirstApprovers). Later steps are told by ApprovalRoutes.ts's
+// notifyNextStepApprovers.
+async function notifyAttendanceCorrectionFirstApprovers(correctionId: number) {
+  try {
+    const [rows, requests] = await Promise.all([
+      queryDB("SELECT * FROM attendance_corrections WHERE id = ?", [correctionId]),
+      queryDB("SELECT * FROM approval_requests WHERE source_type = 'attendance_correction' AND source_id = ? AND status = 'pending'", [correctionId])
+    ]);
+    const c = rows[0];
+    const request = requests[0];
+    if (!c || !request || Number(request.awaiting_approver)) return;
+    const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [c.user_id])) || [];
+    const hm = (v: any) => (v ? String(v).replace("T", " ").slice(11, 16) : "");
+    const times = [c.requested_check_in_at ? `In ${hm(c.requested_check_in_at)}` : "", c.requested_check_out_at ? `Out ${hm(c.requested_check_out_at)}` : ""].filter(Boolean).join(", ");
+    for (const a of await getCurrentStepApprovers(request)) {
+      if (Number(a.user_id) === Number(c.user_id)) continue;
+      await createAlert(queryDB, {
+        userId: a.user_id,
+        type: "hr_action",
+        title: "Attendance Correction Awaiting Your Approval",
+        message: `${who[0]?.name || "An employee"} asked to correct their attendance for ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""}. Please review it.`,
+        relatedType: "attendance_correction",
+        relatedId: Number(correctionId)
+      }).catch(() => {});
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the approver(s) for Attendance Correction #" + correctionId + ": " + err.message);
+  }
 }
 
 // Rejects an Attendance Correction request — never touches `attendance` at all.
@@ -1540,6 +1580,17 @@ async function rejectAttendanceCorrection(correctionId: number, rejectedBy: numb
     rejectedBy,
     correctionId
   ]);
+  const rows: any[] = (await queryDB("SELECT user_id, attendance_date FROM attendance_corrections WHERE id = ?", [correctionId])) || [];
+  if (rows[0]) {
+    await createAlert(queryDB, {
+      userId: Number(rows[0].user_id),
+      type: "hr_action",
+      title: "Attendance Correction Rejected",
+      message: `Your attendance correction for ${toDateOnlyString(rows[0].attendance_date)} was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
+      relatedType: "attendance_correction",
+      relatedId: Number(correctionId)
+    }).catch(() => {});
+  }
 }
 
 // Sets an Asset Requisition to 'approved' once every step of its Approval
@@ -2748,6 +2799,7 @@ async function startServer() {
     createTemplateApprovalRequest,
     finalizeAttendanceCorrection,
     rejectAttendanceCorrection,
+    notifyAttendanceCorrectionFirstApprovers,
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,

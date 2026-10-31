@@ -39,6 +39,7 @@ interface AttendanceRouteDeps {
   todayInDhaka: () => string;
   createApprovalRequest: (...args: any[]) => Promise<any>;
   createTemplateApprovalRequest: (...args: any[]) => Promise<any>;
+  notifyAttendanceCorrectionFirstApprovers: (correctionId: number) => Promise<void>;
   finalizeAttendanceCorrection: (correctionId: number, approvedBy: number, remarks: string | null) => Promise<any>;
   rejectAttendanceCorrection: (correctionId: number, rejectedBy: number, remarks: string | null) => Promise<any>;
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
@@ -63,6 +64,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     todayInDhaka,
     createApprovalRequest,
     createTemplateApprovalRequest,
+    notifyAttendanceCorrectionFirstApprovers,
     finalizeAttendanceCorrection,
     rejectAttendanceCorrection,
     attachApprovalStatuses,
@@ -586,6 +588,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         } catch (finalizeErr: any) {
           console.warn("⚠️ Could not auto-process attendance correction #" + result.insertId + ": " + finalizeErr.message);
         }
+      } else {
+        await notifyAttendanceCorrectionFirstApprovers(result.insertId);
       }
 
       res.status(201).json({ success: true, id: result.insertId });

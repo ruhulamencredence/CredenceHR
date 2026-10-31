@@ -975,7 +975,7 @@ export default function App() {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'timesheet' || target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);

@@ -116,6 +116,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
     asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
     leave_application: { type: "leave_approval", label: "Leave Application" },
+    // "… Awaiting Your Approval" titles open Approve Application (AlertsBell.tsx).
+    attendance_correction: { type: "hr_action", label: "Attendance Correction" },
     // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's
     // own ride-status alerts) so a click opens Approve Application.
     vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" },
@@ -127,7 +129,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // step (status still 'pending', current_step already moved on) — tells
   // that next step's approver(s) it's now waiting on them, instead of them
   // only finding out by happening to open My Approvals. A no-op for source
-  // types with no alert mapping above (Attendance) or a request whose new step has nobody
+  // types with no alert mapping above or a request whose new step has nobody
   // assigned yet.
   async function notifyNextStepApprovers(requestId: number, newStatus: string, actorName: string) {
     if (newStatus !== "pending") return;

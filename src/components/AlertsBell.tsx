@@ -244,6 +244,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'onboarding' })), 0);
           }
+        : alert.type === 'hr_action' && alert.related_type === 'attendance_correction' && !/Awaiting Your Approval/.test(alert.title)
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'timesheet' }))
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
