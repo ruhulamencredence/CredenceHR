@@ -1553,15 +1553,25 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const assignmentByUser = new Map<number, any>(assignments.map((a: any) => [Number(a.employee_user_id), a]));
       const defaultRows = await queryDB("SELECT id, name FROM approval_templates WHERE request_type = ? AND is_default = 1 LIMIT 1", [requestType]);
       const defaultTemplate = defaultRows[0] || null;
+      // Department / Designation / Employee ID for the Assign screen's filters
+      // (the account itself only has name + role).
+      const profiles = new Map<number, any>();
+      try {
+        for (const e of await queryDB("SELECT * FROM all_employees")) if (e.user_id) profiles.set(Number(e.user_id), e);
+      } catch { /* filters just come up empty */ }
 
       res.json({
         default_template: defaultTemplate,
         employees: users.map((u: any) => {
           const a = assignmentByUser.get(Number(u.id));
+          const prof = profiles.get(Number(u.id));
           return {
             employee_user_id: u.id,
             employee_name: u.name,
             employee_role: u.role,
+            employee_code: prof?.employee_id || null,
+            department: prof?.department || null,
+            designation: prof?.designation || null,
             assigned_template_id: a ? a.template_id : null,
             assigned_template_name: a ? a.template_name : null,
             effective_template_id: a ? a.template_id : defaultTemplate?.id || null,
@@ -1570,6 +1580,46 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           };
         })
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Same pick for many employees at once (the Assign screen's filtered list).
+  // template_id: null clears them back to the default. Same permission as the
+  // single PUT above.
+  app.put("/api/template-assignments/bulk", authenticateToken, requireAdmin, requireModule("approvals"), requireModuleLayer("approvals", "edit_add"), async (req: any, res) => {
+    try {
+      const requestType = req.body?.request_type;
+      const templateId = req.body?.template_id === null || req.body?.template_id === undefined ? null : Number(req.body.template_id);
+      const ids: number[] = Array.from(new Set((Array.isArray(req.body?.employee_user_ids) ? req.body.employee_user_ids : []).map(Number).filter(Number.isFinite)));
+      if (ids.length === 0) return res.status(400).json({ error: "Pick at least one employee." });
+      if (ids.length > 5000) return res.status(400).json({ error: "Too many employees at once (max 5000)." });
+      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile, loan." });
+      }
+      if (templateId !== null) {
+        const templateRows = await queryDB("SELECT * FROM approval_templates WHERE id = ?", [templateId]);
+        if (templateRows.length === 0) return res.status(404).json({ error: "Template not found." });
+        if (templateRows[0].request_type !== requestType) return res.status(400).json({ error: "That template is for a different Request Type." });
+        if (!Number(templateRows[0].is_active)) return res.status(400).json({ error: "That template is inactive — activate it first, or pick a different one." });
+      }
+      let done = 0;
+      for (const id of ids) {
+        if ((await queryDB("SELECT id FROM users WHERE id = ?", [id])).length === 0) continue;
+        if (templateId === null) {
+          await queryDB("DELETE FROM employee_template_assignments WHERE employee_user_id = ? AND request_type = ?", [id, requestType]);
+        } else {
+          await queryDB(
+            `INSERT INTO employee_template_assignments (employee_user_id, request_type, template_id, assigned_by)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE template_id = VALUES(template_id), assigned_by = VALUES(assigned_by)`,
+            [id, requestType, templateId, req.user.id]
+          );
+        }
+        done++;
+      }
+      res.json({ success: true, updated: done });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

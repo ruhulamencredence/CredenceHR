@@ -210,6 +210,7 @@ flowchart LR
 
 **কে প্রথম অনুমোদন দেন:** কর্মীর Direct Supervisor (না থাকলে Department Supervisor) ধাপ ১, তারপর Template-এর layer। Supervisor নিজে আবেদন করলে সরাসরি Template-এর layer-এ যায় (টেস্ট `test-logs/2026-10-25/07-supervisor-chain.log`, ৩৬/৩৬)।
 **Supervisor ও Template দুটোই না থাকলে:** আবেদন "approver নেই" অবস্থায় অপেক্ষা করে (`approval_requests.awaiting_approver = 1`)। কর্মী alert পান এবং নিজের পেজে "No approver set yet — tell HR" দেখেন। Superadmin ও Approvals মডিউলের Admin alert পান। শুধু Superadmin সিদ্ধান্ত দিতে পারেন: আবেদনটা তাঁর "My Approvals"-এ "No approver set" চিহ্নসহ আসে, Admin Panel → Approvals-এও থাকে। Supervisor বা Template সেট হলে আবেদন নিজে থেকে সেখানে সরে যায়: কেউ Approvals তালিকা খুললে, নইলে প্রতি ১০ মিনিটে (`rehomeAwaitingApprovals`)। টেস্ট: `test-logs/2026-10-25/09-no-approver-after-fix.log`।
+**Template কাকে লাগবে:** Admin Panel → Approvals → Templates → "Assign to Employees" ট্যাবে প্রতিটি কর্মীর জন্য আলাদা Template বাছা যায়। Department, Designation, User ও Template দিয়ে (একাধিক বেছে, টাইপ করে খুঁজে) তালিকা ছোট করে, একটি Template বেছে **Assign** চাপলে ছোট করা সব কর্মীকে একসাথে সেট হয় (`PUT /api/template-assignments/bulk`, একজনের জন্য `PUT /api/template-assignments`; দুটোতেই Approvals মডিউলের Edit/Add layer লাগে)।
 ফাইল: `ApprovalRoutes.ts` (তালিকা ও act: `GET /api/my-approvals`, `POST /api/my-approvals/:id/act`), `Alerts.ts` (notification)।
 
 ---
