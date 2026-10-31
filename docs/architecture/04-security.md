@@ -29,7 +29,7 @@
 
 | নিয়ন্ত্রণ | বিবরণ | প্রমাণ |
 |---|---|---|
-| Login ID | কর্মীর Login ID হলো তার Employee ID (যেমন `CPL-0201`), `users.username`-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো | `EmployeeLoginId.ts`, `EmployeeRoutes.ts`, `DataImportRoutes.ts` |
+| Login ID | কর্মীর Login ID হলো তার Employee ID (যেমন `CPL-0201`), `users.username`-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো। Admin Panel → Users → Change Login ID-এ (Users module + `edit_add` layer, সার্ভারেও যাচাই) বর্তমান email ও username দুটোই দেখায়, নতুন username দেওয়া যায় (`PUT /api/users/:id/username`): ৩–৫০ অক্ষর, শুধু অক্ষর/সংখ্যা/`.`/`-`/`_`, অন্যের username, email বা অন্য কর্মীর Employee ID হলে 400; হাতে দেওয়া username পরে Employee save-এ বদলায় না | `EmployeeLoginId.ts`, `EmployeeRoutes.ts`, `DataImportRoutes.ts` |
 | কেউ নিজে অ্যাকাউন্ট খুলতে পারে না | Public registration বন্ধ; শুধু Admin/HR অ্যাকাউন্ট বানায় | `AuthRoutes.ts` |
 | Superadmin | `.env`-এর `ADMIN_EMAIL/PASSWORD` থেকে তৈরি; API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role `user` হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না | `server.ts` `seedAdminFromEnv`, `AccountBlock.ts`, টেস্ট |
 | পাসওয়ার্ড hash | bcryptjs, cost 10 | `UserManagement.ts`, `AuthRoutes.ts` |

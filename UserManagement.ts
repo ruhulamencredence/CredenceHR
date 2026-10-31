@@ -24,6 +24,7 @@ import { activeCompanyId } from "./companyContext";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
+import { employeeIdConflict } from "./EmployeeLoginId";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -358,6 +359,35 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       res.json({ success: true, email: new_email });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update Login ID" });
+    }
+  });
+
+  // Same page, same gate: the username a user can also sign in with (an
+  // employee's is their Employee ID until someone sets another one here —
+  // syncEmployeeLoginId in EmployeeLoginId.ts leaves a chosen one alone).
+  // Letters, digits, dot, dash and underscore; no spaces, no "@" (that is an
+  // email). Can't be anyone else's username or email, nor another employee's
+  // Employee ID (those are Login IDs too).
+  app.put("/api/users/:id/username", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const newUsername = String(req.body?.new_username ?? "").trim();
+      if (!newUsername) return res.status(400).json({ error: "New username is required." });
+      if (!/^[A-Za-z0-9._-]{3,50}$/.test(newUsername)) {
+        return res.status(400).json({ error: "Username: 3–50 letters, digits, dot (.), dash (-) or underscore (_) — no spaces or @." });
+      }
+      const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+      if (rows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const own: any[] = (await queryDB("/*unscoped*/ SELECT id FROM all_employees WHERE user_id = ?", [id])) || [];
+      const clash = await employeeIdConflict(queryDB, newUsername, { userId: Number(id), employeeRowId: own[0]?.id ? Number(own[0].id) : null });
+      if (clash) return res.status(400).json({ error: clash.replace(/Pick another Employee ID\.?$/, "Pick another username.") });
+      await queryDB("UPDATE users SET username = ? WHERE id = ?", [newUsername, id]);
+      res.json({ success: true, username: newUsername });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update username" });
     }
   });
 

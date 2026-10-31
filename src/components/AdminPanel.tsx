@@ -661,7 +661,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // no old value needed (see PUT /api/users/:id/email).
   const [changingEmailFor, setChangingEmailFor] = useState<User | null>(null);
   const [newEmailInput, setNewEmailInput] = useState('');
+  // The other Login ID: users.username (an employee's starts as their Employee ID).
+  const [newUsernameInput, setNewUsernameInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
+  const [loginIdError, setLoginIdError] = useState('');
   // Accounts the Module Access page opened with (ModuleAccessPage.tsx).
   const [moduleAccessIds, setModuleAccessIds] = useState<number[]>([]);
 
@@ -2996,28 +2999,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Change Login ID: saves whichever of email / username was changed.
   const handleChangeEmail = async () => {
     if (!changingEmailFor) return;
-    const trimmed = (newEmailInput || '').trim();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+    const email = (newEmailInput || '').trim();
+    const username = (newUsernameInput || '').trim();
+    const emailChanged = email !== (changingEmailFor.email || '');
+    const usernameChanged = username !== (changingEmailFor.username || '');
+    if (!emailChanged && !usernameChanged) {
+      setChangingEmailFor(null);
+      return;
+    }
+    if (emailChanged && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLoginIdError('Enter a valid email address.');
+      return;
+    }
+    if (usernameChanged && !/^[A-Za-z0-9._-]{3,50}$/.test(username)) {
+      setLoginIdError('Username: 3–50 letters, digits, dot (.), dash (-) or underscore (_) — no spaces or @.');
       return;
     }
     setChangingEmail(true);
-    try {
-      const res = await fetch(apiUrl(`/api/users/${changingEmailFor.id}/email`), {
+    setLoginIdError('');
+    const put = async (path: string, body: unknown) => {
+      const res = await fetch(apiUrl(`/api/users/${changingEmailFor.id}/${path}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ new_email: trimmed })
+        body: JSON.stringify(body)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to update Login ID');
+    };
+    try {
+      if (usernameChanged) await put('username', { new_username: username });
+      if (emailChanged) await put('email', { new_email: email });
       setMessage({ type: 'success', text: `Login ID updated for ${changingEmailFor.name}.` });
       setChangingEmailFor(null);
       setNewEmailInput('');
+      setNewUsernameInput('');
       fetchAllData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setLoginIdError(err.message);
+      fetchAllData();
     } finally {
       setChangingEmail(false);
     }
@@ -7361,6 +7383,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               onOpenProjects={() => openManageProjects(mu)}
               onChangeLoginId={() => {
                 setNewEmailInput(mu.email || '');
+                setNewUsernameInput(mu.username || '');
+                setLoginIdError('');
                 setChangingEmailFor(mu);
               }}
               onResetPassword={() => {
@@ -7601,59 +7625,88 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* Change Login ID modal — Admin/Superadmin changes the email address a user
-          logs in with. No old value confirmation asked for, same as Reset
-          Password (see PUT /api/users/:id/email). */}
+      {/* Change Login ID modal — shows how this account signs in now (email
+          and username, either one works) and lets an Admin set a new email,
+          a new username or both (PUT /api/users/:id/email, /username). */}
       {changingEmailFor && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4"
           onClick={() => !changingEmail && setChangingEmailFor(null)}
         >
-          <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Change Login ID</h3>
-                <p className="text-xs text-slate-500">{changingEmailFor.name} • {changingEmailFor.email}</p>
+          <div className="liquid-glass liquid-glass-in rounded-[32px] max-w-md w-full max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setChangingEmailFor(null)}
+              disabled={changingEmail}
+              aria-label="Close"
+              className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 text-slate-600 hover:text-slate-900 rounded-full disabled:opacity-50"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="px-6 pt-6 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">Change Login ID</h3>
+              <p className="text-xs text-slate-500">{changingEmailFor.name}</p>
+            </div>
+            <div className="px-6 pb-2">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Current Login ID</p>
+              <div className="liquid-glass-inset rounded-2xl divide-y divide-white/70 text-sm">
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-xs text-slate-500">Email</span>
+                  <span className="font-semibold text-slate-900 truncate">{changingEmailFor.email || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-xs text-slate-500">Username</span>
+                  <span className="font-semibold text-slate-900 truncate">{changingEmailFor.username || '— none —'}</span>
+                </div>
               </div>
+              <p className="text-[11px] text-slate-500 mt-1.5">They can sign in with either one.</p>
+            </div>
+            <div className="px-6 py-3 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">New email</label>
+                <input
+                  type="email"
+                  value={newEmailInput || ''}
+                  onChange={(e) => setNewEmailInput(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-3 py-2 bg-white/80 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">New username</label>
+                <input
+                  type="text"
+                  value={newUsernameInput || ''}
+                  onChange={(e) => setNewUsernameInput(e.target.value.replace(/\s+/g, ''))}
+                  placeholder="e.g. bipul.sarker"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full px-3 py-2 bg-white/80 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Letters, digits, dot, dash or underscore. Can't be someone else's username, email or Employee ID.</p>
+              </div>
+              {loginIdError && <p className="text-xs font-semibold text-rose-600">{loginIdError}</p>}
+            </div>
+            <div className="px-6 pb-6 pt-2 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setChangingEmailFor(null)}
                 disabled={changingEmail}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-3">
-              <label className="block text-xs font-semibold text-slate-600">New Login ID (email)</label>
-              <input
-                type="email"
-                value={newEmailInput || ''}
-                onChange={(e) => setNewEmailInput(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-              />
-              <p className="text-xs text-slate-500">
-                {changingEmailFor.name} will need to use this new email to log in going forward.
-              </p>
-            </div>
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
-              <button
-                onClick={() => setChangingEmailFor(null)}
-                disabled={changingEmail}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                className="liquid-glass-chip px-4 py-2 text-sm font-semibold text-slate-700 rounded-full disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleChangeEmail}
-                disabled={changingEmail || !(newEmailInput || '').trim()}
-                className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                disabled={
+                  changingEmail ||
+                  ((newEmailInput || '').trim() === (changingEmailFor.email || '') && (newUsernameInput || '').trim() === (changingEmailFor.username || ''))
+                }
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-50"
               >
-                {changingEmail ? 'Saving…' : 'Save New Login ID'}
+                {changingEmail ? 'Saving…' : 'Save Login ID'}
               </button>
             </div>
           </div>
