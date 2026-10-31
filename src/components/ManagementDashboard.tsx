@@ -344,7 +344,7 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                   <span className="text-[11px] text-[#6b6585]">present · late</span>
                 </div>
                 {data.attendance_by_department.length === 0 && <p className="text-sm text-slate-400">No attendance yet this month.</p>}
-                {data.attendance_by_department.map((d) => (
+                {data.attendance_by_department.slice(0, 6).map((d) => (
                   <button key={d.department} type="button" onClick={() => setOpen('attendance')} className={`${rowBtn} grid items-center gap-2.5 text-xs`} style={{ gridTemplateColumns: '110px minmax(0,1fr) 44px 44px' }}>
                     <span className="font-semibold truncate">{d.department}</span>
                     <span className="flex gap-0.5 h-3 bg-[#f3f1f9] rounded-full overflow-hidden">
@@ -355,6 +355,11 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                     <span className="text-right font-semibold text-[#9a5b13]">{d.late_pct}%</span>
                   </button>
                 ))}
+                {data.attendance_by_department.length > 6 && (
+                  <button type="button" onClick={() => setOpen('attendance')} className="self-start text-xs font-semibold text-[#6d28d9] hover:underline">
+                    View all {data.attendance_by_department.length} departments →
+                  </button>
+                )}
               </section>
             </div>
 
