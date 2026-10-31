@@ -15,6 +15,7 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import { UserAvatar } from './UserAvatar';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -186,6 +187,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roomSearch, setRoomSearch] = useState('');
+  // Chat list: only one-to-one chats with people of these Departments (empty = all).
+  const [roomDepts, setRoomDepts] = useState<string[]>([]);
   // Phone bottom bar: which list the room column shows, and the "+" menu.
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
   const [newMenuOpen, setNewMenuOpen] = useState(false);
@@ -963,9 +966,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const byTab = rooms.filter((r) =>
       listTab === 'groups' ? r.type !== 'direct' : listTab === 'calls' ? r.type === 'direct' && !!r.other_participant : true
     );
-    if (!q) return byTab;
-    return byTab.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id, listTab]);
+    const deptOf = new Map(directory.map((d) => [d.id, (d.department || '').trim()]));
+    const byDept = roomDepts.length
+      ? byTab.filter((r) => r.type === 'direct' && !!r.other_participant && roomDepts.includes(deptOf.get(r.other_participant.id) || ''))
+      : byTab;
+    if (!q) return byDept;
+    return byDept.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
+  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory]);
   const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
     window.dispatchEvent(
       new CustomEvent('credence:start-call', {
@@ -1027,11 +1034,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          {listTab !== 'groups' && directory.some((d) => d.department) && (
+            <div className="mt-2 flex items-center gap-2">
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={roomDepts} onChange={setRoomDepts} width={260} />
+              {roomDepts.length > 0 && (
+                <button type="button" onClick={() => setRoomDepts([])} className="text-xs font-semibold text-slate-500 hover:underline">
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {filteredRooms.length === 0 && (
             <div className="p-8 text-center text-sm text-slate-400">
-              {listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+              {roomDepts.length > 0
+                ? 'No chat with anyone in these departments yet — tap + to start one.'
+                : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
             </div>
           )}
           {filteredRooms.map((room) => {
@@ -1786,21 +1805,49 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 };
 
+// Departments in the chat directory, with how many people each — the options
+// of the Department filters below.
+const deptOptionsOf = (people: ChatDirectoryUser[]) => {
+  const n = new Map<string, number>();
+  for (const d of people) {
+    const k = (d.department || '').trim();
+    if (k) n.set(k, (n.get(k) || 0) + 1);
+  }
+  return [...n.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count }));
+};
+
 // Shared "pick people from the directory" list used by both the New Chat/
 // Group/Community modal and the Add Members modal below.
 const MemberPickerModal: React.FC<{
   directory: ChatDirectoryUser[];
   title: string;
   confirmLabel?: string;
+  // New Chat picks one person; groups / communities / Add Members pick many.
+  single?: boolean;
   onClose: () => void;
   onConfirm: (ids: number[]) => void;
-}> = ({ directory, title, confirmLabel = 'Add', onClose, onConfirm }) => {
+}> = ({ directory, title, confirmLabel = 'Add', single = false, onClose, onConfirm }) => {
   const [search, setSearch] = useState('');
+  const [depts, setDepts] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
 
   const q = search.trim().toLowerCase();
-  const filtered = directory.filter((d) => `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q));
+  const filtered = directory.filter(
+    (d) =>
+      (!depts.length || depts.includes((d.department || '').trim())) &&
+      `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
+  );
+  const allShownOn = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
+  const toggleAllShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const d of filtered) {
+        if (allShownOn) next.delete(d.id);
+        else next.add(d.id);
+      }
+      return next;
+    });
 
   return (
     <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
@@ -1822,8 +1869,19 @@ const MemberPickerModal: React.FC<{
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          <div className="mt-2 flex items-center gap-2">
+            {directory.some((d) => d.department) && (
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={depts} onChange={setDepts} width={260} />
+            )}
+            {!single && filtered.length > 0 && (
+              <button type="button" onClick={toggleAllShown} className="ml-auto text-xs font-semibold text-emerald-700 hover:underline">
+                {allShownOn ? 'Unselect all shown' : `Select all shown (${filtered.length})`}
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
+            {filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
           {filtered.map((d) => {
             const isSelected = selected.has(d.id);
             return (
@@ -1832,8 +1890,8 @@ const MemberPickerModal: React.FC<{
                 type="button"
                 onClick={() =>
                   setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(d.id)) next.delete(d.id);
+                    const next = new Set(single ? [] : prev);
+                    if (prev.has(d.id)) next.delete(d.id);
                     else next.add(d.id);
                     return next;
                   })
@@ -1885,6 +1943,7 @@ const NewRoomModal: React.FC<{
         directory={directory}
         title="New Chat"
         confirmLabel="Start Chat"
+        single
         onClose={onClose}
         onConfirm={(ids) => ids[0] && onCreate('direct', '', [ids[0]])}
       />
