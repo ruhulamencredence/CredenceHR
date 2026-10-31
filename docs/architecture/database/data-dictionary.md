@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২১টি টেবিল, ২৩৭৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২১টি টেবিল, ২৩৮৩টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1562,6 +1562,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_mobile_bill` | tinyint(1) | না | default 0 | |
 | `can_view_group_dashboard` | tinyint(1) | না | default 0 | |
 | `attendance_project_id` | int(11) | হ্যাঁ |  | FK → `projects.id` |
+| `can_add_adhoc_approver` | tinyint(1) | না | default 0 | |
 | `can_use_mail` | tinyint(1) | না | default 0 | |
 | `can_view_mail_directory` | tinyint(1) | না | default 0 | |
 | `can_use_mail_groups` | tinyint(1) | না | default 0 | |
@@ -3668,6 +3669,9 @@ Unique: `unique_step_order`(step_order)
 | `group_id` | int(11) | না | default 1 | |
 | `template_id` | int(11) | হ্যাঁ |  | FK → `approval_templates.id` |
 | `supervisor_step_user_id` | int(11) | হ্যাঁ |  | FK → `users.id` |
+| `adhoc_approver_id` | int(11) | হ্যাঁ |  | |
+| `adhoc_added_by` | int(11) | হ্যাঁ |  | |
+| `adhoc_note` | varchar(500) | হ্যাঁ |  | |
 | `awaiting_approver` | tinyint(1) | না | default 0 | |
 
 ### `approval_template_step_approvers`
