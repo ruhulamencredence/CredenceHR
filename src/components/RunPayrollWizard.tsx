@@ -19,10 +19,11 @@
 // PayrollModule.tsx.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2 } from 'lucide-react';
+import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { LoadingBlock } from './LoadingBlock';
+import { SearchSelect } from './Combobox';
 
 interface RunPayrollWizardProps {
   token: string;
@@ -208,6 +209,73 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   };
 
   const includedRows = rows.filter((r) => r.included);
+
+  // Steps 2–4: find people by name / Employee ID / designation / department
+  // and narrow to one Department. Only what is shown changes — every included
+  // employee is still calculated and submitted.
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const departments = useMemo(() => [...new Set(rows.map((r) => r.department || '').filter(Boolean))].sort((a, b) => a.localeCompare(b)), [rows]);
+  const filtering = !!search.trim() || !!deptFilter;
+  const matchesFilter = (r: WizardRow) => {
+    if (deptFilter && (r.department || '') !== deptFilter) return false;
+    const q = search.trim().toLowerCase();
+    return !q || [r.employee_name, r.employee_code, r.designation, r.department].some((t) => (t || '').toLowerCase().includes(q));
+  };
+  const shownRows = rows.filter(matchesFilter);
+  const shownIncluded = includedRows.filter(matchesFilter);
+  const selectable = (r: WizardRow) => r.has_salary_structure && !r.already_generated;
+  const shownSelectable = shownRows.filter(selectable);
+  const shownSelected = shownSelectable.filter((r) => r.included).length;
+  const setIncludedFor = (list: WizardRow[], on: boolean) => {
+    const ids = new Set(list.filter(selectable).map((r) => r.employee_id));
+    setRows((prev) => prev.map((r) => (ids.has(r.employee_id) ? { ...r, included: on } : r)));
+  };
+
+  const filterBar = (shown: number, total: number, extra?: React.ReactNode) => (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+      <div className="relative flex-1 min-w-0">
+        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search name, Employee ID, designation, department…"
+          aria-label="Search employees"
+          className="w-full pl-8 pr-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
+      <SearchSelect
+        value={deptFilter}
+        onChange={(e) => setDeptFilter(e.target.value)}
+        aria-label="Filter by department"
+        className="w-full sm:w-56 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+      >
+        <option value="">All departments</option>
+        {departments.map((d) => (
+          <option key={d} value={d}>
+            {d}
+          </option>
+        ))}
+      </SearchSelect>
+      {extra}
+      <span className="text-[11px] text-slate-500 whitespace-nowrap">
+        {filtering ? `Showing ${shown} of ${total}` : `${total} employee${total === 1 ? '' : 's'}`}
+        {filtering && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setDeptFilter('');
+            }}
+            className="ml-2 font-semibold text-blue-600 hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </span>
+    </div>
+  );
 
   const runPreview = async () => {
     setCalculating(true);
@@ -415,6 +483,36 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   <RefreshCw className="w-3.5 h-3.5" /> Re-sync
                 </button>
               </div>
+              {!loadingSummary &&
+                !summaryError &&
+                filterBar(
+                  shownRows.length,
+                  rows.length,
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIncludedFor(shownRows, true)}
+                      disabled={shownSelectable.length === 0 || shownSelected === shownSelectable.length}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-40"
+                    >
+                      {filtering ? `Select shown (${shownSelectable.length})` : 'Select all'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIncludedFor(shownRows, false)}
+                      disabled={shownSelected === 0}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      {filtering ? 'Unselect shown' : 'Unselect all'}
+                    </button>
+                  </span>
+                )}
+              {!loadingSummary && !summaryError && (
+                <p className="text-[11px] text-slate-500 -mt-1 mb-2">
+                  <span className="font-semibold text-slate-700">{includedRows.length}</span> of {rows.filter(selectable).length} employees included in this run
+                  {filtering ? ` · ${shownSelected} of the ${shownSelectable.length} shown` : ''}
+                </p>
+              )}
               {loadingSummary ? (
                 <LoadingBlock />
               ) : summaryError ? (
@@ -424,7 +522,21 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
                       <tr>
-                        <th className="px-3 py-2 text-left">Include</th>
+                        <th className="px-3 py-2 text-left">
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              aria-label={filtering ? 'Include every employee shown' : 'Include every employee'}
+                              checked={shownSelectable.length > 0 && shownSelected === shownSelectable.length}
+                              ref={(el) => {
+                                if (el) el.indeterminate = shownSelected > 0 && shownSelected < shownSelectable.length;
+                              }}
+                              disabled={shownSelectable.length === 0}
+                              onChange={(e) => setIncludedFor(shownRows, e.target.checked)}
+                            />
+                            Include
+                          </label>
+                        </th>
                         <th className="px-3 py-2 text-left">Employee</th>
                         <th className="px-3 py-2 text-right">Working Days</th>
                         <th className="px-3 py-2 text-right">Present</th>
@@ -436,7 +548,14 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs">
-                      {rows.map((r) => (
+                      {shownRows.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-8 text-center text-slate-400">
+                            No employee matches the search.
+                          </td>
+                        </tr>
+                      )}
+                      {shownRows.map((r) => (
                         <tr key={r.employee_id} className={!r.included ? 'bg-slate-50/60' : ''}>
                           <td className="px-3 py-2">
                             <input
@@ -448,7 +567,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <p className="font-medium text-slate-800">{r.employee_name}</p>
-                            <p className="text-[10px] text-slate-400">{r.employee_code || '—'} · {r.department || '—'}</p>
+                            <p className="text-[10px] text-slate-400">{[r.employee_code || '—', r.designation, r.department || '—'].filter(Boolean).join(' · ')}</p>
                           </td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'total_working_days')}</td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'present_days')}</td>
@@ -510,6 +629,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 Add any manual Bonus/Incentive, Overtime, or Fine for this run — only for the {includedRows.length} employee
                 {includedRows.length === 1 ? '' : 's'} included from Step 2.
               </p>
+              {filterBar(shownIncluded.length, includedRows.length)}
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
@@ -524,9 +644,12 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {includedRows.map((r) => (
+                    {shownIncluded.map((r) => (
                       <tr key={r.employee_id}>
-                        <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <p className="font-medium text-slate-800">{r.employee_name}</p>
+                          <p className="text-[10px] text-slate-400">{[r.employee_code || '—', r.department || '—'].join(' · ')}</p>
+                        </td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_hours')}</td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_rate', 'w-20')}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-slate-800" title={`${r.overtime_hours || 0} h × ${r.overtime_rate || 0}`}>
@@ -550,12 +673,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                         </td>
                       </tr>
                     ))}
-                    {includedRows.length === 0 && (
+                    {includedRows.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
                           No employees included — go back to Step 2.
                         </td>
                       </tr>
+                    ) : (
+                      shownIncluded.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
+                            No employee matches the search.
+                          </td>
+                        </tr>
+                      )
                     )}
                   </tbody>
                 </table>
@@ -580,6 +711,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 <p className="text-xs text-rose-600 text-center py-16">{previewError}</p>
               ) : (
                 <>
+                  {filterBar(shownIncluded.length, includedRows.length)}
                   <div className="overflow-x-auto border border-slate-200 rounded-xl">
                     <table className="min-w-full divide-y divide-slate-200">
                       <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
@@ -592,12 +724,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-xs">
-                        {includedRows.map((r) => {
+                        {shownIncluded.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-8 text-center text-slate-400">
+                              No employee matches the search.
+                            </td>
+                          </tr>
+                        )}
+                        {shownIncluded.map((r) => {
                           const p = previewResults.get(r.employee_id);
                           return (
                             <tr key={r.employee_id}>
                               <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">
                                 {r.employee_name}
+                                <p className="text-[10px] font-normal text-slate-400">{[r.employee_code || '—', r.department || '—'].join(' · ')}</p>
                                 {p && !p.error && p.payment_split && p.payment_split.length > 0 && (
                                   <div className="mt-0.5 flex flex-wrap gap-1">
                                     {p.payment_split.map((s, i) => (
@@ -645,7 +785,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-50 font-semibold text-slate-700">
-                          <td className="px-3 py-2">Total ({previewTotals.count} employee{previewTotals.count === 1 ? '' : 's'})</td>
+                          <td className="px-3 py-2">
+                            Total ({previewTotals.count} employee{previewTotals.count === 1 ? '' : 's'})
+                            {filtering && <span className="block text-[10px] font-normal text-slate-400">whole run, not only those shown</span>}
+                          </td>
                           <td className="px-3 py-2 text-right">{money(previewTotals.gross)}</td>
                           <td className="px-3 py-2 text-right text-rose-600">{money(previewTotals.deductions)}</td>
                           <td className="px-3 py-2 text-right">{money(previewTotals.net)}</td>
