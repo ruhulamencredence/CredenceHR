@@ -5,7 +5,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
+import { CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
 import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -216,31 +216,24 @@ useLiveRefresh(() => load(true));
           returns to the tile menu via useBackButtonClose) and moves Submit
           Leave to a floating bottom-right button below, same design/position
           as Movement Claim's "Add Check In/Out" and Conveyance's "New Claim". */}
-      <div className="hidden md:flex items-center justify-between gap-3 px-5 pt-4 sm:px-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Menu
-        </button>
+      {/* Desktop: title and Submit Leave on one row (Back sits on the
+          breadcrumb row above, UserPanel.tsx). Hidden on mobile — the header
+          shows the title there. */}
+      <div className="hidden md:flex items-start justify-between gap-3 px-5 pt-4 sm:px-6">
+        <div className="min-w-0">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" style={{ color: 'var(--g-accent)' }} /> Leave Applications
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">Review, Approved and Rejected — every Leave Application you've submitted</p>
+        </div>
         <button
           type="button"
           onClick={() => setShowNewModal(true)}
-          className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-xl text-white transition-colors"
+          className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-xl text-white transition-colors shrink-0"
           style={{ background: 'var(--g-accent)' }}
         >
           <Plus className="w-3.5 h-3.5" /> Submit Leave
         </button>
-      </div>
-
-      {/* Heading/description hidden on mobile — redundant with the header's
-          title takeover. Desktop keeps the full block. */}
-      <div className="hidden md:block px-5 pt-4 sm:px-6">
-        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-          <CalendarDays className="w-4 h-4" style={{ color: 'var(--g-accent)' }} /> Leave Applications
-        </h3>
-        <p className="text-xs text-slate-500 mt-0.5">Review, Approved and Rejected — every Leave Application you've submitted</p>
       </div>
 
       {/* Own Leave balance — merged in from the old standalone "My Leave"

@@ -105,7 +105,7 @@ useLiveRefresh(() => fetchClaims(true));
     <>
       {!isNativeApp && (
         <div className="px-2 sm:px-0">
-          <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Conveyance Bill Claim']} />
+          <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Conveyance Bill Claim']} onBack={onBack} />
         </div>
       )}
     <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">

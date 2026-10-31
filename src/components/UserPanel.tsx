@@ -3156,7 +3156,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
       </div>
 
-      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-8'} pb-[calc(9rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:pb-8 space-y-8 max-md:space-y-3`}>
+      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-3'} pb-[calc(9rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:pb-8 space-y-8 max-md:space-y-3`}>
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
@@ -3262,7 +3262,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {canSeeMovementClaim && (
       <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
-          {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} />}
+          {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} onBack={() => goToMobileSection(null)} />}
           <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
           {/* The claim history (Open / Completed) — on the web too, not only in the mobile app. */}
           <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
@@ -3312,7 +3312,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         {!isNativeApp && (
           <div className="hidden md:block">
-            <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} />
+            <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} onBack={() => goToMobileSection(null)} />
           </div>
         )}
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} active={mobileActiveSection === 'leave'} />
