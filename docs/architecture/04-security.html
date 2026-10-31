@@ -85,7 +85,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>Login ID</td>
-<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো</td>
+<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো। Admin Panel → Users → Change Login ID-এ (Users module + <code>edit_add</code> layer, সার্ভারেও যাচাই) বর্তমান email ও username দুটোই দেখায়, নতুন username দেওয়া যায় (<code>PUT /api/users/:id/username</code>): ৩–৫০ অক্ষর, শুধু অক্ষর/সংখ্যা/<code>.</code>/<code>-</code>/<code>_</code>, অন্যের username, email বা অন্য কর্মীর Employee ID হলে 400; হাতে দেওয়া username পরে Employee save-এ বদলায় না</td>
 <td><code>EmployeeLoginId.ts</code>, <code>EmployeeRoutes.ts</code>, <code>DataImportRoutes.ts</code></td>
 </tr>
 <tr>
