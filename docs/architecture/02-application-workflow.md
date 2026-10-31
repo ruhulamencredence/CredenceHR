@@ -403,7 +403,7 @@ HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও �
 
 ## Profile → My Service Book
 
-কর্মীর নিজের Service Book (নিজের Employee 360, শুধু দেখা যায়) এখন **Profile** পাতায়: Personal Data-র নিচে "My Service Book" (ফোনে Account তালিকায়)। শুধু যাঁদের Module Access-এ "My Service Book" (`users.can_view_service_book`, ডিফল্টে বন্ধ) চালু, তাঁরাই দেখেন; server-এ `/api/hr-ops/my/p360` আগের মতোই এই সুইচ যাচাই করে। My Letters & Service Record-এ আর Service Book ট্যাব নেই — সেখানে সবার জন্য Service Record। Assistant-এর "My Service Book খুলুন" বোতাম সরাসরি Profile-এর Service Book খোলে।
+কর্মীর নিজের Service Book (নিজের Employee 360, শুধু দেখা যায়) এখন **Profile** পাতায়। Desktop-এ উপরে বড় ছবিসহ header (ক্যামেরা বোতামে Personal Data খুলে ছবি বদল), বাঁ দিকে মেনু (My Service Book, Contact & Account, Personal Data, My Asset, Appearance, Notifications, Fingerprint, Change Password / Username, Feedback, Logout), ডানে যেটা বাছা — শুরুতে My Service Book। ফোনে দুটো ট্যাব: Service Book আর Settings। শুধু যাঁদের Module Access-এ "My Service Book" (`users.can_view_service_book`, ডিফল্টে বন্ধ) চালু, তাঁরাই দেখেন; server-এ `/api/hr-ops/my/p360` আগের মতোই এই সুইচ যাচাই করে। My Letters & Service Record-এ আর Service Book ট্যাব নেই — সেখানে সবার জন্য Service Record। Assistant-এর "My Service Book খুলুন" বোতাম সরাসরি Profile-এর Service Book খোলে।
 
 ## Employee Tracking: কে কাকে দেখবে
 

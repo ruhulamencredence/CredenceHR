@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, Camera, Palette, Contact } from 'lucide-react';
 import { Employee360 } from './HrOps360';
 import { FingerprintSettings } from './FingerprintSettings';
 import { NotificationSettings } from './NotificationSettings';
@@ -58,19 +58,30 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   // My Service Book (own Employee 360, read only) — only with
   // users.can_view_service_book (the server checks it too, /api/hr-ops/my/p360).
   const canServiceBook = user.role === 'superadmin' || !!user.can_view_service_book;
-  const [showServiceBook, setShowServiceBook] = useState(() => {
+  // Desktop: the left menu picks what the right side shows (My Service Book
+  // first). Phone: two tabs, Service Book and Settings.
+  const wide = useMdUp();
+  const defaultPanel: Panel = canServiceBook ? 'book' : 'contact';
+  const [panel, setPanel] = useState<Panel>(defaultPanel);
+  const [mobileTab, setMobileTab] = useState<'book' | 'settings'>(canServiceBook ? 'book' : 'settings');
+  const showServiceBook = () => {
+    if (!canServiceBook) return;
+    setPanel('book');
+    setMobileTab('book');
+  };
+  useEffect(() => {
     try {
-      const open = sessionStorage.getItem('profile_open') === 'service_book';
+      if (sessionStorage.getItem('profile_open') === 'service_book') showServiceBook();
       sessionStorage.removeItem('profile_open');
-      return open && canServiceBook;
     } catch {
-      return false;
+      // storage unavailable
     }
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The Assistant's "My Service Book" button while this page is already open.
   useEffect(() => {
     const onOpen = (e: Event) => {
-      if ((e as CustomEvent).detail === 'service_book' && canServiceBook) setShowServiceBook(true);
+      if ((e as CustomEvent).detail === 'service_book') showServiceBook();
       try {
         sessionStorage.removeItem('profile_open');
       } catch {
@@ -99,7 +110,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
-  if (showPersonalData) {
+  if (!wide && showPersonalData) {
     return (
       <PersonalDataForm
         token={token}
@@ -110,11 +121,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
     );
   }
 
-  if (showChangePassword) {
+  if (!wide && showChangePassword) {
     return <ChangePasswordForm token={token} onBack={() => setShowChangePassword(false)} />;
   }
 
-  if (showChangeUsername) {
+  if (!wide && showChangeUsername) {
     return (
       <ChangeUsernameForm
         token={token}
@@ -128,26 +139,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
     );
   }
 
-  if (showServiceBook && canServiceBook) {
-    return (
-      <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
-        <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-          {!Capacitor.isNativePlatform() && <ModulePath path={['Profile', 'My Service Book']} />}
-          <div className="flex items-center gap-2 mb-4 mt-2">
-            <button type="button" onClick={() => setShowServiceBook(false)} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
-              <ArrowLeft className="w-5 h-5 text-slate-500" />
-            </button>
-            <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
-              <BookOpen className="w-5 h-5 text-blue-600 shrink-0" /> My Service Book
-            </h1>
-          </div>
-          <Employee360 token={token} employeeId={null} self />
-        </div>
-      </div>
-    );
-  }
-
-  if (showAssetManagement) {
+  if (!wide && showAssetManagement) {
     // AssetManagement.tsx now carries its own Leave-Application-style
     // header/back link (see AssetManagement.tsx's return) — same component
     // App.tsx's Asset Management sidebar entry renders, so both entry
@@ -192,11 +184,22 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div className="flex flex-col items-center mt-4">
-              <div
-                className="w-[104px] h-[104px] rounded-full bg-white flex items-center justify-center text-3xl font-semibold overflow-hidden"
-                style={{ color: 'var(--g-accent)', border: '3px solid rgba(255,255,255,0.55)' }}
-              >
-                {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}
+              <div className="relative">
+                <div
+                  className="w-[124px] h-[124px] rounded-full bg-white flex items-center justify-center text-4xl font-semibold overflow-hidden shadow-[0_14px_30px_-10px_rgba(0,0,0,0.45)]"
+                  style={{ color: 'var(--g-accent)', border: '4px solid rgba(255,255,255,0.7)' }}
+                >
+                  {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPersonalData(true)}
+                  aria-label="Change photo"
+                  className="absolute bottom-1 right-1 w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-md"
+                  style={{ color: 'var(--g-accent)' }}
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
               </div>
               <div className="mt-3 flex items-center gap-1.5 text-white text-base font-semibold">
                 {user.name}
@@ -208,6 +211,27 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
         </div>
 
         <div className="px-4 -mt-8 relative space-y-4 pb-8">
+          {canServiceBook && (
+            <div className="gemini-card p-1 flex" role="tablist">
+              {(['book', 'settings'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileTab === t}
+                  onClick={() => setMobileTab(t)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-[13px] font-semibold transition-colors"
+                  style={mobileTab === t ? { background: 'var(--g-accent)', color: '#fff' } : { color: 'var(--g-text-muted)' }}
+                >
+                  {t === 'book' ? <BookOpen className="w-4 h-4" /> : <UserCircle2 className="w-4 h-4" />}
+                  {t === 'book' ? 'Service Book' : 'Settings'}
+                </button>
+              ))}
+            </div>
+          )}
+          {canServiceBook && mobileTab === 'book' && !wide && <Employee360 token={token} employeeId={null} self />}
+          {mobileTab === 'settings' && (
+          <>
           <section className="gemini-card p-4">
             <p className="text-[11px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--g-text-muted)' }}>
               Contact
@@ -236,7 +260,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 label="Personal Data"
                 onClick={() => setShowPersonalData(true)}
               />
-              {canServiceBook && <ProfileRow icon={<BookOpen className="w-4 h-4" />} label="My Service Book" onClick={() => setShowServiceBook(true)} />}
               <ProfileRow
                 icon={<Package className="w-4 h-4" />}
                 label="My Asset"
@@ -281,141 +304,215 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               />
             </section>
           </div>
+          </>
+          )}
         </div>
       </div>
 
       {/* ---------------- Desktop layout ----------------
-          max-w-5xl, not 3xl: at 3xl this sat as a 768px column stranded in
-          the middle of the content area beside the sidebar, which read as the
-          phone layout blown up rather than a desktop page. */}
-      <div className="hidden md:block max-w-5xl mx-auto px-6 py-8">
+          A hero header with a large photo, then a menu on the left (icons as
+          in the app's own sidebar) and what it opens on the right — My
+          Service Book first. */}
+      <div className="hidden md:block max-w-[1400px] mx-auto px-6 py-6">
         <ModulePath path={['Profile']} />
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm mb-6 hover:opacity-70 transition-opacity"
+          className="flex items-center gap-1.5 text-sm mb-4 hover:opacity-70 transition-opacity"
           style={{ color: 'var(--g-text-muted)' }}
         >
           <ChevronLeft className="w-4 h-4" />
           Back
         </button>
 
-        <section className="gemini-card p-6 flex items-center gap-5">
+        <section className="gemini-card overflow-hidden">
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-semibold shrink-0 overflow-hidden"
-            style={{ background: 'var(--g-accent-soft)', color: 'var(--g-accent)' }}
+            className="relative h-28 overflow-hidden"
+            style={{ background: 'linear-gradient(120deg, var(--g-banner-1, #7F00FF) 0%, var(--g-banner-2, #6300C6) 55%, var(--g-banner-3, #47008E) 100%)' }}
           >
-            {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}
+            <span className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-white/10" />
+            <span className="absolute right-40 -bottom-20 w-48 h-48 rounded-full bg-white/10" />
+            <span className="absolute left-1/3 -top-10 w-28 h-28 rounded-full bg-white/5" />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 text-lg font-semibold">
-              {user.name}
-              <BadgeCheck className="w-4 h-4" style={{ color: 'var(--g-accent)' }} />
-            </div>
-            <p className="text-sm mt-0.5" style={{ color: 'var(--g-text-muted)' }}>
-              {roleLabel} &middot; Credence Housing Limited
-            </p>
-          </div>
-          <span
-            className="text-xs font-medium px-3 py-1 rounded-full shrink-0"
-            style={{ background: 'var(--g-accent-soft)', color: 'var(--g-accent-hover)' }}
-          >
-            {roleLabel}
-          </span>
-        </section>
-
-        {/* Two columns rather than one stacked run: Contact and Personal Data
-            are two or three lines each, so side by side with Settings they
-            fill the width instead of leaving most of the page empty. */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 items-start">
-          <div className="lg:col-span-1 space-y-4">
-            <section className="gemini-card p-5">
-              <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
-                Contact
-              </p>
-              <div className="flex items-center gap-2.5 py-1.5 text-sm">
-                <Mail className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-                <span className="truncate">{user.email || username || '—'}</span>
+          <div className="px-7 pb-5 flex items-end gap-5 -mt-16">
+            <div className="relative shrink-0">
+              <div
+                className="w-36 h-36 rounded-full p-[5px] shadow-[0_18px_40px_-12px_rgba(71,0,142,0.55)]"
+                style={{ background: 'linear-gradient(140deg, #ffffff 0%, var(--g-accent-100, #EDE9FE) 100%)' }}
+              >
+                <div
+                  className="w-full h-full rounded-full overflow-hidden flex items-center justify-center text-5xl font-semibold"
+                  style={{ background: 'var(--g-accent-soft)', color: 'var(--g-accent)' }}
+                >
+                  {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}
+                </div>
               </div>
-              <div className="flex items-center gap-2.5 py-1.5 text-sm">
-                <Building2 className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-                <span>Credence Housing Limited, Dhaka</span>
-              </div>
-            </section>
-
-            {/* `block` matters: a <button> centres its content vertically, so
-                whenever this card was stretched to match the one beside it,
-                its heading sat lower than that card's and the two rows
-                visibly failed to line up. */}
-            <div className="gemini-card p-5 block w-full text-left">
-              <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
-                Personal Data
-              </p>
               <button
                 type="button"
-                onClick={() => setShowPersonalData(true)}
-                className="w-full flex items-center justify-between gap-2.5 py-1.5 text-sm text-left hover:opacity-80 transition-opacity"
+                onClick={() => setPanel('personal')}
+                aria-label="Change photo"
+                title="Change photo (Personal Data)"
+                className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-md hover:scale-105 transition-transform"
+                style={{ color: 'var(--g-accent)' }}
               >
-                <span className="flex items-center gap-2.5">
-                  <UserIcon className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-                  <span>Edit your details</span>
-                </span>
-                <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
+                <Camera className="w-[18px] h-[18px]" />
               </button>
-              {canServiceBook && (
-                <button
-                  type="button"
-                  onClick={() => setShowServiceBook(true)}
-                  className="w-full flex items-center justify-between gap-2.5 py-1.5 mt-1 text-sm text-left hover:opacity-80 transition-opacity"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <BookOpen className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-                    <span>My Service Book</span>
+            </div>
+            <div className="min-w-0 flex-1 pb-2">
+              <div className="flex items-center gap-2 text-2xl font-bold leading-tight">
+                <span className="truncate">{user.name}</span>
+                <BadgeCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--g-accent)' }} />
+              </div>
+              <p className="text-sm mt-1 flex flex-wrap items-center gap-x-3 gap-y-1" style={{ color: 'var(--g-text-muted)' }}>
+                {(user.email || username) && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Mail className="w-4 h-4" /> {user.email || username}
                   </span>
-                  <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
-                </button>
-              )}
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4" /> Credence Housing Limited
+                </span>
+              </p>
             </div>
+            <span
+              className="mb-3 text-xs font-semibold px-3 py-1 rounded-full shrink-0 inline-flex items-center gap-1.5"
+              style={{ background: 'var(--g-accent-soft)', color: 'var(--g-accent-hover)' }}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" /> {roleLabel}
+            </span>
           </div>
+        </section>
 
-          <section className="gemini-card lg:col-span-2 overflow-hidden">
-            {/* pt-5, matching the p-5 on the cards beside it, so this heading
-                and theirs sit on the same line now that they're side by side. */}
-            <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-5 pb-1" style={{ color: 'var(--g-text-muted)' }}>
-              Appearance
-            </p>
-            <div className="border-b" style={{ borderColor: 'var(--g-border)' }}>
-              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} padded />
-            </div>
-            <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
-              Settings
-            </p>
-            <ProfileRow icon={<Package className="w-4 h-4" />} label="My Asset" onClick={() => setShowAssetManagement(true)} padded />
-            <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
-            {canUseFingerprint(user) && (
-              <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} padded />
-            )}
-            {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} padded />}
-            {!!username && (
-              <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
-            )}
+        <div className="grid grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] gap-5 mt-5 items-start">
+          <nav className="gemini-card p-2.5 sticky top-4" aria-label="Profile menu">
+            <MenuHeading>Profile</MenuHeading>
+            {canServiceBook && <MenuItem icon={BookOpen} label="My Service Book" active={panel === 'book'} onClick={() => setPanel('book')} />}
+            <MenuItem icon={Contact} label="Contact & Account" active={panel === 'contact'} onClick={() => setPanel('contact')} />
+            <MenuItem icon={UserIcon} label="Personal Data" active={panel === 'personal'} onClick={() => setPanel('personal')} />
+            <MenuItem icon={Package} label="My Asset" active={panel === 'asset'} onClick={() => setPanel('asset')} />
+            <MenuHeading>Preferences</MenuHeading>
+            <MenuItem icon={Palette} label="Appearance" active={panel === 'appearance'} onClick={() => setPanel('appearance')} />
+            {!Capacitor.isNativePlatform() && <MenuItem icon={BellRing} label="Notifications" onClick={() => setShowNotifications(true)} />}
+            {canUseFingerprint(user) && <MenuItem icon={Fingerprint} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />}
+            <MenuHeading>Security</MenuHeading>
+            <MenuItem icon={Lock} label="Change Password" active={panel === 'password'} onClick={() => setPanel('password')} />
+            {!!username && <MenuItem icon={UserCircle2} label="Change Username" active={panel === 'username'} onClick={() => setPanel('username')} />}
             {canGiveFeedback(user) && (
-              <ProfileRow icon={<MessageSquareHeart className="w-4 h-4" />} label="Give feedback" onClick={() => setShowFeedback(true)} padded />
+              <>
+                <MenuHeading>Help</MenuHeading>
+                <MenuItem icon={MessageSquareHeart} label="Give feedback" onClick={() => setShowFeedback(true)} />
+              </>
             )}
-            <ProfileRow
-              icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
-              label="Logout"
-              labelColor="#B3261E"
-              onClick={onLogout}
-              last
-              padded
-            />
-          </section>
+            <div className="my-2 border-t" style={{ borderColor: 'var(--g-border)' }} />
+            <MenuItem icon={LogOut} label="Logout" danger onClick={onLogout} />
+            <p className="px-3 pt-2 pb-1 text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+              {appVersion}
+            </p>
+          </nav>
+
+          <div className="min-w-0">
+            {wide && panel === 'book' && canServiceBook && <Employee360 token={token} employeeId={null} self />}
+            {panel === 'contact' && (
+              <section className="gemini-card p-6">
+                <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
+                  Contact &amp; Account
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <InfoTile icon={Mail} label="Email" value={user.email || '—'} />
+                  <InfoTile icon={UserCircle2} label="Username" value={username || '—'} />
+                  <InfoTile icon={ShieldCheck} label="Role" value={roleLabel} />
+                  <InfoTile icon={Building2} label="Organization" value="Credence Housing Limited, Dhaka" />
+                </div>
+              </section>
+            )}
+            {panel === 'appearance' && (
+              <section className="gemini-card overflow-hidden">
+                <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-5 pb-1" style={{ color: 'var(--g-text-muted)' }}>
+                  Appearance
+                </p>
+                <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} padded />
+              </section>
+            )}
+            {wide && panel === 'personal' && (
+              <PersonalDataForm token={token} onBack={() => setPanel(defaultPanel)} onSaved={onProfileNameUpdated} onPhotoUpdated={onPhotoUpdated} />
+            )}
+            {wide && panel === 'password' && <ChangePasswordForm token={token} onBack={() => setPanel(defaultPanel)} />}
+            {wide && panel === 'username' && (
+              <ChangeUsernameForm
+                token={token}
+                currentUsername={username}
+                onBack={() => setPanel(defaultPanel)}
+                onSaved={(newUsername) => {
+                  setUsername(newUsername);
+                  onUsernameUpdated?.(newUsername);
+                }}
+              />
+            )}
+            {wide && panel === 'asset' && <AssetManagement onBack={() => setPanel(defaultPanel)} />}
+          </div>
         </div>
       </div>
     </div>
   );
 };
+
+type Panel = 'book' | 'contact' | 'appearance' | 'personal' | 'password' | 'username' | 'asset';
+
+// md and up (768px): the desktop layout. Panels that load data render only
+// in the layout actually on screen.
+function useMdUp(): boolean {
+  const q = '(min-width: 768px)';
+  const [on, setOn] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : true));
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const m = window.matchMedia(q);
+    const f = () => setOn(m.matches);
+    m.addEventListener?.('change', f);
+    return () => m.removeEventListener?.('change', f);
+  }, []);
+  return on;
+}
+
+const MenuHeading: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="px-3 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: 'var(--g-text-muted)' }}>
+    {children}
+  </p>
+);
+
+// Same shape as the app's sidebar items (GlobalSidebar.tsx renderItem): an
+// 18px icon and the label, the open one filled with the accent colour.
+const MenuItem: React.FC<{ icon: React.ComponentType<{ className?: string }>; label: string; active?: boolean; danger?: boolean; onClick: () => void }> = ({
+  icon: Icon,
+  label,
+  active,
+  danger,
+  onClick
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-current={active ? 'page' : undefined}
+    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13.5px] text-left transition-colors ${active ? 'font-semibold shadow-sm' : 'hover:bg-[var(--g-accent-100)]'}`}
+    style={active ? { background: 'var(--g-accent)', color: '#fff' } : { color: danger ? '#B3261E' : 'var(--g-text, #1f2937)' }}
+  >
+    <Icon className="w-[18px] h-[18px] shrink-0" />
+    <span className="truncate">{label}</span>
+  </button>
+);
+
+const InfoTile: React.FC<{ icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; label: string; value: string }> = ({ icon: Icon, label, value }) => (
+  <div className="flex items-center gap-3 rounded-2xl border p-3.5" style={{ borderColor: 'var(--g-border)' }}>
+    <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--g-accent-100)' }}>
+      <Icon className="w-4 h-4" style={{ color: 'var(--g-accent)' }} />
+    </span>
+    <span className="min-w-0">
+      <span className="block text-[11px] uppercase tracking-wide" style={{ color: 'var(--g-text-muted)' }}>
+        {label}
+      </span>
+      <span className="block text-sm font-medium truncate">{value}</span>
+    </span>
+  </div>
+);
 
 // One tappable/display row shared by both layouts — icon in a tinted circle,
 // label, and either a value, a "Coming soon" badge (disabled rows), or a
