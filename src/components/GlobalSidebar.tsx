@@ -1,3 +1,4 @@
+import { setNavEntries } from '../lib/navRegistry';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -669,6 +670,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...adminFlatItems
   ];
   const itemByKey = new Map<string, NavItem>(allItems.map((i) => [i.key, i]));
+  // The Dashboard's search offers these same pages (navRegistry.ts).
+  setNavEntries(allItems.map((i) => ({ key: i.key, label: i.label, onClick: i.onClick })));
   const pick = (...keys: (string | { heading: string })[]): Entry[] => {
     const out: Entry[] = [];
     for (const k of keys) {

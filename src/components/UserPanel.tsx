@@ -31,6 +31,7 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
+import { DashboardGreeting } from './DashboardGreeting';
 import { BookRideCard, useActiveRides } from './BookRideCard';
 import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
@@ -3162,15 +3163,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           single banner used before this change. */}
       {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
       <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
-        {!isNativeApp && <ModulePath path={['Dashboard']} />}
-        {/* Same greeting as the Admin Dashboard (AdminPanel.tsx): plain text
-            on the page background — "Hi Name," in the accent colour, a large
-            heading and the line under it. */}
-        <div className="pt-1 pb-1">
-          <p className="text-sm font-semibold" style={{ color: 'var(--g-accent)' }}>Hi {user.name.split(' ')[0]},</p>
-          <h3 className="mt-0.5 text-2xl sm:text-[32px] sm:leading-tight font-bold tracking-tight text-slate-900">Welcome back!</h3>
-          <p className="mt-1 text-sm text-slate-500">Check in your attendance, submit a New MPR Entry, and keep an eye on Notices — all from here.</p>
-        </div>
+        {/* Date, greeting, search (Ctrl K), Check in, quick actions and today's chips. */}
+        <DashboardGreeting
+          token={token}
+          user={user}
+          onCheckIn={() => {
+            const el = document.getElementById('dash-attendance');
+            if (!el) return;
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('ring-4', 'ring-violet-200');
+            setTimeout(() => el.classList.remove('ring-4', 'ring-violet-200'), 1600);
+          }}
+        />
       </div>
 
       {/* Desktop Dashboard cards (Check In/Check Out, Leave Summary, Pending
@@ -3196,7 +3200,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         {!!user.can_use_attendance && (
-          <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
+          <div id="dash-attendance" className="rounded-[24px] transition-shadow">
+            <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
+          </div>
         )}
         {!!user.can_view_leave_summary && (
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />

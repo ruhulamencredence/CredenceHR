@@ -351,6 +351,34 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // — so a User who already punched the office device shows up as checked in
   // here too (check_in_source/check_out_source say which one it came from).
   // A Remote value, once set, is never overridden by Office data.
+  // GET /api/attendance/today-summary — this account's own first in / last
+  // out today, from any project (remote) or the office device (Dashboard
+  // greeting's "Checked in at …" chip). Only ever the caller's own times.
+  app.get("/api/attendance/today-summary", authenticateToken, async (req: any, res) => {
+    try {
+      const today = todayInDhaka();
+      const rows: any[] = await queryDB("SELECT check_in_at, check_out_at FROM attendance WHERE user_id = ? AND attendance_date = ?", [req.user.id, today]);
+      let inAt: any = null;
+      let outAt: any = null;
+      for (const r of rows) {
+        if (r.check_in_at && (!inAt || new Date(r.check_in_at) < new Date(inAt))) inAt = r.check_in_at;
+        if (r.check_out_at && (!outAt || new Date(r.check_out_at) > new Date(outAt))) outAt = r.check_out_at;
+      }
+      const emp: any[] = await queryDB("SELECT zk_device_pin FROM all_employees WHERE user_id = ? AND zk_device_pin IS NOT NULL LIMIT 1", [req.user.id]);
+      if (emp.length > 0) {
+        const p: any[] = await queryDB(
+          "SELECT MIN(punch_time) AS first_in, CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS last_out FROM zk_attendance_logs WHERE device_user_pin = ? AND DATE(punch_time) = ?",
+          [emp[0].zk_device_pin, today]
+        );
+        if (p[0]?.first_in && (!inAt || new Date(p[0].first_in) < new Date(inAt))) inAt = p[0].first_in;
+        if (p[0]?.last_out && (!outAt || new Date(p[0].last_out) > new Date(outAt))) outAt = p[0].last_out;
+      }
+      res.json({ date: today, check_in_at: inAt, check_out_at: outAt });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/attendance/status", authenticateToken, async (req: any, res) => {
     try {
       const project_id = Number(req.query.project_id);
