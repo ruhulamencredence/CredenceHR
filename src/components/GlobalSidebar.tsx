@@ -687,7 +687,17 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myBreak') },
-    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myPayslips', 'myMobileSim', 'myRequisitions', 'myLoans', 'myLetters') },
+    {
+      key: 'g_requests',
+      label: 'Requests & Claims',
+      icon: Wallet,
+      // Grouped by what they are: money, things the office gives you, HR papers.
+      entries: pick(
+        { heading: 'Claims & Money' }, 'userMovementClaims', 'userConveyanceClaims', 'myLoans', 'myPayslips',
+        { heading: 'Office Items' }, 'assetManagement', 'myMobileSim', 'myRequisitions', 'vehicleManagement',
+        { heading: 'HR Documents' }, 'myLetters'
+      )
+    },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
