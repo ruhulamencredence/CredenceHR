@@ -6,7 +6,7 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, ChevronLeft, Trash2 } from 'lucide-react';
+import { BellRing, Check, ChevronLeft, Mail, MailOpen, Trash2 } from 'lucide-react';
 import { confirmDialog } from '../lib/confirmDialog';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
@@ -78,6 +78,20 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
   }, [fetchAlerts]);
 
   const unreadCount = alerts.filter((a) => !a.is_read).length;
+  const [show, setShow] = useState<'all' | 'unread' | 'read'>('all');
+  const shown = alerts.filter((a) => (show === 'unread' ? !a.is_read : show === 'read' ? a.is_read : true));
+
+  // Read <-> Unread on one alert (the row's envelope button).
+  const toggleRead = async (alert: Alert, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nowRead = !alert.is_read;
+    setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, is_read: nowRead } : a)));
+    try {
+      await fetch(apiUrl(`/api/alerts/${alert.id}/${nowRead ? 'read' : 'unread'}`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // Best-effort, same as markRead below.
+    }
+  };
 
   const markRead = async (id: number) => {
     setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, is_read: true } : a)));
@@ -369,13 +383,36 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               liquid-glass Alerts sheet in AlertsBell.tsx) with a dot while
               unread; no backdrop blur per card, so long lists still scroll
               smoothly. */}
+          {alerts.length > 0 && (
+            <div className="px-4 sm:px-6 py-3 max-sm:px-3 sm:border-b border-slate-100 flex items-center gap-1.5">
+              {(
+                [
+                  ['all', `All (${alerts.length})`],
+                  ['unread', `Unread (${unreadCount})`],
+                  ['read', `Read (${alerts.length - unreadCount})`]
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setShow(k)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${show === k ? 'text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}
+                  style={show === k ? { background: 'var(--g-accent)' } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="max-sm:px-2 max-sm:space-y-2">
             {loading ? (
               <LoadingBlock />
             ) : alerts.length === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">No alerts yet.</div>
+            ) : shown.length === 0 ? (
+              <div className="px-4 py-16 text-center text-sm text-slate-400">{show === 'unread' ? 'No unread alerts.' : 'No read alerts.'}</div>
             ) : (
-              alerts.map((alert) => (
+              shown.map((alert) => (
                 <div
                   key={alert.id}
                   onClick={() => handleAlertClick(alert)}
@@ -385,10 +422,19 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                 >
                   <span className={`sm:hidden mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
                   <div className="flex-1 min-w-0">
-                    <div className={`text-sm text-slate-900 ${alert.is_read ? 'font-medium' : 'font-medium max-sm:font-semibold'}`}>{alert.title}</div>
+                    <div className={`text-sm text-slate-900 ${alert.is_read ? 'font-medium' : 'font-bold'}`}>{alert.title}</div>
                     <div className="text-xs mt-1 text-slate-600">{alert.message}</div>
                     <div className="text-[11px] mt-1.5 text-slate-400">{formatDate(alert.created_at)}</div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => toggleRead(alert, e)}
+                    className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    title={alert.is_read ? 'Mark as unread' : 'Mark as read'}
+                    aria-label={alert.is_read ? 'Mark as unread' : 'Mark as read'}
+                  >
+                    {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => removeAlert(alert.id, e)}

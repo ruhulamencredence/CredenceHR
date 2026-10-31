@@ -196,6 +196,16 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
     }
   });
 
+  // POST /api/alerts/:id/unread — the Alerts page's "Mark unread" (own alert only).
+  app.post("/api/alerts/:id/unread", authenticateToken, async (req: any, res) => {
+    try {
+      await queryDB("UPDATE alerts SET is_read = 0 WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/alerts/read-all — the bell dropdown's "Mark all read".
   app.post("/api/alerts/read-all", authenticateToken, async (req: any, res) => {
     try {
