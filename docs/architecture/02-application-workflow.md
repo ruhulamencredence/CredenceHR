@@ -396,6 +396,14 @@ Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `
 
 ফোনের Back প্রথমে সবচেয়ে উপরের খোলা popup / sheet / ধাপ বন্ধ করে (`backButtonStack.ts`, প্রতিটা popup `useBackButtonClose` দিয়ে নিজেকে রাখে)। কিছু খোলা না থাকলে পুরো পাতা এক ধাপ পেছায় (`App.tsx`): Chat / Alerts / Profile / যেকোনো Self Service পাতা → যেখান থেকে খোলা হয়েছিল (Dashboard); Admin Panel-এর কোনো পাতা → Admin Dashboard → User Dashboard। শুধু User Dashboard-এ "Press back again to exit", ২ সেকেন্ডের মধ্যে আবার চাপলে app বন্ধ।
 
+## Employee Tracking: কে কাকে দেখবে
+
+Admin Panel → Users → Module Access → Employee Tracking টিক দিলে নিচে "Who they can see on Employee Tracking" খোলে: বিভাগের checklist আর "Add an employee" (নাম · Employee ID · পদ · বিভাগ লিখে খোঁজা)। কিছু বাছা না থাকলে ওই অ্যাকাউন্ট সবাইকে দেখে; বাছা থাকলে শুধু টিক দেওয়া বিভাগের কর্মী আর আলাদা করে যোগ করা কর্মীরা (`PUT /api/users/:id/tracking-scope`, `TrackingScope.ts`)। এই সীমা live map, Currently Tracked / Not Tracked, notice পাঠানো, Notice Report, path history, Stay Report ও Live Follow-এ সার্ভারেই বসে। বিভাগের নাম বদলালে সীমাও সাথে বদলায়।
+
+## একই ফোনে account বদল
+
+Log out করে অন্য account-এ ঢুকলে header, drawer ও Profile-এর ছবি নতুন account-এর আসে: `useProfilePhoto` token বদলালে আগের ছবি সাথে সাথে মুছে দেয় আর browser cache ছাড়া আনে; সার্ভার নিজের ছবির উত্তর `no-store` পাঠায়। নতুন account-এর ছবি না থাকলে নামের আদ্যক্ষর দেখায়।
+
 ## Android app update
 
 ```mermaid

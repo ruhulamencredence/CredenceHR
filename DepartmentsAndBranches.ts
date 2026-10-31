@@ -409,6 +409,12 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         } catch {
           // Non-fatal — see comment above.
         }
+        // And Employee Tracking's (tracking_department_access, TrackingScope.ts).
+        try {
+          await queryDB("UPDATE tracking_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+        } catch {
+          // Non-fatal — see comment above.
+        }
       }
       res.json({ success: true });
     } catch (err: any) {

@@ -26,6 +26,7 @@
 // (requireModuleLayer("tracking", "stay_report") in server.ts).
 
 import type { Express } from "express";
+import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -221,6 +222,7 @@ export function registerTrackingStayReportRoutes(app: Express, deps: { authentic
     try {
       const userId = Number(req.query.user_id);
       if (!userId) return res.status(400).json({ error: "Pick an employee." });
+      if (!inTrackingScope(await getTrackingScope(queryDB, req.user), userId)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
       const from = String(req.query.from || "");
       const to = String(req.query.to || from);
       if (!DATE_RE.test(from) || !DATE_RE.test(to)) return res.status(400).json({ error: "Pick the dates." });

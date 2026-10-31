@@ -207,6 +207,29 @@ interface DeptState {
   saved: Record<DeptKind, string[]>;
   draft: Record<DeptKind, Set<string>>;
 }
+// Employee Tracking -> whom they may see (TrackingScope.ts): Departments plus
+// single Employees; both empty = everyone.
+interface TrackEmployee {
+  id: number;
+  employee_id: string;
+  name: string;
+  designation: string;
+  department: string;
+}
+interface TrackScope {
+  saved: { departments: string[]; employee_ids: number[] };
+  draft: { departments: Set<string>; employees: Set<number> };
+  options: TrackEmployee[];
+}
+const fetchTrackScope = (token: string, userId: number) =>
+  fetch(apiUrl(`/api/users/${userId}/tracking-scope`), { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((d: any) => ({
+      departments: Array.isArray(d?.departments) ? (d.departments as string[]) : [],
+      employee_ids: Array.isArray(d?.employee_ids) ? (d.employee_ids as number[]).map(Number) : [],
+      employees: Array.isArray(d?.employees) ? (d.employees as TrackEmployee[]) : []
+    }));
 
 const flagOf = (u: User, k: FlagKey): boolean => {
   const v = (u as any)[k];
@@ -249,7 +272,7 @@ interface Change {
 
 // Everything that differs between an account's saved access and its draft,
 // as the requests that save it.
-function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined): Change[] {
+function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined, track?: TrackScope): Change[] {
   const put = async (path: string, body: unknown) => {
     const res = await fetch(apiUrl(`/api/users/${u.id}/${path}`), {
       method: 'PUT',
@@ -274,6 +297,9 @@ function changesFor(token: string, u: User, base: Access, draft: Access, dept: D
       if (!draft.modules.has(d.module) || sameSet(dept.saved[d.module], dept.draft[d.module])) continue;
       out.push({ label: `${d.module} departments`, run: () => put(d.endpoint, { departments: [...dept.draft[d.module]] }) });
     }
+  }
+  if (track && draft.modules.has('tracking') && (!sameSet(track.saved.departments, track.draft.departments) || !sameSet(track.saved.employee_ids.map(String), [...track.draft.employees].map(String)))) {
+    out.push({ label: 'Employee Tracking — who they can see', run: () => put('tracking-scope', { departments: [...track.draft.departments], employee_ids: [...track.draft.employees] }) });
   }
   for (const f of FLAGS) {
     if (f.adminOnly && u.role !== 'admin') continue;
@@ -358,6 +384,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   // Department scopes: fetched for an account while it's edited on its own.
   const [depts, setDepts] = useState<Record<number, DeptState>>({});
   const [loadingDepts, setLoadingDepts] = useState(false);
+  const [tracks, setTracks] = useState<Record<number, TrackScope>>({});
 
   const [section, setSection] = useState<SectionKey>('general');
   const [query, setQuery] = useState('');
@@ -378,7 +405,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     setIds((cur) => [...cur, ...list.map((u) => u.id).filter((id) => !cur.includes(id))]);
   };
 
-  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id]) : []);
+  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id], tracks[u.id]) : []);
   const pending = selected.map((u) => ({ u, changes: changesOf(u) }));
   const changeCount = pending.reduce((s, p) => s + p.changes.length, 0);
   const changedAccounts = pending.filter((p) => p.changes.length > 0).length;
@@ -387,7 +414,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const u = userById.get(id);
     if (u && changesOf(u).length > 0 && !(await confirmDialog(`Drop the unsaved changes for ${u.name}?`, { tone: 'danger' }))) return;
     setIds((cur) => cur.filter((x) => x !== id));
-    for (const set of [setBase, setDrafts, setDepts] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
+    for (const set of [setBase, setDrafts, setDepts, setTracks] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
       set((m) => {
         const next = { ...m };
         delete next[id];
@@ -432,6 +459,34 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [single?.id]);
+
+  // Employee Tracking scope of the one account being edited, fetched fresh.
+  useEffect(() => {
+    if (!single || tracks[single.id]) return;
+    const u = single;
+    let cancelled = false;
+    fetchTrackScope(token, u.id).then((d) => {
+      if (cancelled) return;
+      setTracks((m) => ({
+        ...m,
+        [u.id]: { saved: { departments: d.departments, employee_ids: d.employee_ids }, draft: { departments: new Set(d.departments), employees: new Set(d.employee_ids) }, options: d.employees }
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [single?.id]);
+  const editTrack = (fn: (t: TrackScope['draft']) => void) => {
+    if (!single) return;
+    setTracks((m) => {
+      const cur = m[single.id];
+      if (!cur) return m;
+      const draft = { departments: new Set(cur.draft.departments), employees: new Set(cur.draft.employees) };
+      fn(draft);
+      return { ...m, [single.id]: { ...cur, draft } };
+    });
+  };
 
   // --- reading the selected accounts' drafts ---
   const aggregate = (get: (a: Access) => boolean, eligible: (u: User, a: Access) => boolean = () => true): Agg => {
@@ -526,6 +581,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         const draft = { ...cur.draft };
         DEPT_KINDS.forEach((d, i) => (draft[d.module] = new Set(lists[i])));
         return { ...m, [target.id]: { ...cur, draft } };
+      });
+      const t = await fetchTrackScope(token, src.id);
+      setTracks((m) => {
+        const cur = m[target.id];
+        if (!cur) return m;
+        return { ...m, [target.id]: { ...cur, draft: { departments: new Set(t.departments), employees: new Set(t.employee_ids) } } };
       });
     }
     setNotice(`Copied access from ${src.name} — check it, then Save.`);
@@ -659,6 +720,74 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     );
   };
 
+  const renderTrackingScope = () => {
+    if (!single) {
+      return <p className="ml-9 -mt-1 mb-3 text-[11px] text-slate-500">Who they can track is set one account at a time — open just one account to change it.</p>;
+    }
+    const ts = tracks[single.id];
+    const empById = new Map((ts?.options || []).map((e) => [e.id, e]));
+    const picked = ts ? [...ts.draft.employees].map((id) => empById.get(id) || { id, employee_id: '', name: `Employee #${id}`, designation: '', department: '' }) : [];
+    const everyone = !!ts && ts.draft.departments.size === 0 && ts.draft.employees.size === 0;
+    return (
+      <div className="ml-9 -mt-1 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+        <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-0.5">
+          <UsersIcon className="w-3.5 h-3.5 text-amber-600" /> Who they can see on Employee Tracking
+        </p>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Nothing chosen = every employee. Chosen = only the people in the ticked Departments plus the employees added below — on the map, status cards, history, Stay Report and Live Follow.
+        </p>
+        {!ts ? (
+          <p className="text-[11px] text-slate-400">Loading…</p>
+        ) : (
+          <>
+            <p className="text-[11px] font-semibold text-amber-900 mb-2">{everyone ? 'Now: everyone' : `Now: ${ts.draft.departments.size} department${ts.draft.departments.size === 1 ? '' : 's'} + ${ts.draft.employees.size} employee${ts.draft.employees.size === 1 ? '' : 's'}`}</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Departments</p>
+            {departments.length === 0 ? (
+              <p className="text-[11px] text-slate-400 mb-2">No Departments set up yet (Admin Panel → Departments).</p>
+            ) : (
+              <ModuleAccessChecklist
+                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+                selected={ts.draft.departments}
+                onToggle={(k) => editTrack((d) => (d.departments.has(k) ? d.departments.delete(k) : d.departments.add(k)))}
+                onSetMany={(keys, checked) => editTrack((d) => keys.forEach((k) => (checked ? d.departments.add(k) : d.departments.delete(k))))}
+                tone="amber"
+                searchPlaceholder="Search departments…"
+              />
+            )}
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-3 mb-1">Single employees</p>
+            <SearchSelect
+              value=""
+              onChange={(e) => e.target.value && editTrack((d) => d.employees.add(Number(e.target.value)))}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="">— Add an employee —</option>
+              {ts.options
+                .filter((e) => !ts.draft.employees.has(e.id))
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {[e.name, e.employee_id, e.designation, e.department].filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+            </SearchSelect>
+            {picked.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {picked.map((e) => (
+                  <span key={e.id} className="inline-flex items-center gap-1 text-[11.5px] font-semibold bg-white border border-amber-300 text-amber-900 rounded-full pl-2.5 pr-1 py-0.5">
+                    {e.name}
+                    {e.employee_id ? ` · ${e.employee_id}` : ''}
+                    <button type="button" onClick={() => editTrack((d) => d.employees.delete(e.id))} className="p-0.5 rounded-full hover:bg-amber-100" aria-label={`Remove ${e.name}`}>
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderModule = (m: { key: AdminModuleKey; label: string }) => {
     const agg = moduleAgg(m.key);
     const showGroupView = m.key === 'admin_dashboard' && (agg.on > 0 || anyAdmin);
@@ -678,6 +807,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         </button>
         {agg.on > 0 && LAYER_MODULES.includes(m.key) && renderLayers(m.key, layersFor(m.key))}
         {agg.on > 0 && DEPT_KINDS.some((d) => d.module === m.key) && renderDepts(m.key as DeptKind)}
+        {agg.on > 0 && m.key === 'tracking' && renderTrackingScope()}
         {showGroupView && <div className="ml-6">{renderFlag(FLAG.can_view_group_dashboard)}</div>}
       </React.Fragment>
     );

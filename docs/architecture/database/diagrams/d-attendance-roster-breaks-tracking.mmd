@@ -125,6 +125,11 @@ erDiagram
     int backup_user_id
     decimal lat
   }
+  tracking_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
   tracking_device_state {
     int user_id PK,FK
     tinyint location_on
@@ -133,6 +138,11 @@ erDiagram
     tinyint precise_granted
     varchar mode
     int battery_pct
+  }
+  tracking_employee_access {
+    int id PK
+    int user_id FK
+    int employee_pk
   }
   tracking_notice_recipients {
     int id PK
@@ -190,6 +200,8 @@ erDiagram
   all_employees ||--o{ late_waivers : "employee_id"
   users ||--o{ late_waivers : "waived_by"
   users ||--o{ location_pings : "user_id"
+  users ||--o{ tracking_department_access : "user_id"
+  users ||--o{ tracking_employee_access : "user_id"
   all_employees ||--o{ site_attendance_entries : "employee_id"
   site_attendance_sheets ||--o{ site_attendance_entries : "sheet_id"
   all_employees ||--o{ site_attendance_members : "employee_id"

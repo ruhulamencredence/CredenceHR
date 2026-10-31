@@ -22,19 +22,38 @@ import { apiUrl } from './api';
 export function useProfilePhoto(token: string, version: number = 0): string | null {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const tokenRef = useRef(token);
 
   useEffect(() => {
     let cancelled = false;
+    // Another account signed in on this device: drop the previous one's photo
+    // at once, so it is never shown even for a moment (or at all, when the
+    // new account has none).
+    if (tokenRef.current !== token) {
+      tokenRef.current = token;
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+      setPhotoUrl(null);
+    }
     if (!token) {
       setPhotoUrl(null);
       return;
     }
     (async () => {
       try {
+        // Same URL for every account — never take it from the browser cache.
         const res = await fetch(apiUrl('/api/profile/photo'), {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store'
         });
-        if (!res.ok || res.status === 204 || cancelled) return;
+        if (cancelled) return;
+        if (res.status === 204 || res.status === 404) {
+          if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+          setPhotoUrl(null);
+          return;
+        }
+        if (!res.ok) return;
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);

@@ -187,10 +187,15 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       // No photo is the normal case for most people, not an error: 204, so the
       // browser console doesn't fill with a red 404 per colleague. Callers
       // treat 204 as "show the initials".
-      if (!row || !row.photo_data) return res.status(204).end();
+      if (!row || !row.photo_data) return res.status(204).setHeader("Cache-Control", "no-store").end();
       const buffer: Buffer = Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data);
       res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
-      res.setHeader("Cache-Control", "private, max-age=300");
+      // "/api/profile/photo" (own photo) is one URL for every account, so it is
+      // never cached — on a phone shared by two people the browser handed the
+      // previous account's photo back after a switch. A colleague's photo by id
+      // may be kept a few minutes.
+      res.setHeader("Cache-Control", req.params.userId ? "private, max-age=300" : "no-store");
+      res.setHeader("Vary", "Authorization");
       res.send(buffer);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

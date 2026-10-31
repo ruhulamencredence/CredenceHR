@@ -57,6 +57,7 @@ import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
@@ -271,6 +272,8 @@ async function initDB() {
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    // Employee Tracking: whom each account may see (TrackingScope.ts).
+    await ensureTrackingScopeSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
     await ensureBreakSchema(dbPool);
     // Forgot password (PasswordResetRoutes.ts).

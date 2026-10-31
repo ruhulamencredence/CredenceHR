@@ -83,7 +83,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
 
   const loadPhoto = async () => {
     try {
-      const res = await fetch(apiUrl('/api/profile/photo'), { headers: authHeaders });
+      const res = await fetch(apiUrl('/api/profile/photo'), { headers: authHeaders, cache: 'no-store' });
       if (!res.ok || res.status === 204) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

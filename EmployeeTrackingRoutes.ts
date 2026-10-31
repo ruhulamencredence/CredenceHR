@@ -7,6 +7,7 @@
 // moved out of server.ts unchanged. The shared helpers they use are passed in by startServer().
 
 import { wallMinutes } from "./TrackingStayReport";
+import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 import type { Express } from "express";
 
 export interface RegisterEmployeeTrackingRoutesDeps {
@@ -106,7 +107,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   // now" map, not a history. Only users with at least one ping ever show up.
   app.get("/api/tracking/live", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM location_pings", []);
+      const scope = await getTrackingScope(queryDB, req.user);
+      const rows = (await queryDB("SELECT * FROM location_pings", [])).filter((r: any) => inTrackingScope(scope, r.user_id));
       const users = await queryDB("SELECT id, name, email, role FROM users", []);
       const userMap = new Map<number, any>(users.map((u: any) => [u.id, u]));
       const latestByUser = new Map<number, any>();
@@ -136,13 +138,16 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   // before a dot turns grey). Anyone not tracked gets the reason.
   const TRACKING_LIVE_MIN = 20;
   const TRACKING_STATE_MIN = 8;
-  const trackingStatusRows = async () => {
-    const employees: any[] = (await queryDB(
+  // Only the people `user` may track (TrackingScope.ts).
+  const trackingStatusRows = async (user: any) => {
+    const scope = await getTrackingScope(queryDB, user);
+    const allEmployees: any[] = (await queryDB(
       `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
          FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
         WHERE e.is_active = 1`,
       []
     )) || [];
+    const employees = scope ? allEmployees.filter((e) => scope.employeePks.has(Number(e.id))) : allEmployees;
     const pings: any[] = (await queryDB(
       `SELECT user_id, MAX(recorded_at) AS last_ping, TIMESTAMPDIFF(MINUTE, MAX(recorded_at), NOW()) AS minutes_ago
          FROM location_pings GROUP BY user_id`,
@@ -214,7 +219,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
 
   app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
-      const rows = await trackingStatusRows();
+      const rows = await trackingStatusRows(req.user);
       res.json({
         live_minutes: TRACKING_LIVE_MIN,
         tracked: rows.filter((r) => r.tracked).length,
@@ -241,7 +246,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       if (!message) return res.status(400).json({ error: "Message is required." });
       const wanted = new Set<number>((Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0));
       if (wanted.size === 0) return res.status(400).json({ error: "Pick at least one employee." });
-      const rows = (await trackingStatusRows()).filter((r) => !r.tracked && r.user_id && wanted.has(Number(r.user_id)));
+      const rows = (await trackingStatusRows(req.user)).filter((r) => !r.tracked && r.user_id && wanted.has(Number(r.user_id)));
       if (rows.length === 0) return res.status(400).json({ error: "None of the picked employees is currently not tracked." });
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const html = message.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br/>")}</p>`).join("");
@@ -273,7 +278,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       const [y, m] = month.split("-").map(Number);
       const from = `${month}-01 00:00:00`;
       const next = m === 12 ? `${y + 1}-01-01 00:00:00` : `${y}-${String(m + 1).padStart(2, "0")}-01 00:00:00`;
-      const sends: any[] = (await queryDB(
+      const scope = await getTrackingScope(queryDB, req.user);
+      const allSends: any[] = (await queryDB(
         `SELECT r.notice_id, r.user_id, r.employee_pk, r.reason, r.sent_at, n.title, s.name AS sent_by_name,
                 (SELECT d.dismissed_at FROM notice_dismissals d WHERE d.notice_id = r.notice_id AND d.user_id = r.user_id LIMIT 1) AS seen_at
            FROM tracking_notice_recipients r
@@ -283,6 +289,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
           ORDER BY r.sent_at`,
         [from, next]
       )) || [];
+      const sends = allSends.filter((x) => inTrackingScope(scope, x.user_id));
       const employees: any[] = (await queryDB("SELECT id, employee_id, name, designation, department, user_id FROM all_employees", [])) || [];
       const empByUser = new Map<number, any>(employees.filter((e) => e.user_id).map((e) => [Number(e.user_id), e]));
       const users: any[] = (await queryDB("SELECT id, name FROM users", [])) || [];
@@ -325,6 +332,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
     try {
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       if (!user_id) return res.status(400).json({ error: "user_id is required" });
+      if (!inTrackingScope(await getTrackingScope(queryDB, req.user), user_id)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
       const rows = await queryDB("SELECT * FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC", [user_id]);
       const from = req.query.from ? String(req.query.from) : null;
       const to = req.query.to ? String(req.query.to) : null;

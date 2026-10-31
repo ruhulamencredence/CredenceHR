@@ -1150,6 +1150,17 @@ Unique: `unique_site_sheet`(team_id,attendance_date)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 
+### `tracking_department_access`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `department` | varchar(150) | না |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_user_department`(user_id,department)
+
 ### `tracking_device_state`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1162,6 +1173,17 @@ Unique: `unique_site_sheet`(team_id,attendance_date)
 | `mode` | varchar(10) | হ্যাঁ |  | |
 | `battery_pct` | int(11) | হ্যাঁ |  | |
 | `reported_at` | timestamp | না | default current_timestamp() | |
+
+### `tracking_employee_access`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `employee_pk` | int(11) | না |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_user_employee`(user_id,employee_pk)
 
 ### `tracking_notice_recipients`
 

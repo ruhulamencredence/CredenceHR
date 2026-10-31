@@ -23,6 +23,7 @@ import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
+import { getTrackingScopeLists } from "./TrackingScope";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -936,6 +937,54 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         await queryDB("INSERT INTO duty_roster_department_access (user_id, department) VALUES (?, ?)", [id, department]);
       }
       res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Employee Tracking -> whom this account may see (TrackingScope.ts):
+  // Departments plus single Employees; both empty = everyone. The GET also
+  // returns the Employees to pick from (Name · ID · Designation · Department).
+  app.get("/api/users/:id/tracking-scope", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const lists = await getTrackingScopeLists(queryDB, Number(req.params.id));
+      const employees: any[] =
+        (await queryDB("SELECT id, employee_id, name, designation, department FROM all_employees WHERE is_active = 1 ORDER BY name ASC", [])) || [];
+      res.json({
+        ...lists,
+        employees: employees.map((e) => ({ id: Number(e.id), employee_id: e.employee_id || "", name: e.name, designation: e.designation || "", department: e.department || "" }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/tracking-scope", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Employee Tracking scope only applies to Admin and User accounts." });
+      }
+      const requestedDepts: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+      const requestedEmps: number[] = Array.isArray(req.body?.employee_ids) ? req.body.employee_ids : [];
+      // Only real Departments and Employees — anything else is dropped.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const departments = Array.from(new Set(requestedDepts.map((d) => String(d).trim()).filter((d) => d && realNames.has(d))));
+      const realEmployees: any = await queryDB("SELECT id FROM all_employees");
+      const realIds = new Set<number>(realEmployees.map((e: any) => Number(e.id)));
+      const employee_ids = Array.from(new Set(requestedEmps.map(Number).filter((n) => realIds.has(n))));
+      await queryDB("DELETE FROM tracking_department_access WHERE user_id = ?", [id]);
+      for (const department of departments) {
+        await queryDB("INSERT INTO tracking_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      await queryDB("DELETE FROM tracking_employee_access WHERE user_id = ?", [id]);
+      for (const pk of employee_ids) {
+        await queryDB("INSERT INTO tracking_employee_access (user_id, employee_pk) VALUES (?, ?)", [id, pk]);
+      }
+      res.json({ success: true, departments, employee_ids });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

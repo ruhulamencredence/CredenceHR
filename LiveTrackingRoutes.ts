@@ -22,6 +22,7 @@
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import { sendSilentPushToUserIds } from "./PushNotificationService";
+import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 
 interface Deps {
   authenticateToken: any;
@@ -131,8 +132,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
       try {
         const userId = Number(req.params.userId);
         if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ error: "Invalid employee." });
-        // Scoped read (same as the live board): only someone this account can
-        // already see on Employee Tracking can be followed.
+        // Only someone this account can already see on Employee Tracking
+        // (company and TrackingScope.ts) can be followed.
+        if (!inTrackingScope(await getTrackingScope(queryDB, req.user), userId)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
         const latest = await queryDB(
           "SELECT lat, lng, accuracy_m, battery_pct, recorded_at FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1",
           [userId]
