@@ -311,7 +311,7 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 </tr>
 <tr>
 <td><strong>Alerts (বেল)</strong></td>
-<td>সার্ভারে <code>createAlert()</code>; অ্যাপে পুশ (Firebase), ওয়েবে Web Push</td>
+<td>সার্ভারে <code>createAlert()</code>; অ্যাপে পুশ (Firebase), ওয়েবে Web Push। বেলের popup-এর "Clear all" ও মুছুন শুধু popup থেকে সরায় (<code>alerts.hidden_in_bell</code>, <code>POST /api/alerts/bell-clear</code>, <code>/:id/bell-hide</code>); Alerts পেজে সব থেকে যায়, সেখানকার Clear all-ই আসলে মোছে। মানচিত্র (Leaflet) নিজের stacking layer-এ থাকে, তাই popup সবসময় মানচিত্রের উপরে খোলে</td>
 </tr>
 <tr>
 <td><strong>AI Assistant</strong></td>

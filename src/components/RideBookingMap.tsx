@@ -213,7 +213,7 @@ export function RideBookingMap({ here, pickup, destination, active, onPick, onLo
   }, [showProjects, shownProjects]);
 
   return (
-    <div className={`relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100 ${className}`}>
+    <div className={`relative isolate rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100 ${className}`}>
       <div ref={containerRef} className={`absolute inset-0 ${onPick && active ? 'cursor-crosshair [&_.leaflet-container]:cursor-crosshair' : ''}`} />
       {onPickProject && projects.length > 0 && (
         <button

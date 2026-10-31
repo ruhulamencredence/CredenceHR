@@ -70,7 +70,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl('/api/alerts/unread-count'), {
+      const res = await fetch(apiUrl('/api/alerts/unread-count?bell=1'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) return;
@@ -84,7 +84,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/alerts'), {
+      const res = await fetch(apiUrl('/api/alerts?bell=1'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) setAlerts(await res.json());
@@ -154,11 +154,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   };
 
   const clearAll = async () => {
-    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
+    // Only empties this popup — every alert stays on the Alerts page.
+    if (!(await confirmDialog('Clear all alerts from this list? They stay on the Alerts page.'))) return;
     setAlerts([]);
     setUnreadCount(0);
     try {
-      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      await fetch(apiUrl('/api/alerts/bell-clear'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {
       // Best-effort, same as markRead above.
     }
@@ -170,8 +171,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     setAlerts((prev) => prev.filter((a) => a.id !== id));
     if (wasUnread) setUnreadCount((prev) => Math.max(0, prev - 1));
     try {
-      await fetch(apiUrl(`/api/alerts/${id}`), {
-        method: 'DELETE',
+      // Hidden from this popup only; it stays on the Alerts page.
+      await fetch(apiUrl(`/api/alerts/${id}/bell-hide`), {
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
     } catch {

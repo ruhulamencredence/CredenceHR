@@ -698,3 +698,10 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
     margin-left: 0;
   }
 }
+
+/* Leaflet stacks its tiles / markers / controls at z-index 400–1000. Keep
+   each map in its own stacking layer so header popups (Alerts, profile
+   menu…) always open above a map instead of under it. */
+.leaflet-container {
+  isolation: isolate;
+}
