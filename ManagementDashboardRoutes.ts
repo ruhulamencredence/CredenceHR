@@ -106,7 +106,7 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
           safe(queryDB("SELECT * FROM job_postings"), []),
           safe(queryDB("SELECT * FROM job_candidates"), []),
           safe(queryDB("SELECT id, project_id, computed_amount, created_at FROM entries WHERE deleted_at IS NULL AND created_at >= ?", [prevFrom]), []),
-          safe(queryDB("SELECT id, name FROM projects"), []),
+          safe(queryDB("SELECT id, project_name FROM projects"), []),
           safe(queryDB("SELECT d.id, d.status, d.dispatch_date, d.received_date, e.project_id FROM mpr_dispatches d JOIN entries e ON e.id = d.entry_id WHERE d.status <> 'cancelled'"), []),
           safe(queryDB("SELECT id, status, completed_at, department FROM tasks WHERE completed_at >= ?", [prevFrom]), []),
           safe(queryDB("SELECT id, status FROM grievances"), [])
@@ -301,7 +301,7 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
       ];
 
       // PEPM projects — MPR value entered this month, and material on the way / received.
-      const projName = new Map<number, string>((projects as any[]).map((p) => [Number(p.id), p.name]));
+      const projName = new Map<number, string>((projects as any[]).map((p) => [Number(p.id), p.project_name]));
       const projAgg = new Map<number, { value: number; prevValue: number; rows: number; sent: number; received: number }>();
       const pa = (id: number) => projAgg.get(id) || (projAgg.set(id, { value: 0, prevValue: 0, rows: 0, sent: 0, received: 0 }), projAgg.get(id)!);
       for (const e of entries as any[]) {
