@@ -410,8 +410,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     return [...seen.entries()].map(([value, v]) => ({ value, label: v.label, count: v.count })).sort((x, y) => x.label.localeCompare(y.label));
   };
   const deptOptions = facet('dept', (r) => (r.department || '').trim(), (k) => k, fDept);
-  const desigOptions = facet('desig', (r) => (r.designation || '').trim(), (k) => k, fDesig);
-  const userOptions = facet('user', (r) => String(r.employee_user_id), (_k, r) => [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · '), fUser);
+  const desigOptions = facet('desig', (r) => (r.designation || '').trim(), (k) => k, []);
+  const userOptions = facet('user', (r) => String(r.employee_user_id), (_k, r) => [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · '), []);
   const templateFilterOptions = facet(
     'tpl',
     tplKey,
@@ -419,6 +419,25 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     fTemplate
   );
   const shownRows = assignRows.filter((r) => passes(r));
+  // Department -> Designation -> User narrow each other: picking a Department
+  // drops ticked Designations / Users outside it, so the User list (and the
+  // table) only ever holds people of the chosen Departments.
+  const inDept = (r: any) => !fDept.length || fDept.includes((r.department || '').trim());
+  const inDesig = (r: any) => !fDesig.length || fDesig.includes((r.designation || '').trim());
+  useEffect(() => {
+    setFDesig((cur) => {
+      const next = cur.filter((v) => assignRows.some((r) => inDept(r) && (r.designation || '').trim() === v));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, assignRows]);
+  useEffect(() => {
+    setFUser((cur) => {
+      const next = cur.filter((id) => assignRows.some((r) => String(r.employee_user_id) === id && inDept(r) && inDesig(r)));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, fDesig, assignRows]);
   const anyFilter = fDept.length + fDesig.length + fUser.length + fTemplate.length > 0;
   const clearFilters = () => { setFDept([]); setFDesig([]); setFUser([]); setFTemplate([]); };
 
