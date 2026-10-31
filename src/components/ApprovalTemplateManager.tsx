@@ -383,25 +383,42 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   };
 
   const DEFAULT_KEY = '__default';
-  const optList = (vals: (string | null | undefined)[]) =>
-    [...new Set(vals.map((v) => (v || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((v) => ({ value: v, label: v }));
-  const deptOptions = optList(assignRows.map((r) => r.department));
-  const desigOptions = optList(assignRows.map((r) => r.designation));
-  const userOptions = assignRows.map((r) => ({
-    value: String(r.employee_user_id),
-    label: [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · ')
-  }));
-  const templateFilterOptions = [
-    { value: DEFAULT_KEY, label: 'Using the default' },
-    ...templates.filter((t) => t.request_type === requestType).map((t) => ({ value: String(t.id), label: t.name }))
-  ];
-  const shownRows = assignRows.filter((r) => {
-    if (fDept.length && !fDept.includes((r.department || '').trim())) return false;
-    if (fDesig.length && !fDesig.includes((r.designation || '').trim())) return false;
-    if (fUser.length && !fUser.includes(String(r.employee_user_id))) return false;
-    if (fTemplate.length && !fTemplate.includes(r.assigned_template_id ? String(r.assigned_template_id) : DEFAULT_KEY)) return false;
-    return true;
-  });
+  // Each filter only offers what the OTHER filters still leave on screen
+  // (with how many), so a combination can't end in an empty list by accident;
+  // anything already ticked stays in its list so it can be unticked.
+  type FKey = 'dept' | 'desig' | 'user' | 'tpl';
+  const tplKey = (r: any) => (r.assigned_template_id ? String(r.assigned_template_id) : DEFAULT_KEY);
+  const passes = (r: any, skip?: FKey) =>
+    (skip === 'dept' || !fDept.length || fDept.includes((r.department || '').trim())) &&
+    (skip === 'desig' || !fDesig.length || fDesig.includes((r.designation || '').trim())) &&
+    (skip === 'user' || !fUser.length || fUser.includes(String(r.employee_user_id))) &&
+    (skip === 'tpl' || !fTemplate.length || fTemplate.includes(tplKey(r)));
+  const facet = (skip: FKey, keyOf: (r: any) => string, labelOf: (k: string, r: any) => string, keep: string[]) => {
+    const seen = new Map<string, { label: string; count: number }>();
+    for (const r of assignRows) {
+      if (!passes(r, skip)) continue;
+      const k = keyOf(r);
+      if (!k) continue;
+      const cur = seen.get(k);
+      if (cur) cur.count++;
+      else seen.set(k, { label: labelOf(k, r), count: 1 });
+    }
+    for (const k of keep) if (!seen.has(k)) {
+      const r = assignRows.find((x) => keyOf(x) === k);
+      seen.set(k, { label: r ? labelOf(k, r) : k, count: 0 });
+    }
+    return [...seen.entries()].map(([value, v]) => ({ value, label: v.label, count: v.count })).sort((x, y) => x.label.localeCompare(y.label));
+  };
+  const deptOptions = facet('dept', (r) => (r.department || '').trim(), (k) => k, fDept);
+  const desigOptions = facet('desig', (r) => (r.designation || '').trim(), (k) => k, fDesig);
+  const userOptions = facet('user', (r) => String(r.employee_user_id), (_k, r) => [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · '), fUser);
+  const templateFilterOptions = facet(
+    'tpl',
+    tplKey,
+    (k) => (k === DEFAULT_KEY ? 'Using the default' : templates.find((t) => String(t.id) === k)?.name || `Template #${k}`),
+    fTemplate
+  );
+  const shownRows = assignRows.filter((r) => passes(r));
   const anyFilter = fDept.length + fDesig.length + fUser.length + fTemplate.length > 0;
   const clearFilters = () => { setFDept([]); setFDesig([]); setFUser([]); setFTemplate([]); };
 
@@ -652,6 +669,24 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {shownRows.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-14 text-center">
+                      <Users2 className="w-8 h-8 mx-auto text-slate-300" />
+                      <div className="mt-2 text-sm font-semibold text-slate-700">
+                        {assignRows.length === 0 ? 'No employee accounts yet' : 'No employee matches these filters'}
+                      </div>
+                      {anyFilter && (
+                        <>
+                          <div className="mt-1 text-xs text-slate-500">Change a filter above, or show everyone again.</div>
+                          <button type="button" onClick={clearFilters} className="mt-3 px-4 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+                            Clear filters
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )}
                 {shownRows.map((row) => (
                   <tr key={row.employee_user_id} className="hover:bg-slate-50/60">
                     <td className="px-4 py-3">
