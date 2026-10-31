@@ -3200,7 +3200,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         {!!user.can_use_attendance && (
-          <div id="dash-attendance" className="rounded-[24px] transition-shadow">
+          <div id="dash-attendance" className="flex flex-col [&>*]:flex-1 rounded-[24px] transition-shadow">
             <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
           </div>
         )}
