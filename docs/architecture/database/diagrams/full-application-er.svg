@@ -6568,7 +6568,7 @@
 <text xml:space="preserve" text-anchor="start" x="986.79" y="-4954.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">event_type</text>
 <text xml:space="preserve" text-anchor="start" x="1101.74" y="-4954.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">enum</text>
 <text xml:space="preserve" text-anchor="start" x="1136.65" y="-4954.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
-<text xml:space="preserve" text-anchor="start" x="986.79" y="-4937.91" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +12 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="986.79" y="-4937.91" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +14 কলাম</text>
 </g>
 <!-- users&#45;&gt;approval_requests -->
 <g id="edge12" class="edge">
