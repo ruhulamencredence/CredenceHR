@@ -69,6 +69,9 @@ interface ApprovalRouteDeps {
   // Requests that had no approver (no Supervisor, no Template) move to one
   // that exists now (server.ts) — run before the approval lists are built.
   rehomeAwaitingApprovals: (onlyId?: number) => Promise<number>;
+  // Pending requests follow Supervisor changes, inactive approvers and Layer
+  // changes (server.ts) — after a step advance and a Template edit here.
+  reconcilePendingApprovals: (onlyId?: number) => Promise<number>;
   isVehicleMaintainerStep: (request: any) => Promise<boolean>;
   isAssetFulfillerStep: (request: any) => Promise<boolean>;
   isConveyanceDisburserStep: (request: any) => Promise<boolean>;
@@ -92,6 +95,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     attachApprovalStatuses,
     getCurrentStepApprovers,
     rehomeAwaitingApprovals,
+    reconcilePendingApprovals,
     isVehicleMaintainerStep,
     isAssetFulfillerStep,
     isConveyanceDisburserStep,
@@ -533,6 +537,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
       const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo, claimOpts);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
+      // The next Layer may have nobody active on it.
+      if (status === "pending") await reconcilePendingApprovals(Number(id)).catch(() => 0);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
       res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message });
@@ -725,6 +731,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const mine = pendingRequests.filter((r: any) => {
         // No approver yet: it shows in a Superadmin's queue (never their own).
         if (Number(r.awaiting_approver) === 1) return req.user.role === "superadmin" && Number(r.requested_by) !== myId;
+        // Its Layer has nobody active on it: a Superadmin decides meanwhile.
+        if (r.stuck_since && !r.adhoc_approver_id && req.user.role === "superadmin" && Number(r.requested_by) !== myId) return true;
         // Ad-hoc approver asked in: only theirs until they approve.
         if (r.adhoc_approver_id) return Number(r.adhoc_approver_id) === myId;
         // Department Supervisor auto-layer (Part 6) — step_order 1 is the
@@ -954,6 +962,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             total_steps: r.total_steps,
             // No Supervisor and no Approval Template: here only because this is a Superadmin.
             no_approver: Number(r.awaiting_approver) === 1,
+            // Nobody active on its current Layer any more (reconcilePendingApprovals).
+            layer_stuck: !!r.stuck_since,
             // Asked in as an ad-hoc approver: who asked, and why.
             adhoc: r.adhoc_approver_id
               ? { added_by: Number(r.adhoc_added_by) || null, added_by_name: adhocNames.get(Number(r.adhoc_added_by)) || null, note: r.adhoc_note || null }
@@ -1326,6 +1336,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
       const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo, claimOpts);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
+      // The next Layer may have nobody active on it.
+      if (status === "pending") await reconcilePendingApprovals(Number(id)).catch(() => 0);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
       res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message });
@@ -1605,6 +1617,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         id
       ]);
 
+      // Who was on each Layer before, so people newly added are told about the
+      // requests already waiting on their Layer (below).
+      const before: any[] =
+        (await queryDB(
+          `SELECT s.step_order, sa.user_id FROM approval_template_steps s JOIN approval_template_step_approvers sa ON sa.step_id = s.id WHERE s.template_id = ?`,
+          [id]
+        ).catch(() => [])) || [];
       // Replace the step/approver tree wholesale — ON DELETE CASCADE on
       // approval_template_step_approvers.step_id takes the approver rows with it.
       await queryDB("DELETE FROM approval_template_steps WHERE template_id = ?", [id]);
@@ -1622,11 +1641,54 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       await grantVehicleMaintainerAccess(steps);
+      await alertNewLayerApprovers(id, before, steps).catch(() => {});
       res.json(await getTemplateWithSteps(id));
     } catch (err: any) {
       res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || /^Layer \d+/.test(err.message || "") ? 400 : 500).json({ error: err.message });
     }
   });
+
+  // After a Template edit: anyone newly put on a Layer hears about the
+  // requests already waiting on that Layer; then every pending request is
+  // re-checked (a Layer that had nobody active may have someone now).
+  async function alertNewLayerApprovers(templateId: number, before: any[], steps: { approver_user_ids: number[] }[]) {
+    const had = new Map<number, Set<number>>();
+    for (const b of before) {
+      const k = Number(b.step_order);
+      if (!had.has(k)) had.set(k, new Set());
+      had.get(k)!.add(Number(b.user_id));
+    }
+    const pending: any[] =
+      (await queryDB(
+        "SELECT * FROM approval_requests WHERE status = 'pending' AND template_id = ? AND COALESCE(awaiting_approver, 0) = 0 AND adhoc_approver_id IS NULL AND stuck_since IS NULL",
+        [templateId]
+      ).catch(() => [])) || [];
+    const names = new Map<number, string>();
+    for (const r of pending) {
+      const hasSup = !!r.supervisor_step_user_id;
+      if (hasSup && Number(r.current_step) === 1) continue;
+      const order = hasSup ? Number(r.current_step) - 1 : Number(r.current_step);
+      const now = steps[order - 1]?.approver_user_ids || [];
+      const added = now.map(Number).filter((u) => !had.get(order)?.has(u) && u !== Number(r.requested_by));
+      if (!added.length) continue;
+      const mapping = SOURCE_TYPE_ALERT[r.source_type];
+      if (!names.has(Number(r.requested_by))) {
+        const u: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [r.requested_by]).catch(() => [])) || [];
+        names.set(Number(r.requested_by), u[0]?.name || "An employee");
+      }
+      for (const uid of added) {
+        await createAlert(queryDB, {
+          userId: uid,
+          type: mapping?.type || "hr_action",
+          title: "Approval waiting on you",
+          message: `You were added to Layer ${r.current_step} — ${names.get(Number(r.requested_by))}'s ${mapping?.label || "request"} is already waiting there.`,
+          relatedType: r.source_type,
+          relatedId: Number(r.source_id)
+        }).catch(() => {});
+      }
+    }
+    await reconcilePendingApprovals().catch(() => 0);
+  }
 
   // Deletes a Template outright. Blocked (400, not a silent cascade) whenever
   // it's still in active use — either as a request_type's default fallback, or

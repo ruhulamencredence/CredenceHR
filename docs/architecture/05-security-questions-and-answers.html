@@ -317,6 +317,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Approver চলে গেলে বা Supervisor বদলালে অপেক্ষায় থাকা আবেদনের কী হয়?</td>
+<td>এখনকার active Supervisor / Layer-এর active লোকের কাছে নিজে থেকে চলে যায়, তিনি ও কর্মী alert পান। কেউ না থাকলে Superadmin alert পান ও সিদ্ধান্ত দেন। block / inactive account কোনো আবেদন approve করতে পারে না, নতুন আবেদনও তাঁর কাছে যায় না (<code>server.ts</code> reconcilePendingApprovals)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>গাড়ির booking কে বাতিল করতে পারে?</td>
 <td>start-এর আগে শুধু সংশ্লিষ্টরা — rider, (approved হলে) শেষ approver, (গাড়ি দেওয়া হলে) driver ও যিনি দিয়েছেন, আর Vehicle Management; অন্য কেউ চাইলে server 403 দেয়। বাতিল হলে গাড়ি সঙ্গে সঙ্গে ছাড়া পায়; কেউ start না করলে পরিকল্পিত শেষ সময়ের পর ride নিজে বন্ধ হয়।</td>
 <td>✅</td>

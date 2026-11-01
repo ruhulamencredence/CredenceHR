@@ -50,6 +50,7 @@ import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { applyCompanyTransfer } from "./CompanyRoutes";
 import { blockEmployeeLogin } from "./AccountBlock";
 import { isMailerConfigured, sendMail } from "./mailer";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -1030,6 +1031,7 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
         0,
         empId
       ]);
+      requestApprovalReconcile();
       // A separated employee can no longer sign in (AccountBlock.ts).
       await blockEmployeeLogin(queryDB, empId, `${ACTION_LABEL.get(action.action_type) || "Separated"} from ${eff}`, actorId);
       break;

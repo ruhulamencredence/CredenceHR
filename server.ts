@@ -48,7 +48,8 @@ import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
-import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
+import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { registerHrReminderRoutes } from "./HrRemindersRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
@@ -289,6 +290,15 @@ async function initDB() {
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
     });
+    // reconcilePendingApprovals: stuck_since — the request's current Layer has
+    // nobody active on it (a Superadmin decides meanwhile); supervisor_pinned —
+    // Layer 1 is an approver someone picked by hand (Emergency Requisition),
+    // not "the employee's Supervisor", so a Supervisor change leaves it.
+    for (const [col, def] of [["stuck_since", "DATETIME NULL"], ["supervisor_pinned", "TINYINT(1) NOT NULL DEFAULT 0"]]) {
+      await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN ${col} ${def}`).catch((err: any) => {
+        if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ approval_requests.${col}: ` + err.message);
+      });
+    }
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
     // Measurement Sheet was taken out of the software: drop its table and the
@@ -800,10 +810,39 @@ async function resolveEmployeeDirectSupervisor(employeeUserId: number): Promise<
 // Employee's own Direct Supervisor (resolveEmployeeDirectSupervisor) first;
 // only when that resolves to null does the Department Supervisor
 // (resolveDepartmentSupervisor) apply as the fallback.
+// The employee's Supervisor for an approval: their own Direct Supervisor,
+// else their Department's — skipping anyone blocked, set inactive or whose
+// Job Status says they have left (a request never goes to someone who can't
+// act on it).
 async function resolveSupervisorApprover(employeeUserId: number): Promise<number | null> {
   const direct = await resolveEmployeeDirectSupervisor(employeeUserId);
-  if (direct) return direct;
-  return resolveDepartmentSupervisor(employeeUserId);
+  if (direct && !(await inactiveUserIds([direct])).has(direct)) return direct;
+  const dept = await resolveDepartmentSupervisor(employeeUserId);
+  if (dept && !(await inactiveUserIds([dept])).has(dept)) return dept;
+  return null;
+}
+
+// Of these accounts, the ones that can't act any more: missing, blocked, or
+// whose Employee record is inactive / has a Job Status meaning they left.
+async function inactiveUserIds(ids: number[]): Promise<Set<number>> {
+  const uniq = [...new Set(ids.map(Number).filter((x) => Number.isFinite(x) && x > 0))];
+  const out = new Set<number>(uniq);
+  if (!uniq.length) return out;
+  const rows: any[] =
+    (await queryDB(
+      `/*unscoped*/ SELECT u.id, COALESCE(u.is_blocked, 0) AS blocked, e.id AS emp_id, e.is_active AS emp_active, e.job_status
+         FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+        WHERE u.id IN (${uniq.map(() => "?").join(",")})`,
+      uniq
+    ).catch(() => null)) || null;
+  if (!rows) return new Set(); // can't tell — treat everyone as active
+  const ok = new Set<number>();
+  for (const r of rows) {
+    if (Number(r.blocked)) continue;
+    if (r.emp_id == null || (Number(r.emp_active) === 1 && !isSeparatedJobStatus(r.job_status))) ok.add(Number(r.id));
+  }
+  for (const id of ok) out.delete(id);
+  return out;
 }
 
 // Creates a Template-driven approval_requests row for a just-submitted
@@ -883,11 +922,17 @@ async function createTemplateApprovalRequest(
     return { autoApproved: false, template: null };
   }
 
-  await queryDB(
+  const ins: any = await queryDB(
     `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
      VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?)`,
     [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
   );
+  const newId = Number(ins?.insertId);
+  if (newId) {
+    if (supervisorId && overrideSupervisorId) await queryDB("UPDATE approval_requests SET supervisor_pinned = 1 WHERE id = ?", [newId]).catch(() => {});
+    // A first Layer with nobody active on it goes to a Superadmin straight away.
+    await reconcilePendingApprovals(newId).catch(() => 0);
+  }
   return { autoApproved: false, template };
 }
 
@@ -1012,6 +1057,176 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
 // supervisor_step_user_id is set on the request, step_order 1 is that
 // Supervisor and the Template's own steps are shifted down by one (its own
 // step_order 1 is this request's step_order 2, and so on).
+// Everyone on a request's current Template Layer (active or not).
+async function templateLayerApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
+  if (!request?.template_id) return [];
+  const templateStepOrder = request.supervisor_step_user_id ? Number(request.current_step) - 1 : Number(request.current_step);
+  const rows: any[] =
+    (await queryDB(
+      `SELECT sa.user_id, u.name AS user_name
+       FROM approval_template_step_approvers sa
+       JOIN approval_template_steps s ON s.id = sa.step_id
+       LEFT JOIN users u ON u.id = sa.user_id
+       WHERE s.template_id = ? AND s.step_order = ?`,
+      [request.template_id, templateStepOrder]
+    )) || [];
+  return rows.map((r: any) => ({ user_id: Number(r.user_id), user_name: r.user_name }));
+}
+
+// Moves every pending request (or just `onlyId`) to whoever should have it
+// now, and tells them:
+//  - an ad-hoc approver who is no longer active: back to the Layer;
+//  - waiting on the Supervisor Layer: the employee's CURRENT active
+//    Supervisor (a hand-picked approver stays unless they are inactive);
+//    with no Supervisor any more it goes to the Template's first Layer, or,
+//    without one, to "no approver" (a Superadmin decides; it moves on once a
+//    Supervisor / Template exists — rehomeAwaitingApprovals);
+//  - a Template Layer with nobody active on it: a Superadmin is told and can
+//    decide it (stuck_since); once someone active is on it again they are told.
+// Template Layers are read live, so new people on a Layer see its waiting
+// requests at once (PUT /api/approval-templates/:id alerts them).
+let reconcileRunning: Promise<number> | null = null;
+async function reconcilePendingApprovals(onlyId?: number): Promise<number> {
+  if (!onlyId && reconcileRunning) return reconcileRunning;
+  const run = (async () => {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT * FROM approval_requests WHERE status = 'pending' AND COALESCE(awaiting_approver, 0) = 0${onlyId ? " AND id = ?" : ""}`,
+        onlyId ? [onlyId] : []
+      ).catch(() => [])) || [];
+    let changed = 0;
+    for (const r of rows) {
+      try {
+        changed += await reconcileOneApproval(r);
+      } catch (err: any) {
+        console.warn(`⚠️ Could not reconcile approval request #${r.id}: ` + err.message);
+      }
+    }
+    return changed;
+  })();
+  if (!onlyId) {
+    reconcileRunning = run;
+    run.finally(() => (reconcileRunning = null)).catch(() => {});
+  }
+  return run;
+}
+
+async function superadminIds(exceptId: number): Promise<number[]> {
+  const rows: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' AND COALESCE(is_blocked, 0) = 0").catch(() => [])) || [];
+  return rows.map((x) => Number(x.id)).filter((id) => id !== Number(exceptId));
+}
+
+async function reconcileOneApproval(r: any): Promise<number> {
+  const mapping = APPROVAL_ALERT[r.source_type];
+  const label = mapping?.label || "request";
+  const alertType = mapping?.type || "hr_action";
+  const nameOf = async (id: number) => (((await queryDB("SELECT name FROM users WHERE id = ?", [id]).catch(() => [])) || [])[0]?.name as string) || "someone";
+  const requester = Number(r.requested_by);
+  const tell = (userId: number, title: string, message: string) =>
+    createAlert(queryDB, { userId, type: alertType, title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
+  // The employee's own alert opens their own request, not Approve Application.
+  const REQUESTER_TYPE: Record<string, AlertType> = {
+    user_claim: "conveyance_claim",
+    attendance_correction: "hr_action",
+    leave_application: "leave_application",
+    asset_requisition: "asset_requisition",
+    vehicle_requisition: "vehicle_requisition",
+    mobile_limit_request: "mobile_bill",
+    advance_request: "loan_request"
+  };
+  const tellRequester = (title: string, message: string) =>
+    createAlert(queryDB, { userId: requester, type: REQUESTER_TYPE[r.source_type] || "hr_action", title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
+  let changed = 0;
+
+  // An ad-hoc approver who can't act any more: back to the Layer.
+  if (r.adhoc_approver_id) {
+    const adhoc = Number(r.adhoc_approver_id);
+    if (!(await inactiveUserIds([adhoc])).has(adhoc)) return 0;
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET adhoc_approver_id = NULL, adhoc_added_by = NULL, adhoc_note = NULL WHERE id = ? AND status = 'pending' AND adhoc_approver_id = ?",
+      [r.id, adhoc]
+    );
+    if (!Number(done?.affectedRows)) return 0;
+    r.adhoc_approver_id = null;
+    changed++;
+  }
+
+  const who = await nameOf(requester);
+  // Waiting on the Supervisor Layer.
+  if (r.supervisor_step_user_id && Number(r.current_step) === 1) {
+    const stored = Number(r.supervisor_step_user_id);
+    const storedGone = (await inactiveUserIds([stored])).has(stored);
+    if (Number(r.supervisor_pinned) && !storedGone) return changed;
+    const desired = await resolveSupervisorApprover(requester);
+    if (desired === stored && !storedGone) return changed;
+    const oldName = await nameOf(stored);
+    const why = storedGone ? `${oldName} is no longer active` : `${oldName} is no longer ${who}'s supervisor`;
+    if (desired && desired !== stored) {
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET supervisor_step_user_id = ?, supervisor_pinned = 0 WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+        [desired, r.id, stored]
+      );
+      if (!Number(done?.affectedRows)) return changed;
+      const newName = await nameOf(desired);
+      await tell(desired, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it now waits on you as their supervisor.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${newName}.`);
+      return changed + 1;
+    }
+    // No (active) supervisor now: on to the Template's first Layer, or to "no approver".
+    const steps: any[] = r.template_id ? (await queryDB("SELECT id FROM approval_template_steps WHERE template_id = ?", [r.template_id]).catch(() => [])) || [] : [];
+    if (steps.length) {
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+        [steps.length, r.id, stored]
+      );
+      if (!Number(done?.affectedRows)) return changed;
+      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length });
+      const next = await getCurrentStepApprovers(r);
+      for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why} and no other supervisor is set, so it moved on to you.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
+      return changed + 1 + (await reconcileOneApproval(r));
+    }
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, awaiting_approver = 1 WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+      [r.id, stored]
+    );
+    if (!Number(done?.affectedRows)) return changed;
+    for (const id of await superadminIds(requester)) {
+      await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set their Supervisor and it moves there by itself, or decide it yourself in Approve Application.`);
+    }
+    await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
+    return changed + 1;
+  }
+
+  // Waiting on a Template Layer.
+  if (r.template_id) {
+    const layer = await templateLayerApprovers(r);
+    const gone = await inactiveUserIds(layer.map((a) => a.user_id));
+    const active = layer.filter((a) => !gone.has(a.user_id));
+    const layerNo = Number(r.current_step);
+    if (!active.length && !r.stuck_since) {
+      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NOW() WHERE id = ? AND stuck_since IS NULL", [r.id]);
+      if (!Number(done?.affectedRows)) return changed;
+      const names = layer.map((a) => a.user_name).filter(Boolean).join(", ");
+      for (const id of await superadminIds(requester)) {
+        await tell(
+          id,
+          "Approval stuck — nobody active on the Layer",
+          `${who}'s ${label} is waiting on Layer ${layerNo}${names ? ` (${names})` : ""}, but nobody on that Layer is active any more. Add someone to the Layer in Approval Chain -> Templates and it goes to them, or decide it yourself in Approve Application.`
+        );
+      }
+      return changed + 1;
+    }
+    if (active.length && r.stuck_since) {
+      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NULL WHERE id = ? AND stuck_since IS NOT NULL", [r.id]);
+      if (!Number(done?.affectedRows)) return changed;
+      for (const a of active) if (a.user_id !== requester) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} is waiting on you (Layer ${layerNo}).`);
+      return changed + 1;
+    }
+  }
+  return changed;
+}
+
 async function getCurrentStepApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
   // No approver yet: move it to a Supervisor / Template if one exists now,
   // else nobody (only a Superadmin's override can decide it).
@@ -1028,21 +1243,17 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
     return rows.length > 0 ? [{ user_id: Number(rows[0].id), user_name: rows[0].name }] : [];
   }
   const hasSupervisorStep = !!request.supervisor_step_user_id;
+  // Nobody blocked / inactive / gone counts as an approver
+  // (reconcilePendingApprovals moves the request on from them).
   if (hasSupervisorStep && Number(request.current_step) === 1) {
     const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
-    return rows.length > 0 ? [{ user_id: Number(rows[0].id), user_name: rows[0].name }] : [];
+    if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
+    return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
   }
   if (request.template_id) {
-    const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
-    const rows = await queryDB(
-      `SELECT sa.user_id, u.name AS user_name
-       FROM approval_template_step_approvers sa
-       JOIN approval_template_steps s ON s.id = sa.step_id
-       LEFT JOIN users u ON u.id = sa.user_id
-       WHERE s.template_id = ? AND s.step_order = ?`,
-      [request.template_id, templateStepOrder]
-    );
-    return rows.map((r: any) => ({ user_id: Number(r.user_id), user_name: r.user_name }));
+    const rows = await templateLayerApprovers(request);
+    const gone = await inactiveUserIds(rows.map((r) => r.user_id));
+    return rows.filter((r) => !gone.has(r.user_id));
   }
   const chain = await getApprovalChain();
   const step = chain.find((s: any) => Number(s.step_order) === Number(request.current_step));
@@ -3200,8 +3411,20 @@ async function startServer() {
   // Requests that had no approver move on once one is set (every 10 minutes
   // too, besides whenever an approvals list is opened).
   setInterval(() => void rehomeAwaitingApprovals().catch(() => {}), 10 * 60 * 1000);
+  // Pending requests follow Supervisor changes, blocked / inactive approvers
+  // and Template Layer changes (reconcilePendingApprovals): right after such
+  // a save (requestApprovalReconcile) and every 2 minutes.
+  setApprovalReconcileHandler(async () => {
+    await reconcilePendingApprovals();
+    await rehomeAwaitingApprovals();
+  });
+  if (runsBackgroundJobs()) {
+    setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);
+    setTimeout(() => requestApprovalReconcile(0), 20 * 1000);
+  }
   registerApprovalRoutes(app, {
     rehomeAwaitingApprovals,
+    reconcilePendingApprovals,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,

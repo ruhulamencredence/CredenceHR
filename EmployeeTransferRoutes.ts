@@ -47,6 +47,7 @@
 // promoting any now-due row to all_employees right before it's read.
 
 import type { Express } from "express";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 interface EmployeeTransferRouteDeps {
   authenticateToken: any;
@@ -192,6 +193,7 @@ async function applyTransferEffect(
         "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, 1)",
         [row.employee_id, row.to_supervisor_id, row.effective_date]
       );
+        requestApprovalReconcile();
     }
   }
 }

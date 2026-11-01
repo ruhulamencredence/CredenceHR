@@ -15,6 +15,7 @@
 // A Superadmin account can never be blocked. Unblocking is always by hand.
 
 import type { Express } from "express";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -99,6 +100,8 @@ export async function setAccountBlocked(
   }
   await syncEmployeeActive(queryDB, userId, blocked);
   cache.delete(userId);
+  // Requests waiting on this account move on (or come back) — approvalReconcile.ts.
+  requestApprovalReconcile();
   return true;
 }
 

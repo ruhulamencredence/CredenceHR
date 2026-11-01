@@ -44,6 +44,8 @@ interface MyApprovalItem extends ClaimReviewFields {
   total_steps: number | null;
   // No Supervisor or Approval Template set — listed because this is a Superadmin.
   no_approver?: boolean;
+  // Nobody active is on its current Layer any more — a Superadmin decides.
+  layer_stuck?: boolean;
   created_at: string;
   // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
   // this Conveyance Bill Claim's Amount was built from, each with its own
@@ -567,6 +569,11 @@ useLiveRefresh(() => load(true));
                           From {item.requested_by_name || `User #${item.requested_by}`}
                           {item.no_approver ? (
                             <span className="text-amber-700 font-medium"> &middot; No approver set — you decide as Superadmin</span>
+                          ) : item.layer_stuck ? (
+                            <span className="text-amber-700 font-medium">
+                              {' '}
+                              &middot; Layer {item.current_step} of {item.total_steps} has nobody active — you decide as Superadmin
+                            </span>
                           ) : item.total_steps ? (
                             <> &middot; Layer {item.current_step} of {item.total_steps}</>
                           ) : null}

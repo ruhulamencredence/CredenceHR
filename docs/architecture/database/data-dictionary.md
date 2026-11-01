@@ -3719,6 +3719,8 @@ Unique: `unique_step_order`(step_order)
 | `adhoc_added_by` | int(11) | হ্যাঁ |  | |
 | `adhoc_note` | varchar(500) | হ্যাঁ |  | |
 | `awaiting_approver` | tinyint(1) | না | default 0 | |
+| `stuck_since` | datetime | হ্যাঁ |  | |
+| `supervisor_pinned` | tinyint(1) | না | default 0 | |
 
 ### `approval_template_step_approvers`
 

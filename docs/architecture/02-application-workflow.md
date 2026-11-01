@@ -507,3 +507,12 @@ server চালু হওয়ার সময়ের এককালীন 
 - **Est. Duration:** Book a Ride, Direct Book আর Emergency Requisition-এ সময় বাছা যায় 15 / 30 / 45 মিনিট, 1 ঘণ্টা থেকে 6 ঘণ্টা, Half day (4 ঘণ্টা), Full day (8 ঘণ্টা), বা Custom (যত মিনিট বা ঘণ্টা) — `DurationPicker.tsx`। রাখা হয় ঘণ্টায় (`estimated_duration_hours`), দেখানো হয় "45 min", "1 hr 30 min", "Half day (4 hrs)" (`src/lib/rideDuration.ts`)। server নেয় ৫ মিনিট থেকে ২৪০ ঘণ্টা (১০ দিন)।
 - **Approve Application-এ ride:** Vehicle Requisition-এর card-এ route-এর নিচে কবে (তারিখ · সময় · Est. duration) আর Purpose দেখায় (`/api/my-approvals`-এর `vehicle_requisition_details`)। Vehicle Maintainer layer-এর "Assign Vehicle & Driver"-এর driver তালিকা অন্য সব Assign form-এর মতোই Inventory → Drivers থেকে আসে (কে ফাঁকা, কার License শেষ পাশে লেখা)।
 
+## অপেক্ষায় থাকা অনুমোদন: Supervisor বা approver বদলালে
+
+Leave, Conveyance, Mobile Limit, Loan / Advance, Timesheet, Asset ও Vehicle — Approval Engine-এর সব আবেদন এখন যাঁর কাছে থাকার কথা তাঁর কাছেই যায়, জমা দেওয়ার পরে কিছু বদলালেও (`server.ts` reconcilePendingApprovals, `approvalReconcile.ts`)। Supervisor / Department Supervisor বদল, কাউকে block বা inactive করা (Job Status Resigned / Terminated সহ), কর্মী transfer, Template বদল — যেকোনোটা save হলেই মিলিয়ে নেওয়া হয়, আর প্রতি ২ মিনিটে একবার এমনিও।
+
+- **Supervisor-এর ধাপে অপেক্ষায়:** কর্মীর এখনকার active Supervisor-এর কাছে চলে যায়; তিনি "Approval waiting on you" পান, কর্মী জানেন কার কাছে গেল। আগের Supervisor যা approve করে ফেলেছেন তা যেমন ছিল থাকে। কোনো active Supervisor না থাকলে Template-এর প্রথম Layer-এ যায়; Template-ও না থাকলে "No approver set" — Superadmin alert পান ও নিজে সিদ্ধান্ত দিতে পারেন, আর Supervisor বসানো হলেই নিজে থেকে তাঁর কাছে চলে যায়। Emergency Requisition-এ হাতে বাছা approver Supervisor বদলেও থাকেন, শুধু inactive হলে সরে।
+- **Template Layer-এ অপেক্ষায়:** Layer-এর লোক প্রতিবার Template থেকে পড়া হয়, block / inactive কাউকে approver ধরা হয় না। Layer-এ একজনও active না থাকলে Superadmin একবার alert পান ("Approval stuck — nobody active on the Layer"), Approve Application-এ "Layer N has nobody active — you decide as Superadmin" দেখে সিদ্ধান্ত দিতে পারেন। Layer-এ কাউকে যোগ করলে (বা কেউ আবার active হলে) তিনি alert পান আর আবেদন তাঁর Approve Application-এ আসে। চালু Layer-এ নতুন কাউকে যোগ করলেও তিনি জানতে পারেন কোন আবেদন সেখানে অপেক্ষা করছে।
+- **Ad-hoc approver** inactive হলে আবেদন Layer-এ ফিরে আসে।
+- **নতুন আবেদন** কখনো block / inactive Supervisor-এর কাছে যায় না।
+

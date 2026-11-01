@@ -19,6 +19,7 @@ import type { Express } from "express";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
 import { employeeIdConflict, syncEmployeeLoginId } from "./EmployeeLoginId";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -446,6 +447,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           id
         ]
       );
+      // Set inactive here: requests waiting on them move on (approvalReconcile.ts).
+      requestApprovalReconcile();
       if (zkPin.set && (existing[0].zk_device_pin ?? null) !== zkPin.pin) {
         await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, id]);
       }
@@ -534,6 +537,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, ?)",
         [id, supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0]
       );
+        requestApprovalReconcile();
       res.status(201).json({ id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -556,6 +560,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         "UPDATE employee_supervisors SET supervisor_id = ?, effective_date = ?, is_direct = ? WHERE id = ?",
         [supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0, rowId]
       );
+        requestApprovalReconcile();
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -569,6 +574,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const existing = await queryDB("SELECT id FROM employee_supervisors WHERE id = ? AND employee_id = ?", [rowId, id]);
       if (existing.length === 0) return res.status(404).json({ error: "Supervisor record not found" });
       await queryDB("DELETE FROM employee_supervisors WHERE id = ?", [rowId]);
+      requestApprovalReconcile();
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

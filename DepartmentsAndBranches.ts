@@ -21,6 +21,7 @@
 // Approval Workflow, not just here) stays in server.ts.
 
 import type { Express } from "express";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 interface DepartmentsAndBranchesRouteDeps {
   authenticateToken: any;
@@ -370,6 +371,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         "UPDATE departments SET name = ?, supervisor_user_id = ?, include_supervisor_approval = ?, is_active = ? WHERE id = ?",
         [name, supervisorUserId, includeSupervisorApproval, isActive, id]
       );
+        requestApprovalReconcile();
       // Keep every existing reader's plain-text `all_employees.department`
       // mirror in sync with a rename (Notices targeting, Attendance Reports,
       // the Employees panel's own search — see resolveEmployeeDepartment).

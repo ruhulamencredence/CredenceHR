@@ -89,6 +89,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>AssetManagementRoutes.ts</code></td>
 </tr>
 <tr>
+<td>অনুমোদনের approver বদল</td>
+<td>block / inactive / চলে যাওয়া account কোনো আবেদনের approver হিসেবে ধরা হয় না (server-এ <code>getCurrentStepApprovers</code>), নতুন আবেদনও তাঁর কাছে যায় না; অপেক্ষায় থাকা আবেদন কর্মীর এখনকার Supervisor বা Layer-এর active লোকের কাছে যায়, কেউ না থাকলে শুধু Superadmin সিদ্ধান্ত দেন। কে কখন approve করলেন <code>actions_json</code>-এ আগের মতোই থাকে</td>
+<td><code>server.ts</code> reconcilePendingApprovals</td>
+</tr>
+<tr>
 <td>Ride বাতিল</td>
 <td>start-এর আগের ride বাতিল server-এ যাচাই হয়: Pending — শুধু rider; Approved (গাড়ি নেই) — rider, শেষ approver বা Vehicle Management / Maintainer; গাড়ি দেওয়া — rider, driver, যিনি দিয়েছেন বা Vehicle Management; বাকিদের 403। শুরু হওয়া ride বাতিল হয় না</td>
 <td><code>VehicleManagementRoutes.ts</code></td>
