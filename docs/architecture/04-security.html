@@ -89,6 +89,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>AssetManagementRoutes.ts</code></td>
 </tr>
 <tr>
+<td>Ride বাতিল</td>
+<td>start-এর আগের ride বাতিল server-এ যাচাই হয়: Pending — শুধু rider; Approved (গাড়ি নেই) — rider, শেষ approver বা Vehicle Management / Maintainer; গাড়ি দেওয়া — rider, driver, যিনি দিয়েছেন বা Vehicle Management; বাকিদের 403। শুরু হওয়া ride বাতিল হয় না</td>
+<td><code>VehicleManagementRoutes.ts</code></td>
+</tr>
+<tr>
 <td>Vehicle drivers</td>
 <td>Inventory → Drivers দেখা Vehicle Management module-এ; driver যোগ / বদল / বাদ আলাদা 🔒 layer <code>manage_drivers</code> (ডিফল্টে কারও নেই, API-ও <code>requireModuleLayer</code> দিয়ে বন্ধ)। ride-এ driver বাছাই server-এও যাচাই হয়: তালিকা চালু থাকলে শুধু Active, মেয়াদি License-এর driver</td>
 <td><code>VehicleManagementRoutes.ts</code></td>

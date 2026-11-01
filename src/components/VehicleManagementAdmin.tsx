@@ -35,6 +35,7 @@ import { RideDetails } from './RideDetails';
 import { SearchSelect } from './Combobox';
 import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 import { VehicleDriversPanel } from './VehicleDriversPanel';
+import { confirmDialog } from '../lib/confirmDialog';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -285,6 +286,25 @@ useLiveRefresh(() => loadRequisitions());
     }
   }
 
+  // Calls off a ride that hasn't started: approved and still waiting for a
+  // vehicle, or given a vehicle but never started (the vehicle is freed).
+  async function cancelRide(r: Requisition) {
+    const msg =
+      r.status === 'assigned'
+        ? `Cancel ride #${r.id}? The vehicle is freed for another booking, and the rider and driver are told.`
+        : `Cancel ride request #${r.id}? It is approved but has no vehicle yet — the rider is told.`;
+    if (!(await confirmDialog(msg, { tone: 'danger' }))) return;
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${r.id}/cancel`), { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not cancel this ride.');
+      loadRequisitions();
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   async function decideExtension(id: number, decision: 'approved' | 'rejected') {
     try {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/extension-decision`), {
@@ -365,7 +385,8 @@ useLiveRefresh(() => loadRequisitions());
               <div className="min-w-[220px] flex-1">
                 <div className="font-semibold text-gray-800 text-sm">Ride deadline</div>
                 A request still waiting on approval or a vehicle expires {rideRules.grace_minutes} min after its start time; approvers and
-                Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it.
+                Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it. A ride given a vehicle but never started is
+                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed.
               </div>
               {rideRules.can_change && (
                 <>
@@ -426,12 +447,20 @@ useLiveRefresh(() => loadRequisitions());
                   {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
                   {r.started_at && <div>Started: {new Date(r.started_at).toLocaleString()}{r.started_by_name ? ` by ${r.started_by_name}` : ''}</div>}
                   {r.status === 'assigned' && (
-                    <button
-                      onClick={() => startRide(r.id)}
-                      className="mt-1.5 px-2.5 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                    >
-                      Start Ride
-                    </button>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      <button
+                        onClick={() => startRide(r.id)}
+                        className="px-2.5 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                      >
+                        Start Ride
+                      </button>
+                      <button
+                        onClick={() => cancelRide(r)}
+                        className="px-2.5 py-1 text-xs font-medium rounded border border-rose-300 text-rose-700 bg-white hover:bg-rose-50"
+                      >
+                        Cancel Ride
+                      </button>
+                    </div>
                   )}
                   {r.status === 'ongoing' && (
                     <button
@@ -575,6 +604,14 @@ useLiveRefresh(() => loadRequisitions());
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
                       Assign Vehicle &amp; Driver
+                    </button>
+                  )}
+                  {assigningFor !== r.id && (
+                    <button
+                      onClick={() => cancelRide(r)}
+                      className="ml-2 px-3 py-1.5 text-xs font-medium rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                    >
+                      Cancel Ride
                     </button>
                   )}
                 </div>

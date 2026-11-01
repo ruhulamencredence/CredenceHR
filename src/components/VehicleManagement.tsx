@@ -457,11 +457,13 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   }
 
   async function cancelRequisition(id: number) {
-    const ride = [...requisitions, ...myTrips].find((r) => r.id === id);
+    const ride = [...requisitions, ...myTrips, ...awaitingAssignment].find((r) => r.id === id);
     const ok = await confirmDialog(
       ride?.status === 'assigned'
         ? 'Cancel this ride? The vehicle is released and the rider and driver are told.'
-        : 'Cancel this ride request?',
+        : ride?.status === 'approved'
+          ? 'Cancel this ride request? It is approved but no vehicle is given yet — nobody will book a car for it.'
+          : 'Cancel this ride request?',
       { tone: 'danger' }
     );
     if (!ok) return;
@@ -470,6 +472,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not cancel.');
       loadRequisitions();
+      void loadAwaitingAssignment(true);
     } catch (err: any) {
       setError(err.message);
     }
@@ -968,7 +971,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   )}
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
-                  {(r.status === 'pending' || r.status === 'assigned') && (
+                  {(r.status === 'pending' || r.status === 'approved' || r.status === 'assigned') && (
                     <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                       Cancel
                     </button>
@@ -1078,7 +1081,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     <MapIcon className="w-3.5 h-3.5" /> Ride Details & Map
                   </button>
                 )}
-                {(r.status === 'pending' || r.status === 'assigned') && (
+                {(r.status === 'pending' || r.status === 'approved' || r.status === 'assigned') && (
                   <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                     Cancel Request
                   </button>
@@ -1137,15 +1140,20 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => {
-                      setAssigningFor(r.id);
-                      setAssignForm({ vehicle_id: '', driver_user_id: '' });
-                    }}
-                    className={BTN_PRIMARY_SM}
-                  >
-                    <Car className="w-3.5 h-3.5" /> Assign Vehicle &amp; Driver
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setAssigningFor(r.id);
+                        setAssignForm({ vehicle_id: '', driver_user_id: '' });
+                      }}
+                      className={BTN_PRIMARY_SM}
+                    >
+                      <Car className="w-3.5 h-3.5" /> Assign Vehicle &amp; Driver
+                    </button>
+                    <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
+                      Cancel Ride
+                    </button>
+                  </div>
                 ),
                 false
               )

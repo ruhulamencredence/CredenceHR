@@ -667,11 +667,40 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         }
         // A ride with its vehicle given whose start time has come but nobody
         // pressed Start Ride: remind the driver and whoever assigned it, once.
+        // Once even its planned end (start + estimated hours) plus the grace
+        // time has passed without a start, it is closed as expired and the
+        // vehicle is freed — before, it kept the vehicle booked forever.
         const waiting: any[] = await queryDB("SELECT * FROM vehicle_requisitions WHERE status = ?", ["assigned"]);
         for (const r of waiting) {
-          if (r.start_reminded_at) continue;
           const start = rideStartAt(r.ride_date, r.start_time);
-          if (!start || now < start.getTime()) continue;
+          if (!start) continue;
+          const plannedEnd = start.getTime() + Math.max(0, Number(r.estimated_duration_hours) || 0) * 3600e3;
+          if (now > plannedEnd + grace_minutes * 60 * 1000) {
+            const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ?, expired_at = ? WHERE id = ? AND status = ?", [
+              "expired",
+              new Date(),
+              r.id,
+              "assigned"
+            ]);
+            if (Number(done?.affectedRows ?? 1) === 0) continue;
+            if (r.assigned_vehicle_id) await releaseVehicle(Number(r.assigned_vehicle_id));
+            const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+            const ids = new Set<number>([Number(r.employee_user_id) || 0, Number(r.driver_user_id) || 0, Number(r.assigned_by) || 0]);
+            ids.delete(0);
+            for (const uid of ids) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_requisition" as AlertType,
+                title: "Ride Closed — Never Started",
+                message: `Ride #${r.id} (${r.pickup_location} → ${r.destination}, ${when}) was never started, so it has been closed and the vehicle is free again.${uid === Number(r.employee_user_id) ? " Book again if you still need a ride." : ""}`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+            continue;
+          }
+          if (r.start_reminded_at) continue;
+          if (now < start.getTime()) continue;
           await queryDB("UPDATE vehicle_requisitions SET start_reminded_at = ? WHERE id = ?", [new Date(), r.id]);
           const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
           const ids = new Set<number>([Number(r.driver_user_id) || 0, Number(r.assigned_by) || 0]);
@@ -1182,8 +1211,32 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         }
         return res.json({ success: true });
       }
+      // Approved but no vehicle given yet: the requester, or whoever would
+      // give the vehicle (Vehicle Management / Maintainer), can call it off;
+      // the people who would assign it are told so nobody books a car for it.
+      if (requisition.status === "approved") {
+        if (!isOwner && !(await canRunRide(requisition, req.user)) && !(await wasFinalApprover(id, req.user.id))) {
+          return res.status(403).json({ error: "Not authorized." });
+        }
+        const actors = await rideActors(requisition);
+        const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ? WHERE id = ? AND status = ?", ["cancelled", id, "approved"]);
+        if (Number(done?.affectedRows ?? 1) === 0) return res.status(409).json({ error: "This ride just changed — refresh and try again." });
+        const notify = new Set<number>([...actors, Number(requisition.employee_user_id)]);
+        notify.delete(Number(req.user.id));
+        for (const uid of notify) {
+          await createAlert(queryDB, {
+            userId: uid,
+            type: "vehicle_requisition" as AlertType,
+            title: "Ride Cancelled",
+            message: `${req.user.name || "Someone"} cancelled ride request #${id} (${requisition.pickup_location} → ${requisition.destination}) — no vehicle is needed for it.`,
+            relatedType: "vehicle_requisition",
+            relatedId: id
+          });
+        }
+        return res.json({ success: true });
+      }
       if (!isOwner) return res.status(403).json({ error: "Not authorized." });
-      if (requisition.status !== "pending") return res.status(400).json({ error: "Only a pending request can be cancelled." });
+      if (requisition.status !== "pending") return res.status(400).json({ error: "This ride can't be cancelled any more — it has already started or ended." });
 
       await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_at = ? WHERE id = ?", ["cancelled", new Date(), id]);
 
