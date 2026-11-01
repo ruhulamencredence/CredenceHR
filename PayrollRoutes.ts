@@ -381,6 +381,19 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_days column: " + err.message);
     }
+    // A waived late day may carry a supporting file (approval mail, doctor's
+    // note…) — kept on the waiver row (base64 in, LONGBLOB stored).
+    for (const [name, def] of [
+      ["attachment_name", "VARCHAR(255) NULL"],
+      ["attachment_mime", "VARCHAR(100) NULL"],
+      ["attachment_data", "LONGBLOB NULL"]
+    ] as const) {
+      try {
+        await dbPool.query(`ALTER TABLE late_waivers ADD COLUMN ${name} ${def}`);
+      } catch (err: any) {
+        if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add late_waivers.${name}: ` + err.message);
+      }
+    }
     // Salary Hold — a held run can't be Processed or marked Paid until it is
     // released (POST /api/payroll/:id/hold, /release; "salary_hold" layer).
     for (const [name, def] of [
@@ -2111,7 +2124,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // view can show every raw late day, including already-waived ones,
       // then mark which are currently waived separately.
       const allWaivers = await queryDB(
-        "SELECT id, waiver_date, reason FROM late_waivers WHERE employee_id = ? AND waiver_date BETWEEN ? AND ?",
+        "SELECT id, waiver_date, reason, attachment_name FROM late_waivers WHERE employee_id = ? AND waiver_date BETWEEN ? AND ?",
         [employeeId, monthStart, monthEnd]
       );
       const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
@@ -2127,14 +2140,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         extreme: false,
         waived: waiverByDate.has(d),
         waiver_id: waiverByDate.get(d)?.id || null,
-        reason: waiverByDate.get(d)?.reason || null
+        reason: waiverByDate.get(d)?.reason || null,
+        attachment_name: waiverByDate.get(d)?.attachment_name || null
       }));
       const extremeDays = rawExtremeLateDates.map((d) => ({
         date: d,
         extreme: true,
         waived: waiverByDate.has(d),
         waiver_id: waiverByDate.get(d)?.id || null,
-        reason: waiverByDate.get(d)?.reason || null
+        reason: waiverByDate.get(d)?.reason || null,
+        attachment_name: waiverByDate.get(d)?.attachment_name || null
       }));
       const countedLate = days.filter((d) => !d.waived).length;
       const countedExtremeLate = extremeDays.filter((d) => !d.waived).length;
@@ -2700,17 +2715,51 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const employeeId = Number(req.body?.employee_id);
       const waiverDate = typeof req.body?.waiver_date === "string" ? req.body.waiver_date.trim() : "";
-      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : null;
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : "";
       if (!employeeId) return res.status(400).json({ error: "employee_id is required." });
       if (!/^\d{4}-\d{2}-\d{2}$/.test(waiverDate)) return res.status(400).json({ error: "waiver_date must be in YYYY-MM-DD format." });
+      // Every waiver says why (it takes a day's pay cut off); a supporting
+      // file is optional — image, PDF or Office document, at most 5 MB.
+      if (reason.length < 3) return res.status(400).json({ error: "Write why this late day is waived." });
+      let file: Buffer | null = null;
+      let fileName: string | null = null;
+      let fileMime: string | null = null;
+      if (typeof req.body?.file_base64 === "string" && req.body.file_base64) {
+        file = Buffer.from(req.body.file_base64, "base64");
+        if (!file.length) return res.status(400).json({ error: "The attachment is empty." });
+        if (file.length > 5 * 1024 * 1024) return res.status(400).json({ error: "Attachment must be 5MB or smaller." });
+        fileMime = String(req.body.file_mimetype || "application/octet-stream").slice(0, 100);
+        const okType =
+          /^image\/(png|jpe?g|gif|webp|heic|heif)$/.test(fileMime) ||
+          fileMime === "application/pdf" ||
+          /^application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|vnd\.ms-excel)$/.test(fileMime);
+        if (!okType) return res.status(400).json({ error: "Attach an image, PDF, Word or Excel file." });
+        fileName = String(req.body.file_name || "attachment").replace(/[\\/\r\n"]/g, "_").slice(0, 255);
+      }
 
       const result = await queryDB(
-        `INSERT IGNORE INTO late_waivers (employee_id, waiver_date, reason, waived_by) VALUES (?, ?, ?, ?)`,
-        [employeeId, waiverDate, reason, req.user.id]
+        `INSERT IGNORE INTO late_waivers (employee_id, waiver_date, reason, waived_by, attachment_name, attachment_mime, attachment_data) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [employeeId, waiverDate, reason, req.user.id, fileName, fileMime, file]
       );
       res.json({ success: true, id: result.insertId || null });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to waive late day." });
+    }
+  });
+
+  // The file attached to a waiver (Payroll module, same as the waiver itself).
+  app.get("/api/payroll/late-waivers/:id/attachment", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT attachment_name, attachment_mime, attachment_data FROM late_waivers WHERE id = ?", [Number(req.params.id)]);
+      const w = rows[0];
+      if (!w || !w.attachment_data) return res.status(404).json({ error: "No attachment on this waiver." });
+      const buf: Buffer = Buffer.isBuffer(w.attachment_data) ? w.attachment_data : Buffer.from(w.attachment_data);
+      res.setHeader("Content-Type", w.attachment_mime || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(w.attachment_name || "attachment")}"`);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the attachment." });
     }
   });
 
