@@ -58,9 +58,7 @@ interface Vehicle {
 
 interface Requisition {
   id: number;
-  employee_user_id?: number;
   employee_name: string;
-  self_drive?: boolean;
   purpose: string;
   pickup_location: string;
   destination: string;
@@ -103,8 +101,7 @@ const emptyEmergencyForm = () => ({
   destination: '',
   ride_date: '',
   start_time: '',
-  estimated_duration_hours: 1,
-  self_drive: false
+  estimated_duration_hours: 1
 });
 
 export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
@@ -146,27 +143,6 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [noticeNote, setNoticeNote] = useState('');
 
   const [emergencyForm, setEmergencyForm] = useState(emptyEmergencyForm());
-  // Self-drive for the person picked: anyone, unless they're on Inventory ->
-  // Drivers set Inactive or with a license not covering the ride date.
-  const [emSelfDrive, setEmSelfDrive] = useState<{ allowed: boolean; on_list?: boolean; reason: string; license_expiry: string | null } | null>(null);
-  useEffect(() => {
-    if (!emergencyForm.employee_user_id) {
-      setEmSelfDrive(null);
-      return;
-    }
-    let live = true;
-    fetch(apiUrl(`/api/vehicles/self-drive-check?user_id=${emergencyForm.employee_user_id}&ride_date=${encodeURIComponent(emergencyForm.ride_date || '')}`), { headers: authHeaders() })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!live) return;
-        setEmSelfDrive(d);
-        if (!d?.allowed) setEmergencyForm((f) => (f.self_drive ? { ...f, self_drive: false } : f));
-      })
-      .catch(() => live && setEmSelfDrive(null));
-    return () => {
-      live = false;
-    };
-  }, [emergencyForm.employee_user_id, emergencyForm.ride_date]);
   const [emergencySubmitting, setEmergencySubmitting] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
 
@@ -457,7 +433,6 @@ useLiveRefresh(() => loadRequisitions());
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
-                {r.self_drive && <span className="ml-1 font-semibold text-blue-700">• Self-drive</span>}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
@@ -606,9 +581,8 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {sortDrivers(driverOptions, assignForm.vehicle_id, r.employee_user_id).map((d) => (
+                        {sortDrivers(driverOptions, assignForm.vehicle_id).map((d) => (
                           <option key={d.id} value={d.id}>
-                            {r.employee_user_id && Number(r.employee_user_id) === d.id ? 'Rider (self-drive): ' : ''}
                             {driverOptionLabel(d, assignForm.vehicle_id)}
                           </option>
                         ))}
@@ -627,8 +601,7 @@ useLiveRefresh(() => loadRequisitions());
                     <button
                       onClick={() => {
                         setAssigningFor(r.id);
-                        // Self-drive: the rider is picked as the driver.
-                        setAssignForm({ vehicle_id: '', driver_user_id: r.self_drive && r.employee_user_id ? String(r.employee_user_id) : '' });
+                        setAssignForm({ vehicle_id: '', driver_user_id: '' });
                       }}
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
@@ -754,29 +727,6 @@ useLiveRefresh(() => loadRequisitions());
                 />
               </div>
             </div>
-            {emSelfDrive && (
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={!!emergencyForm.self_drive}
-                  disabled={!emSelfDrive.allowed}
-                  onChange={(e) => setEmergencyForm({ ...emergencyForm, self_drive: e.target.checked })}
-                />
-                <span>
-                  <span className="font-medium text-gray-800">They'll drive themselves</span>
-                  <span className="block text-xs text-gray-500">
-                    {emSelfDrive.allowed
-                      ? emSelfDrive.license_expiry
-                        ? `License valid till ${emSelfDrive.license_expiry}.`
-                        : emSelfDrive.on_list === false
-                          ? 'Not on the Drivers list — no driving license on file.'
-                          : ''
-                      : emSelfDrive.reason.replace(/^Your/, 'Their').replace(/^You're/, "They're")}
-                  </span>
-                </span>
-              </label>
-            )}
             {emergencyMessage && <div className="text-sm text-gray-700">{emergencyMessage}</div>}
             <button
               type="submit"

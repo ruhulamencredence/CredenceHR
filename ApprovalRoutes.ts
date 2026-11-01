@@ -982,10 +982,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
                     destination: vr.destination,
                     ride_date: toDateOnlyString(vr.ride_date),
                     start_time: String(vr.start_time || "").slice(0, 5),
-                    estimated_duration_hours: Number(vr.estimated_duration_hours),
-                    // Self-drive: the rider drives; the assign form picks them.
-                    self_drive: !!Number(vr.self_drive || 0),
-                    rider_user_id: Number(vr.employee_user_id)
+                    estimated_duration_hours: Number(vr.estimated_duration_hours)
                   }
                 : null;
             })()
