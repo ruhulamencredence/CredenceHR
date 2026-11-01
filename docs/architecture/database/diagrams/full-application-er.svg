@@ -5038,7 +5038,7 @@
 <text xml:space="preserve" text-anchor="start" x="6342.78" y="-3702.38" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">assigned_date</text>
 <text xml:space="preserve" text-anchor="start" x="6430.5" y="-3702.38" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">date</text>
 <text xml:space="preserve" text-anchor="start" x="6459.85" y="-3702.38" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
-<text xml:space="preserve" text-anchor="start" x="6342.78" y="-3685.38" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +9 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="6342.78" y="-3685.38" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +25 কলাম</text>
 </g>
 <!-- users&#45;&gt;asset_assignments -->
 <g id="edge22" class="edge">

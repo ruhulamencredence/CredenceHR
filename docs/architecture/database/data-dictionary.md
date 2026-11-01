@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২২টি টেবিল, ২৩৯৫টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২২টি টেবিল, ২৪১১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2845,22 +2845,22 @@ Unique: `ucompany_uniq_leave_category_policy`(company_id,category_key)
 | `quantity` | decimal(10,2) | হ্যাঁ |  | |
 | `unit` | varchar(50) | হ্যাঁ |  | |
 | `handover_note` | text | হ্যাঁ |  | |
-| `handed_to_kind` | varchar(10) | হ্যাঁ | self / employee / other |  |
-| `handed_to_employee_id` | int(11) | হ্যাঁ |  | → `all_employees.id` |
-| `handed_to_name` | varchar(150) | হ্যাঁ |  |  |
-| `handed_to_mobile` | varchar(30) | হ্যাঁ |  |  |
-| `handed_over_at` | datetime | হ্যাঁ |  |  |
-| `return_reason` | varchar(30) | হ্যাঁ | not_needed / replace_faulty / leaving / other |  |
-| `return_condition_said` | varchar(10) | হ্যাঁ | good / damaged / lost |  |
-| `return_via_kind` | varchar(10) | হ্যাঁ | self / employee / other |  |
-| `return_via_employee_id` | int(11) | হ্যাঁ |  | → `all_employees.id` |
-| `return_via_name` | varchar(150) | হ্যাঁ |  |  |
-| `return_via_mobile` | varchar(30) | হ্যাঁ |  |  |
-| `return_note` | varchar(500) | হ্যাঁ |  |  |
-| `received_by` | int(11) | হ্যাঁ |  | → `users.id` |
-| `received_from_name` | varchar(150) | হ্যাঁ |  |  |
-| `received_at` | datetime | হ্যাঁ |  |  |
-| `receive_note` | varchar(500) | হ্যাঁ |  |  |
+| `handed_to_kind` | varchar(10) | হ্যাঁ |  | |
+| `handed_to_employee_id` | int(11) | হ্যাঁ |  | |
+| `handed_to_name` | varchar(150) | হ্যাঁ |  | |
+| `handed_to_mobile` | varchar(30) | হ্যাঁ |  | |
+| `handed_over_at` | datetime | হ্যাঁ |  | |
+| `return_reason` | varchar(30) | হ্যাঁ |  | |
+| `return_condition_said` | varchar(10) | হ্যাঁ |  | |
+| `return_via_kind` | varchar(10) | হ্যাঁ |  | |
+| `return_via_employee_id` | int(11) | হ্যাঁ |  | |
+| `return_via_name` | varchar(150) | হ্যাঁ |  | |
+| `return_via_mobile` | varchar(30) | হ্যাঁ |  | |
+| `return_note` | varchar(500) | হ্যাঁ |  | |
+| `received_by` | int(11) | হ্যাঁ |  | |
+| `received_from_name` | varchar(150) | হ্যাঁ |  | |
+| `received_at` | datetime | হ্যাঁ |  | |
+| `receive_note` | varchar(500) | হ্যাঁ |  | |
 
 ### `asset_requisition_events`
 
