@@ -377,7 +377,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // days, earnings, deductions and net for the month, on screen, for whoever
 // checks it before approving / paying. Plain reading, so it is part of the
 // no-saved-layers default ("read" + "approval_sheet").
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet"] as const;
+// "month_compare" = Payroll -> Approval -> Month comparison: this month vs
+// last month — totals, departments, who is new, who left and why each
+// person's net changed. Plain reading too, so also in that default.
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -2647,7 +2650,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2667,7 +2670,7 @@ async function startServer() {
           : moduleKey === "attendance_reports"
             ? ["read", "dept_summary"]
           : moduleKey === "payroll"
-            ? ["read", "approval_sheet"]
+            ? ["read", "approval_sheet", "month_compare"]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
             : moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
@@ -2701,7 +2704,7 @@ async function startServer() {
       : moduleKey === "attendance_reports"
         ? ["read", "dept_summary"]
       : moduleKey === "payroll"
-        ? ["read", "approval_sheet"]
+        ? ["read", "approval_sheet", "month_compare"]
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
         : moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"

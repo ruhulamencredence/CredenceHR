@@ -34,7 +34,7 @@ type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -297,16 +297,17 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log, edit, sheet] = await Promise.all([
+    const [audit, pay, log, edit, sheet, compare] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
       hasModuleLayer(req.user, "payroll", "access_log"),
       hasModuleLayer(req.user, "payroll", "read"),
-      hasModuleLayer(req.user, "payroll", "approval_sheet")
+      hasModuleLayer(req.user, "payroll", "approval_sheet"),
+      hasModuleLayer(req.user, "payroll", "month_compare")
     ]);
     // edit = HR's "Payroll" layer; without it the account only views.
     // approval_sheet = the Salary sheet table in Approval.
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet });
+    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare });
   });
 
   // ---- one month's approval state ---------------------------------------
@@ -620,6 +621,181 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         };
       });
       res.json({ month_year: month, previous_month: prevMonth, rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Payroll -> Approval -> Month comparison (layer "month_compare"): this
+  // month's salaries against last month's — totals, a bridge from last
+  // month's net to this month's (new joiners, people who left, and each
+  // salary part that moved for everyone else), departments side by side,
+  // and per person what changed and why. ?vs=YYYY-MM compares with another
+  // month instead of the one before.
+  app.get("/api/payroll/approval/:month/compare", authenticateToken, requireAdmin, requireModuleLayer("payroll", "month_compare"), async (req: any, res: any) => {
+    try {
+      const month = String(req.params.month);
+      if (!MONTH_RE.test(month)) return bad(res, "Choose a month.");
+      const [y, mo] = month.split("-").map(Number);
+      const prevMonth = MONTH_RE.test(String(req.query.vs || "")) ? String(req.query.vs) : `${mo === 1 ? y - 1 : y}-${String(mo === 1 ? 12 : mo - 1).padStart(2, "0")}`;
+      if (prevMonth === month) return bad(res, "Pick a different month to compare with.");
+      const load = async (m: string) =>
+        ((await queryDB(
+          `SELECT p.*, e.name AS employee_name, e.employee_id AS employee_code, e.department, e.designation, e.joining_date, e.is_active AS employee_active, e.user_id
+             FROM payrolls p JOIN all_employees e ON e.id = p.employee_id
+            WHERE p.month_year = ?`,
+          [m]
+        )) || []) as any[];
+      const [cur, prev] = await Promise.all([load(month), load(prevMonth)]);
+      const curBy = new Map<number, any>(cur.map((r) => [Number(r.employee_id), r]));
+      const prevBy = new Map<number, any>(prev.map((r) => [Number(r.employee_id), r]));
+      const userIds = [...new Set([...cur, ...prev].map((r) => Number(r.user_id)).filter(Boolean))];
+      const exits: any[] = userIds.length
+        ? ((await queryDB(
+            `SELECT user_id, exit_type, reason, last_working_day, status FROM exit_requests WHERE user_id IN (${userIds.map(() => "?").join(",")}) ORDER BY id DESC`,
+            userIds
+          ).catch(() => [])) || []).filter((x: any) => !["cancelled", "rejected", "withdrawn"].includes(String(x.status || "")))
+        : [];
+      const exitBy = new Map<number, any>();
+      for (const x of exits) if (!exitBy.has(Number(x.user_id))) exitBy.set(Number(x.user_id), x);
+      const ymd = (v: any) => (v ? String(v).slice(0, 10) : null);
+      const plain = (v: number) => money(v).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      // Salary parts and their effect on net (earnings +, deductions −).
+      const PARTS: { key: string; label: string; col: string; sign: 1 | -1 }[] = [
+        { key: "basic", label: "Basic", col: "basic_amount", sign: 1 },
+        { key: "allowances", label: "Allowances", col: "allowances_total", sign: 1 },
+        { key: "overtime", label: "Overtime", col: "overtime_amount", sign: 1 },
+        { key: "bonus", label: "Bonus", col: "bonus_amount", sign: 1 },
+        { key: "extra_pay", label: "Extra pay", col: "item_earnings", sign: 1 },
+        { key: "absent_cut", label: "Absent / LWP / late cut", col: "absent_deduction", sign: -1 },
+        { key: "tax", label: "Tax", col: "tax_deduction", sign: -1 },
+        { key: "pf", label: "PF", col: "pf_deduction", sign: -1 },
+        { key: "advance", label: "Loan / advance", col: "advance_deduction", sign: -1 },
+        { key: "other_ded", label: "Other deduction", col: "other_deduction", sign: -1 },
+        { key: "extra_ded", label: "Extra deduction", col: "item_deductions", sign: -1 }
+      ];
+      const n = (r: any, c: string) => money(r?.[c]);
+      const people: any[] = [];
+      const bridge: Record<string, number> = { new: 0, left: 0, other: 0 };
+      for (const p of PARTS) bridge[p.key] = 0;
+      const ids = new Set<number>([...curBy.keys(), ...prevBy.keys()]);
+      for (const id of ids) {
+        const c = curBy.get(id);
+        const p = prevBy.get(id);
+        const base = c || p;
+        const row: any = {
+          employee_id: id,
+          employee_code: base.employee_code || "",
+          employee_name: base.employee_name,
+          department: base.department || "No department",
+          designation: base.designation || "",
+          last_net: p ? n(p, "net_salary") : null,
+          this_net: c ? n(c, "net_salary") : null,
+          diff: money((c ? n(c, "net_salary") : 0) - (p ? n(p, "net_salary") : 0)),
+          held: !!(c && Number(c.is_held)),
+          reasons: [] as { label: string; effect: number; note: string }[]
+        };
+        if (c && !p) {
+          row.kind = "new";
+          const jd = ymd(c.joining_date);
+          row.why = jd && jd.slice(0, 7) >= prevMonth && jd.slice(0, 7) <= month ? `Joined ${jd}` : `No salary in ${prevMonth}${jd ? ` (joined ${jd})` : ""}`;
+          bridge.new += row.this_net;
+        } else if (p && !c) {
+          row.kind = "left";
+          const x = base.user_id ? exitBy.get(Number(base.user_id)) : null;
+          row.why = x
+            ? `${String(x.exit_type || "Exit").replace(/_/g, " ").replace(/^./, (ch: string) => ch.toUpperCase())}${ymd(x.last_working_day) ? ` — last working day ${ymd(x.last_working_day)}` : ""}${x.reason ? ` (${String(x.reason).slice(0, 120)})` : ""}`
+            : Number(base.employee_active) === 0
+              ? "Employee set Inactive"
+              : `No salary run for ${month} yet`;
+          bridge.left -= row.last_net;
+        } else {
+          row.kind = row.diff !== 0 ? "changed" : "same";
+          let explained = 0;
+          for (const part of PARTS) {
+            const d = money(n(c, part.col) - n(p, part.col));
+            if (!d) continue;
+            const effect = money(d * part.sign);
+            explained = money(explained + effect);
+            bridge[part.key] += effect;
+            let note = `${plain(n(p, part.col))} → ${plain(n(c, part.col))}`;
+            if (part.key === "absent_cut") {
+              const bits = [
+                Number(c.absent_days) !== Number(p.absent_days) ? `absent ${Number(p.absent_days) || 0} → ${Number(c.absent_days) || 0} days` : "",
+                Number(c.lwp_days) !== Number(p.lwp_days) ? `LWP ${Number(p.lwp_days) || 0} → ${Number(c.lwp_days) || 0} days` : "",
+                Number(c.late_count) !== Number(p.late_count) ? `late ${Number(p.late_count) || 0} → ${Number(c.late_count) || 0} times` : ""
+              ].filter(Boolean);
+              if (bits.length) note += ` (${bits.join(", ")})`;
+            } else if (part.key === "overtime") {
+              note += ` (${Number(p.overtime_hours) || 0} → ${Number(c.overtime_hours) || 0} h)`;
+            } else if (part.key === "basic" || part.key === "allowances") {
+              note += " (salary structure changed)";
+            }
+            row.reasons.push({ label: part.label, effect, note });
+          }
+          const rest = money(row.diff - explained);
+          if (rest) {
+            bridge.other += rest;
+            row.reasons.push({ label: "Other / rounding", effect: rest, note: "" });
+          }
+          if (Number(c.total_working_days) !== Number(p.total_working_days)) {
+            row.reasons.push({ label: "Working days", effect: 0, note: `${Number(p.total_working_days) || 0} → ${Number(c.total_working_days) || 0} days in the month` });
+          }
+        }
+        people.push(row);
+      }
+      people.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff) || String(a.employee_name).localeCompare(String(b.employee_name)));
+
+      const deptMap = new Map<string, any>();
+      for (const r of people) {
+        if (!deptMap.has(r.department))
+          deptMap.set(r.department, { department: r.department, last_count: 0, last_net: 0, this_count: 0, this_net: 0, new_count: 0, left_count: 0, changed_count: 0 });
+        const d = deptMap.get(r.department);
+        if (r.last_net != null) {
+          d.last_count++;
+          d.last_net = money(d.last_net + r.last_net);
+        }
+        if (r.this_net != null) {
+          d.this_count++;
+          d.this_net = money(d.this_net + r.this_net);
+        }
+        if (r.kind === "new") d.new_count++;
+        if (r.kind === "left") d.left_count++;
+        if (r.kind === "changed") d.changed_count++;
+      }
+      const departments = [...deptMap.values()]
+        .map((d) => ({ ...d, diff: money(d.this_net - d.last_net) }))
+        .sort((a, b) => a.department.localeCompare(b.department));
+      const total = (rows: any[], k: string) => money(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0));
+      const lastTotal = total(prev, "net_salary");
+      const thisTotal = total(cur, "net_salary");
+      const steps = [
+        { key: "new", label: "New this month", amount: money(bridge.new) },
+        { key: "left", label: "Left / not paid this month", amount: money(bridge.left) },
+        ...PARTS.map((p) => ({ key: p.key, label: p.label, amount: money(bridge[p.key]) })),
+        { key: "other", label: "Other / rounding", amount: money(bridge.other) }
+      ].filter((s) => s.amount !== 0);
+      res.json({
+        month_year: month,
+        previous_month: prevMonth,
+        summary: {
+          last_count: prev.length,
+          last_net: lastTotal,
+          last_gross: total(prev, "gross_earned"),
+          this_count: cur.length,
+          this_net: thisTotal,
+          this_gross: total(cur, "gross_earned"),
+          diff: money(thisTotal - lastTotal),
+          diff_pct: lastTotal ? Math.round(((thisTotal - lastTotal) / lastTotal) * 1000) / 10 : null,
+          new_count: people.filter((r) => r.kind === "new").length,
+          left_count: people.filter((r) => r.kind === "left").length,
+          changed_count: people.filter((r) => r.kind === "changed").length,
+          same_count: people.filter((r) => r.kind === "same").length
+        },
+        bridge: steps,
+        departments,
+        people
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
