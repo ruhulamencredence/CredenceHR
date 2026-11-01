@@ -798,18 +798,20 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   }
 
   // Can this account drive the company vehicle on its own ride (on `rideDate`)?
-  // Strict: only an active driver on Inventory -> Drivers whose license is on
-  // file and still valid that day.
-  async function selfDriveCheck(userId: number, rideDate?: string): Promise<{ allowed: boolean; reason: string; license_expiry: string | null }> {
+  // Anyone may: someone not on Inventory -> Drivers has no license on file
+  // (on_list false) and whoever gives the vehicle decides. Refused only for a
+  // driver on the list who is set Inactive or whose license on file doesn't
+  // cover the ride date.
+  async function selfDriveCheck(userId: number, rideDate?: string): Promise<{ allowed: boolean; on_list: boolean; reason: string; license_expiry: string | null }> {
     const roster = await driverRoster();
     const d = roster.find((x) => x.user_id === userId);
-    if (!d || !d.is_active) return { allowed: false, reason: "Only someone on Vehicle Management -> Inventory -> Drivers (with a driving license on file) can drive themselves.", license_expiry: null };
-    if (!d.license_expiry) return { allowed: false, reason: "Your driving license's valid-till date isn't on file — ask Vehicle Management to add it in Inventory -> Drivers.", license_expiry: null };
-    if (d.license_state === "expired") return { allowed: false, reason: `Your driving license expired on ${d.license_expiry} — renew it and have it updated in Inventory -> Drivers.`, license_expiry: d.license_expiry };
-    if (rideDate && /^\d{4}-\d{2}-\d{2}$/.test(rideDate) && rideDate > d.license_expiry) {
-      return { allowed: false, reason: `Your driving license ends on ${d.license_expiry}, before this ride.`, license_expiry: d.license_expiry };
+    if (!d) return { allowed: true, on_list: false, reason: "Not on Inventory -> Drivers, so no driving license is on file — whoever gives the vehicle decides.", license_expiry: null };
+    if (!d.is_active) return { allowed: false, on_list: true, reason: "You're set Inactive in Inventory -> Drivers.", license_expiry: d.license_expiry };
+    if (d.license_state === "expired") return { allowed: false, on_list: true, reason: `Your driving license expired on ${d.license_expiry} — renew it and have it updated in Inventory -> Drivers.`, license_expiry: d.license_expiry };
+    if (d.license_expiry && rideDate && /^\d{4}-\d{2}-\d{2}$/.test(rideDate) && rideDate > d.license_expiry) {
+      return { allowed: false, on_list: true, reason: `Your driving license ends on ${d.license_expiry}, before this ride.`, license_expiry: d.license_expiry };
     }
-    return { allowed: true, reason: "", license_expiry: d.license_expiry };
+    return { allowed: true, on_list: true, reason: d.license_expiry ? "" : "License valid-till date isn't on file.", license_expiry: d.license_expiry };
   }
 
   async function validateVehicleAssignment(body: any) {
@@ -829,12 +831,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     // Once Inventory -> Drivers has anyone in it, only an active driver from
     // there may be given a ride, and not with an expired license. With the
     // list still empty it works as before (any account).
+    // The driver may be anyone with a login — the rider (self-drive) or
+    // another employee — even if not on Inventory -> Drivers. A driver who IS
+    // on that list must be Active and not have an expired license.
     const roster = await driverRoster();
-    if (roster.length > 0) {
-      const d = roster.find((x) => x.user_id === driverUserId);
-      if (!d || !d.is_active) throw new Error("Pick a driver from Vehicle Management -> Inventory -> Drivers.");
-      if (d.license_state === "expired") throw new Error(`${d.name}'s driving license has expired — update it in Inventory -> Drivers first.`);
-    }
+    const d = roster.find((x) => x.user_id === driverUserId);
+    if (d && !d.is_active) throw new Error(`${d.name} is set Inactive in Inventory -> Drivers.`);
+    if (d && d.license_state === "expired") throw new Error(`${d.name}'s driving license has expired — update it in Inventory -> Drivers first.`);
     // all_employees.user_id is how EmployeeDirectoryRoutes.ts links a login
     // account to its contact number(s); mobile/phone/telephone are all
     // optional there, so fall back through them for a display number.
@@ -1033,13 +1036,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // invisible there — that's exactly the "driver dropdown shows nobody" bug
   // this route exists to avoid. No module gate, same reasoning as GET
   // /api/vehicles/available just above.
-  // Who can be picked as the driver of a ride. With Inventory -> Drivers in
-  // use: its active drivers who have a login, with what they are doing now
-  // (expired licenses come back marked; the server refuses them). With the
-  // list still empty: every account, as before.
   // GET /api/vehicles/self-drive-check?ride_date=&user_id= — whether the
-  // "I'll drive myself" tick can be offered. Own account; another account's
-  // only with Vehicle Management (Direct Book on someone's behalf).
+  // "I'll drive myself" tick is on (selfDriveCheck). Own account; another
+  // account's only with Vehicle Management (Emergency Requisition).
   app.get("/api/vehicles/self-drive-check", authenticateToken, async (req: any, res: any) => {
     try {
       let userId = Number(req.user.id);
@@ -1055,30 +1054,49 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
+  // Who can be picked as the driver of a ride: Inventory -> Drivers' active
+  // drivers first (with what each is doing now and their license state;
+  // expired ones come back marked and the server refuses them), then every
+  // other login account (registered: false — no license on file), so the
+  // rider themselves or anyone else can drive too.
   app.get("/api/vehicles/driver-picker", authenticateToken, async (req: any, res: any) => {
     try {
       const roster = await driverRoster();
-      if (roster.length > 0) {
-        return res.json(
-          roster
-            .filter((d) => d.is_active && d.user_id)
-            .map((d) => ({
-              id: d.user_id,
-              name: d.name,
-              employee_code: d.employee_code,
-              designation: d.designation,
-              department: d.department,
-              now: d.now,
-              license_state: d.license_state,
-              license_expiry: d.license_expiry,
-              usual_vehicle_id: d.usual_vehicle_id,
-              registered: true
-            }))
-        );
-      }
-      const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
-      const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
-      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false })));
+      const onList = new Set(roster.filter((d) => d.user_id).map((d) => Number(d.user_id)));
+      const listed = roster
+        .filter((d) => d.is_active && d.user_id)
+        .map((d) => ({
+          id: d.user_id,
+          name: d.name,
+          employee_code: d.employee_code,
+          designation: d.designation,
+          department: d.department,
+          now: d.now,
+          license_state: d.license_state,
+          license_expiry: d.license_expiry,
+          usual_vehicle_id: d.usual_vehicle_id,
+          registered: true
+        }));
+      const rows: any[] =
+        (await queryDB(
+          `SELECT u.id, u.name, u.role, e.employee_id AS employee_code, e.designation, e.department
+             FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+            WHERE COALESCE(u.is_blocked, 0) = 0
+            ORDER BY u.name ASC`
+        )) || [];
+      const seen = new Set<number>();
+      const others = rows
+        .filter((u) => (req.user.role === "superadmin" || u.role !== "superadmin") && !onList.has(Number(u.id)))
+        .filter((u) => (seen.has(Number(u.id)) ? false : (seen.add(Number(u.id)), true)))
+        .map((u) => ({
+          id: Number(u.id),
+          name: u.name,
+          employee_code: u.employee_code || "",
+          designation: u.designation || "",
+          department: u.department || "",
+          registered: false
+        }));
+      res.json([...listed, ...others]);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

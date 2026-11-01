@@ -428,7 +428,7 @@ Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `
 
 ## Vehicle Management → Inventory → Drivers
 
-Inventory-তে দুটো ভাগ: Vehicles আর Drivers। Driver যোগ হয় শুধু Employees থেকে (নাম · Employee ID · পদ · বিভাগ লিখে খোঁজা); নাম, মোবাইল, বিভাগ Employee record থেকে আসে, এখানে রাখা হয় শুধু License নম্বর, ধরন, মেয়াদ, সাধারণ গাড়ি আর Active / Inactive (`vehicle_drivers`, `VehicleManagementRoutes.ts`)। Login নেই এমন কর্মীকে driver করা যায় না (live map-এ অবস্থান লাগে)। তালিকায় কেউ থাকলে ride-এ গাড়ি দেওয়ার সময় (Assign, Approve & Assign, Direct Book, Direct Assign) শুধু Active driver বাছা যায় — কে ফাঁকা, কার ride booked বা চলছে, কার License শেষ পাশে লেখা থাকে (`GET /api/vehicles/driver-picker`); License শেষ হলে server নেয় না। তালিকা খালি থাকলে আগের মতো যেকোনো অ্যাকাউন্ট। License শেষের ৩০ দিন আগে (বা শেষ হলে) Vehicle Management-এর লোকজন আর Superadmin একবার alert পান। তালিকা দেখা Vehicle Management module-এ; যোগ / বদল / বাদ "Manage drivers" layer-এ।
+Inventory-তে দুটো ভাগ: Vehicles আর Drivers। Driver যোগ হয় শুধু Employees থেকে (নাম · Employee ID · পদ · বিভাগ লিখে খোঁজা); নাম, মোবাইল, বিভাগ Employee record থেকে আসে, এখানে রাখা হয় শুধু License নম্বর, ধরন, মেয়াদ, সাধারণ গাড়ি আর Active / Inactive (`vehicle_drivers`, `VehicleManagementRoutes.ts`)। Login নেই এমন কর্মীকে driver করা যায় না (live map-এ অবস্থান লাগে)। ride-এ গাড়ি দেওয়ার সময় (Assign, Approve & Assign, Direct Book, Direct Assign) তালিকার Active driver-রা আগে আসে — কে ফাঁকা, কার ride booked বা চলছে, কার License শেষ পাশে লেখা থাকে (`GET /api/vehicles/driver-picker`); তালিকার কারও License শেষ বা Inactive হলে server নেয় না। তালিকার বাইরের যেকোনো login account-ও driver হতে পারেন (নিচে Self-drive অংশ দেখুন)। License শেষের ৩০ দিন আগে (বা শেষ হলে) Vehicle Management-এর লোকজন আর Superadmin একবার alert পান। তালিকা দেখা Vehicle Management module-এ; যোগ / বদল / বাদ "Manage drivers" layer-এ।
 
 ## আরও কিছু notification
 
@@ -485,12 +485,12 @@ flowchart TD
 
 server চালু হওয়ার সময়ের এককালীন কাজগুলো এখন একবারই চলে; কোনটা হয়ে গেছে তা `startup_migrations`-এ লেখা থাকে (`startupOnce.ts`)। আগে প্রতি restart-এ: শুধু Head office-এর জন্য দেওয়া holiday / weekend Project site-এর calendar-এও কপি হয়ে যেত; কোনো Request Type-এর সব template মুছে দিলে পুরনো Approval Chain থেকে "Migrated Global Chain" template আবার তৈরি হতো; আর Superadmin-এর নিজে বদলানো password ও নাম `.env`-এরটায় ফিরে যেত। এখন Holiday-এর কপি একবারই হয় (Project site calendar খালি থাকলে), template migration একবারই (কোনো template না থাকলে), আর `.env`-এর `ADMIN_PASSWORD` / `ADMIN_NAME` বসে শুধু যখন `.env`-এ সেগুলো বদলানো হয়েছে — তাই password ভুলে গেলে `.env` বদলে restart করলে আগের মতোই নতুনটা বসে। Role সবসময় superadmin রাখা হয়।
 
-## Book a Ride: নিজে গাড়ি চালানো (Self-drive)
+## Book a Ride: নিজে গাড়ি চালানো (Self-drive) ও Drivers list-এর বাইরের driver
 
-- Book a Ride ফর্মে **"I'll drive myself"** টিক দেখায় শুধু তাঁকে, যিনি Vehicle Management → Inventory → Drivers-এ Active আছেন এবং যাঁর License-এর মেয়াদ ride-এর দিন পর্যন্ত আছে (`GET /api/vehicles/self-drive-check`)। তালিকায় আছেন কিন্তু License শেষ / মেয়াদ নেই — টিক বন্ধ থাকে, কারণ লেখা থাকে। তালিকায় না থাকলে টিক দেখায় না।
-- Server একই যাচাই করে (`POST /api/vehicles/requisitions`, Emergency / HR Direct-এর `admin-create`-এও); না মিললে 400। Request-এ `vehicle_requisitions.self_drive = 1`।
+- Book a Ride ফর্মে **"I'll drive myself"** টিক সবার জন্য (`GET /api/vehicles/self-drive-check`)। Inventory → Drivers-এ না থাকলেও দেওয়া যায় — পাশে লেখা থাকে License on file নেই, গাড়ি যিনি দেন তিনি দেখে সিদ্ধান্ত নেন। বন্ধ থাকে শুধু তখন, যখন rider Drivers list-এ আছেন কিন্তু Inactive, বা তাঁর License-এর মেয়াদ ride-এর দিনের আগে শেষ। Server একই যাচাই করে (`POST /api/vehicles/requisitions`, `admin-create`); request-এ `vehicle_requisitions.self_drive = 1`।
 - Emergency Requisition ফর্মে (Admin Panel → Vehicle Management) বাছা কর্মীর জন্য "They'll drive themselves" — অন্য কারও যাচাই শুধু Vehicle Management module থাকলে।
-- Approve / Assign-এর সময় (Approve Application, Pending Approvals card, Ride Assign, Bypass, Admin Assign) driver ঘরে rider আগে থেকে বাছা থাকে; card-এ "Self-drive" লেখা। যিনি গাড়ি দেন তিনি চাইলে অন্য driver বাছতে পারেন — driver সবসময় Drivers তালিকা থেকে, License যাচাই আগের মতো।
+- গাড়ি দেওয়ার সময় (Approve Application, Pending Approvals card, Ride Assign, Bypass, Direct Book, Admin Assign) driver তালিকায় সবার উপরে **"Rider (self-drive)"**, তারপর Drivers list (কে ফাঁকা, License), তারপর বাকি সব login account "not on Drivers list" লেখা সহ (`GET /api/vehicles/driver-picker`)। Self-drive request-এ rider আগে থেকে বাছা থাকে, card-এ "Self-drive" লেখা।
+- Server (`validateVehicleAssignment`) যেকোনো login account-কে driver নেয়; Drivers list-এ থাকা কেউ Inactive বা License শেষ হলে নেয় না।
 
 ## Book a Ride: start না হওয়া ride বাতিল ও বন্ধ
 

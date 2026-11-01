@@ -146,9 +146,9 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [noticeNote, setNoticeNote] = useState('');
 
   const [emergencyForm, setEmergencyForm] = useState(emptyEmergencyForm());
-  // Self-drive for the person picked: only if they're on Inventory -> Drivers
-  // with a license valid on the ride date (GET /api/vehicles/self-drive-check).
-  const [emSelfDrive, setEmSelfDrive] = useState<{ allowed: boolean; reason: string; license_expiry: string | null } | null>(null);
+  // Self-drive for the person picked: anyone, unless they're on Inventory ->
+  // Drivers set Inactive or with a license not covering the ride date.
+  const [emSelfDrive, setEmSelfDrive] = useState<{ allowed: boolean; on_list?: boolean; reason: string; license_expiry: string | null } | null>(null);
   useEffect(() => {
     if (!emergencyForm.employee_user_id) {
       setEmSelfDrive(null);
@@ -606,8 +606,9 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {sortDrivers(driverOptions, assignForm.vehicle_id).map((d) => (
+                        {sortDrivers(driverOptions, assignForm.vehicle_id, r.employee_user_id).map((d) => (
                           <option key={d.id} value={d.id}>
+                            {r.employee_user_id && Number(r.employee_user_id) === d.id ? 'Rider (self-drive): ' : ''}
                             {driverOptionLabel(d, assignForm.vehicle_id)}
                           </option>
                         ))}
@@ -753,7 +754,7 @@ useLiveRefresh(() => loadRequisitions());
                 />
               </div>
             </div>
-            {emSelfDrive && (emSelfDrive.allowed || emSelfDrive.license_expiry) && (
+            {emSelfDrive && (
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -765,7 +766,13 @@ useLiveRefresh(() => loadRequisitions());
                 <span>
                   <span className="font-medium text-gray-800">They'll drive themselves</span>
                   <span className="block text-xs text-gray-500">
-                    {emSelfDrive.allowed ? `License valid till ${emSelfDrive.license_expiry}.` : emSelfDrive.reason.replace(/^Your/, 'Their')}
+                    {emSelfDrive.allowed
+                      ? emSelfDrive.license_expiry
+                        ? `License valid till ${emSelfDrive.license_expiry}.`
+                        : emSelfDrive.on_list === false
+                          ? 'Not on the Drivers list — no driving license on file.'
+                          : ''
+                      : emSelfDrive.reason.replace(/^Your/, 'Their').replace(/^You're/, "They're")}
                   </span>
                 </span>
               </label>

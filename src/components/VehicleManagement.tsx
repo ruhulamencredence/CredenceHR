@@ -138,8 +138,9 @@ const emptyForm = () => ({
   ride_date: todayLocal(),
   start_time: '',
   estimated_duration_hours: 1,
-  // "I'll drive myself" — offered only to someone on Inventory -> Drivers
-  // with a license valid on the ride date (GET /api/vehicles/self-drive-check).
+  // "I'll drive myself" — anyone may ask; refused only for a driver on
+  // Inventory -> Drivers set Inactive or whose license doesn't cover the
+  // date (GET /api/vehicles/self-drive-check).
   self_drive: false
 });
 
@@ -182,7 +183,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
 
   const [form, setForm] = useState(emptyForm());
   // Self-drive: whether this account may drive itself on the picked date.
-  const [selfDrive, setSelfDrive] = useState<{ allowed: boolean; reason: string; license_expiry: string | null } | null>(null);
+  const [selfDrive, setSelfDrive] = useState<{ allowed: boolean; on_list?: boolean; reason: string; license_expiry: string | null } | null>(null);
   useEffect(() => {
     let live = true;
     fetch(apiUrl(`/api/vehicles/self-drive-check?ride_date=${encodeURIComponent(form.ride_date || '')}`), { headers: authHeaders() })
@@ -594,7 +595,8 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   );
   const vehicleDriverPicker = (
     value: { vehicle_id: string; driver_user_id: string },
-    set: (v: { vehicle_id: string; driver_user_id: string }) => void
+    set: (v: { vehicle_id: string; driver_user_id: string }) => void,
+    riderId?: number | null
   ) => (
     <>
       <SearchSelect value={value.vehicle_id} onChange={(e) => set({ ...value, vehicle_id: e.target.value })} className={RIDE_INPUT_SM}>
@@ -607,8 +609,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
       </SearchSelect>
       <SearchSelect value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a driver…</option>
-        {sortDrivers(driverCandidates, value.vehicle_id).map((d) => (
+        {sortDrivers(driverCandidates, value.vehicle_id, riderId).map((d) => (
           <option key={d.id} value={d.id}>
+            {riderId && Number(riderId) === d.id ? 'Rider (self-drive): ' : ''}
             {driverOptionLabel(d, value.vehicle_id)}
           </option>
         ))}
@@ -867,10 +870,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 <DurationPicker value={form.estimated_duration_hours} onChange={(h) => setForm({ ...form, estimated_duration_hours: h })} className={RIDE_INPUT} />
               </div>
             </div>
-            {/* Self-drive: only for someone on Inventory -> Drivers whose
-                license is on file and valid that day (a driver whose
-                license doesn't cover the date sees why). */}
-            {selfDrive && (selfDrive.allowed || selfDrive.license_expiry) && (
+            {/* Self-drive: anyone may tick it; a driver on Inventory ->
+                Drivers whose license doesn't cover the date sees why it's off. */}
+            {selfDrive && (
               <label className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${selfDrive.allowed ? 'border-slate-200 bg-white/70 cursor-pointer' : 'border-amber-200 bg-amber-50/70'}`}>
                 <input
                   type="checkbox"
@@ -882,7 +884,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 <span className="text-sm">
                   <span className="font-semibold text-slate-800">I'll drive myself</span>
                   <span className="block text-xs text-slate-500">
-                    {selfDrive.allowed ? `You'll be picked as the driver. License valid till ${selfDrive.license_expiry}.` : selfDrive.reason}
+                    {selfDrive.allowed
+                      ? `You'll be picked as the driver.${selfDrive.license_expiry ? ` License valid till ${selfDrive.license_expiry}.` : selfDrive.on_list === false ? ' No driving license on file — whoever gives the vehicle decides.' : ''}`
+                      : selfDrive.reason}
                   </span>
                 </span>
               </label>
@@ -1172,7 +1176,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 r,
                 assigningFor === r.id ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    {vehicleDriverPicker(assignForm, setAssignForm)}
+                    {vehicleDriverPicker(assignForm, setAssignForm, r.employee_user_id)}
                     <button onClick={() => assignVehicle(r.id)} className={BTN_PRIMARY_SM}>
                       Confirm Assignment
                     </button>
@@ -1395,9 +1399,10 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     className={RIDE_INPUT}
                   >
                     <option value="">Pick a driver…</option>
-                    {driverCandidates.map((d) => (
+                    {sortDrivers(driverCandidates, directBookForm.vehicle_id, directBookForm.employee_user_id).map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.name}
+                        {directBookForm.employee_user_id && Number(directBookForm.employee_user_id) === d.id ? 'Rider (self-drive): ' : ''}
+                        {driverOptionLabel(d, directBookForm.vehicle_id)}
                       </option>
                     ))}
                   </SearchSelect>
@@ -1419,7 +1424,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   r,
                   bypassingFor === r.id ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      {vehicleDriverPicker(bypassForm, setBypassForm)}
+                      {vehicleDriverPicker(bypassForm, setBypassForm, r.employee_user_id)}
                       <button onClick={() => bypassAssign(r.id)} className={BTN_PRIMARY_SM}>
                         Confirm Directly
                       </button>
