@@ -199,14 +199,20 @@ const clipCache = new Map<string, Promise<Blob>>();
 function fetchClip(text: string, token: string): Promise<Blob> {
   const hit = clipCache.get(text);
   if (hit) return hit;
+  // Never wait more than 50 s for a piece (the server stops trying at ~40).
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 50000);
   const p = fetch(apiUrl('/api/assistant/speak'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text })
-  }).then(async (r) => {
-    if (!r.ok) throw new Error('Could not read the answer aloud.');
-    return r.blob();
-  });
+    body: JSON.stringify({ text }),
+    signal: ctl.signal
+  })
+    .then(async (r) => {
+      if (!r.ok) throw new Error('Could not read the answer aloud.');
+      return r.blob();
+    })
+    .finally(() => clearTimeout(timer));
   p.catch(() => clipCache.delete(text));
   clipCache.set(text, p);
   if (clipCache.size > 60) clipCache.delete(clipCache.keys().next().value as string);

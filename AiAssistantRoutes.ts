@@ -2809,10 +2809,36 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
 
   // POST /api/assistant/speak { text } -> audio/wav: the answer read out by
   // Gemini's voice — used only when the device has no Bangla voice of its own.
-  const TTS_MODELS = (process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts,gemini-2.5-flash-tts").split(",").map((m) => m.trim()).filter(Boolean);
-  // The model that last worked is tried first (no wasted call on one that's
-  // gone), and a piece read in the last 10 minutes is sent again at once.
-  let preferredTts = 0;
+  // Which voice (TTS) models this key can use: GEMINI_TTS_MODEL first, then
+  // every model Google lists whose name has "tts" (flash before pro), looked
+  // up once an hour — Google renames these, so names aren't guessed. The one
+  // that last worked is tried first; a piece read in the last 10 minutes is
+  // sent again at once.
+  const TTS_FROM_ENV = (process.env.GEMINI_TTS_MODEL || "").split(",").map((m) => m.trim()).filter(Boolean);
+  const TTS_GUESS = ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts", "gemini-2.5-pro-preview-tts"];
+  let ttsModels: string[] = [];
+  let ttsListedAt = 0;
+  let preferredTtsModel = "";
+  const ttsModelList = async (ai: GoogleGenAI): Promise<string[]> => {
+    if (ttsModels.length && Date.now() - ttsListedAt < 60 * 60_000) return ttsModels;
+    const found: string[] = [];
+    try {
+      const pager: any = await (ai.models as any).list({ config: { pageSize: 200 } });
+      for await (const m of pager) {
+        const name = String(m?.name || "").replace(/^models\//, "");
+        const actions: string[] = m?.supportedActions || [];
+        if (/tts/i.test(name) && (!actions.length || actions.includes("generateContent"))) found.push(name);
+      }
+    } catch (err: any) {
+      console.warn("AI Assistant: could not list Gemini models:", String(err?.message || err).slice(0, 160));
+    }
+    const rank = (n: string) => (/flash/.test(n) ? 0 : 1) + (/preview/.test(n) ? 0.1 : 0);
+    found.sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
+    ttsModels = [...new Set([...TTS_FROM_ENV, ...found, ...(found.length ? [] : TTS_GUESS)])];
+    ttsListedAt = Date.now();
+    console.log(`AI Assistant: voice models available: ${ttsModels.join(", ") || "none"}`);
+    return ttsModels;
+  };
   const ttsCache = new Map<string, { at: number; wav: Buffer }>();
   app.post("/api/assistant/speak", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
@@ -2828,10 +2854,12 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
       res.setHeader("Cache-Control", "no-store");
       return res.send(hit.wav);
     }
-    let lastErr: any = null;
-    for (let k = 0; k < TTS_MODELS.length; k++) {
-      const mi = (preferredTts + k) % TTS_MODELS.length;
-      const model = TTS_MODELS[mi];
+    const list = await ttsModelList(ai);
+    const order = preferredTtsModel && list.includes(preferredTtsModel) ? [preferredTtsModel, ...list.filter((m) => m !== preferredTtsModel)] : list;
+    const why: string[] = [];
+    const t0 = Date.now();
+    for (const model of order.slice(0, 4)) {
+      if (Date.now() - t0 > 40000) break;
       try {
         const resp: any = await ai.models.generateContent({
           model,
@@ -2862,17 +2890,22 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
         head.write("data", 36);
         head.writeUInt32LE(pcm.length, 40);
         const wav = Buffer.concat([head, pcm]);
-        preferredTts = mi;
+        if (preferredTtsModel !== model) console.log(`AI Assistant: reading aloud with ${model} (${Date.now() - t0} ms)`);
+        preferredTtsModel = model;
         ttsCache.set(text, { at: Date.now(), wav });
         if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
         res.setHeader("Content-Type", "audio/wav");
         res.setHeader("Cache-Control", "no-store");
         return res.send(wav);
       } catch (err: any) {
-        lastErr = err;
+        const msg = String(err?.message || err).slice(0, 200);
+        why.push(`${model}: ${msg}`);
+        if (/API key/i.test(msg)) break;
       }
     }
-    console.warn("AI Assistant: speak failed:", lastErr?.message || lastErr);
+    console.warn(`AI Assistant: speak failed after ${Date.now() - t0} ms (${text.length} chars) — ${why.join(" | ") || "no voice model"}`);
+    // Google may have renamed the models: list them again on the next try.
+    ttsListedAt = 0;
     res.status(502).json({ error: "Could not read the answer aloud." });
   });
 
