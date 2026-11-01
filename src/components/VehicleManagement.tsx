@@ -46,7 +46,10 @@ import {
 
 interface Requisition {
   id: number;
+  employee_user_id?: number;
   employee_name?: string | null;
+  // The rider asked to drive themselves (they're on Inventory -> Drivers).
+  self_drive?: boolean;
   purpose: string;
   pickup_location: string;
   destination: string;
@@ -134,7 +137,10 @@ const emptyForm = () => ({
   destination: '',
   ride_date: todayLocal(),
   start_time: '',
-  estimated_duration_hours: 1
+  estimated_duration_hours: 1,
+  // "I'll drive myself" — offered only to someone on Inventory -> Drivers
+  // with a license valid on the ride date (GET /api/vehicles/self-drive-check).
+  self_drive: false
 });
 
 const emptyDirectBookForm = () => ({
@@ -175,6 +181,22 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState(emptyForm());
+  // Self-drive: whether this account may drive itself on the picked date.
+  const [selfDrive, setSelfDrive] = useState<{ allowed: boolean; reason: string; license_expiry: string | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(apiUrl(`/api/vehicles/self-drive-check?ride_date=${encodeURIComponent(form.ride_date || '')}`), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live) return;
+        setSelfDrive(d);
+        if (!d?.allowed) setForm((f) => (f.self_drive ? { ...f, self_drive: false } : f));
+      })
+      .catch(() => live && setSelfDrive(null));
+    return () => {
+      live = false;
+    };
+  }, [form.ride_date]);
   // Book a Ride is two steps: pick where from/to (RideDestinationPicker),
   // then the rest of the form. null = still on step 1.
   const [places, setPlaces] = useState<RidePlaces | null>(null);
@@ -611,6 +633,11 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
         <span className="inline-flex items-center gap-1">
           <Timer className="w-3.5 h-3.5" /> Est. {hours(r.estimated_duration_hours)}
         </span>
+        {r.self_drive && (
+          <span className="inline-flex items-center gap-1 font-semibold text-[color:var(--g-accent-700)]">
+            <Car className="w-3.5 h-3.5" /> Self-drive
+          </span>
+        )}
       </div>
       {r.purpose && <p className="mt-2 text-sm text-slate-600">{r.purpose}</p>}
       <div className="mt-3">{footer}</div>
@@ -840,6 +867,26 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 <DurationPicker value={form.estimated_duration_hours} onChange={(h) => setForm({ ...form, estimated_duration_hours: h })} className={RIDE_INPUT} />
               </div>
             </div>
+            {/* Self-drive: only for someone on Inventory -> Drivers whose
+                license is on file and valid that day (a driver whose
+                license doesn't cover the date sees why). */}
+            {selfDrive && (selfDrive.allowed || selfDrive.license_expiry) && (
+              <label className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${selfDrive.allowed ? 'border-slate-200 bg-white/70 cursor-pointer' : 'border-amber-200 bg-amber-50/70'}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 w-4 h-4 accent-[var(--g-accent-600,#7c3aed)]"
+                  checked={!!form.self_drive}
+                  disabled={!selfDrive.allowed}
+                  onChange={(e) => setForm({ ...form, self_drive: e.target.checked })}
+                />
+                <span className="text-sm">
+                  <span className="font-semibold text-slate-800">I'll drive myself</span>
+                  <span className="block text-xs text-slate-500">
+                    {selfDrive.allowed ? `You'll be picked as the driver. License valid till ${selfDrive.license_expiry}.` : selfDrive.reason}
+                  </span>
+                </span>
+              </label>
+            )}
             {submitMessage && <RideBanner tone="error">{submitMessage}</RideBanner>}
             <button type="submit" disabled={submitting} className={`${BTN_PRIMARY} w-full py-3`}>
               {submitting ? 'Submitting…' : 'Submit Request'} {!submitting && <ArrowRight className="w-4 h-4" />}
@@ -1138,7 +1185,8 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     <button
                       onClick={() => {
                         setAssigningFor(r.id);
-                        setAssignForm({ vehicle_id: '', driver_user_id: '' });
+                        // Self-drive: the rider is picked as the driver.
+                        setAssignForm({ vehicle_id: '', driver_user_id: r.self_drive && r.employee_user_id ? String(r.employee_user_id) : '' });
                       }}
                       className={BTN_PRIMARY_SM}
                     >
@@ -1383,7 +1431,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     <button
                       onClick={() => {
                         setBypassingFor(r.id);
-                        setBypassForm({ vehicle_id: '', driver_user_id: '' });
+                        setBypassForm({ vehicle_id: '', driver_user_id: r.self_drive && r.employee_user_id ? String(r.employee_user_id) : '' });
                       }}
                       className={BTN_PRIMARY_SM}
                     >

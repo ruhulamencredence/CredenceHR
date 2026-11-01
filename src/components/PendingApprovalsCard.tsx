@@ -19,6 +19,8 @@ interface MyApprovalItem extends ClaimReviewFields {
   id: number;
   source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
+  // Ride details (GET /api/my-approvals) — a self-drive ride starts with the rider as driver.
+  vehicle_requisition_details?: { self_drive?: boolean; rider_user_id?: number } | null;
   source_label: string;
   source_amount: number | null;
   requested_by: number;
@@ -147,6 +149,12 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
   const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
   const [assignForm, setAssignForm] = useState<Record<number, { vehicle_id: string; driver_user_id: string }>>({});
+  const driverFor = (item: MyApprovalItem) => {
+    const picked = assignForm[item.id]?.driver_user_id;
+    if (picked !== undefined) return picked;
+    const v = item.vehicle_requisition_details;
+    return v?.self_drive && v.rider_user_id ? String(v.rider_user_id) : '';
+  };
 
   useEffect(() => {
     const authHeaders = { Authorization: `Bearer ${token}` };
@@ -268,7 +276,7 @@ useLiveRefresh(() => load());
   // vehicle_maintainer_bypass item, via PUT .../approve-and-assign instead
   // of the generic POST /api/my-approvals/:id/act.
   const handleAssignAndApprove = async (item: MyApprovalItem) => {
-    const form = assignForm[item.id];
+    const form = { vehicle_id: assignForm[item.id]?.vehicle_id || '', driver_user_id: driverFor(item) };
     if (!form?.vehicle_id || !form?.driver_user_id) {
       setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
       return;
@@ -550,7 +558,7 @@ useLiveRefresh(() => load());
                       <div className="flex flex-wrap items-center gap-2">
                         <SearchSelect
                           value={assignForm[item.id]?.vehicle_id || ''}
-                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: e.target.value, driver_user_id: prev[item.id]?.driver_user_id || '' } }))}
+                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: e.target.value, driver_user_id: driverFor(item) } }))}
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >
                           <option value="">Pick a vehicle…</option>
@@ -561,7 +569,7 @@ useLiveRefresh(() => load());
                           ))}
                         </SearchSelect>
                         <SearchSelect
-                          value={assignForm[item.id]?.driver_user_id || ''}
+                          value={driverFor(item)}
                           onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: prev[item.id]?.vehicle_id || '', driver_user_id: e.target.value } }))}
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >

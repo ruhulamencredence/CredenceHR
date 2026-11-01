@@ -271,6 +271,14 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_ride_settings table: " + err.message);
   }
+  // Self-drive: the rider drives the company vehicle themselves. Only someone
+  // on Inventory -> Drivers (active, license valid on the ride date) can ask
+  // for it; the assign forms then pick them as the driver.
+  try {
+    await dbPool.query("ALTER TABLE vehicle_requisitions ADD COLUMN self_drive TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add vehicle_requisitions.self_drive: " + err.message);
+  }
   // Geocoded destination for the Live Ride Map's road route — filled lazily
   // the first time the map is opened (see geocodeDestination below), since
   // destination itself is free text typed by the requester.
@@ -789,6 +797,21 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", vehicleId]);
   }
 
+  // Can this account drive the company vehicle on its own ride (on `rideDate`)?
+  // Strict: only an active driver on Inventory -> Drivers whose license is on
+  // file and still valid that day.
+  async function selfDriveCheck(userId: number, rideDate?: string): Promise<{ allowed: boolean; reason: string; license_expiry: string | null }> {
+    const roster = await driverRoster();
+    const d = roster.find((x) => x.user_id === userId);
+    if (!d || !d.is_active) return { allowed: false, reason: "Only someone on Vehicle Management -> Inventory -> Drivers (with a driving license on file) can drive themselves.", license_expiry: null };
+    if (!d.license_expiry) return { allowed: false, reason: "Your driving license's valid-till date isn't on file — ask Vehicle Management to add it in Inventory -> Drivers.", license_expiry: null };
+    if (d.license_state === "expired") return { allowed: false, reason: `Your driving license expired on ${d.license_expiry} — renew it and have it updated in Inventory -> Drivers.`, license_expiry: d.license_expiry };
+    if (rideDate && /^\d{4}-\d{2}-\d{2}$/.test(rideDate) && rideDate > d.license_expiry) {
+      return { allowed: false, reason: `Your driving license ends on ${d.license_expiry}, before this ride.`, license_expiry: d.license_expiry };
+    }
+    return { allowed: true, reason: "", license_expiry: d.license_expiry };
+  }
+
   async function validateVehicleAssignment(body: any) {
     const vehicleId = Number(body.vehicle_id);
     const driverUserId = Number(body.driver_user_id);
@@ -906,6 +929,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       // validateVehicleAssignment) — that's what GET .../:id/live-location
       // needs to pull the driver's position from Employee Tracking.
       driver_user_id: r.driver_user_id ? Number(r.driver_user_id) : null,
+      self_drive: !!Number(r.self_drive || 0),
       // Start Ride step: who gave the vehicle, and when / by whom it started.
       assigned_by: r.assigned_by ? Number(r.assigned_by) : null,
       assigned_by_name: r.assigned_by ? userById.get(Number(r.assigned_by))?.name || null : null,
@@ -1013,6 +1037,24 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // use: its active drivers who have a login, with what they are doing now
   // (expired licenses come back marked; the server refuses them). With the
   // list still empty: every account, as before.
+  // GET /api/vehicles/self-drive-check?ride_date=&user_id= — whether the
+  // "I'll drive myself" tick can be offered. Own account; another account's
+  // only with Vehicle Management (Direct Book on someone's behalf).
+  app.get("/api/vehicles/self-drive-check", authenticateToken, async (req: any, res: any) => {
+    try {
+      let userId = Number(req.user.id);
+      const other = Number(req.query.user_id);
+      if (other && other !== userId) {
+        const mods = req.user.role === "superadmin" ? ["vehicle_management"] : await getAdminModules(req.user.id).catch(() => [] as string[]);
+        if (!mods.includes("vehicle_management")) return res.status(403).json({ error: "You don't have access to this section." });
+        userId = other;
+      }
+      res.json(await selfDriveCheck(userId, typeof req.query.ride_date === "string" ? req.query.ride_date : undefined));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/vehicles/driver-picker", authenticateToken, async (req: any, res: any) => {
     try {
       const roster = await driverRoster();
@@ -1069,6 +1111,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     overrideSupervisorId?: number | null
   ) {
     const { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn } = validateRideFields(body);
+    const selfDrive = body?.self_drive === true || body?.self_drive === 1 || body?.self_drive === "1";
+    if (selfDrive) {
+      const chk = await selfDriveCheck(employeeUserId, rideDate);
+      if (!chk.allowed) throw new Error(chk.reason);
+    }
 
     // time_extension_status/hr_notice_flag are explicitly listed here
     // (rather than relying on the columns' own SQL DEFAULT) because the
@@ -1089,6 +1136,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     // Map doesn't have to look the free-text destination up again later.
     const destLat = Number(body.destination_lat);
     const destLng = Number(body.destination_lng);
+    if (selfDrive) await queryDB("UPDATE vehicle_requisitions SET self_drive = 1 WHERE id = ?", [result.insertId]);
     if (body.destination_lat != null && body.destination_lng != null && Number.isFinite(destLat) && Number.isFinite(destLng) && Math.abs(destLat) <= 90 && Math.abs(destLng) <= 180) {
       await queryDB("UPDATE vehicle_requisitions SET destination_lat = ?, destination_lng = ? WHERE id = ?", [destLat, destLng, result.insertId]);
     }

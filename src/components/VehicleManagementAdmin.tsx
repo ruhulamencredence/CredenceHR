@@ -58,7 +58,9 @@ interface Vehicle {
 
 interface Requisition {
   id: number;
+  employee_user_id?: number;
   employee_name: string;
+  self_drive?: boolean;
   purpose: string;
   pickup_location: string;
   destination: string;
@@ -101,7 +103,8 @@ const emptyEmergencyForm = () => ({
   destination: '',
   ride_date: '',
   start_time: '',
-  estimated_duration_hours: 1
+  estimated_duration_hours: 1,
+  self_drive: false
 });
 
 export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
@@ -143,6 +146,27 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [noticeNote, setNoticeNote] = useState('');
 
   const [emergencyForm, setEmergencyForm] = useState(emptyEmergencyForm());
+  // Self-drive for the person picked: only if they're on Inventory -> Drivers
+  // with a license valid on the ride date (GET /api/vehicles/self-drive-check).
+  const [emSelfDrive, setEmSelfDrive] = useState<{ allowed: boolean; reason: string; license_expiry: string | null } | null>(null);
+  useEffect(() => {
+    if (!emergencyForm.employee_user_id) {
+      setEmSelfDrive(null);
+      return;
+    }
+    let live = true;
+    fetch(apiUrl(`/api/vehicles/self-drive-check?user_id=${emergencyForm.employee_user_id}&ride_date=${encodeURIComponent(emergencyForm.ride_date || '')}`), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live) return;
+        setEmSelfDrive(d);
+        if (!d?.allowed) setEmergencyForm((f) => (f.self_drive ? { ...f, self_drive: false } : f));
+      })
+      .catch(() => live && setEmSelfDrive(null));
+    return () => {
+      live = false;
+    };
+  }, [emergencyForm.employee_user_id, emergencyForm.ride_date]);
   const [emergencySubmitting, setEmergencySubmitting] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
 
@@ -433,6 +457,7 @@ useLiveRefresh(() => loadRequisitions());
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
+                {r.self_drive && <span className="ml-1 font-semibold text-blue-700">• Self-drive</span>}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
@@ -601,7 +626,8 @@ useLiveRefresh(() => loadRequisitions());
                     <button
                       onClick={() => {
                         setAssigningFor(r.id);
-                        setAssignForm({ vehicle_id: '', driver_user_id: '' });
+                        // Self-drive: the rider is picked as the driver.
+                        setAssignForm({ vehicle_id: '', driver_user_id: r.self_drive && r.employee_user_id ? String(r.employee_user_id) : '' });
                       }}
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
@@ -727,6 +753,23 @@ useLiveRefresh(() => loadRequisitions());
                 />
               </div>
             </div>
+            {emSelfDrive && (emSelfDrive.allowed || emSelfDrive.license_expiry) && (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={!!emergencyForm.self_drive}
+                  disabled={!emSelfDrive.allowed}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, self_drive: e.target.checked })}
+                />
+                <span>
+                  <span className="font-medium text-gray-800">They'll drive themselves</span>
+                  <span className="block text-xs text-gray-500">
+                    {emSelfDrive.allowed ? `License valid till ${emSelfDrive.license_expiry}.` : emSelfDrive.reason.replace(/^Your/, 'Their')}
+                  </span>
+                </span>
+              </label>
+            )}
             {emergencyMessage && <div className="text-sm text-gray-700">{emergencyMessage}</div>}
             <button
               type="submit"
