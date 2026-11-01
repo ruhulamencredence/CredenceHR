@@ -37,6 +37,10 @@ interface AiAssistantDeps {
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
   todayInDhaka: () => string;
+  // The server's own layer check (requireModuleLayer's rule) — used where
+  // a report's page checks a layer its API doesn't, so the Assistant shows
+  // only what the page would.
+  hasModuleLayer: (user: any, moduleKey: string, layer: string) => Promise<boolean>;
 }
 
 // A page the client can open. kind:target is understood by AiAssistant.tsx.
@@ -433,6 +437,24 @@ const helpAction = (h: HelpEntry): AssistantAction[] => (h.nav ? [{ label: `${h.
 // ---------------------------------------------------------------------------
 // The account's own API, called with the account's own token.
 // ---------------------------------------------------------------------------
+// Set when the routes are registered (see AiAssistantDeps.hasModuleLayer).
+let layerCheck: ((user: any, moduleKey: string, layer: string) => Promise<boolean>) | null = null;
+const layerOk = async (c: Ctx, moduleKey: string, layer: string) => isSuper(c) || (!!layerCheck && (await layerCheck(c.req.user, moduleKey, layer).catch(() => false)));
+
+// Same as callApi, for the report APIs that take a POST body.
+async function callApiPost(req: any, path: string, body: any): Promise<{ ok: boolean; status: number; body: any }> {
+  const port = req.socket?.localPort;
+  const headers: Record<string, string> = { Authorization: String(req.headers.authorization || ""), "Content-Type": "application/json" };
+  if (req.headers["x-company-id"]) headers["X-Company-Id"] = String(req.headers["x-company-id"]);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(30000) });
+    const out = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, body: out };
+  } catch {
+    return { ok: false, status: 0, body: null };
+  }
+}
+
 async function callApi(req: any, path: string): Promise<{ ok: boolean; status: number; body: any }> {
   const port = req.socket?.localPort;
   const headers: Record<string, string> = { Authorization: String(req.headers.authorization || "") };
@@ -445,6 +467,35 @@ async function callApi(req: any, path: string): Promise<{ ok: boolean; status: n
     return { ok: false, status: 0, body: null };
   }
 }
+
+// Reports & Insights (ReportsInsightsRoutes.ts) report keys.
+const REPORT_KEYS = ["attendance_summary", "attendance_daily", "remote_attendance", "movement_claims", "bill_claims", "bill_claim_categories", "conveyance_bills", "bill_disbursements",
+  "leave_applications", "leave_taken", "asset_register", "asset_assignments", "asset_requisitions", "vehicle_rides", "vehicle_utilization"];
+// HR Operations -> Employee Reports ready-made lists (the same configs as
+// HrOpsReports.tsx's presets). payroll: needs the Payroll module too — the
+// API leaves those columns out otherwise.
+const HR_PRESETS: Record<string, { title: string; payroll?: boolean; config: Record<string, any> }> = {
+  salary_register: { title: "Salary register", payroll: true, config: { columns: ["name", "employee_code", "designation", "department", "grade", "basic_salary", "gross_salary", "last_increment_date", "last_increment_percent", "net_paid_year"] } },
+  loans_outstanding: { title: "Loans outstanding", payroll: true, config: { columns: ["name", "department", "loan_outstanding", "active_loans", "loan_installment", "installments_left"], filters: [{ key: "loan_outstanding", op: "gt", value: 0 }] } },
+  training_summary: { title: "Training summary", config: { columns: ["name", "department", "trainings", "training_count", "training_hours", "training_cost", "last_training_date"] } },
+  pending_documents: { title: "Pending documents", config: { columns: ["name", "employee_code", "department", "missing_documents", "expired_documents"], filters: [{ key: "missing_documents_count", op: "gt", value: 0 }] } },
+  missing_documents_by_type: { title: "Missing documents by type", config: { columns: ["name", "department", "missing_documents"], group_by: "missing_documents", filters: [{ key: "missing_documents_count", op: "gt", value: 0 }] } },
+  nominee_gaps: { title: "Nominee / emergency contact gaps", config: { columns: ["name", "department", "nominee_status", "nominees", "has_emergency_contact"], match: "any", filters: [{ key: "nominee_status", op: "neq", value: "OK" }, { key: "has_emergency_contact", op: "is_false" }] } },
+  education_levels: { title: "Education levels", config: { columns: ["name", "designation", "department", "highest_degree", "institutes"], group_by: "highest_level" } },
+  experience_bands: { title: "Experience bands", config: { columns: ["name", "designation", "department", "prior_experience_years", "service_years", "total_experience_years"], group_by: "total_experience_band" } },
+  unverified_records: { title: "Experience / education not verified", config: { columns: ["name", "department", "experience_unverified", "experience_no_certificate", "education_unverified", "education_no_certificate"], match: "any", filters: [{ key: "experience_unverified", op: "gt", value: 0 }, { key: "education_unverified", op: "gt", value: 0 }] } },
+  no_education: { title: "No education recorded", config: { columns: ["name", "employee_code", "designation", "department", "joining_date"], filters: [{ key: "education_records", op: "eq", value: 0 }] } },
+  joined_from_company: { title: "Joined from which company", config: { columns: ["name", "employee_code", "designation", "department", "last_company", "previous_companies", "prior_experience_years"], group_by: "previous_companies" } },
+  probation_ending: { title: "Probation ending (60 days)", config: { columns: ["name", "designation", "department", "joining_date", "probation_end_date", "supervisor"], filters: [{ key: "service_status", op: "eq", value: "probation" }, { key: "probation_end_date", op: "next_days", value: 60 }] } },
+  birthdays_this_month: { title: "Birthdays this month", config: { columns: ["name", "designation", "department", "date_of_birth", "age"], filters: [{ key: "birth_month", op: "eq", value: new Date().toLocaleString("en-US", { month: "long", timeZone: "Asia/Dhaka" }) }] } },
+  anniversaries_this_month: { title: "Work anniversaries this month", config: { columns: ["name", "designation", "department", "joining_date", "service_years"], filters: [{ key: "joining_month", op: "eq", value: new Date().toLocaleString("en-US", { month: "long", timeZone: "Asia/Dhaka" }) }] } },
+  assets_with_employees: { title: "Assets with employees", config: { columns: ["name", "department", "assets_held", "asset_names"], filters: [{ key: "assets_held", op: "gt", value: 0 }] } },
+  blood_group_directory: { title: "Blood group directory", config: { columns: ["name", "department", "blood_group", "mobile"], group_by: "blood_group" } },
+  headcount_list: { title: "Headcount by department", config: { columns: ["name", "employee_code", "designation", "department", "joining_date"], group_by: "department" } },
+  leave_summary: { title: "Leave summary", config: { columns: ["name", "department", "casual_taken", "casual_balance", "sick_taken", "sick_balance", "lwp_taken", "leave_pending", "leave_remaining"] } },
+  claims_summary: { title: "Claims & conveyance", config: { columns: ["name", "department", "claims_count", "claims_claimed", "claims_approved", "claims_pending", "conveyance_paid", "movement_km"] } },
+  monthly_attendance: { title: "Monthly attendance", config: { columns: ["name", "department", "att_working", "att_present", "att_leave", "att_absent", "att_late", "att_extreme_late", "att_percent"] } }
+};
 
 const NO_ACCESS: ToolResult = { ok: false, text: "এই তথ্য দেখার অনুমতি আপনার account-এ নেই। দরকার হলে HR / Superadmin-কে বলুন।", data: { error: "no_access" } };
 const FAILED: ToolResult = { ok: false, text: "দুঃখিত, এই মুহূর্তে তথ্যটা আনতে পারছি না। একটু পরে আবার চেষ্টা করুন।", data: { error: "failed" } };
@@ -1139,6 +1190,433 @@ const TOOLS: Tool[] = [
         draft,
         data: { drafted: true, submitted: false, mode: "check_in", purpose: draft.purpose, note: "The card takes the phone's location when they press Check In." }
       };
+    }
+  },
+  // ---- Reports (each through the report's own API with the asker's token,
+  // so the asker sees exactly what that report page would show them) ----
+  {
+    name: "company_report",
+    description:
+      "Run one of the Reports & Insights reports (the API checks the module and Department scope): " +
+      "attendance_summary (per person: working / present / absent / leave / late %), attendance_daily (day-by-day log), remote_attendance (GPS check-in/out with distance), " +
+      "movement_claims, bill_claims, bill_claim_categories (bill claims by category), conveyance_bills, bill_disbursements (paid / unpaid bills), " +
+      "leave_applications, leave_taken (leave days by type per person), asset_register, asset_assignments (handover history), asset_requisitions, vehicle_rides (ride history), vehicle_utilization. " +
+      "from / to YYYY-MM-DD (default this month), optional department, employee (name or ID), status.",
+    params: {
+      report: { type: "string", description: "One of the report keys above" },
+      from: { type: "string", description: "YYYY-MM-DD" },
+      to: { type: "string", description: "YYYY-MM-DD" },
+      department: { type: "string", description: "Department name (optional)" },
+      employee: { type: "string", description: "Employee name or ID (optional)" },
+      status: { type: "string", description: "Status filter (optional)" }
+    },
+    available: (c) => isSuper(c) || c.role === "admin" || c.modules.length > 0,
+    run: async (c, args) => {
+      const key = String(args?.report || "").trim();
+      if (!REPORT_KEYS.includes(key)) return { ok: false, text: "কোন রিপোর্ট চান বুঝতে পারিনি — যেমন: হাজিরার সারাংশ, ছুটির ধরন অনুযায়ী, bill claim, disbursement, asset register, ride history।", data: { error: "unknown_report", reports: REPORT_KEYS } };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const body = {
+        key,
+        from: isDate(args?.from) ? args.from : `${c.today.slice(0, 7)}-01`,
+        to: isDate(args?.to) ? args.to : c.today,
+        department: String(args?.department || ""),
+        employee: String(args?.employee || ""),
+        status: String(args?.status || "")
+      };
+      const r = await callApiPost(c.req, "/api/reports-insights/run", body);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || "রিপোর্টটা চালানো গেল না।"), data: { error: r.body?.error } } : fail(r.status);
+      const cols: { key: string; label: string }[] = r.body?.columns || [];
+      const rows: any[] = r.body?.rows || [];
+      const summary: { label: string; value: any }[] = r.body?.summary || [];
+      const show = cols.slice(0, 5);
+      const line = (x: any) => "• " + show.map((col) => x[col.key]).filter((v) => v !== null && v !== undefined && v !== "").map(String).join(" · ");
+      const period = r.body?.from ? ` (${bnDate(r.body.from)} – ${bnDate(r.body.to)})` : "";
+      const text =
+        `**${r.body?.title || key}**${period}${body.department ? ` — ${body.department}` : ""}\n` +
+        (summary.length ? summary.map((x) => `${x.label}: **${typeof x.value === "number" ? bn(x.value) : x.value}**`).join(" · ") + "\n" : "") +
+        (rows.length ? rows.slice(0, 15).map(line).join("\n") + (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)}টি সারি (পুরোটা PDF / Excel-এ)` : "") : "এই সময়ে কিছু নেই।");
+      return {
+        ok: true,
+        text,
+        data: { report: key, from: r.body?.from, to: r.body?.to, summary, rows: rows.slice(0, 60), total_rows: rows.length },
+        actions: [{ label: "Reports & Insights খুলুন", nav: "admin:reports_insights" }],
+        report: report(String(r.body?.title || key), `${key}-${body.from}-${body.to}`, cols.map((x) => x.label), rows.map((x) => cols.map((col) => (x[col.key] === null || x[col.key] === undefined ? "" : typeof x[col.key] === "number" ? x[col.key] : String(x[col.key])))),
+          [["Period", r.body?.from ? `${enDate(r.body.from)} – ${enDate(r.body.to)}` : "-"], ...(body.department ? [["Department", body.department] as [string, string]] : []), ...summary.map((x) => [x.label, String(x.value)] as [string, string])])
+      };
+    }
+  },
+  {
+    name: "attendance_department_summary",
+    description: "Monthly Attendance Report -> Department Summary: per department Present / Absent / Leave / Delay / Extreme Delay and attendance %, for one day (date) or a whole month (month YYYY-MM, person-days).",
+    params: { date: { type: "string", description: "YYYY-MM-DD for one day" }, month: { type: "string", description: "YYYY-MM for a whole month" } },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month || "")) ? String(args.month) : "";
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : "";
+      const q = month ? `mode=month&year=${month.slice(0, 4)}&month=${Number(month.slice(5, 7))}` : `mode=day&date=${date || c.today}`;
+      const r = await callApi(c.req, `/api/attendance/report/department-summary?${q}`);
+      if (!r.ok) return fail(r.status);
+      const d: any[] = r.body?.departments || [];
+      const t = r.body?.total || {};
+      const when = month ? bnMonth(month) : bnDate(date || c.today);
+      const pct = (v: any) => (v == null ? "—" : `${bn(v)}%`);
+      const text = `**Department অনুযায়ী হাজিরা — ${when}**${month ? " (person-days)" : ""}\n` +
+        d.map((x) => `• **${x.department}** (${bn(x.employees)} জন): উপস্থিত ${bn(x.present)}, অনুপস্থিত ${bn(x.absent)}, ছুটি ${bn(x.leave)}, দেরি ${bn(x.delay)}, অনেক দেরি ${bn(x.extreme)} — ${pct(x.attendance_pct)}`).join("\n") +
+        `\nমোট: উপস্থিত ${bn(t.present || 0)}, অনুপস্থিত ${bn(t.absent || 0)}, ছুটি ${bn(t.leave || 0)}, দেরি ${bn(t.delay || 0)}, অনেক দেরি ${bn(t.extreme || 0)} — ${pct(t.attendance_pct)}`;
+      return {
+        ok: true, text, data: { when: month || date || c.today, departments: d, total: t },
+        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }],
+        report: report("Department Attendance Summary", `Department-Attendance-${month || date || c.today}`, ["Department", "Employees", "Present", "Absent", "Leave", "Delay", "Extreme Delay", "Attendance %"],
+          [...d.map((x) => [x.department, x.employees, x.present, x.absent, x.leave, x.delay, x.extreme, x.attendance_pct ?? ""]), ["All departments", t.employees, t.present, t.absent, t.leave, t.delay, t.extreme, t.attendance_pct ?? ""]],
+          [[month ? "Month" : "Date", month || enDate(date || c.today)]])
+      };
+    }
+  },
+  {
+    name: "payroll_salary_sheet",
+    description: "Payroll -> Approval -> Salary sheet: every employee's salary for a month — gross, deductions, net, absent / late cuts, held, change from last month. month_year YYYY-MM (default this month). Optional name / department to narrow.",
+    params: { month_year: { type: "string", description: "YYYY-MM" }, name: { type: "string", description: "Employee name / ID or department (optional)" } },
+    available: (c) => hasMod(c, "payroll"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const r = await callApi(c.req, `/api/payroll/approval/${month}/salary-sheet`);
+      if (!r.ok) return fail(r.status);
+      const q = String(args?.name || "").trim().toLowerCase();
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !q || [x.employee_name, x.employee_code, x.department, x.designation].some((v) => String(v || "").toLowerCase().includes(q)));
+      if (!rows.length) return { ok: true, text: `${bnMonth(month)}-এর কোনো বেতন${q ? ` "${args.name}"-এর` : ""} পাওয়া যায়নি।`, data: { month, rows: [] } };
+      const sum = (k: string) => rows.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+      const tk = (v: number) => `৳${bn(Math.round(v).toLocaleString("en-IN"))}`;
+      const held = rows.filter((x) => x.status === "held");
+      const cut = rows.filter((x) => x.absent_deduction > 0 || x.late_deduction > 0).sort((a, b) => b.absent_deduction + b.late_deduction - a.absent_deduction - a.late_deduction);
+      const text = `**বেতন — ${bnMonth(month)}**${q ? ` (${args.name})` : ""}: ${bn(rows.length)} জন, Gross ${tk(sum("gross"))}, কর্তন ${tk(sum("total_deduction"))}, Net **${tk(sum("net"))}**` +
+        (held.length ? `\nহোল্ডে: ${held.map((x) => x.employee_name).join(", ")}` : "") +
+        (cut.length ? `\nঅনুপস্থিতি / দেরিতে কাটা সবচেয়ে বেশি:\n` + cut.slice(0, 8).map((x) => `• ${x.employee_name} — ${tk(x.absent_deduction + x.late_deduction)} (অনুপস্থিত ${bn(x.absent_days)}, LWP ${bn(x.lwp_days)}, late ${bn(x.late_count)})`).join("\n") : "") +
+        (rows.length <= 10 ? "\n" + rows.map((x) => `• ${x.employee_name}: Gross ${tk(x.gross)}, Net ${tk(x.net)}`).join("\n") : "");
+      return {
+        ok: true, text, data: { month, count: rows.length, gross: sum("gross"), net: sum("net"), deductions: sum("total_deduction"), held: held.map((x) => x.employee_name), rows: rows.slice(0, 40).map((x) => ({ name: x.employee_name, department: x.department, gross: x.gross, deductions: x.total_deduction, net: x.net, last_net: x.last_net, status: x.status })) },
+        actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Salary Sheet", `Salary-Sheet-${month}`, ["Employee ID", "Name", "Department", "Working", "Present", "Absent", "Leave", "LWP", "Late", "Gross", "Absent / late cut", "Other deductions", "Total deduction", "Net", "Last month net", "Status"],
+          rows.map((x) => [x.employee_code, x.employee_name, x.department, x.working_days, x.present_days, x.absent_days, x.leave_days, x.lwp_days, x.late_count, x.gross, x.absent_deduction + x.late_deduction, x.tax + x.pf + x.advance + x.other_deduction + x.extra_deduction, x.total_deduction, x.net, x.last_net ?? "", x.status]),
+          [["Month", month]])
+      };
+    }
+  },
+  {
+    name: "payroll_month_comparison",
+    description: "Payroll -> Approval -> Month comparison: this month's salaries vs last month (or vs a month) — total difference, who is new, who left (with exit reason), and why each person's net changed. month_year YYYY-MM (default this month), vs YYYY-MM optional.",
+    params: { month_year: { type: "string", description: "YYYY-MM" }, vs: { type: "string", description: "YYYY-MM to compare with (optional)" } },
+    available: (c) => hasMod(c, "payroll"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const vs = /^\d{4}-\d{2}$/.test(String(args?.vs || "")) ? `?vs=${args.vs}` : "";
+      const r = await callApi(c.req, `/api/payroll/approval/${month}/compare${vs}`);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
+      const b = r.body;
+      const tk = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}৳${bn(Math.abs(Math.round(v)).toLocaleString("en-IN"))}`;
+      const people: any[] = b.people || [];
+      const nw = people.filter((x) => x.kind === "new");
+      const left = people.filter((x) => x.kind === "left");
+      const changed = people.filter((x) => x.kind === "changed");
+      const text = `**বেতনের তুলনা — ${bnMonth(b.month_year)} বনাম ${bnMonth(b.previous_month)}**\n` +
+        `Net ${tk(b.summary.last_net).replace("+", "")} → ${tk(b.summary.this_net).replace("+", "")}, পার্থক্য **${tk(b.summary.diff)}**${b.summary.diff_pct != null ? ` (${bn(b.summary.diff_pct)}%)` : ""}\n` +
+        (b.bridge || []).map((x: any) => `• ${x.label}: ${tk(x.amount)}`).join("\n") +
+        (nw.length ? `\nনতুন: ${nw.map((x) => `${x.employee_name} (${x.why})`).join("; ")}` : "") +
+        (left.length ? `\nচলে গেছেন / বেতন হয়নি: ${left.map((x) => `${x.employee_name} (${x.why})`).join("; ")}` : "") +
+        (changed.length ? `\nসবচেয়ে বেশি বদল:\n` + changed.slice(0, 6).map((x) => `• ${x.employee_name} ${tk(x.diff)} — ${x.reasons.filter((y: any) => y.effect).map((y: any) => `${y.label} ${tk(y.effect)}${y.note ? ` (${y.note})` : ""}`).join("; ")}`).join("\n") : "");
+      return {
+        ok: true, text, data: { month: b.month_year, vs: b.previous_month, summary: b.summary, bridge: b.bridge, new: nw.map((x) => ({ name: x.employee_name, why: x.why, net: x.this_net })), left: left.map((x) => ({ name: x.employee_name, why: x.why, last_net: x.last_net })), changed: changed.slice(0, 30).map((x) => ({ name: x.employee_name, diff: x.diff, reasons: x.reasons })) },
+        actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Payroll Month Comparison", `Payroll-Comparison-${b.month_year}-vs-${b.previous_month}`, ["Employee ID", "Name", "Department", "Type", `Net ${b.previous_month}`, `Net ${b.month_year}`, "Difference", "Why"],
+          people.map((x) => [x.employee_code, x.employee_name, x.department, x.kind, x.last_net ?? "", x.this_net ?? "", x.diff, x.why || x.reasons.map((y: any) => `${y.label} ${y.effect || ""}${y.note ? ` (${y.note})` : ""}`).join("; ")]),
+          [["Month", b.month_year], ["Compared with", b.previous_month], ["Difference", String(b.summary.diff)]])
+      };
+    }
+  },
+  {
+    name: "employee_records_report",
+    description:
+      "HR Operations -> Employee Reports (ready-made lists): salary_register (needs Payroll too), loans_outstanding (Payroll too), training_summary, pending_documents, missing_documents_by_type, nominee_gaps, " +
+      "education_levels, experience_bands, unverified_records, no_education, joined_from_company, probation_ending, birthdays_this_month, anniversaries_this_month, assets_with_employees, blood_group_directory, headcount_list, leave_summary, claims_summary, monthly_attendance.",
+    params: { preset: { type: "string", description: "One of the list names above" }, department: { type: "string", description: "Department (optional)" } },
+    available: (c) => hasMod(c, "hr_operations"),
+    run: async (c, args) => {
+      const key = String(args?.preset || "").trim();
+      const p = HR_PRESETS[key];
+      if (!p) return { ok: false, text: "কোন তালিকা চান বুঝতে পারিনি — যেমন salary register, pending documents, nominee, training, blood group directory।", data: { error: "unknown_preset", presets: Object.keys(HR_PRESETS) } };
+      const r = await callApiPost(c.req, "/api/hr-ops/reports/run", { filters: [], match: "all", group_by: null, month: "current", year: "current", include_inactive: false, ...p.config });
+      if (!r.ok) return fail(r.status);
+      const cols: any[] = r.body?.columns || [];
+      const dept = String(args?.department || "").trim().toLowerCase();
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !dept || String(x.department || "").toLowerCase().includes(dept));
+      const val = (v: any) => (Array.isArray(v) ? v.join(", ") : v === true ? "Yes" : v === false ? "No" : v ?? "");
+      const groups: any[] = r.body?.groups || [];
+      const text = `**${p.title}** — ${bn(rows.length)} জন${dept ? ` (${args.department})` : ""}\n` +
+        (groups.length && !dept ? groups.slice(0, 12).map((g) => `• ${g.key}: ${bn(g.count)} জন`).join("\n") + "\n" : "") +
+        rows.slice(0, 15).map((x) => "• " + cols.slice(0, 4).map((col) => val(x[col.key])).filter((v) => v !== "").join(" · ")).join("\n") +
+        (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)} জন (পুরোটা PDF / Excel-এ)` : "") +
+        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো আপনার account-এ Payroll না থাকায় দেখানো হয়নি।)");
+      return {
+        ok: true, text, data: { preset: key, total: rows.length, groups: groups.slice(0, 20), rows: rows.slice(0, 40).map((x) => Object.fromEntries(cols.map((col) => [col.label, val(x[col.key])]))) },
+        actions: [{ label: "HR Operations → Reports খুলুন", nav: "hrops:reports" }],
+        report: report(p.title, `${key}-${c.today}`, cols.map((col) => col.label), rows.map((x) => cols.map((col) => { const v = val(x[col.key]); return typeof v === "number" ? v : String(v); })))
+      };
+    }
+  },
+  {
+    name: "mobile_bill_report",
+    description: "Mobile Bill: the company's SIMs and bills for a month or range — total billed, over the limit (who, by how much), unpaid, SIM count by operator. from / to YYYY-MM (default this month).",
+    params: { from: { type: "string", description: "YYYY-MM" }, to: { type: "string", description: "YYYY-MM" } },
+    available: (c) => hasMod(c, "mobile_bill"),
+    run: async (c, args) => {
+      const to = /^\d{4}-\d{2}$/.test(String(args?.to || "")) ? String(args.to) : c.today.slice(0, 7);
+      const from = /^\d{4}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : to;
+      const r = await callApi(c.req, `/api/mobile-bill/report?from=${from}&to=${to}`);
+      if (!r.ok) return fail(r.status);
+      const sims: any[] = r.body?.sims || [];
+      const bills: any[] = r.body?.bills || [];
+      const simById = new Map<number, any>(sims.map((x) => [Number(x.id), x]));
+      const over = bills.filter((b) => b.limit_amount > 0 && b.amount > b.limit_amount).sort((a, b) => b.amount - b.limit_amount - (a.amount - a.limit_amount));
+      const tk = (v: number) => `৳${bn(Math.round(v).toLocaleString("en-IN"))}`;
+      const who = (b: any) => simById.get(b.sim_id)?.employee?.name || simById.get(b.sim_id)?.phone_number || `SIM #${b.sim_id}`;
+      const total = bills.reduce((a, b) => a + b.amount, 0);
+      const text = `**Mobile Bill — ${bnMonth(from)}${from !== to ? ` থেকে ${bnMonth(to)}` : ""}**: SIM ${bn(sims.length)}টি, বিল ${bn(bills.length)}টি, মোট ${tk(total)}, অপরিশোধিত ${bn(bills.filter((b) => !b.paid).length)}টি` +
+        (over.length ? `\nসীমার বেশি:\n` + over.slice(0, 10).map((b) => `• ${who(b)} (${b.month}) — ${tk(b.amount)}, সীমা ${tk(b.limit_amount)}, বেশি ${tk(b.amount - b.limit_amount)}`).join("\n") : "\nকেউ সীমার বেশি নয়।");
+      return {
+        ok: true, text, data: { from, to, sims: sims.length, bills: bills.length, total, over_limit: over.slice(0, 30).map((b) => ({ who: who(b), month: b.month, amount: b.amount, limit: b.limit_amount })) },
+        actions: [{ label: "Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
+        report: report("Mobile Bill Report", `Mobile-Bill-${from}-${to}`, ["Month", "Phone", "Employee", "Department", "Operator", "Limit", "Bill", "Over limit", "Paid"],
+          bills.map((b) => { const sm = simById.get(b.sim_id) || {}; return [b.month, sm.phone_number || "", sm.employee?.name || "", sm.employee?.department || "", sm.operator || "", b.limit_amount, b.amount, Math.max(0, b.amount - b.limit_amount), b.paid ? "Yes" : "No"]; }),
+          [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "tracking_overview",
+    description: "Employee Tracking: who is sending their location now (live) and who isn't, with why (tracking off, no recent ping, standing still) — only the people this account may track.",
+    available: (c) => hasMod(c, "tracking"),
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/tracking/status");
+      if (!r.ok) return fail(r.status);
+      const emps: any[] = r.body?.employees || [];
+      const on = emps.filter((x) => x.tracked);
+      const off = emps.filter((x) => !x.tracked);
+      const text = `**Employee Tracking — এখন**: ট্র্যাকিং-এ ${bn(on.length)} জন, নেই ${bn(off.length)} জন (গত ${bn(r.body?.live_minutes || 20)} মিনিটে লোকেশন)।` +
+        (on.length ? "\nট্র্যাকিং-এ:\n" + on.slice(0, 15).map((x) => `• ${x.name}${x.department ? ` — ${x.department}` : ""}${x.minutes_ago != null ? `, ${bn(x.minutes_ago)} মিনিট আগে` : ""}${x.standing_still ? " · এক জায়গায় দাঁড়িয়ে" : ""}`).join("\n") : "") +
+        (off.length ? "\nনেই:\n" + off.slice(0, 15).map((x) => `• ${x.name} — ${x.reason || "লোকেশন আসেনি"}`).join("\n") : "");
+      return {
+        ok: true, text, data: { tracked: on.length, not_tracked: off.length, people: emps.slice(0, 60).map((x) => ({ name: x.name, department: x.department, tracked: x.tracked, minutes_ago: x.minutes_ago, reason: x.reason })) },
+        actions: [{ label: "Employee Tracking খুলুন", nav: "admin:tracking" }],
+        report: report("Employee Tracking Status", `Tracking-${c.today}`, ["Name", "Employee ID", "Department", "Tracked now", "Minutes ago", "Standing still", "Why not"],
+          emps.map((x) => [x.name, x.employee_id || "", x.department || "", x.tracked ? "Yes" : "No", x.minutes_ago ?? "", x.standing_still ? "Yes" : "", x.tracked ? "" : x.reason || ""]))
+      };
+    }
+  },
+  {
+    name: "tracking_stay_report",
+    description: "Employee Tracking -> Stay Report for one person: where they stayed and how long, between from and to (YYYY-MM-DD, default today), 09:00–18:00. name = the person.",
+    params: { name: { type: "string", description: "Person's name or employee ID" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "tracking"),
+    run: async (c, args) => {
+      const q = String(args?.name || "").trim().toLowerCase();
+      if (!q) return { ok: false, text: "কার Stay Report চান? নাম লিখুন — যেমন \"Rahim-এর আজকের stay report\"।", data: { error: "need_name" } };
+      const st = await callApi(c.req, "/api/tracking/status");
+      if (!st.ok) return fail(st.status);
+      const hit = (st.body?.employees || []).find((x: any) => [x.name, x.employee_id].some((v) => String(v || "").toLowerCase().includes(q)));
+      if (!hit?.user_id) return { ok: true, text: `"${args.name}" নামে আপনার দেখার মধ্যে কাউকে পাওয়া যায়নি।`, data: { results: [] } };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : from;
+      const r = await callApi(c.req, `/api/tracking/stay-report?user_id=${hit.user_id}&from=${from}&to=${to}`);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
+      const stays: any[] = r.body?.stays || r.body?.rows || r.body?.days?.flatMap((d: any) => d.stays || []) || [];
+      const place = (x: any) => x.place || x.address || x.label || (x.lat ? `${Number(x.lat).toFixed(4)}, ${Number(x.lng).toFixed(4)}` : "—");
+      const mins = (x: any) => Number(x.minutes ?? x.duration_minutes ?? 0);
+      const text = `**${hit.name}-এর Stay Report** (${bnDate(from)}${to !== from ? ` – ${bnDate(to)}` : ""}):\n` +
+        (stays.length ? stays.slice(0, 15).map((x) => `• ${enTime(x.from || x.start || x.started_at)}–${enTime(x.to || x.end || x.ended_at)} ${place(x)}${mins(x) ? ` (${bn(mins(x))} মিনিট)` : ""}`).join("\n") : "এই সময়ে কোথাও থামার রেকর্ড নেই।");
+      return {
+        ok: true, text, data: { name: hit.name, from, to, stays: stays.slice(0, 40) },
+        actions: [{ label: "Employee Tracking খুলুন", nav: "admin:tracking" }],
+        report: report("Stay Report", `Stay-${hit.name}-${from}`, ["From", "To", "Place", "Minutes"], stays.map((x) => [String(x.from || x.start || x.started_at || ""), String(x.to || x.end || x.ended_at || ""), place(x), mins(x)]), [["Employee", hit.name], ["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "duty_roster_overview",
+    description: "Duty Roster: who works which shift and who is Off, for a date range (from / to YYYY-MM-DD, default the next 7 days); name narrows to a person or department.",
+    params: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, name: { type: "string", description: "Person or department (optional)" } },
+    available: (c) => hasMod(c, "duty_roster"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : addDays(from, 6);
+      const [r, sh] = await Promise.all([callApi(c.req, `/api/roster?from=${from}&to=${to}`), callApi(c.req, "/api/roster/shifts")]);
+      if (!r.ok) return fail(r.status);
+      const shiftName = new Map<number, string>((Array.isArray(sh.body) ? sh.body : sh.body?.shifts || []).map((x: any) => [Number(x.id), `${x.name || x.title || "Shift"}${x.start_time ? ` ${enTime(x.start_time)}–${enTime(x.end_time)}` : ""}`]));
+      const q = String(args?.name || "").trim().toLowerCase();
+      const emps: any[] = (r.body?.employees || []).filter((e: any) => !q || [e.name, e.department, e.employee_code].some((v) => String(v || "").toLowerCase().includes(q)));
+      const withRoster = emps.filter((e) => Object.keys(e.days || {}).length);
+      const dates: string[] = [];
+      for (let d = from; d <= to && dates.length < 31; d = addDays(d, 1)) dates.push(d);
+      const cell = (e: any, d: string) => { const x = e.days?.[d]; return !x ? "" : x.is_off ? "Off" : shiftName.get(Number(x.shift_id)) || "Shift"; };
+      const text = `**Duty Roster — ${bnDate(from)} থেকে ${bnDate(to)}**${q ? ` (${args.name})` : ""}: ${bn(withRoster.length)} জনের roster আছে, ${bn(emps.length - withRoster.length)} জনের নেই।\n` +
+        withRoster.slice(0, 12).map((e) => `• ${e.name}: ` + dates.map((d) => cell(e, d)).map((v, i) => (v ? `${bn(dates[i].slice(8))}-${v}` : "")).filter(Boolean).join(", ")).join("\n");
+      return {
+        ok: true, text, data: { from, to, people: withRoster.slice(0, 40).map((e) => ({ name: e.name, department: e.department, days: Object.fromEntries(dates.map((d) => [d, cell(e, d)])) })) },
+        actions: [{ label: "Duty Roster খুলুন", nav: "admin:duty_roster" }],
+        report: report("Duty Roster", `Roster-${from}-${to}`, ["Name", "Department", ...dates], emps.map((e) => [e.name, e.department || "", ...dates.map((d) => cell(e, d))]), [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "break_report",
+    description: "Break Time report: breaks taken between from / to (YYYY-MM-DD, default today) — who took how many and how long, who went over the allowed minutes, who is on a break now.",
+    params: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "break_time"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : from;
+      const r = await callApi(c.req, `/api/breaks/report?from=${from}&to=${to}`);
+      if (!r.ok) return fail(r.status);
+      const sum: any[] = r.body?.summary || [];
+      const now: any[] = r.body?.on_break_now || [];
+      const allowed = Number(r.body?.rules?.allowed_minutes) || 0;
+      const name = (x: any) => x.name || x.employee_name || x.user_name || "—";
+      const minsOf = (x: any) => Number(x.minutes ?? x.total_minutes ?? 0);
+      const over = sum.filter((x) => x.over || (allowed && minsOf(x) > allowed));
+      const text = `**Break — ${bnDate(from)}${to !== from ? ` – ${bnDate(to)}` : ""}**: ${bn(sum.length)} জন break নিয়েছেন${allowed ? `, অনুমতি ${bn(allowed)} মিনিট` : ""}।` +
+        (now.length ? `\nএখন break-এ: ${now.map(name).join(", ")}` : "") +
+        (over.length ? `\nসময়ের বেশি:\n` + over.slice(0, 10).map((x) => `• ${name(x)} — ${bn(minsOf(x))} মিনিট`).join("\n") : "") +
+        (sum.length && !over.length ? "\nকেউ সময়ের বেশি নেননি।" : "");
+      return {
+        ok: true, text, data: { from, to, people: sum.slice(0, 40), on_break_now: now.map(name), allowed_minutes: allowed },
+        actions: [{ label: "Break Time খুলুন", nav: "admin:break_time" }],
+        report: report("Break Report", `Breaks-${from}-${to}`, ["Name", "Department", "Breaks", "Minutes", "Over"], sum.map((x) => [name(x), x.department || "", Number(x.count ?? x.breaks ?? 0), minsOf(x), x.over || (allowed && minsOf(x) > allowed) ? "Yes" : ""]), [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "pepm_report",
+    description:
+      "PEPM reports: kind = mpr_entries (MPR entries: count, quantity / amount by project, latest), budget_submission (Budget Submission Status per project: submitted / not; budget = name, default the latest), dispatch (Dispatch Material rows sent / received). " +
+      "from / to YYYY-MM-DD for mpr_entries (default this month).",
+    params: { kind: { type: "string", description: "mpr_entries | budget_submission | dispatch" }, budget: { type: "string", description: "Budget name (budget_submission)" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "reports"),
+    run: async (c, args) => {
+      const kind = String(args?.kind || "mpr_entries");
+      const nav = [{ label: "Reports খুলুন", nav: "admin:reports" }];
+      if (kind === "budget_submission") {
+        const bl = await callApi(c.req, "/api/budgets");
+        const list: any[] = Array.isArray(bl.body) ? bl.body : [];
+        const q = String(args?.budget || "").trim().toLowerCase();
+        const b = (q && list.find((x) => String(x.budget_name || "").toLowerCase().includes(q))) || [...list].sort((a, b2) => Number(b2.id) - Number(a.id))[0];
+        if (!b) return { ok: true, text: "কোনো Budget পাওয়া যায়নি।", data: { budgets: [] } };
+        const r = await callApi(c.req, `/api/reports/budget-submission-status?budget_id=${b.id}`);
+        if (!r.ok) return fail(r.status);
+        const ps: any[] = r.body?.projects || [];
+        const STATUS: Record<string, string> = { submitted: "জমা হয়েছে", not_submitted: "জমা হয়নি", partial: "আংশিক" };
+        const text = `**Budget Submission — ${r.body?.budget?.budget_name || b.budget_name}**\n` + ps.map((p) => `• ${p.project_name}: ${STATUS[p.status] || p.status}${p.entry_count ? `, entry ${bn(p.entry_count)}` : ""}${(p.submitters || []).length ? ` (${p.submitters.map((x: any) => x.name || x).join(", ")})` : ""}`).join("\n");
+        return { ok: true, text, data: { budget: b.budget_name, projects: ps }, actions: nav,
+          report: report("Budget Submission Status", `Budget-Submission-${b.id}`, ["Project", "Status", "Items", "Jobs", "Entries", "Last entry"], ps.map((p) => [p.project_name, p.status, p.budget_item_count, p.job_count, p.entry_count, p.last_entry_at || ""]), [["Budget", String(r.body?.budget?.budget_name || b.budget_name)]]) };
+      }
+      if (kind === "dispatch") {
+        const r = await callApi(c.req, "/api/mpr-dispatch/rows?view=all");
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = r.body?.rows || [];
+        const received = rows.filter((x) => x.received_at || x.status === "received");
+        const text = `**Dispatch Material**${r.body?.all ? "" : " (শুধু আপনার)"}: মোট ${bn(rows.length)}টি সারি, গ্রহণ হয়েছে ${bn(received.length)}টি, বাকি ${bn(rows.length - received.length)}টি।` +
+          (rows.length ? "\n" + rows.slice(0, 12).map((x) => `• ${x.mpr_no || x.mrf_no || ""} ${x.item_name || x.description || ""} — ${x.project_name || ""}${x.received_at ? " ✓" : ""}`).join("\n") : "");
+        return { ok: true, text, data: { total: rows.length, received: received.length, rows: rows.slice(0, 40) }, actions: nav,
+          report: report("Dispatch Material", `Dispatch-${c.today}`, ["MPR No", "Item", "Project", "Qty", "Sent", "Received"], rows.map((x) => [x.mpr_no || x.mrf_no || "", x.item_name || x.description || "", x.project_name || "", x.quantity ?? x.qty ?? "", x.dispatched_at || x.created_at || "", x.received_at || ""])) };
+      }
+      // MPR entries: the Reports page needs the Reports module and its
+      // Read layer; the entries API itself also serves everyone their own and
+      // every Admin all, so the Assistant checks the page's rule first.
+      if (!(isSuper(c) || (c.modules.includes("reports") && (await layerOk(c, "reports", "read"))))) return NO_ACCESS;
+      const r = await callApi(c.req, "/api/entries?scope=all");
+      if (!r.ok) return fail(r.status);
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : `${c.today.slice(0, 7)}-01`;
+      const to = isDate(args?.to) ? String(args.to) : c.today;
+      const rows: any[] = (Array.isArray(r.body) ? r.body : []).filter((e: any) => { const d = String(e.entry_date || "").slice(0, 10); return d >= from && d <= to; });
+      const byProject = new Map<string, number>();
+      for (const e of rows) byProject.set(e.project_name || `Project #${e.project_id}`, (byProject.get(e.project_name || `Project #${e.project_id}`) || 0) + 1);
+      const text = `**MPR Entries — ${bnDate(from)} থেকে ${bnDate(to)}**: মোট ${bn(rows.length)}টি\n` + [...byProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([p, n]) => `• ${p}: ${bn(n)}টি`).join("\n");
+      return { ok: true, text, data: { from, to, total: rows.length, by_project: Object.fromEntries(byProject) }, actions: nav,
+        report: report("MPR Entries", `MPR-Entries-${from}-${to}`, ["Date", "Project", "MPR No", "Item", "Qty", "Unit", "Entered by"], rows.map((e) => [String(e.entry_date || "").slice(0, 10), e.project_name || "", e.mpr_no || "", e.item_name || e.particulars || "", e.quantity ?? "", e.unit || "", e.user_name || e.created_by_name || ""]), [["From", from], ["To", to]]) };
+    }
+  },
+  {
+    name: "management_dashboard_overview",
+    description: "Management Dashboard for a month (YYYY-MM, default this month): headcount, attendance %, late %, salary, people on leave, approvals waiting / stuck, targets, joiners / leavers, and what needs attention.",
+    params: { month: { type: "string", description: "YYYY-MM" } },
+    available: (c) => hasMod(c, "management_dashboard"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month || "")) ? String(args.month) : c.today.slice(0, 7);
+      const r = await callApi(c.req, `/api/management-dashboard?month=${month}`);
+      if (!r.ok) return fail(r.status);
+      const k = r.body?.kpis || {};
+      const att: any[] = r.body?.attention || [];
+      const tk = (v: number) => `৳${bn(Math.round(v || 0).toLocaleString("en-IN"))}`;
+      const text = `**Management Dashboard — ${bnMonth(month)}**\n` +
+        `• কর্মী: ${bn(k.headcount?.value ?? 0)}${k.headcount?.prev != null ? ` (আগের মাসে ${bn(k.headcount.prev)})` : ""}\n` +
+        `• হাজিরা: ${bn(k.attendance?.value ?? 0)}%${k.attendance?.late_pct != null ? `, দেরি ${bn(k.attendance.late_pct)}%` : ""}\n` +
+        `• বেতন: ${k.salary?.value ? tk(k.salary.value) : "এখনো চালানো হয়নি"}${k.salary?.prev ? ` (আগের মাসে ${tk(k.salary.prev)})` : ""}\n` +
+        `• আজ ছুটিতে: ${bn(k.on_leave_today?.value ?? 0)}, কাল ${bn(k.on_leave_today?.tomorrow ?? 0)}, অপেক্ষমাণ ছুটির আবেদন ${bn(k.on_leave_today?.pending ?? 0)}\n` +
+        `• অনুমোদনের অপেক্ষায়: ${bn(k.approvals?.waiting ?? 0)} (আটকে ${bn(k.approvals?.stuck ?? 0)})` +
+        (k.targets?.value != null ? `\n• Target: ${bn(k.targets.value)}%` : "") +
+        (att.length ? "\nনজর দরকার:\n" + att.slice(0, 6).map((x: any) => `• ${x.text || x.title || x.message || JSON.stringify(x)}`).join("\n") : "");
+      return { ok: true, text, data: { month, kpis: k, attention: att.slice(0, 10) }, actions: [{ label: "Management Dashboard খুলুন", nav: "admin:management_dashboard" }] };
+    }
+  },
+  {
+    name: "grievance_overview",
+    description: "Grievance & Disciplinary: complaints by status (open / under investigation / resolved), who raised against whom (as the module shows), and disciplinary actions — for an account that manages them.",
+    available: (c) => hasMod(c, "grievance_disciplinary"),
+    run: async (c) => {
+      const [g, d] = await Promise.all([callApi(c.req, "/api/grievances"), callApi(c.req, "/api/disciplinary-actions")]);
+      if (!g.ok) return fail(g.status);
+      const gs: any[] = Array.isArray(g.body) ? g.body : [];
+      const ds: any[] = d.ok && Array.isArray(d.body) ? d.body : [];
+      const byStatus = new Map<string, number>();
+      for (const x of gs) byStatus.set(String(x.status || "open"), (byStatus.get(String(x.status || "open")) || 0) + 1);
+      const text = `**Grievance**: মোট ${bn(gs.length)}টি — ${[...byStatus.entries()].map(([s2, n]) => `${s2} ${bn(n)}`).join(", ") || "কিছু নেই"}\n` +
+        gs.filter((x) => !["resolved", "closed", "rejected"].includes(String(x.status))).slice(0, 10).map((x) => `• #${x.id} ${x.subject || x.title || x.category || ""} — ${x.status}${x.raised_by_name ? `, ${x.raised_by_name}` : ""}`).join("\n") +
+        `\n**Disciplinary action**: ${bn(ds.length)}টি` + (ds.length ? "\n" + ds.slice(0, 8).map((x) => `• ${x.employee_name || x.name || ""} — ${x.action_type || x.type || ""} (${String(x.action_date || x.created_at || "").slice(0, 10)})`).join("\n") : "");
+      return { ok: true, text, data: { grievances: gs.length, by_status: Object.fromEntries(byStatus), disciplinary: ds.length }, actions: [{ label: "Grievance & Disciplinary খুলুন", nav: "admin:grievance_disciplinary" }],
+        report: report("Grievances", `Grievances-${c.today}`, ["No", "Subject", "Category", "Status", "Raised by", "Against", "Date"], gs.map((x) => [x.id, x.subject || x.title || "", x.category || "", x.status || "", x.raised_by_name || "", x.against_name || x.respondent_name || "", String(x.created_at || "").slice(0, 10)])) };
+    }
+  },
+  {
+    name: "activity_log",
+    description: "Logs: kind = payroll (Payroll Activity Log: who opened Payroll and what they did), entry_edits (PEPM entry edit history), office_punches (office device In / Out punches for a date, default today).",
+    params: { kind: { type: "string", description: "payroll | entry_edits | office_punches" }, date: { type: "string", description: "YYYY-MM-DD (office_punches)" } },
+    available: (c) => hasMod(c, "payroll") || hasMod(c, "editlog") || hasMod(c, "office_attendance"),
+    run: async (c, args) => {
+      const kind = String(args?.kind || "payroll");
+      if (kind === "office_punches") {
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : c.today;
+        const r = await callApi(c.req, `/api/office-attendance?from=${date}&to=${date}`);
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = Array.isArray(r.body) ? r.body : r.body?.rows || [];
+        const text = `**Office device punches — ${bnDate(date)}**: ${bn(rows.length)}টি\n` + rows.slice(0, 15).map((x) => `• ${x.employee_name || x.name || x.device_user_pin || ""} — ইন ${enTime(x.check_in_at || x.first_in || x.punch_time)}${x.check_out_at || x.last_out ? `, আউট ${enTime(x.check_out_at || x.last_out)}` : ""}`).join("\n");
+        return { ok: true, text, data: { date, rows: rows.slice(0, 40) }, actions: [{ label: "Office Attendance খুলুন", nav: "admin:office_attendance" }],
+          report: report("Office Punches", `Office-Punches-${date}`, ["Name", "PIN", "In", "Out", "Device"], rows.map((x) => [x.employee_name || x.name || "", x.device_user_pin || x.pin || "", String(x.check_in_at || x.first_in || x.punch_time || ""), String(x.check_out_at || x.last_out || ""), x.device_name || ""]), [["Date", date]]) };
+      }
+      if (kind === "entry_edits") {
+        const r = await callApi(c.req, "/api/entries/edit-history");
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = Array.isArray(r.body) ? r.body : [];
+        const text = `**Entry edit history**: ${bn(rows.length)}টি বদল\n` + rows.slice(0, 12).map((x) => `• ${String(x.edited_at || x.created_at || "").slice(0, 16)} — ${x.edited_by_name || x.user_name || ""}: ${x.field_name || x.field || ""} ${x.old_value ?? ""} → ${x.new_value ?? ""}`).join("\n");
+        return { ok: true, text, data: { total: rows.length, rows: rows.slice(0, 40) }, actions: [{ label: "Edit Log খুলুন", nav: "admin:editlog" }],
+          report: report("Entry Edit History", `Edit-History-${c.today}`, ["When", "By", "Entry", "Field", "Old", "New"], rows.map((x) => [String(x.edited_at || x.created_at || ""), x.edited_by_name || x.user_name || "", x.entry_id ?? "", x.field_name || x.field || "", String(x.old_value ?? ""), String(x.new_value ?? "")])) };
+      }
+      const r = await callApi(c.req, "/api/payroll/access-log");
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = r.body?.rows || [];
+      const text = `**Payroll Activity Log** (সর্বশেষ):\n` + rows.slice(0, 15).map((x) => `• ${String(x.created_at || "").slice(0, 16)} — ${x.user_name}: ${x.area}${x.detail ? ` (${x.detail})` : ""}`).join("\n");
+      return { ok: true, text, data: { rows: rows.slice(0, 40).map((x) => ({ at: x.created_at, who: x.user_name, kind: x.kind, area: x.area, detail: x.detail })) }, actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Payroll Activity Log", `Payroll-Log-${c.today}`, ["When", "Who", "Kind", "What", "Detail", "IP"], rows.map((x) => [String(x.created_at || ""), x.user_name || "", x.kind || "", x.area || "", x.detail || "", x.ip || ""])) };
     }
   },
   // ---- The asker's own things (each reads the asker's own API) ----
@@ -2338,7 +2816,75 @@ interface Intent { tool: string; keys: string[]; args?: (t: string, c: Ctx) => a
 
 const LAST_MONTH = ["last month", "gotomash", "gotomas", "goto mash", "goto mas", "গত মাস", "আগের মাস", "previous month", "ager mas", "ager mash"];
 
+// "gotomas", "ei bochor", "october", "aj" -> a period for the report tools
+// (nothing said = the tool's own default, this month).
+const periodOf = (t: string, c: Ctx): { from?: string; to?: string; month?: string; date?: string; month_year?: string } => {
+  const ym = c.today.slice(0, 7);
+  const lastDay = (m: string) => { const [y, mo] = m.split("-").map(Number); return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`; };
+  if (hasAny(t, LAST_MONTH)) { const m = monthShift(ym, -1); return { from: `${m}-01`, to: lastDay(m), month: m, month_year: m }; }
+  if (hasAny(t, ["this year", "ei bochor", "ei bochhor", "এই বছর", "এ বছর", "e bochor", "চলতি বছর"])) return { from: `${ym.slice(0, 4)}-01-01`, to: c.today };
+  if (hasAny(t, [" aj ", " ajke ", " আজ ", " আজকে ", " today "])) return { from: c.today, to: c.today, date: c.today };
+  if (hasAny(t, ["gotokal", "গতকাল", "yesterday"])) { const d = addDays(c.today, -1); return { from: d, to: d, date: d }; }
+  for (const w of t.trim().split(" ")) {
+    const m = monthOf(w.replace(/(er|এর|-এর|e|তে)$/, ""));
+    if (m) {
+      const [ty, tm] = ym.split("-").map(Number);
+      const y = m > tm ? ty - 1 : ty;
+      const mm = `${y}-${String(m).padStart(2, "0")}`;
+      return { from: `${mm}-01`, to: mm === ym ? c.today : lastDay(mm), month: mm, month_year: mm };
+    }
+  }
+  return {};
+};
+// One intent per ready-made report, so a question goes straight to it.
+const reportIntent = (report: string, keys: string[]): Intent => ({ tool: "company_report", keys, args: (t, c) => ({ report, ...periodOf(t, c) }) });
+const presetIntent = (preset: string, keys: string[]): Intent => ({ tool: "employee_records_report", keys, args: () => ({ preset }) });
+
 const INTENTS: Intent[] = [
+  reportIntent("leave_taken", ["leave taken", "leave by type", "ছুটির ধরন অনুযায়ী", "কে কত ছুটি নিয়েছে", "ke koto chuti niyeche", "kar koto chuti nise", "kon dhoroner chuti"]),
+  reportIntent("bill_disbursements", ["disbursement", "ডিসবার্স", "bill payment report", "koto taka deya baki", "কত টাকা দেওয়া বাকি", "bill paid"]),
+  reportIntent("bill_claim_categories", ["category wise claim", "claim by category", "ক্যাটাগরি অনুযায়ী claim", "category onujayi bill"]),
+  reportIntent("bill_claims", ["bill claim report", "বিল ক্লেইম রিপোর্ট", "conveyance claim report", "sobar bill claim", "কোম্পানির bill claim"]),
+  reportIntent("conveyance_bills", ["conveyance bill list", "conveyance bill report", "কনভেয়েন্স বিলের তালিকা"]),
+  reportIntent("movement_claims", ["movement claim report", "sobar movement", "মুভমেন্ট রিপোর্ট", "movement report"]),
+  reportIntent("asset_register", ["asset register", "asset list", "সব asset", "অ্যাসেট রেজিস্টার", "company r asset"]),
+  reportIntent("asset_assignments", ["asset handover", "asset hostantor", "হস্তান্তরের ইতিহাস", "handover history"]),
+  reportIntent("asset_requisitions", ["asset requisition report", "asset er abedon", "অ্যাসেটের আবেদন"]),
+  reportIntent("vehicle_rides", ["ride history", "গাড়ির ইতিহাস", "ride report", "koyta ride hoyeche", "কয়টা ride"]),
+  reportIntent("vehicle_utilization", ["vehicle utilization", "gari koto cholse", "গাড়ি কত চলেছে", "utilization"]),
+  reportIntent("attendance_summary", ["attendance summary", "hajira summary", "মাসের হাজিরা রিপোর্ট", "attendance report sobar"]),
+  reportIntent("remote_attendance", ["remote attendance report", "gps attendance", "remote check in report"]),
+  reportIntent("leave_applications", ["leave application report", "ছুটির আবেদনের রিপোর্ট"]),
+  { tool: "attendance_department_summary", keys: ["department summary", "department wise attendance", "department onujayi hajira", "বিভাগ অনুযায়ী হাজিরা", "department e koto absent", "department wise absent", "ডিপার্টমেন্ট অনুযায়ী"],
+    args: (t, c) => { const p = periodOf(t, c); return p.date ? { date: p.date } : p.month ? { month: p.month } : hasAny(t, ["mas", "month", "মাস"]) ? { month: c.today.slice(0, 7) } : {}; } },
+  { tool: "payroll_month_comparison", keys: ["salary comparison", "beton er tulona", "বেতনের তুলনা", "salary difference", "beton keno barlo", "ager maser sathe beton", "বেতন কেন বাড়ল", "বেতন কেন কমল", "payroll comparison"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
+  { tool: "payroll_salary_sheet", keys: ["salary sheet", "বেতনের শীট", "salary list", "beton koto gese", "বেতন কত গেছে", "kar koto beton", "কার কত বেতন"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
+  presetIntent("salary_register", ["salary register", "বেতন রেজিস্টার"]),
+  presetIntent("loans_outstanding", ["loan outstanding", "কার কত লোন বাকি", "loan baki sobar", "sobar loan"]),
+  presetIntent("training_summary", ["training summary", "ট্রেনিং রিপোর্ট", "training report"]),
+  presetIntent("pending_documents", ["pending document", "কাগজ বাকি", "document missing", "documents pending"]),
+  presetIntent("missing_documents_by_type", ["missing document by type", "কোন কাগজ বাকি"]),
+  presetIntent("nominee_gaps", ["nominee", "নমিনি", "emergency contact nai"]),
+  presetIntent("education_levels", ["education level", "শিক্ষাগত যোগ্যতা", "education report"]),
+  presetIntent("experience_bands", ["experience band", "অভিজ্ঞতা অনুযায়ী", "experience report"]),
+  presetIntent("unverified_records", ["not verified", "verify hoyni", "যাচাই হয়নি"]),
+  presetIntent("joined_from_company", ["ager company", "আগের কোম্পানি", "previous company"]),
+  presetIntent("probation_ending", ["probation ending", "probation shesh", "প্রবেশন শেষ"]),
+  presetIntent("blood_group_directory", ["blood group list", "রক্তের গ্রুপের তালিকা", "blood group directory", "kar blood group"]),
+  presetIntent("assets_with_employees", ["assets with employees", "kar kache asset", "কার কাছে asset"]),
+  { tool: "mobile_bill_report", keys: ["mobile bill report", "মোবাইল বিলের রিপোর্ট", "sim bill report", "limit er beshi", "সীমার বেশি বিল", "mobile bill koto"], args: (t, c) => { const p = periodOf(t, c); return p.month ? { from: p.month, to: p.month } : {}; } },
+  { tool: "tracking_overview", keys: ["tracking e ke ache", "কে ট্র্যাকিং", "tracking status", "location pathacche", "লোকেশন পাঠাচ্ছে", "ke track e"] },
+  { tool: "tracking_stay_report", keys: ["stay report", "কোথায় ছিল", "kothay chilo"], args: (t, c) => ({ name: nameBefore(t), ...periodOf(t, c) }) },
+  { tool: "duty_roster_overview", keys: ["duty roster", "রোস্টার", "kar kon shift", "কার কোন শিফট", "shift ke"], args: (t, c) => periodOf(t, c) },
+  { tool: "break_report", keys: ["break report", "ব্রেক রিপোর্ট", "ke break e", "কে ব্রেকে", "break niyeche"], args: (t, c) => periodOf(t, c) },
+  { tool: "pepm_report", keys: ["mpr entry", "এমপিআর", "mpr report"], args: (t, c) => ({ kind: "mpr_entries", ...periodOf(t, c) }) },
+  { tool: "pepm_report", keys: ["budget submission", "বাজেট জমা", "budget submit"], args: () => ({ kind: "budget_submission" }) },
+  { tool: "pepm_report", keys: ["dispatch", "ডিসপ্যাচ"], args: () => ({ kind: "dispatch" }) },
+  { tool: "management_dashboard_overview", keys: ["management dashboard", "ম্যানেজমেন্ট ড্যাশবোর্ড", "company overview", "কোম্পানির অবস্থা", "companyr obostha"], args: (t, c) => ({ month: periodOf(t, c).month }) },
+  { tool: "grievance_overview", keys: ["grievance", "অভিযোগ", "disciplinary", "শাস্তিমূলক"] },
+  { tool: "activity_log", keys: ["payroll log", "payroll e ke dhukeche", "payroll activity"], args: () => ({ kind: "payroll" }) },
+  { tool: "activity_log", keys: ["edit log", "edit history", "এডিট লগ"], args: () => ({ kind: "entry_edits" }) },
+  { tool: "activity_log", keys: ["device punch", "office punch", "মেশিনের পাঞ্চ", "punch log"], args: (t, c) => ({ kind: "office_punches", date: periodOf(t, c).date }) },
   // Forms the Assistant fills (cards the person submits) — in INTENTS so a
   // wording Gemini answered with them is learned: the local engine then fills
   // the same card with its own reading of the question.
@@ -2478,7 +3024,7 @@ const RIDE_STATUS = ["status", "স্ট্যাটাস", "kothay", "কো�
 const wantsMovement = (t: string) =>
   hasAny(t, ["movement", "মুভমেন্ট"]) &&
   hasAny(t, ["check in", "checkin", "check out", "checkout", "চেক ইন", "চেক আউট", "start", "শুরু", "shuru", "jacchi", "যাচ্ছি", "jabo", "যাব", "pouch", "পৌঁছ", "kaj shesh", "কাজ শেষ", "end", "koro", "করো", "dao", "দাও", "kore", "করে"]) &&
-  !hasAny(t, ["koto", "কত", "kototi", "কতটি", "koyta", "কয়টা", "list", "তালিকা", "history", "ki holo", "কী হল", "status", "total", "মোট", "km", "কিলো", "kivabe", "কিভাবে", "কীভাবে"]);
+  !hasAny(t, ["koto", "কত", "kototi", "কতটি", "koyta", "কয়টা", "list", "তালিকা", "history", "ki holo", "কী হল", "status", "total", "মোট", "km", "কিলো", "kivabe", "কিভাবে", "কীভাবে", "report", "রিপোর্ট", "sobar", "সবার"]);
 const wantsRide = (t: string) => hasAny(t, RIDE_WORDS) && hasAny(t, RIDE_ASK) && !hasAny(t, RIDE_STATUS);
 // Correcting a day's In / Out ("check in dite bhule gechi", "timesheet edit",
 // "hajira thik kore dao") — not asking what the timesheet shows.
@@ -2691,12 +3237,19 @@ async function localAnswer(c: Ctx, message: string, history: { role: string; tex
 //     every word the engine knows before giving up.
 // ---------------------------------------------------------------------------
 const LEARNABLE = new Set(INTENTS.map((i) => i.tool));
-const LEARN_ARG_KEYS = new Set(["section", "field", "mode"]);
+const LEARN_ARG_KEYS = new Set(["section", "field", "mode", "report", "preset", "kind"]);
 interface LearnedRow { question: string; tool: string | null; help_id: string | null; args: Record<string, any> | null; grams: Set<string> }
 // Built-in examples: questions worded the way people actually ask, each
 // with what answers it ("help:<id>" = a how-to entry). Known from the start,
 // before Gemini has taught anything; what Gemini teaches is added on top.
 const TRAINING: [string, string, Record<string, any>?][] = [
+  ["e bochor ke koto casual leave niyeche", "company_report", { report: "leave_taken" }], ["এই মাসে কত টাকার bill দেওয়া বাকি", "company_report", { report: "bill_disbursements" }],
+  ["kon gari koto cholse ei mase", "company_report", { report: "vehicle_utilization" }], ["asset register dekhao", "company_report", { report: "asset_register" }],
+  ["department wise ajker hajira", "attendance_department_summary"], ["ei mase kon department e beshi absent", "attendance_department_summary"],
+  ["gotomaser sathe beton er parthokko", "payroll_month_comparison"], ["এ মাসে বেতন কেন বেড়েছে", "payroll_month_comparison"], ["salary sheet dekhao", "payroll_salary_sheet"],
+  ["kar kar document jama dewa baki", "employee_records_report", { preset: "pending_documents" }], ["blood group onujayi talika", "employee_records_report", { preset: "blood_group_directory" }],
+  ["mobile bill e ke limit er beshi korse", "mobile_bill_report"], ["ekhon ke ke tracking e ache", "tracking_overview"], ["ajke ke break e", "break_report"],
+  ["management dashboard er summary dao", "management_dashboard_overview"], ["kon project budget submit koreni", "pepm_report", { kind: "budget_submission" }],
   ["client visit e jacchi movement check in koro", "prepare_movement_claim"], ["movement claim check in kore dao", "prepare_movement_claim"], ["মুভমেন্ট চেক ইন করো ব্যাংকে যাচ্ছি", "prepare_movement_claim"],
   ["pouche gechi movement check out koro", "prepare_movement_claim"], ["movement claim shesh koro", "prepare_movement_claim"], ["start a movement claim for site visit", "prepare_movement_claim"],
   ["kal sokal 10 tay office theke gulshan jabo gari lagbe", "prepare_ride_booking"], ["ekta gari book kore dao", "prepare_ride_booking"], ["আমার একটা গাড়ি লাগবে", "prepare_ride_booking"],
@@ -3049,6 +3602,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
 // ---------------------------------------------------------------------------
 export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const { authenticateToken, queryDB, getAdminModules, todayInDhaka } = deps;
+  layerCheck = deps.hasModuleLayer;
   learnedQuery = queryDB;
   void queryDB(`/*unscoped*/ CREATE TABLE IF NOT EXISTS assistant_learned (
       id INT AUTO_INCREMENT PRIMARY KEY,

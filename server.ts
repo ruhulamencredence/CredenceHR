@@ -3385,7 +3385,7 @@ async function startServer() {
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, getCurrentStepApprovers });
   // AI Assistant — floating chat helper for every account (AiAssistantRoutes.ts).
-  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, hasModuleLayer });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
