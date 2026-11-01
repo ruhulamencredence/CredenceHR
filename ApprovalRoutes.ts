@@ -969,7 +969,23 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             can_edit_asset_items:
               r.source_type === "asset_requisition" && !!r.supervisor_step_user_id && Number(r.current_step) === 1,
             created_at: r.created_at,
-            asset_requisition_details: assetRequisitionDetails
+            asset_requisition_details: assetRequisitionDetails,
+            // A ride's purpose, date, time and duration — the one-line
+            // source_label only carries the route.
+            vehicle_requisition_details: (() => {
+              if (r.source_type !== "vehicle_requisition") return null;
+              const vr = vehicleRequisitionMap.get(Number(r.source_id));
+              return vr
+                ? {
+                    purpose: vr.purpose || "",
+                    pickup_location: vr.pickup_location,
+                    destination: vr.destination,
+                    ride_date: toDateOnlyString(vr.ride_date),
+                    start_time: String(vr.start_time || "").slice(0, 5),
+                    estimated_duration_hours: Number(vr.estimated_duration_hours)
+                  }
+                : null;
+            })()
           };
         }),
         ...relieverItems.map((la: any) => {

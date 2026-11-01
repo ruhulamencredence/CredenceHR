@@ -23,6 +23,8 @@ import { LoadingBlock } from './LoadingBlock';
 import { ApproverSignatureCard } from './ApproverSignatureCard';
 
 import { SearchSelect } from './Combobox';
+import { formatDuration } from '../lib/rideDuration';
+import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 interface ApproveApplicationsProps {
   token: string;
   onBack: () => void;
@@ -61,6 +63,15 @@ interface MyApprovalItem extends ClaimReviewFields {
   // (itemized line items, reason, urgency, target date, attachment) behind
   // this item's one-line source_label, shown when the card is clicked. See
   // GET /api/my-approvals's assetRequisitionDetails.
+  // Only on a 'vehicle_requisition' item: what the ride is for and when.
+  vehicle_requisition_details?: {
+    purpose: string;
+    pickup_location: string;
+    destination: string;
+    ride_date: string;
+    start_time: string;
+    estimated_duration_hours: number;
+  } | null;
   asset_requisition_details?: {
     asset_category: string;
     reason: string;
@@ -128,10 +139,6 @@ interface AvailableVehicle {
   model: string;
 }
 
-interface DriverCandidate {
-  id: number;
-  name: string;
-}
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
@@ -222,15 +229,12 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [editingItems, setEditingItems] = useState<MyApprovalItem | null>(null);
 
   // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
-  // "Assign Vehicle & Driver" form below — same source VehicleManagement.tsx's
-  // own Assign form uses. Driver candidates come from GET
-  // /api/vehicles/driver-candidates (every login account), NOT the Employee
-  // Directory — a driver only needs a real users.id, and an account created
-  // straight as a login is never linked to an all_employees row. Fetched
-  // unconditionally on mount (cheap, and most accounts here have no admin
-  // gate to check first) rather than only once such an item is actually seen.
+  // "Assign Vehicle & Driver" form below — the same driver list as every
+  // other Assign form (GET /api/vehicles/driver-picker): Vehicle Management
+  // -> Inventory -> Drivers with what each is doing now, or every account
+  // while that list is empty. Fetched on mount (cheap).
   const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
-  const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
+  const [driverCandidates, setDriverCandidates] = useState<DriverOption[]>([]);
   const [assignForm, setAssignForm] = useState<Record<string, { vehicle_id: string; driver_user_id: string }>>({});
 
   useEffect(() => {
@@ -238,7 +242,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
       .then((r) => r.json())
       .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
       .catch(() => {});
-    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders })
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders })
       .then((r) => r.json())
       .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
@@ -544,6 +548,21 @@ useLiveRefresh(() => load(true));
                             : item.source_label}
                           {!editable && item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
                         </p>
+                        {item.vehicle_requisition_details && (
+                          <div className="mt-1.5 max-w-xl text-[11px] text-slate-600 space-y-0.5">
+                            <div>
+                              <span className="text-slate-400 font-semibold">When: </span>
+                              {formatDate(item.vehicle_requisition_details.ride_date)} · {item.vehicle_requisition_details.start_time} · Est.{' '}
+                              {formatDuration(item.vehicle_requisition_details.estimated_duration_hours)}
+                            </div>
+                            {item.vehicle_requisition_details.purpose && (
+                              <div className="whitespace-pre-line break-words">
+                                <span className="text-slate-400 font-semibold">Purpose: </span>
+                                {item.vehicle_requisition_details.purpose}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <p className="text-[11px] text-slate-400 mt-1">
                           From {item.requested_by_name || `User #${item.requested_by}`}
                           {item.no_approver ? (
@@ -676,9 +695,9 @@ useLiveRefresh(() => load(true));
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a driver…</option>
-                            {driverCandidates.map((d) => (
+                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id).map((d) => (
                               <option key={d.id} value={d.id}>
-                                {d.name}
+                                {driverOptionLabel(d, assignForm[key]?.vehicle_id)}
                               </option>
                             ))}
                           </SearchSelect>
