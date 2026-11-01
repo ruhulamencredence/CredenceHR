@@ -404,8 +404,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-2 sm:p-3">
+      {/* Nearly the whole screen, so every column of the step tables fits without scrolling sideways. */}
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[1680px] max-h-[94vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
           <h2 className="text-sm font-semibold text-slate-800">Run Payroll — {monthLabel(monthYear)}</h2>
