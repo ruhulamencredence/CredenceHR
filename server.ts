@@ -1023,7 +1023,7 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
       const total = (sup ? 1 : 0) + steps;
       if (!total) continue;
       const done: any = await queryDB(
-        "UPDATE approval_requests SET awaiting_approver = 0, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
         [template ? template.id : null, sup || null, total, r.id]
       );
       if (!Number(done?.affectedRows)) continue;
@@ -1088,7 +1088,9 @@ async function templateLayerApprovers(request: any): Promise<{ user_id: number; 
 let reconcileRunning: Promise<number> | null = null;
 async function reconcilePendingApprovals(onlyId?: number): Promise<number> {
   if (!onlyId && reconcileRunning) return reconcileRunning;
-  const run = (async () => {
+  // Outside any request's company scope: a save in one company's Admin Panel
+  // (strict scope) must not hide a Supervisor who sits in a sister company.
+  const run = companyStore.exit(() => (async () => {
     const rows: any[] =
       (await queryDB(
         `SELECT * FROM approval_requests WHERE status = 'pending' AND COALESCE(awaiting_approver, 0) = 0${onlyId ? " AND id = ?" : ""}`,
@@ -1103,7 +1105,7 @@ async function reconcilePendingApprovals(onlyId?: number): Promise<number> {
       }
     }
     return changed;
-  })();
+  })());
   if (!onlyId) {
     reconcileRunning = run;
     run.finally(() => (reconcileRunning = null)).catch(() => {});
@@ -1111,9 +1113,18 @@ async function reconcilePendingApprovals(onlyId?: number): Promise<number> {
   return run;
 }
 
-async function superadminIds(exceptId: number): Promise<number[]> {
-  const rows: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' AND COALESCE(is_blocked, 0) = 0").catch(() => [])) || [];
-  return rows.map((x) => Number(x.id)).filter((id) => id !== Number(exceptId));
+// The Superadmins of the requester's own workspace (group), plus the system
+// owner — never another workspace's (reconcile runs without a company scope).
+async function superadminIds(requesterId: number): Promise<number[]> {
+  const rows: any[] =
+    (await queryDB(
+      `/*unscoped*/ SELECT s.id FROM users s
+        WHERE s.role = 'superadmin' AND COALESCE(s.is_blocked, 0) = 0 AND s.id <> ?
+          AND (COALESCE(s.is_platform_admin, 0) = 1
+               OR COALESCE(s.group_id, 1) = (SELECT COALESCE(u.group_id, 1) FROM users u WHERE u.id = ?))`,
+      [requesterId, requesterId]
+    ).catch(() => [])) || [];
+  return rows.map((x) => Number(x.id));
 }
 
 async function reconcileOneApproval(r: any): Promise<number> {
@@ -1122,6 +1133,8 @@ async function reconcileOneApproval(r: any): Promise<number> {
   const alertType = mapping?.type || "hr_action";
   const nameOf = async (id: number) => (((await queryDB("SELECT name FROM users WHERE id = ?", [id]).catch(() => [])) || [])[0]?.name as string) || "someone";
   const requester = Number(r.requested_by);
+  let requesterName: string | null = null;
+  const whoName = async () => (requesterName ??= await nameOf(requester));
   const tell = (userId: number, title: string, message: string) =>
     createAlert(queryDB, { userId, type: alertType, title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
   // The employee's own alert opens their own request, not Approve Application.
@@ -1151,7 +1164,6 @@ async function reconcileOneApproval(r: any): Promise<number> {
     changed++;
   }
 
-  const who = await nameOf(requester);
   // Waiting on the Supervisor Layer.
   if (r.supervisor_step_user_id && Number(r.current_step) === 1) {
     const stored = Number(r.supervisor_step_user_id);
@@ -1159,6 +1171,7 @@ async function reconcileOneApproval(r: any): Promise<number> {
     if (Number(r.supervisor_pinned) && !storedGone) return changed;
     const desired = await resolveSupervisorApprover(requester);
     if (desired === stored && !storedGone) return changed;
+    const who = await whoName();
     const oldName = await nameOf(stored);
     const why = storedGone ? `${oldName} is no longer active` : `${oldName} is no longer ${who}'s supervisor`;
     if (desired && desired !== stored) {
@@ -1205,8 +1218,13 @@ async function reconcileOneApproval(r: any): Promise<number> {
     const active = layer.filter((a) => !gone.has(a.user_id));
     const layerNo = Number(r.current_step);
     if (!active.length && !r.stuck_since) {
-      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NOW() WHERE id = ? AND stuck_since IS NULL", [r.id]);
+      // Only while it is still on this Layer.
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET stuck_since = NOW() WHERE id = ? AND stuck_since IS NULL AND status = 'pending' AND current_step = ? AND adhoc_approver_id IS NULL",
+        [r.id, Number(r.current_step)]
+      );
       if (!Number(done?.affectedRows)) return changed;
+      const who = await whoName();
       const names = layer.map((a) => a.user_name).filter(Boolean).join(", ");
       for (const id of await superadminIds(requester)) {
         await tell(
@@ -1218,8 +1236,12 @@ async function reconcileOneApproval(r: any): Promise<number> {
       return changed + 1;
     }
     if (active.length && r.stuck_since) {
-      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NULL WHERE id = ? AND stuck_since IS NOT NULL", [r.id]);
+      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NULL WHERE id = ? AND stuck_since IS NOT NULL AND status = 'pending' AND current_step = ?", [
+        r.id,
+        Number(r.current_step)
+      ]);
       if (!Number(done?.affectedRows)) return changed;
+      const who = await whoName();
       for (const a of active) if (a.user_id !== requester) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} is waiting on you (Layer ${layerNo}).`);
       return changed + 1;
     }
@@ -1413,7 +1435,7 @@ async function performApprovalAction(
       acted_at: new Date().toISOString()
     });
     const back: any = await queryDB(
-      "UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
+      "UPDATE approval_requests SET status = 'returned', current_step = 1, stuck_since = NULL, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
       [JSON.stringify(trail), requestId, Number(request.current_step)]
     );
     if (back && back.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
@@ -1508,7 +1530,8 @@ async function performApprovalAction(
 
   // Only if nobody acted on this step meanwhile (two approvers, a
   // double-click): the second one changes nothing and runs no side effects.
-  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
+  // A new Layer (or the end): whether it is stuck is worked out afresh.
+  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, stuck_since = NULL, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
     newStatus,
     newStep,
     JSON.stringify(actions),
@@ -3416,7 +3439,7 @@ async function startServer() {
   // a save (requestApprovalReconcile) and every 2 minutes.
   setApprovalReconcileHandler(async () => {
     await reconcilePendingApprovals();
-    await rehomeAwaitingApprovals();
+    await companyStore.exit(() => rehomeAwaitingApprovals());
   });
   if (runsBackgroundJobs()) {
     setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);

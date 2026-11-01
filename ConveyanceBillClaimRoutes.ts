@@ -26,6 +26,7 @@
 // moved. conveyance_bills/conveyance_bill_items table creation stays behind
 // in server.ts's ensureSchemaMigrations(), same as every other table.
 
+import { requestApprovalReconcile } from "./approvalReconcile";
 import type { Express } from "express";
 import { isAppSession } from "./SessionSecurity";
 import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
@@ -896,7 +897,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         remarks: null,
         acted_at: new Date().toISOString()
       });
-      await queryDB("UPDATE approval_requests SET status = 'pending', current_step = 1, actions_json = ? WHERE id = ?", [JSON.stringify(actions), current.id]);
+      await queryDB("UPDATE approval_requests SET status = 'pending', current_step = 1, stuck_since = NULL, actions_json = ? WHERE id = ?", [JSON.stringify(actions), current.id]);
+      // Back at Layer 1: re-checked for a Supervisor change / nobody active.
+      requestApprovalReconcile();
       current = { ...current, status: "pending", current_step: 1 };
     }
     if (current) {
