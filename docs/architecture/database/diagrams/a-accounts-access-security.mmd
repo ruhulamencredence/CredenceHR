@@ -93,6 +93,11 @@ erDiagram
     int app_days
     int app_idle_days
   }
+  startup_migrations {
+    varchar name PK
+    datetime done_at
+    varchar value
+  }
   user_access_audit {
     int id PK
     int target_user_id

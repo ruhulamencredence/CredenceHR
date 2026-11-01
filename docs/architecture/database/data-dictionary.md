@@ -1410,6 +1410,14 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
+### `startup_migrations`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `name` | varchar(100) | না | PK | |
+| `done_at` | datetime | না | default current_timestamp() | |
+| `value` | varchar(255) | হ্যাঁ |  | |
+
 ### `user_access_audit`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

@@ -5,6 +5,7 @@
 
 import { ensureAccountBlockSchema } from "./AccountBlock";
 import { widenEnum } from "./enumWiden";
+import { getStartupMarker, setStartupMarker } from "./startupOnce";
 import { ensureOnboardingSchema } from "./OnboardingSelfServiceRoutes";
 import { ensureHrReminderSchema } from "./HrRemindersRoutes";
 import { ensureActiveUsersSchema } from "./ActiveUsersRoutes";
@@ -2428,8 +2429,14 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // created — a fresh install auto-approving until someone builds a Template
   // is the correct, intended behavior in that case.
   // ============================================================================
+  // Runs ONCE (startupOnce.ts): before, every restart re-created a
+  // "Migrated Global Chain" template for any of these types an admin had
+  // removed all templates from. An install that already has any template
+  // ran it long ago — it is only marked done.
   try {
-    const chain = await getApprovalChain();
+    const alreadyDone = !!(await getStartupMarker(dbPool, "approval_chain_to_templates"));
+    const [anyTemplate]: any = alreadyDone ? [[{ n: 1 }]] : await dbPool.query("SELECT COUNT(*) AS n FROM approval_templates");
+    const chain = Number(anyTemplate?.[0]?.n || 0) > 0 ? [] : await getApprovalChain();
     if (chain.length > 0) {
       const requestTypes: { key: "conveyance" | "leave" | "timesheet"; label: string }[] = [
         { key: "conveyance", label: "Conveyance Bill Claim" },
@@ -2451,6 +2458,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         console.log(`\u2705 Migrated the old global Approval Chain into a default Template for '${rt.key}' (Admin Panel -> Approvals -> Templates).`);
       }
     }
+    if (!alreadyDone) await setStartupMarker(dbPool, "approval_chain_to_templates");
   } catch (err: any) {
     console.warn("⚠️ Could not migrate the old global Approval Chain into default Templates: " + err.message);
   }

@@ -105,7 +105,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>Superadmin</td>
-<td><code>.env</code>-এর <code>ADMIN_EMAIL/PASSWORD</code> থেকে তৈরি; API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role <code>user</code> হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না</td>
+<td><code>.env</code>-এর <code>ADMIN_EMAIL/PASSWORD</code> থেকে তৈরি; app থেকে বদলানো password restart-এ আর <code>.env</code>-এরটায় ফেরে না — <code>.env</code>-এ <code>ADMIN_PASSWORD</code> বদলে restart করলে তবেই সেটা বসে (শেষ বসানো password-এর bcrypt hash <code>startup_migrations</code>-এ, <code>startupOnce.ts</code>); API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role <code>user</code> হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না</td>
 <td><code>server.ts</code> <code>seedAdminFromEnv</code>, <code>AccountBlock.ts</code>, টেস্ট</td>
 </tr>
 <tr>

@@ -20,6 +20,7 @@
 // piece the Monthly/Date-Wise Attendance Reports in server.ts call so a date
 // marked here is never counted as an employee being Absent.
 
+import { getStartupMarker, setStartupMarker } from "./startupOnce";
 import type { Express } from "express";
 
 export type HolidayDayType = "holiday" | "weekend";
@@ -105,23 +106,26 @@ export async function ensureHolidayCalendarSchema(dbPool: any): Promise<void> {
       console.warn("⚠️ Could not add holiday_calendar's (entry_date, applies_to) unique key: " + err.message);
     }
   }
-  // One-time-per-date migration: every pre-existing entry (which the ADD
-  // COLUMN above defaulted to 'head_office') gets copied into
-  // 'project_site' too, so upgrading never silently drops Project-site
-  // Employees' holidays down to zero — an Admin reviews/splits them apart
-  // afterwards in Admin Panel -> Holidays, they don't start from a blank
-  // calendar. NOT EXISTS keeps this idempotent across repeated startups.
+  // One-time migration: when the Head office / Project site split arrived,
+  // every existing entry (the ADD COLUMN above defaulted them to
+  // 'head_office') was copied onto 'project_site' too, so upgrading never
+  // dropped Project-site Employees' holidays to zero. It runs ONCE
+  // (startupOnce.ts) and only while the Project-site calendar is still empty —
+  // it used to run on every restart and copied every Head-office-only holiday
+  // or weekend added since onto the Project-site calendar.
   try {
-    await dbPool.query(`
-      INSERT INTO holiday_calendar (entry_date, day_type, title, applies_to, created_by)
-      SELECT h.entry_date, h.day_type, h.title, 'project_site', h.created_by
-      FROM holiday_calendar h
-      WHERE h.applies_to = 'head_office'
-        AND NOT EXISTS (
-          SELECT 1 FROM holiday_calendar h2
-          WHERE h2.entry_date = h.entry_date AND h2.applies_to = 'project_site'
-        )
-    `);
+    if (!(await getStartupMarker(dbPool, "holiday_project_site_copy"))) {
+      const [ps]: any = await dbPool.query("SELECT COUNT(*) AS n FROM holiday_calendar WHERE applies_to = 'project_site'");
+      if (!Number(ps?.[0]?.n || 0)) {
+        await dbPool.query(`
+          INSERT INTO holiday_calendar (entry_date, day_type, title, applies_to, created_by)
+          SELECT h.entry_date, h.day_type, h.title, 'project_site', h.created_by
+          FROM holiday_calendar h
+          WHERE h.applies_to = 'head_office'
+        `);
+      }
+      await setStartupMarker(dbPool, "holiday_project_site_copy");
+    }
   } catch (err: any) {
     console.warn("⚠️ Could not copy existing holiday_calendar entries into the project_site group: " + err.message);
   }

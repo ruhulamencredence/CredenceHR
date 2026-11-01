@@ -7395,6 +7395,41 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
+<h3 id="startup_migrations"><code>startup_migrations</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>varchar(100)</td>
+<td>না</td>
+<td>PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>done_at</code></td>
+<td>datetime</td>
+<td>না</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <h3 id="user_access_audit"><code>user_access_audit</code></h3>
 <table>
 <thead>

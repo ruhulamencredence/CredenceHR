@@ -100,6 +100,7 @@ import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallbac
 import { runsBackgroundJobs } from "./jobRunner";
 import { resolveJwtSecret } from "./JwtSecret";
 import { installWebSecurity, socketCorsOrigin } from "./WebSecurity";
+import { getStartupMarker, setStartupMarker } from "./startupOnce";
 
 dotenv.config();
 
@@ -2241,16 +2242,30 @@ async function seedAdminFromEnv() {
         "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'superadmin')",
         [adminName, adminEmail, password_hash]
       );
+      await setStartupMarker(dbPool, "env_admin_password", password_hash).catch(() => {});
+      await setStartupMarker(dbPool, "env_admin_name", adminName).catch(() => {});
       console.log(`✅ Superadmin account created from .env: ${adminEmail}`);
     } else {
-      // Keep the account in sync with .env (name + password). Role is only forced
-      // back to 'superadmin' the first time — if it somehow got changed we still
-      // guarantee at least one superadmin exists to administer the system.
-      await queryDB(
-        "UPDATE users SET name = ?, password_hash = ?, role = 'superadmin' WHERE email = ?",
-        [adminName, password_hash, adminEmail]
-      );
-      console.log(`✅ Superadmin account synced from .env: ${adminEmail}`);
+      // Role is always put back to 'superadmin', so there is always one.
+      // Name and password are applied from .env only when they CHANGED in
+      // .env since the last start (startupOnce.ts remembers the last applied
+      // ones) — editing .env and restarting still resets a forgotten
+      // password, but a password or name the Superadmin set in the app is
+      // no longer put back to the .env one on every restart.
+      await queryDB("UPDATE users SET role = 'superadmin' WHERE email = ?", [adminEmail]);
+      const lastPw = await getStartupMarker(dbPool, "env_admin_password").catch(() => null);
+      const pwChanged = !lastPw?.value || !(await bcrypt.compare(adminPassword, lastPw.value).catch(() => false));
+      if (pwChanged) {
+        await queryDB("UPDATE users SET password_hash = ? WHERE email = ?", [password_hash, adminEmail]);
+        await setStartupMarker(dbPool, "env_admin_password", password_hash);
+        console.log(`✅ Superadmin password set from .env: ${adminEmail}`);
+      }
+      const lastName = await getStartupMarker(dbPool, "env_admin_name").catch(() => null);
+      if (lastName?.value !== adminName) {
+        await queryDB("UPDATE users SET name = ? WHERE email = ?", [adminName, adminEmail]);
+        await setStartupMarker(dbPool, "env_admin_name", adminName);
+      }
+      console.log(`✅ Superadmin account checked against .env: ${adminEmail}`);
     }
     // Multi-company: the .env account is the system owner — in the original
     // (Credence) workspace and the one who manages every workspace.
