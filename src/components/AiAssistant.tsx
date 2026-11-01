@@ -19,7 +19,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
-import { MAX_RECORD_SECONDS, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
+import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
@@ -239,6 +239,8 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const [recSecs, setRecSecs] = useState(0);
   const [voiceErr, setVoiceErr] = useState('');
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  // True until the answer being read actually makes sound.
+  const [speakLoading, setSpeakLoading] = useState(false);
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -350,6 +352,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
         if (cancelled || !d) return;
         setSuggestions(d.suggestions || []);
         setVoice(!!d.voice);
+        if (d.voice) prepareVoices();
       })
       .catch(() => {});
     setTimeout(() => inputRef.current?.focus(), 150);
@@ -390,15 +393,18 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     if (speakingIdx === index) {
       stopSpeaking();
       setSpeakingIdx(null);
+      setSpeakLoading(false);
       return;
     }
     setSpeakingIdx(index);
+    setSpeakLoading(true);
     try {
-      await speak(text, token);
+      await speak(text, token, () => setSpeakLoading(false));
     } catch {
       setVoiceErr('উত্তরটা পড়ে শোনানো গেল না।');
     } finally {
       setSpeakingIdx((cur) => (cur === index ? null : cur));
+      setSpeakLoading(false);
     }
   };
 
@@ -656,8 +662,12 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                           title={speakingIdx === i ? 'থামান' : 'পড়ে শোনান'}
                           className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${speakingIdx === i ? 'bg-violet-600 text-white' : 'text-violet-700 hover:bg-violet-50'}`}
                         >
-                          {speakingIdx === i ? <Square className="w-3 h-3" /> : <Volume2 className="w-3.5 h-3.5" />}
-                          {speakingIdx === i ? 'থামান' : 'শুনুন'}
+                          {speakingIdx === i ? (
+                            speakLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-3 h-3" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5" />
+                          )}
+                          {speakingIdx === i ? (speakLoading ? 'আসছে…' : 'থামান') : 'শুনুন'}
                         </button>
                       )}
                       {m.draft && !m.draftDone && <LeaveDraftCard token={token} draft={m.draft} onDone={(r, note) => finishDraft(i, r, note)} />}

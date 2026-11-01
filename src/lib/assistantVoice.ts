@@ -135,27 +135,74 @@ export function speakableText(text: string): string {
     .trim();
 }
 
-const isBangla = (t: string) => /[ঀ-৿]/.test(t);
+const isBangla = (t: string) => /[\u0980-\u09FF]/.test(t);
 
-async function deviceVoice(lang: 'bn' | 'en'): Promise<SpeechSynthesisVoice | null> {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
-  let voices = window.speechSynthesis.getVoices();
-  if (!voices.length) {
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, 700);
+// The device's voices, looked up once (the list loads late on some browsers).
+let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null;
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return Promise.resolve([]);
+  if (!voicesReady) {
+    voicesReady = new Promise((resolve) => {
+      const now = window.speechSynthesis.getVoices();
+      if (now.length) return resolve(now);
+      const t = setTimeout(() => resolve(window.speechSynthesis.getVoices()), 600);
       window.speechSynthesis.onvoiceschanged = () => {
         clearTimeout(t);
-        resolve();
+        resolve(window.speechSynthesis.getVoices());
       };
     });
-    voices = window.speechSynthesis.getVoices();
   }
-  return voices.find((v) => v.lang?.toLowerCase().startsWith(lang)) || null;
+  return voicesReady;
+}
+async function deviceVoice(lang: 'bn' | 'en'): Promise<SpeechSynthesisVoice | null> {
+  return (await loadVoices()).find((v) => v.lang?.toLowerCase().startsWith(lang)) || null;
+}
+// Warm the voice list up early (the Assistant calls this when it opens).
+export function prepareVoices() {
+  void loadVoices();
+}
+
+// Gemini's voice is made in pieces: a short first sentence (so sound starts
+// in a second or two), then bigger pieces made while the earlier ones play.
+// Pieces already made are kept for this session, so playing an answer again
+// starts at once.
+function splitForSpeech(text: string): string[] {
+  const sentences = text.match(/[^।!?.\n]+[।!?.]*\s*/g)?.map((x) => x.trim()).filter(Boolean) || [text];
+  const out: string[] = [];
+  let cur = '';
+  for (const sn of sentences) {
+    const limit = out.length === 0 ? 90 : 320;
+    if (cur && (cur + ' ' + sn).length > limit) {
+      out.push(cur);
+      cur = sn;
+    } else cur = cur ? `${cur} ${sn}` : sn;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+const clipCache = new Map<string, Promise<Blob>>();
+function fetchClip(text: string, token: string): Promise<Blob> {
+  const hit = clipCache.get(text);
+  if (hit) return hit;
+  const p = fetch(apiUrl('/api/assistant/speak'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text })
+  }).then(async (r) => {
+    if (!r.ok) throw new Error('Could not read the answer aloud.');
+    return r.blob();
+  });
+  p.catch(() => clipCache.delete(text));
+  clipCache.set(text, p);
+  if (clipCache.size > 60) clipCache.delete(clipCache.keys().next().value as string);
+  return p;
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+let playId = 0;
 
 export function stopSpeaking() {
+  playId++;
   try {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   } catch {
@@ -167,40 +214,58 @@ export function stopSpeaking() {
   }
 }
 
+function playBlob(blob: Blob, id: number): Promise<void> {
+  if (id !== playId) return Promise.resolve();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) currentAudio = null;
+      resolve();
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    audio.onpause = done;
+    void audio.play().catch(done);
+  });
+}
+
 // Reads `text` aloud; resolves when it has finished (or was stopped).
-export async function speak(text: string, token: string): Promise<void> {
+// onPlaying fires when sound actually starts (the button shows "loading"
+// until then).
+export async function speak(text: string, token: string, onPlaying?: () => void): Promise<void> {
   stopSpeaking();
+  const id = playId;
   const words = speakableText(text);
   if (!words) return;
   const lang = isBangla(words) ? 'bn' : 'en';
   const voice = await deviceVoice(lang);
+  if (id !== playId) return;
   if (voice) {
     await new Promise<void>((resolve) => {
       const u = new SpeechSynthesisUtterance(words);
       u.voice = voice;
       u.lang = voice.lang;
       u.rate = 1;
+      u.onstart = () => onPlaying?.();
       u.onend = () => resolve();
       u.onerror = () => resolve();
       window.speechSynthesis.speak(u);
     });
     return;
   }
-  const r = await fetch(apiUrl('/api/assistant/speak'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text: words })
-  });
-  if (!r.ok) throw new Error('Could not read the answer aloud.');
-  const url = URL.createObjectURL(await r.blob());
-  const audio = new Audio(url);
-  currentAudio = audio;
-  await new Promise<void>((resolve) => {
-    audio.onended = () => resolve();
-    audio.onerror = () => resolve();
-    audio.onpause = () => resolve();
-    void audio.play().catch(() => resolve());
-  });
-  URL.revokeObjectURL(url);
-  if (currentAudio === audio) currentAudio = null;
+  const parts = splitForSpeech(words);
+  // Ask for the first two pieces at once; each later one while the one
+  // before it plays.
+  const clips = parts.map((_, i) => (i < 2 ? fetchClip(parts[i], token) : null));
+  for (let i = 0; i < parts.length; i++) {
+    if (id !== playId) return;
+    const blob = await (clips[i] || fetchClip(parts[i], token));
+    if (id !== playId) return;
+    if (i + 2 < parts.length && !clips[i + 2]) clips[i + 2] = fetchClip(parts[i + 2], token);
+    if (i === 0) onPlaying?.();
+    await playBlob(blob, id);
+  }
 }

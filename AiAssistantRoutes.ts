@@ -2767,6 +2767,10 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   // POST /api/assistant/speak { text } -> audio/wav: the answer read out by
   // Gemini's voice — used only when the device has no Bangla voice of its own.
   const TTS_MODELS = (process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts,gemini-2.5-flash-tts").split(",").map((m) => m.trim()).filter(Boolean);
+  // The model that last worked is tried first (no wasted call on one that's
+  // gone), and a piece read in the last 10 minutes is sent again at once.
+  let preferredTts = 0;
+  const ttsCache = new Map<string, { at: number; wav: Buffer }>();
   app.post("/api/assistant/speak", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
@@ -2775,12 +2779,20 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!ai) return res.status(503).json({ error: "Voice is not available." });
     const text = String(req.body?.text || "").replace(/[*_#`>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
     if (!text) return res.status(400).json({ error: "Nothing to read." });
+    const hit = ttsCache.get(text);
+    if (hit && Date.now() - hit.at < 10 * 60_000) {
+      res.setHeader("Content-Type", "audio/wav");
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(hit.wav);
+    }
     let lastErr: any = null;
-    for (const model of TTS_MODELS) {
+    for (let k = 0; k < TTS_MODELS.length; k++) {
+      const mi = (preferredTts + k) % TTS_MODELS.length;
+      const model = TTS_MODELS[mi];
       try {
         const resp: any = await ai.models.generateContent({
           model,
-          contents: [{ role: "user", parts: [{ text: `Read this aloud in a warm, clear voice:\n${text}` }] }],
+          contents: [{ role: "user", parts: [{ text }] }],
           config: {
             responseModalities: ["AUDIO"],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.GEMINI_TTS_VOICE || "Kore" } } },
@@ -2806,9 +2818,13 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
         head.writeUInt16LE(16, 34);
         head.write("data", 36);
         head.writeUInt32LE(pcm.length, 40);
+        const wav = Buffer.concat([head, pcm]);
+        preferredTts = mi;
+        ttsCache.set(text, { at: Date.now(), wav });
+        if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
         res.setHeader("Content-Type", "audio/wav");
         res.setHeader("Cache-Control", "no-store");
-        return res.send(Buffer.concat([head, pcm]));
+        return res.send(wav);
       } catch (err: any) {
         lastErr = err;
       }
