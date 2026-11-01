@@ -18,7 +18,7 @@
 // speaker button (lib/assistantVoice.ts).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Car, CheckCircle2, Clock, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
 import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
@@ -29,6 +29,7 @@ import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessa
 import { useIsPhone, useScrolling } from '../lib/useScrolling';
 
 import { SearchSelect } from './Combobox';
+import { DurationPicker } from './DurationPicker';
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
 // Nothing is sent until the person presses "জমা দিন" on the card.
@@ -43,7 +44,34 @@ interface LeaveDraft {
   types: { value: string; label: string; balance: number | null; reliever_required: boolean }[];
   relievers: { id: number; name: string }[];
 }
-interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; draft?: LeaveDraft; draftDone?: 'submitted' | 'cancelled'; report?: AssistantReport }
+// Book a Ride (RideDraft) and Timesheet -> Correct Attendance
+// (CorrectionDraft) filled in the same way — nothing is sent until the
+// person presses the card's own button.
+interface RideDraft {
+  kind: 'ride_booking';
+  purpose: string;
+  pickup_location: string;
+  destination: string;
+  ride_date: string;
+  start_time: string;
+  estimated_duration_hours: number;
+  self_drive: boolean;
+  self_drive_note: string | null;
+  today: string;
+}
+interface CorrectionDraft {
+  kind: 'attendance_correction';
+  attendance_date: string;
+  check_in: string;
+  check_out: string;
+  remarks: string;
+  options: { project_id: number; name: string; check_in: string; check_out: string }[];
+  today: string;
+}
+type AnyDraft = LeaveDraft | RideDraft | CorrectionDraft;
+// What the card says once it's done (and the page it points to).
+type DraftDone = (result: 'submitted' | 'cancelled', done?: { text: string; action?: Action }) => void;
+interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; draft?: AnyDraft; draftDone?: 'submitted' | 'cancelled'; report?: AssistantReport }
 
 // PDF / Excel of the full list behind an answer. The server only sends a
 // report to accounts with "Assistant — report PDF / Excel download" ticked.
@@ -88,7 +116,7 @@ const dayCountOf = (from: string, to: string, half: boolean) => {
   return half ? Math.max(0.5, days - 0.5) : days;
 };
 
-const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: (result: 'submitted' | 'cancelled', note?: string) => void }> = ({ token, draft, onDone }) => {
+const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: DraftDone }> = ({ token, draft, onDone }) => {
   const [type, setType] = useState(draft.leave_type);
   const [from, setFrom] = useState(draft.start_date);
   const [to, setTo] = useState(draft.end_date || draft.start_date);
@@ -129,7 +157,10 @@ const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: (resu
       });
       const d = await r.json().catch(() => null);
       if (!r.ok) throw new Error(d?.error || 'আবেদন জমা হয়নি।');
-      onDone('submitted', `${t?.label || type}, ${from}${to !== from ? ` – ${to}` : ''} (${days} দিন)`);
+      onDone('submitted', {
+        text: `✅ আবেদন জমা হয়েছে — ${t?.label || type}, ${from}${to !== from ? ` – ${to}` : ''} (${days} দিন)। এখন এটা অনুমোদনের অপেক্ষায়; অবস্থা জানতে আমাকে জিজ্ঞেস করুন বা Leave Application খুলুন।`,
+        action: { label: 'Leave Application খুলুন', nav: 'self:leaveApplication' }
+      });
     } catch (e: any) {
       setError(e.message || 'আবেদন জমা হয়নি।');
     } finally {
@@ -185,6 +216,187 @@ const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: (resu
       <div className="flex gap-2 pt-0.5">
         <button type="button" onClick={submit} disabled={saving} className="liquid-glass-button flex-1 rounded-full py-2 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} জমা দিন
+        </button>
+        <button type="button" onClick={() => onDone('cancelled')} disabled={saving} className="liquid-glass-chip rounded-full px-4 py-2 text-xs text-slate-700">
+          বাতিল
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const cardField = 'w-full rounded-xl bg-white/70 border border-white/80 px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-violet-300';
+
+// Book a Ride, filled by the Assistant -> POST /api/vehicles/requisitions
+// (the server checks everything the Book a Ride form's own submit does).
+const RideDraftCard: React.FC<{ token: string; draft: RideDraft; onDone: DraftDone }> = ({ token, draft, onDone }) => {
+  const [pickup, setPickup] = useState(draft.pickup_location);
+  const [dest, setDest] = useState(draft.destination);
+  const [date, setDate] = useState(draft.ride_date);
+  const [time, setTime] = useState(draft.start_time);
+  const [hours, setHours] = useState(draft.estimated_duration_hours || 1);
+  const [purpose, setPurpose] = useState(draft.purpose);
+  const [selfDrive, setSelfDrive] = useState(draft.self_drive);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async () => {
+    if (!pickup.trim() || !dest.trim()) return setError('কোথা থেকে আর কোথায় — দুটোই দিন।');
+    if (!date || !time) return setError('তারিখ আর সময় দিন।');
+    if (new Date(`${date}T${time}`).getTime() < Date.now() - 60000) return setError('এই সময় পেরিয়ে গেছে — সামনের সময় দিন।');
+    if (!purpose.trim()) return setError('উদ্দেশ্য লিখুন।');
+    setSaving(true);
+    setError('');
+    try {
+      const r = await fetch(apiUrl('/api/vehicles/requisitions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ purpose: purpose.trim(), pickup_location: pickup.trim(), destination: dest.trim(), ride_date: date, start_time: time, estimated_duration_hours: hours, self_drive: selfDrive })
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || 'Request জমা হয়নি।');
+      onDone('submitted', {
+        text: `✅ গাড়ির request জমা হয়েছে — ${pickup.trim()} → ${dest.trim()}, ${date} ${time}${selfDrive ? ' (নিজে চালাবেন)' : ''}। অনুমোদন হলে গাড়ি ও ড্রাইভার জানানো হবে; অবস্থা জানতে আমাকে জিজ্ঞেস করুন বা Ride Status খুলুন।`,
+        action: { label: 'Ride Status খুলুন', nav: 'self:vehicleManagement' }
+      });
+    } catch (e: any) {
+      setError(e.message || 'Request জমা হয়নি।');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="mt-2.5 rounded-2xl bg-white/55 border border-white/80 p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-800">
+        <Car className="w-4 h-4" /> গাড়ির request — দেখে নিন
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block text-[11px] text-slate-500">
+          কোথা থেকে
+          <input value={pickup} onChange={(e) => setPickup(e.target.value)} maxLength={200} placeholder="যেমন Head Office" className={cardField} />
+        </label>
+        <label className="block text-[11px] text-slate-500">
+          কোথায়
+          <input value={dest} onChange={(e) => setDest(e.target.value)} maxLength={200} className={cardField} />
+        </label>
+        <label className="block text-[11px] text-slate-500">
+          তারিখ
+          <input type="date" value={date} min={draft.today} onChange={(e) => setDate(e.target.value)} className={cardField} />
+        </label>
+        <label className="block text-[11px] text-slate-500">
+          সময়
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={cardField} />
+        </label>
+      </div>
+      <label className="block text-[11px] text-slate-500">
+        কতক্ষণ লাগবে
+        <DurationPicker value={hours} onChange={setHours} className={cardField} />
+      </label>
+      <label className="block text-[11px] text-slate-500">
+        উদ্দেশ্য
+        <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} maxLength={300} className={`${cardField} resize-none`} />
+      </label>
+      <label className="flex items-start gap-2 text-xs text-slate-700">
+        <input type="checkbox" checked={selfDrive} onChange={(e) => setSelfDrive(e.target.checked)} className="accent-violet-600 mt-0.5" />
+        <span>
+          আমি নিজে চালাব
+          {draft.self_drive_note && <span className="block text-[11px] text-amber-700">{draft.self_drive_note}</span>}
+        </span>
+      </label>
+      {error && <p className="text-[11px] text-rose-600">{error}</p>}
+      <div className="flex gap-2 pt-0.5">
+        <button type="button" onClick={submit} disabled={saving} className="liquid-glass-button flex-1 rounded-full py-2 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Car className="w-3.5 h-3.5" />} Book করুন
+        </button>
+        <button type="button" onClick={() => onDone('cancelled')} disabled={saving} className="liquid-glass-chip rounded-full px-4 py-2 text-xs text-slate-700">
+          বাতিল
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Timesheet -> Correct Attendance, filled by the Assistant ->
+// POST /api/attendance/corrections (goes to approval like the page's own).
+const CorrectionDraftCard: React.FC<{ token: string; draft: CorrectionDraft; onDone: DraftDone }> = ({ token, draft, onDone }) => {
+  const [date, setDate] = useState(draft.attendance_date);
+  const [projectId, setProjectId] = useState(draft.options[0] ? String(draft.options[0].project_id) : '');
+  const [checkIn, setCheckIn] = useState(draft.check_in);
+  const [checkOut, setCheckOut] = useState(draft.check_out);
+  const [remarks, setRemarks] = useState(draft.remarks);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const nextDay = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  // An Out earlier than the In is a night shift: out the next morning.
+  const outNext = !!checkIn && !!checkOut && checkOut < checkIn;
+  const submit = async () => {
+    if (!projectId) return setError('Project বেছে নিন।');
+    if (!date || date > draft.today) return setError('আজ বা আগের একটা দিন দিন।');
+    if (!checkIn && !checkOut) return setError('ইন বা আউট সময় দিন।');
+    if (!remarks.trim()) return setError('কারণ লিখুন।');
+    setSaving(true);
+    setError('');
+    try {
+      const r = await fetch(apiUrl('/api/attendance/corrections'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          project_id: Number(projectId),
+          attendance_date: date,
+          check_in_at: checkIn ? `${date} ${checkIn}:00` : undefined,
+          check_out_at: checkOut ? `${outNext ? nextDay(date) : date} ${checkOut}:00` : undefined,
+          remarks: remarks.trim()
+        })
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || 'জমা হয়নি।');
+      onDone('submitted', {
+        text: `✅ ${date}-এর হাজিরা ঠিক করার অনুরোধ জমা হয়েছে${checkIn ? ` — ইন ${checkIn}` : ''}${checkOut ? `${checkIn ? ',' : ' —'} আউট ${checkOut}` : ''}। অনুমোদন হলে Timesheet-এ বসে যাবে; কিছু ফাইল (প্রমাণ) দিতে চাইলে Timesheet থেকে দিতে পারবেন।`,
+        action: { label: 'Timesheet খুলুন', nav: 'self:timesheet' }
+      });
+    } catch (e: any) {
+      setError(e.message || 'জমা হয়নি।');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="mt-2.5 rounded-2xl bg-white/55 border border-white/80 p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-800">
+        <Clock className="w-4 h-4" /> হাজিরা ঠিক করা — দেখে নিন
+      </div>
+      <label className="block text-[11px] text-slate-500">
+        দিন
+        <input type="date" value={date} max={draft.today} onChange={(e) => setDate(e.target.value)} className={cardField} />
+      </label>
+      {draft.options.length > 1 && (
+        <label className="block text-[11px] text-slate-500">
+          Project
+          <SearchSelect value={projectId} onChange={(e) => setProjectId(e.target.value)} className={cardField}>
+            <option value="">— Project বেছে নিন —</option>
+            {draft.options.map((o) => (
+              <option key={o.project_id} value={o.project_id}>{o.name}</option>
+            ))}
+          </SearchSelect>
+        </label>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block text-[11px] text-slate-500">
+          ইন টাইম
+          <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className={cardField} />
+        </label>
+        <label className="block text-[11px] text-slate-500">
+          আউট টাইম{outNext ? ' (পরদিন)' : ''}
+          <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className={cardField} />
+        </label>
+      </div>
+      <label className="block text-[11px] text-slate-500">
+        কারণ
+        <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} maxLength={250} placeholder="যেমন: চেক ইন দিতে ভুলে গিয়েছিলাম" className={`${cardField} resize-none`} />
+      </label>
+      {error && <p className="text-[11px] text-rose-600">{error}</p>}
+      <div className="flex gap-2 pt-0.5">
+        <button type="button" onClick={submit} disabled={saving} className="liquid-glass-button flex-1 rounded-full py-2 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Submit করুন
         </button>
         <button type="button" onClick={() => onDone('cancelled')} disabled={saving} className="liquid-glass-chip rounded-full px-4 py-2 text-xs text-slate-700">
           বাতিল
@@ -414,7 +626,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     if (!message || busy) return;
     const history = msgs.slice(-10).map((m) => ({
       role: m.role,
-      text: m.text + (m.draftDone === 'submitted' ? ' [The user submitted this leave application.]' : m.draftDone === 'cancelled' ? ' [The user cancelled this draft.]' : m.draft ? ' [Draft shown, not submitted yet.]' : '')
+      text: m.text + (m.draftDone === 'submitted' ? ` [The user submitted this ${m.draft?.kind === 'ride_booking' ? 'ride request' : m.draft?.kind === 'attendance_correction' ? 'attendance correction' : 'leave application'}.]` : m.draftDone === 'cancelled' ? ' [The user cancelled this draft.]' : m.draft ? ' [Draft shown, not submitted yet.]' : '')
     }));
     setMsgs((m) => [...m, { role: 'user', text: message }]);
     setInput('');
@@ -504,12 +716,12 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     }, 1000);
   };
 
-  const finishDraft = (index: number, result: 'submitted' | 'cancelled', note?: string) => {
+  const finishDraft = (index: number, result: 'submitted' | 'cancelled', done?: { text: string; action?: Action }) => {
     setMsgs((m) => {
       const next = m.map((x, i) => (i === index ? { ...x, draftDone: result } : x));
       next.push(
-        result === 'submitted'
-          ? { role: 'assistant', text: `✅ আবেদন জমা হয়েছে — ${note}। এখন এটা অনুমোদনের অপেক্ষায়; অবস্থা জানতে আমাকে জিজ্ঞেস করুন বা Leave Application খুলুন।`, actions: [{ label: 'Leave Application খুলুন', nav: 'self:leaveApplication' }] }
+        result === 'submitted' && done
+          ? { role: 'assistant', text: done.text, actions: done.action ? [done.action] : [] }
           : { role: 'assistant', text: 'ঠিক আছে, খসড়াটা বাতিল করলাম — কিছু জমা হয়নি।' }
       );
       return next;
@@ -686,7 +898,9 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                           {speakingIdx === i ? (speakLoading ? 'আসছে…' : 'থামান') : 'শুনুন'}
                         </button>
                       )}
-                      {m.draft && !m.draftDone && <LeaveDraftCard token={token} draft={m.draft} onDone={(r, note) => finishDraft(i, r, note)} />}
+                      {m.draft && !m.draftDone && m.draft.kind === 'leave_application' && <LeaveDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
+                      {m.draft && !m.draftDone && m.draft.kind === 'ride_booking' && <RideDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
+                      {m.draft && !m.draftDone && m.draft.kind === 'attendance_correction' && <CorrectionDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
                       {m.draft && m.draftDone === 'submitted' && (
                         <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> জমা দেওয়া হয়েছে</p>
                       )}

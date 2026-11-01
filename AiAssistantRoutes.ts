@@ -61,8 +61,39 @@ interface ToolResult {
   text: string; // ready-made Bangla answer (local engine)
   data?: any; // compact facts (Gemini engine)
   actions?: AssistantAction[];
-  draft?: LeaveDraft;
+  draft?: AssistantDraft;
   report?: AssistantReport;
+}
+
+// A form the Assistant filled in but did NOT submit — the chat shows it as an
+// editable card and only the person's own button posts it, to the same API
+// (with all its checks) the page itself uses.
+export type AssistantDraft = LeaveDraft | RideDraft | CorrectionDraft;
+
+// Book a Ride -> POST /api/vehicles/requisitions.
+export interface RideDraft {
+  kind: "ride_booking";
+  purpose: string;
+  pickup_location: string;
+  destination: string;
+  ride_date: string;
+  start_time: string; // HH:MM
+  estimated_duration_hours: number;
+  self_drive: boolean;
+  self_drive_note: string | null; // why self-drive is off for them, if it is
+  today: string;
+}
+
+// Timesheet -> Correct Attendance -> POST /api/attendance/corrections.
+export interface CorrectionDraft {
+  kind: "attendance_correction";
+  attendance_date: string;
+  check_in: string; // HH:MM or ""
+  check_out: string; // HH:MM or ""
+  remarks: string;
+  // The project(s) it can be filed under, with that day's times on record.
+  options: { project_id: number; name: string; check_in: string; check_out: string }[];
+  today: string;
 }
 
 // A leave application the Assistant filled in but did NOT submit: the chat
@@ -94,7 +125,7 @@ export interface AssistantReport {
 interface Answer {
   reply: string;
   actions: AssistantAction[];
-  draft?: LeaveDraft;
+  draft?: AssistantDraft;
   report?: AssistantReport;
   // Gemini only: which tool / how-to entry answered, kept so the local engine
   // can answer the same question itself later (see "Learning" below).
@@ -103,7 +134,8 @@ interface Answer {
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
-  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book"
+  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book",
+  "can_use_attendance"
 ] as const;
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -532,6 +564,129 @@ export function parseLeaveRequest(text: string, today: string) {
   return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
+// Clock times in free text: "10:30", "10.30", "10 ta", "৩টায়", "3pm",
+// "bikel 3 tay" (afternoon/evening/night words make it PM). Each with where
+// it was found, so "in 9:10 out 6" can tell In from Out.
+export function parseClockTimes(text: string): { at: number; hm: string }[] {
+  const t = ` ${toAsciiDigits(String(text || "").toLowerCase())} `;
+  const out: { at: number; hm: string }[] = [];
+  const rx = /(?:^|[^\d:.])(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|ta|টা|tay|টায়|tar|টার|baje|বাজে|o'?clock)?(?![\d])/g;
+  for (const m of t.matchAll(rx)) {
+    const h0 = +m[1];
+    const min = m[2] ? +m[2] : 0;
+    if (!m[2] && !m[3]) continue; // a bare number is a date or a count, not a time
+    if (h0 > 23 || min > 59) continue;
+    const at = (m.index || 0) + m[0].indexOf(m[1]);
+    const near = t.slice(Math.max(0, at - 14), at);
+    let h = h0;
+    const pm = /p\.?m/.test(m[3] || "") || /(bikel|bikal|বিকাল|বিকেল|sondha|shondha|সন্ধ্যা|rat|raat|রাত|evening|night)\s*$/.test(near);
+    const noon = /(dupur|দুপুর|noon)\s*$/.test(near);
+    if ((pm && h < 12) || (noon && h <= 4)) h += 12;
+    if (/a\.?m/.test(m[3] || "") && h === 12) h = 0;
+    out.push({ at, hm: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` });
+  }
+  return out;
+}
+
+// "kal sokal 10 tay office theke gulshan jabo client meeting er jonno 2 ghonta"
+// -> a Book a Ride draft. Only fills the card; the person checks it.
+export function parseRideRequest(text: string, today: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।]/g, " ").replace(/\s+/g, " ")} `;
+  const date = parseLeaveRequest(raw, today).start_date || today;
+  const time = parseClockTimes(raw)[0]?.hm || "";
+  let hours = 0;
+  const hm = /(\d+(?:\.\d+)?)\s*(?:ghonta|ghonta|ghanta|ঘণ্টা|ঘন্টা|hours?|hrs?|h)\b/.exec(t);
+  const mm = /(\d{1,3})\s*(?:min|mins|minutes?|minit|মিনিট)\b/.exec(t);
+  if (hm) hours = +hm[1];
+  else if (mm) hours = Math.round((+mm[1] / 60) * 100) / 100;
+  else if (/half ?day|হাফ ডে|অর্ধেক দিন|ordhek din/.test(t)) hours = 4;
+  else if (/full ?day|sara ?din|সারা দিন|সারাদিন|puro din|পুরো দিন/.test(t)) hours = 8;
+  const self_drive = /nije (?:chalabo|chalai|drive)|self ?drive|নিজে চালা|i(?:'ll| will) drive|nijei chalabo/.test(t);
+  // Places: "A theke B (jabo)" / "from A to B" / "B jabo" / "to B".
+  const STOP = new Set(["jabo", "যাব", "যাবো", "jete", "যেতে", "jaite", "porjonto", "পর্যন্ত", "er", "এর", "jonno", "জন্য", "lagbe", "লাগবে", "gari", "গাড়ি", "car", "ride",
+    "book", "বুক", "koro", "করো", "kore", "করে", "dao", "দাও", "chai", "চাই", "at", "kal", "কাল", "aj", "আজ", "sokal", "সকাল", "bikel", "বিকেল", "dupur", "দুপুর", "rat", "রাত",
+    "on", "for", "please", "plz", "ekta", "একটা", "and", "ar", "আর", "e", "te", "তে", "এ", "theke", "থেকে", "from", "to"]);
+  const cleanPlace = (words: string[]) => {
+    const keep = words.filter((w) => w && !STOP.has(w) && !/^\d/.test(w) && !monthOf(w) && !/^(ta|টা|tay|টায়|am|pm|ghonta|ঘণ্টা|hours?|min|half|full|day)$/.test(w));
+    const v = keep.slice(0, 4).join(" ").trim();
+    return v ? v.replace(/(^|\s)\S/g, (x) => x.toUpperCase()) : "";
+  };
+  const words = toAsciiDigits(raw).replace(/[,।]/g, " ").split(/\s+/).filter(Boolean);
+  const low = words.map((w) => w.toLowerCase());
+  let pickup = "";
+  let destination = "";
+  const from = low.findIndex((w) => w === "from");
+  const to = low.findIndex((w, i) => w === "to" && i > from);
+  const theke = low.findIndex((w) => w === "theke" || w === "থেকে");
+  if (from >= 0 && to > from) {
+    pickup = cleanPlace(low.slice(from + 1, to));
+    destination = cleanPlace(low.slice(to + 1, to + 5));
+  } else if (theke > 0) {
+    pickup = cleanPlace(low.slice(Math.max(0, theke - 3), theke).filter((w) => !/^\d/.test(w)));
+    destination = cleanPlace(low.slice(theke + 1, theke + 5).join(" ").split(/\s(?:jabo|যাব|যাবো|jete|যেতে|porjonto|পর্যন্ত|er|এর|e|te|তে)\s/)[0].split(" "));
+  }
+  if (!destination) {
+    const j = low.findIndex((w) => ["jabo", "যাব", "যাবো", "jete", "যেতে"].includes(w));
+    // "banani jabo", "gulshane jabo": the place words right before "jabo"
+    // (request words like "lagbe" dropped first, then a trailing "-e/-te").
+    if (j > 0) {
+      const before = low.slice(Math.max(0, j - 3), j).filter((w) => !STOP.has(w) && !/^\d/.test(w) && !monthOf(w)).slice(-2);
+      destination = cleanPlace(before.map((w) => (w.length > 5 ? w.replace(/(te|তে)$/, "").replace(/([a-z]{4,})e$/, "$1") : w)));
+    }
+    const toOnly = low.findIndex((w) => w === "to");
+    if (!destination && toOnly >= 0) destination = cleanPlace(low.slice(toOnly + 1, toOnly + 4));
+  }
+  const pre = /^(.{3,80}?)\s*(?:er jonno|এর জন্য|jonno|জন্য|kaje|কাজে)(?:\s|$)/i.exec(raw.replace(/[,।]/g, " "));
+  const post = /(?:\bfor|purpose|udde?shyo|উদ্দেশ্য)\s*[:\-]?\s+(.{3,80}?)\s*$/i.exec(raw);
+  let purpose = ((pre && pre[1].split(/\s(?:theke|থেকে|jabo|যাব|tay|টায়|ta|টা)\s/).pop()) || (post && post[1]) || "").trim();
+  if (purpose && /^\d/.test(purpose)) purpose = "";
+  return { ride_date: date, start_time: time, estimated_duration_hours: hours || 1, pickup_location: pickup, destination, purpose, self_drive };
+}
+
+// "gotokal check in dite bhule gechi 9:10 e ashchi 6 tay ber hoyechi" -> a
+// Correct Attendance draft. "kal" here means yesterday (a correction is
+// never for a day still to come).
+export function parseCorrectionRequest(text: string, today: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase())} `;
+  const words = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।!?]/g, " ")} `;
+  let date = parseLeaveRequest(raw, today).start_date || "";
+  if (/\s(gotokal|গতকাল|yesterday)\s/.test(words) || (date && date > today && /\s(kal|kalke|কাল|কালকে)\s/.test(words))) date = addDays(today, -1);
+  if (!date || date > today) date = /\s(aj|ajke|আজ|আজকে|today)\s/.test(words) || !date ? today : addDays(today, -1);
+  const times = parseClockTimes(raw);
+  // Each time goes with the nearer In / Out word, before or after it
+  // ("in 9:15", "9:10 e ashchi", "6 tay ber hoyechi").
+  // Every spelling of "came in" / "went out" (also after spelling fixes:
+  // ashchi / ashche / esechi / eshechilam, ber hoyechi / beriye / chole gechi).
+  const IN = /(\bin\b|ইন|check ?in|ঢুক|dhuk|entry|enter|এসেছি|এসেছিলাম|এসে|আসছি|আসি|প্রবেশ|arrive|\b(?:ashchi|ashche|aschi|asche|asci|ashi|ashlam|aslam|ashchilam|eshechi|esechi|esheche|eseche|eshechilam|esechilam|eshe|ese|pouchechi|pouchaichi)\b|পৌঁছ)/g;
+  const OUT = /(\bout\b|আউট|check ?out|বের|\bber\b|\bberi\w*|chole|চলে|left\b|bahir|বাহির)/g;
+  const posOf = (rx: RegExp) => [...t.matchAll(rx)].map((m) => m.index || 0);
+  const inAt = posOf(IN);
+  const outAt = posOf(OUT);
+  const dist = (list: number[], at: number) => Math.min(Infinity, ...list.map((p) => Math.abs(p - at)));
+  let check_in = "";
+  let check_out = "";
+  for (const x of times) {
+    const di = dist(inAt, x.at);
+    const dout = dist(outAt, x.at);
+    if (Math.min(di, dout) > 30) continue;
+    if (dout < di && !check_out) check_out = x.hm;
+    else if (di <= dout && !check_in) check_in = x.hm;
+  }
+  // "9:10 e ashchi, 6 tay ber": an Out before the In with no am/pm said is the evening.
+  if (check_in && check_out && check_out < check_in && +check_out.slice(0, 2) < 12 && +check_out.slice(0, 2) + 12 > +check_in.slice(0, 2)) {
+    check_out = `${String(+check_out.slice(0, 2) + 12).padStart(2, "0")}${check_out.slice(2)}`;
+  }
+  if (!check_in && !check_out && times.length) {
+    check_in = times[0].hm;
+    if (times[1]) check_out = times[1].hm;
+  }
+  const why = /(?:karon|কারণ|because|reason)\s*[:\-]?\s+(.{3,150})$/i.exec(raw)?.[1] ||
+    (/(bhule|ভুলে|forgot|vule|mone chilo na|মনে ছিল না|network|নেটওয়ার্ক|gps|phone|ফোন|charge|চার্জ)/i.test(raw) ? raw.trim() : "");
+  return { attendance_date: date, check_in, check_out, remarks: why.slice(0, 250) };
+}
+
 // "Rahim er chuti koto" -> "rahim": the word(s) right before a separate
 // "er" / "-এর" / "এর" ("ajker" and "মাসের" are not names).
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
@@ -815,6 +970,94 @@ const TOOLS: Tool[] = [
       const text = `ছুটির আবেদনের খসড়া তৈরি করেছি${start ? ` — ${bnDate(start)}${end !== start ? ` থেকে ${bnDate(end)}` : ""}` : ""}। ` +
         (missing.length ? `${missing.join(" আর ")} দিয়ে দিন, ` : "") + "নিচে সব দেখে **জমা দিন** চাপুন। আপনি না চাপলে কিছু জমা হবে না।";
       return { ok: true, text, draft, data: { drafted: true, submitted: false, leave_type: leaveType, start_date: start, end_date: end, purpose: draft.purpose, note: "Shown to the user as a form; they must review it and press Submit themselves." } };
+    }
+  },
+  {
+    name: "prepare_ride_booking",
+    description:
+      "Fill in (do NOT submit) a Book a Ride request (an office car) for the asking employee. The app shows it as an editable card and the employee submits it themselves. " +
+      "Use when they ask to book / need a car or ride. Resolve relative dates against today. start_time 24-hour HH:MM.",
+    params: {
+      pickup_location: { type: "string", description: "Where from, as they said it (e.g. 'Head Office')" },
+      destination: { type: "string", description: "Where to" },
+      ride_date: { type: "string", description: "YYYY-MM-DD" },
+      start_time: { type: "string", description: "HH:MM, 24-hour" },
+      estimated_duration_hours: { type: "number", description: "How long they need the car, in hours (0.25 to 240); omit if not said" },
+      purpose: { type: "string", description: "Why, short, in their words" },
+      self_drive: { type: "boolean", description: "true if they will drive themselves" }
+    },
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const date = isDate(args?.ride_date) && String(args.ride_date) >= c.today ? String(args.ride_date) : c.today;
+      const time = /^\d{1,2}:\d{2}$/.test(String(args?.start_time || "")) ? String(args.start_time).padStart(5, "0") : "";
+      const hours = Number(args?.estimated_duration_hours);
+      let selfNote: string | null = null;
+      let selfDrive = !!args?.self_drive;
+      if (selfDrive) {
+        const chk = await callApi(c.req, `/api/vehicles/self-drive-check?ride_date=${date}`);
+        if (chk.ok && chk.body && !chk.body.allowed) {
+          selfDrive = false;
+          selfNote = String(chk.body.reason || "Self-drive isn't allowed for this ride.");
+        }
+      }
+      const draft: RideDraft = {
+        kind: "ride_booking",
+        purpose: String(args?.purpose || "").slice(0, 300),
+        pickup_location: String(args?.pickup_location || "").slice(0, 200),
+        destination: String(args?.destination || "").slice(0, 200),
+        ride_date: date,
+        start_time: time,
+        estimated_duration_hours: Number.isFinite(hours) && hours > 0 ? Math.min(240, hours) : 1,
+        self_drive: selfDrive,
+        self_drive_note: selfNote,
+        today: c.today
+      };
+      const missing = [!draft.pickup_location && "কোথা থেকে", !draft.destination && "কোথায়", !time && "সময়", !draft.purpose && "উদ্দেশ্য"].filter(Boolean);
+      const text = `গাড়ির requisition-এর খসড়া তৈরি করেছি — ${bnDate(date)}${time ? `, ${bn(time)}` : ""}${draft.destination ? `, ${draft.destination}` : ""}। ` +
+        (missing.length ? `${missing.join(", ")} দিয়ে দিন, ` : "") + "নিচে সব দেখে **Book করুন** চাপুন। আপনি না চাপলে কিছু জমা হবে না।";
+      return { ok: true, text, draft, data: { drafted: true, submitted: false, ...draft, note: "Shown to the user as a form; they must review it and press Book themselves." } };
+    }
+  },
+  {
+    name: "prepare_attendance_correction",
+    description:
+      "Fill in (do NOT submit) a Timesheet attendance correction (Correct Attendance: set a day's In / Out time, e.g. forgot to check in) for the asking employee. " +
+      "The app shows an editable card; the employee submits it. attendance_date YYYY-MM-DD, never in the future ('kal' about a past punch means yesterday). Times 24-hour HH:MM.",
+    params: {
+      attendance_date: { type: "string", description: "The day to correct, YYYY-MM-DD" },
+      check_in: { type: "string", description: "In time HH:MM, 24-hour; omit if not said" },
+      check_out: { type: "string", description: "Out time HH:MM, 24-hour; omit if not said" },
+      remarks: { type: "string", description: "Why, short, in their words" }
+    },
+    available: (c) => isSuper(c) || (c.flags.can_use_attendance && c.flags.can_view_timesheet),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const date = isDate(args?.attendance_date) && String(args.attendance_date) <= c.today ? String(args.attendance_date) : c.today;
+      const [mine, projects, me] = await Promise.all([callApi(c.req, "/api/attendance/mine"), callApi(c.req, "/api/projects/all"), callApi(c.req, "/api/auth/me")]);
+      if (!mine.ok && mine.status === 403) return NO_ACCESS;
+      const hhmm = (v: any) => /(\d{2}):(\d{2})/.exec(String(v || ""))?.slice(1, 3).join(":") || "";
+      const day = (Array.isArray(mine.body) ? mine.body : []).filter((r: any) => String(r.attendance_date).slice(0, 10) === date);
+      const all = Array.isArray(projects.body) ? projects.body : [];
+      const pinned = Number(me.body?.user?.attendance_project_id ?? me.body?.attendance_project_id) || 0;
+      const nameOf = (id: number) => all.find((p: any) => Number(p.id) === id)?.project_name || `Project #${id}`;
+      const options = pinned
+        ? [{ project_id: pinned, name: nameOf(pinned), check_in: hhmm(day[0]?.check_in_at), check_out: hhmm(day[0]?.check_out_at) }]
+        : day.length
+          ? day.filter((r: any) => Number(r.project_id) > 0).map((r: any) => ({ project_id: Number(r.project_id), name: r.project_name || nameOf(Number(r.project_id)), check_in: hhmm(r.check_in_at), check_out: hhmm(r.check_out_at) }))
+          : [];
+      const fallback = options.length ? options : all.slice(0, 200).map((p: any) => ({ project_id: Number(p.id), name: String(p.project_name), check_in: "", check_out: "" }));
+      const draft: CorrectionDraft = {
+        kind: "attendance_correction",
+        attendance_date: date,
+        check_in: /^\d{1,2}:\d{2}$/.test(String(args?.check_in || "")) ? String(args.check_in).padStart(5, "0") : fallback[0]?.check_in || "",
+        check_out: /^\d{1,2}:\d{2}$/.test(String(args?.check_out || "")) ? String(args.check_out).padStart(5, "0") : fallback[0]?.check_out || "",
+        remarks: String(args?.remarks || "").slice(0, 250),
+        options: fallback,
+        today: c.today
+      };
+      const onRecord = day[0] ? `রেকর্ডে আছে ইন ${bn(hhmm(day[0].check_in_at) || "—")}, আউট ${bn(hhmm(day[0].check_out_at) || "—")}। ` : "ওই দিনের কোনো হাজিরা রেকর্ডে নেই। ";
+      const text = `${bnDate(date)}-এর হাজিরা ঠিক করার খসড়া তৈরি করেছি। ${onRecord}নিচে ইন / আউট সময় আর কারণ দেখে **Submit করুন** চাপুন — এটা অনুমোদনের জন্য যাবে; আপনি না চাপলে কিছু জমা হবে না।`;
+      return { ok: true, text, draft, data: { drafted: true, submitted: false, attendance_date: date, check_in: draft.check_in, check_out: draft.check_out, on_record: day.map((r: any) => ({ project: r.project_name, in: hhmm(r.check_in_at), out: hhmm(r.check_out_at) })), note: "Shown to the user as a form; they must review it and press Submit themselves." } };
     }
   },
   // ---- The asker's own things (each reads the asker's own API) ----
@@ -2015,6 +2258,11 @@ interface Intent { tool: string; keys: string[]; args?: (t: string, c: Ctx) => a
 const LAST_MONTH = ["last month", "gotomash", "gotomas", "goto mash", "goto mas", "গত মাস", "আগের মাস", "previous month", "ager mas", "ager mash"];
 
 const INTENTS: Intent[] = [
+  // Forms the Assistant fills (cards the person submits) — in INTENTS so a
+  // wording Gemini answered with them is learned: the local engine then fills
+  // the same card with its own reading of the question.
+  { tool: "prepare_ride_booking", keys: ["book a ride", "gari book", "car book", "গাড়ি বুক", "gari lagbe", "গাড়ি লাগবে", "car lagbe", "ride book"], args: (t, c) => parseRideRequest(t, c.today) },
+  { tool: "prepare_attendance_correction", keys: ["timesheet edit", "attendance correction", "hajira thik", "হাজিরা ঠিক", "check in dite bhule", "চেক ইন দিতে ভুলে", "punch dite bhule"], args: (t, c) => parseCorrectionRequest(t, c.today) },
   { tool: "my_leave_balance", keys: ["leave balance", "balance", "ব্যালেন্স", "chuti koto", "chuti baki", "koto chuti", "ছুটি কত", "কত ছুটি", "ছুটি বাকি", "বাকি ছুটি", "leave baki", "leave koto", "leave left", "how many leave", "কয় দিন ছুটি", "koydin chuti"] },
   { tool: "my_leave_applications", keys: ["leave status", "amar leave", "আমার ছুটির আবেদন", "আবেদনের অবস্থা", "application status", "approve hoyeche", "অনুমোদন হয়েছে", "approved hoise", "leave ki holo", "ছুটির কী হল", "ছুটির কি হলো", "my leave", "leave application"] },
   { tool: "my_late_days", keys: ["kon din late", "কোন দিন দেরি", "কোন কোন দিন", "late days", "which days late", "late er din", "দেরির দিন", "কবে দেরি", "kobe late"],
@@ -2137,6 +2385,20 @@ const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটি�
 const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
 const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
 
+// Asking for an office car ("gari lagbe", "book a ride", "car book koro") —
+// not asking about one already booked ("gari kothay", "ride status").
+const RIDE_WORDS = ["gari", "gaari", "গাড়ি", "গাড়ী", "car", "ride", "রাইড", "vehicle", "ভেহিকেল", "microbus", "মাইক্রো"];
+const RIDE_ASK = ["book", "বুক", "lagbe", "লাগবে", "chai", "চাই", "dorkar", "দরকার", "nibo", "নেব", "nite", "নিতে", "need", "want", "requisition", "রিকুইজিশন", "jabo", "যাব", "যাবো", "pathao", "পাঠাও"];
+const RIDE_STATUS = ["status", "স্ট্যাটাস", "kothay", "কোথায়", "ki holo", "কী হল", "কি হলো", "approve", "অনুমোদন", "koyta", "কয়টা", "list", "তালিকা", "cancel", "বাতিল", "driver ke", "কে চালাবে"];
+const wantsRide = (t: string) => hasAny(t, RIDE_WORDS) && hasAny(t, RIDE_ASK) && !hasAny(t, RIDE_STATUS);
+// Correcting a day's In / Out ("check in dite bhule gechi", "timesheet edit",
+// "hajira thik kore dao") — not asking what the timesheet shows.
+const CORRECTION_WORDS = ["timesheet", "টাইমশিট", "correction", "কারেকশন", "correct attendance", "attendance thik", "hajira thik", "হাজিরা ঠিক", "attendance edit", "edit attendance",
+  "in time", "out time", "ইন টাইম", "আউট টাইম", "check in", "checkin", "check out", "checkout", "চেক ইন", "চেক আউট", "punch", "পাঞ্চ"];
+const CORRECTION_ASK = ["thik", "ঠিক", "correct", "edit", "এডিট", "bhule", "ভুলে", "vule", "forgot", "missed", "miss", "dite pari nai", "দিতে পারিনি", "korte pari nai", "করতে পারিনি",
+  "bosao", "বসাও", "add", "dao", "দাও", "kore dao", "করে দাও", "change", "বদল", "update", "lagbe", "লাগবে"];
+const wantsCorrection = (t: string) => hasAny(t, CORRECTION_WORDS) && hasAny(t, CORRECTION_ASK) && !hasAny(t, ["status", "স্ট্যাটাস", "ki holo", "কী হল", "approve hoyeche", "অনুমোদন হয়েছে"]);
+
 // The keyword engine: an answer when the question matches something, else null.
 async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   const t = norm(message);
@@ -2145,6 +2407,19 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   if (hasAny(t, HUMAN_WORDS)) {
     const r = await TOOLS.find((x) => x.name === "request_human_support")!.run(c, {});
     return { reply: r.text, actions: r.actions || [] };
+  }
+
+  // "kal 10 tay gulshan jabo gari lagbe" -> a Book a Ride draft card
+  if (wantsRide(t) && !asksHow) {
+    const r = await TOOLS.find((x) => x.name === "prepare_ride_booking")!.run(c, parseRideRequest(message, c.today));
+    return { reply: r.text, actions: [], draft: r.draft };
+  }
+  // "gotokal check in dite bhule gechi 9:10 e ashchi" -> a Correct Attendance draft card
+  if (wantsCorrection(t) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "prepare_attendance_correction")!;
+    if (!toolAvailable(tool, c)) return { reply: "Timesheet / হাজিরা ঠিক করা আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+    const r = await tool.run(c, parseCorrectionRequest(message, c.today));
+    return { reply: r.text, actions: [], draft: r.draft };
   }
 
   // "20 oct family problem niye leave application kore dao" -> a draft card
@@ -2208,8 +2483,9 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
       : scored[0].i;
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
-    const r = await tool.run(c, intent.args ? intent.args(t, c) : {});
-    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+    // Form tools read the question as typed ("9.10" is a time, not "9 10").
+    const r = await tool.run(c, intent.args ? intent.args(intent.tool.startsWith("prepare_") ? message : t, c) : {});
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report, draft: r.draft };
   }
   if (help.length) {
     return { reply: help.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions: help.flatMap(helpAction) };
@@ -2225,6 +2501,13 @@ const blockedHelpAnswer = (h: HelpEntry): Answer => ({
 
 // Keyword match, then the same with misspelt words corrected.
 async function matchWithSpelling(c: Ctx, message: string): Promise<Answer | null> {
+  // A form request is read as typed (spelling fixes would change the
+  // reason / place words that go into the card).
+  const asTyped = norm(message);
+  if (wantsRide(asTyped) || wantsCorrection(asTyped)) {
+    const r = await matchLocal(c, message);
+    if (r) return r;
+  }
   const fixed = fixSpelling(message);
   if (fixed !== norm(message)) {
     const r = await matchLocal(c, fixed);
@@ -2257,8 +2540,8 @@ async function answerLearned(c: Ctx, message: string, hit: LearnedRow): Promise<
   if (!tool) return { reply: "", actions: [] };
   if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
   const intent = INTENTS.find((i) => i.tool === tool.name);
-  const r = await tool.run(c, { ...(intent?.args ? intent.args(t, c) : {}), ...(hit.args || {}) });
-  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+  const r = await tool.run(c, { ...(intent?.args ? intent.args(message, c) : {}), ...(hit.args || {}) });
+  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report, draft: r.draft };
 }
 
 async function localAnswer(c: Ctx, message: string, history: { role: string; text: string }[] = []): Promise<Answer> {
@@ -2318,6 +2601,10 @@ interface LearnedRow { question: string; tool: string | null; help_id: string | 
 // with what answers it ("help:<id>" = a how-to entry). Known from the start,
 // before Gemini has taught anything; what Gemini teaches is added on top.
 const TRAINING: [string, string, Record<string, any>?][] = [
+  ["kal sokal 10 tay office theke gulshan jabo gari lagbe", "prepare_ride_booking"], ["ekta gari book kore dao", "prepare_ride_booking"], ["আমার একটা গাড়ি লাগবে", "prepare_ride_booking"],
+  ["book a car for tomorrow 3pm", "prepare_ride_booking"], ["client meeting e jete hobe car dorkar", "prepare_ride_booking"], ["গাড়ি বুক করে দাও", "prepare_ride_booking"],
+  ["gotokal check in dite bhule gechi", "prepare_attendance_correction"], ["amar timesheet edit kore dao", "prepare_attendance_correction"], ["হাজিরা ঠিক করে দাও", "prepare_attendance_correction"],
+  ["out time bosano hoyni", "prepare_attendance_correction"], ["i forgot to check out yesterday", "prepare_attendance_correction"], ["punch dite pari nai attendance correction lagbe", "prepare_attendance_correction"],
   ["amar koydin chuti ache", "my_leave_balance"], ["ar koto din leave nite parbo", "my_leave_balance"], ["আমি আর কয়দিন ছুটি নিতে পারব", "my_leave_balance"],
   ["casual leave koyta ache", "my_leave_balance"], ["sick leave baki ache koto", "my_leave_balance"], ["how many days off do i have", "my_leave_balance"],
   ["amar dorkhaster ki obostha", "my_leave_applications"], ["chutir abedon approve hoyeche ki", "my_leave_applications"], ["আমার ছুটি মঞ্জুর হয়েছে কি", "my_leave_applications"],
@@ -2590,7 +2877,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- Reply in the user's language; default to Bangla. Banglish questions get Bangla answers. Be short and friendly; use bullet lines for lists.\n` +
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
-    `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
+    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access. When app_help returns several entries, answer with the one that fits the question best and keep its steps, order and button names as written (you may translate into the user's language) — don't merge entries into a process of your own or add steps that aren't there.\n` +
@@ -2604,7 +2891,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     { role: "user", parts: [{ text: message }] }
   ];
   const actions: AssistantAction[] = [];
-  let draft: LeaveDraft | undefined;
+  let draft: AssistantDraft | undefined;
   let rep: AssistantReport | undefined;
   // How-to answers are given exactly as written in HELP (menu paths and
   // button names must not be paraphrased): when app_help is all Gemini
