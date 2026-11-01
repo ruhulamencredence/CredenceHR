@@ -10,9 +10,16 @@
 //
 // Shown to every account unless HR switched it off for them in Module Access
 // (users.can_use_ai_assistant); the API checks the same switch.
+//
+// Voice (users.can_use_assistant_voice, off by default; needs Gemini on the
+// server): a mic button records a spoken question, the server writes it
+// down (POST /api/assistant/transcribe) and it is asked like a typed one;
+// the answer to a spoken question is read aloud, and any answer has a
+// speaker button (lib/assistantVoice.ts).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
+import { MAX_RECORD_SECONDS, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
@@ -225,6 +232,14 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  // Voice: allowed for this account (status.voice), recording / writing-down
+  // state, and which answer is being read aloud.
+  const [voice, setVoice] = useState(false);
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const [recSecs, setRecSecs] = useState(0);
+  const [voiceErr, setVoiceErr] = useState('');
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Live support (AssistantSupport.tsx): 'bot' = the Assistant, 'live' = my
@@ -334,6 +349,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       .then((d) => {
         if (cancelled || !d) return;
         setSuggestions(d.suggestions || []);
+        setVoice(!!d.voice);
       })
       .catch(() => {});
     setTimeout(() => inputRef.current?.focus(), 150);
@@ -346,6 +362,19 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [msgs, busy, open]);
 
+  // Closing the Assistant stops any reading aloud and drops a recording.
+  useEffect(() => {
+    if (open) return;
+    stopSpeaking();
+    setSpeakingIdx(null);
+    if (recTimer.current) clearInterval(recTimer.current);
+    recTimer.current = null;
+    setRecState((st) => {
+      if (st === 'recording') void stopRecording(false);
+      return 'idle';
+    });
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -357,7 +386,23 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
 
   if (!allowed) return null;
 
-  const ask = async (text: string) => {
+  const readAloud = async (index: number, text: string) => {
+    if (speakingIdx === index) {
+      stopSpeaking();
+      setSpeakingIdx(null);
+      return;
+    }
+    setSpeakingIdx(index);
+    try {
+      await speak(text, token);
+    } catch {
+      setVoiceErr('উত্তরটা পড়ে শোনানো গেল না।');
+    } finally {
+      setSpeakingIdx((cur) => (cur === index ? null : cur));
+    }
+  };
+
+  const ask = async (text: string, spoken = false) => {
     const message = text.trim();
     if (!message || busy) return;
     const history = msgs.slice(-10).map((m) => ({
@@ -376,11 +421,65 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       const d = await r.json().catch(() => null);
       const reply = r.ok && d?.reply ? d.reply : d?.error || 'দুঃখিত, এখন উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।';
       setMsgs((m) => [...m, { role: 'assistant', text: reply, actions: r.ok ? d?.actions || [] : [], draft: r.ok && d?.draft ? d.draft : undefined, report: r.ok && d?.report ? d.report : undefined }]);
+      // A spoken question gets its answer read aloud (it lands after the
+      // question just added: index msgs.length + 1).
+      if (spoken && r.ok) void readAloud(msgs.length + 1, reply);
     } catch {
       setMsgs((m) => [...m, { role: 'assistant', text: 'সংযোগে সমস্যা হয়েছে। ইন্টারনেট দেখে আবার চেষ্টা করুন।' }]);
     } finally {
       setBusy(false);
     }
+  };
+
+  const stopRec = async (keep: boolean) => {
+    if (recTimer.current) clearInterval(recTimer.current);
+    recTimer.current = null;
+    if (!keep) {
+      setRecState('idle');
+      await stopRecording(false);
+      return;
+    }
+    setRecState('transcribing');
+    try {
+      const blob = await stopRecording(true);
+      if (!blob || blob.size < 1200) throw new Error('কিছু শোনা যায়নি — মাইক চেপে আবার বলুন।');
+      const { base64, mime } = await toWavBase64(blob);
+      const r = await fetch(apiUrl('/api/assistant/transcribe'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ audio_base64: base64, mime_type: mime })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'কথাটা বোঝা গেল না — আবার বলুন।');
+      const text = String(d.text || '').trim();
+      if (!text) throw new Error('কিছু শোনা যায়নি — মাইক চেপে আবার বলুন।');
+      setRecState('idle');
+      void ask(text, true);
+    } catch (e: any) {
+      setRecState('idle');
+      setVoiceErr(e.message || 'কথাটা বোঝা গেল না।');
+    }
+  };
+
+  const startRec = async () => {
+    if (busy || recState !== 'idle') return;
+    setVoiceErr('');
+    stopSpeaking();
+    setSpeakingIdx(null);
+    try {
+      await startRecording();
+    } catch (e: any) {
+      setVoiceErr(e?.message || 'মাইক্রোফোন চালু করা গেল না।');
+      return;
+    }
+    setRecSecs(0);
+    setRecState('recording');
+    recTimer.current = setInterval(() => {
+      setRecSecs((sec) => {
+        if (sec + 1 >= MAX_RECORD_SECONDS) void stopRec(true);
+        return sec + 1;
+      });
+    }, 1000);
   };
 
   const finishDraft = (index: number, result: 'submitted' | 'cancelled', note?: string) => {
@@ -549,6 +648,18 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                   <div key={i} className="flex justify-start">
                     <div className="max-w-[92%] liquid-glass-inset rounded-[20px] rounded-bl-md px-3.5 py-2.5 text-sm text-slate-700 break-words">
                       <RichText text={m.text} />
+                      {voice && (
+                        <button
+                          type="button"
+                          onClick={() => void readAloud(i, m.text)}
+                          aria-label={speakingIdx === i ? 'Stop reading' : 'Read aloud'}
+                          title={speakingIdx === i ? 'থামান' : 'পড়ে শোনান'}
+                          className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${speakingIdx === i ? 'bg-violet-600 text-white' : 'text-violet-700 hover:bg-violet-50'}`}
+                        >
+                          {speakingIdx === i ? <Square className="w-3 h-3" /> : <Volume2 className="w-3.5 h-3.5" />}
+                          {speakingIdx === i ? 'থামান' : 'শুনুন'}
+                        </button>
+                      )}
                       {m.draft && !m.draftDone && <LeaveDraftCard token={token} draft={m.draft} onDone={(r, note) => finishDraft(i, r, note)} />}
                       {m.draft && m.draftDone === 'submitted' && (
                         <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> জমা দেওয়া হয়েছে</p>
@@ -591,6 +702,30 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 void ask(input);
               }}
             >
+              {voiceErr && <p className="text-[11px] text-rose-600 px-2 pb-1.5">{voiceErr}</p>}
+              {recState !== 'idle' ? (
+                <div className="liquid-glass-inset rounded-[24px] flex items-center gap-2 pl-4 pr-1.5 py-1.5 min-h-[48px]" role="status" aria-live="polite">
+                  {recState === 'recording' ? (
+                    <>
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse shrink-0" aria-hidden="true" />
+                      <span className="flex-1 text-sm text-slate-800">
+                        শুনছি… <span className="tabular-nums text-slate-500">0:{String(recSecs).padStart(2, '0')}</span>
+                        <span className="block text-[11px] text-slate-500">বলা শেষ হলে ■ চাপুন</span>
+                      </span>
+                      <button type="button" onClick={() => void stopRec(false)} aria-label="Cancel recording" className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-slate-600">
+                        <X className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => void stopRec(true)} aria-label="Stop and ask" className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 bg-rose-600 text-white">
+                        <Square className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="flex-1 text-sm text-slate-600 inline-flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> কথাটা লিখে নিচ্ছি…
+                    </span>
+                  )}
+                </div>
+              ) : (
               <div className="liquid-glass-inset rounded-[24px] flex items-end gap-2 pl-4 pr-1.5 py-1.5">
                 <textarea
                   ref={inputRef}
@@ -607,6 +742,18 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                   placeholder="প্রশ্ন লিখুন… (বাংলা / English)"
                   className="flex-1 resize-none bg-transparent outline-none text-sm text-slate-900 placeholder:text-slate-400 py-2 max-h-28"
                 />
+                {voice && !input.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => void startRec()}
+                    disabled={busy}
+                    aria-label="Ask by voice"
+                    title="বলে প্রশ্ন করুন"
+                    className="liquid-glass-button w-9 h-9 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
+                ) : (
                 <button
                   type="submit"
                   disabled={busy || !input.trim()}
@@ -615,7 +762,9 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 >
                   <Send className="w-4 h-4" />
                 </button>
+                )}
               </div>
+              )}
             </form>
             </>
             )}

@@ -85,6 +85,7 @@ type FlagKey =
   | 'can_take_break'
   | 'can_save_ride_places'
   | 'can_add_adhoc_approver'
+  | 'can_use_assistant_voice'
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_request_items'
@@ -111,6 +112,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_email_reports', label: 'Email reports', desc: 'An Email button next to PDF on the reports they can open.', section: 'general', endpoint: 'report-email-access' },
   { key: 'can_use_ai_assistant', label: 'AI Assistant', desc: 'The floating Assistant. On by default.', section: 'general', endpoint: 'ai-assistant-access', defaultOn: true },
   { key: 'can_export_assistant_reports', label: 'Assistant: PDF / Excel download', desc: 'Download the Assistant’s list answers (only figures they can see).', section: 'general', endpoint: 'assistant-report-access' },
+  { key: 'can_use_assistant_voice', label: 'AI Assistant — voice', desc: 'Speak a question with the mic and hear the answer read out. The recording is sent to Google (Gemini) to be written down, then dropped.', section: 'general', endpoint: 'assistant-voice-access', parent: 'can_use_ai_assistant' },
   { key: 'can_handle_assistant_support', label: 'Assistant live support', desc: 'Answer people who ask the Assistant for a human.', section: 'general', endpoint: 'assistant-support-access' },
 
   { key: 'can_view_budget_module', label: 'Budget / Jobs / Job Entry Details', desc: 'Enter MPRs for their projects. On by default.', section: 'pepm', endpoint: 'budget-module-access', defaultOn: true },

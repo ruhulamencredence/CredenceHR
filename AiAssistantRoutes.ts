@@ -2705,10 +2705,116 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     return list.length > 30;
   };
 
+  // Voice (Module Access -> "AI Assistant — voice", users.can_use_assistant_voice,
+  // off by default; Superadmin always). Needs Gemini: the recording is sent to
+  // Google to be written down and is never stored here.
+  const voiceAllowed = async (c: Ctx) => {
+    if (c.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_use_assistant_voice FROM users WHERE id = ?", [c.userId]).catch(() => [])) || [];
+    return !!rows[0] && Number(rows[0].can_use_assistant_voice || 0) === 1;
+  };
+
   app.get("/api/assistant/status", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
-    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c) });
+    const voice = !!geminiClient() && (await voiceAllowed(c));
+    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c), voice });
+  });
+
+  // POST /api/assistant/transcribe { audio_base64, mime_type } -> { text }:
+  // a spoken question (WAV from the page, at most ~1 minute) written down as
+  // it was said — Bangla in Bangla script, English in English.
+  app.post("/api/assistant/transcribe", authenticateToken, async (req: any, res: any) => {
+    const c = await loadCtx(req);
+    if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
+    if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
+    const ai = geminiClient();
+    if (!ai) return res.status(503).json({ error: "ভয়েস এখন চালু নেই — লিখে প্রশ্ন করুন।" });
+    if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
+    const data = typeof req.body?.audio_base64 === "string" ? req.body.audio_base64 : "";
+    const mime = String(req.body?.mime_type || "audio/wav");
+    if (!data) return res.status(400).json({ error: "No recording." });
+    if (!/^audio\/(wav|x-wav|mp3|mpeg|aac|ogg|flac|webm|mp4)/.test(mime)) return res.status(400).json({ error: "Unsupported recording." });
+    if (Buffer.byteLength(data, "base64") > 4 * 1024 * 1024) return res.status(400).json({ error: "রেকর্ডিং অনেক লম্বা — এক মিনিটের মধ্যে বলুন।" });
+    try {
+      const resp: any = await generateWithFallback(ai, {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: mime.split(";")[0], data } },
+              {
+                text:
+                  "Write down exactly what is said in this recording — a question to an HR app assistant. " +
+                  "Bangla in Bangla script, English words in English, Banglish as it is spoken. " +
+                  "Only the words, no notes or quotes. If nothing is said, answer with an empty line."
+              }
+            ]
+          }
+        ],
+        config: { temperature: 0 }
+      });
+      const text = String(resp?.text || "").trim().slice(0, 1000);
+      geminiWorked();
+      res.json({ text });
+    } catch (err: any) {
+      if (err?.quotaExhausted) pauseGemini();
+      console.warn("AI Assistant: transcribe failed:", err?.message || err);
+      res.status(502).json({ error: "কথাটা বোঝা গেল না — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+    }
+  });
+
+  // POST /api/assistant/speak { text } -> audio/wav: the answer read out by
+  // Gemini's voice — used only when the device has no Bangla voice of its own.
+  const TTS_MODELS = (process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts,gemini-2.5-flash-tts").split(",").map((m) => m.trim()).filter(Boolean);
+  app.post("/api/assistant/speak", authenticateToken, async (req: any, res: any) => {
+    const c = await loadCtx(req);
+    if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
+    if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
+    const ai = geminiClient();
+    if (!ai) return res.status(503).json({ error: "Voice is not available." });
+    const text = String(req.body?.text || "").replace(/[*_#`>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
+    if (!text) return res.status(400).json({ error: "Nothing to read." });
+    let lastErr: any = null;
+    for (const model of TTS_MODELS) {
+      try {
+        const resp: any = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: `Read this aloud in a warm, clear voice:\n${text}` }] }],
+          config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.GEMINI_TTS_VOICE || "Kore" } } },
+            httpOptions: { timeout: 30000 }
+          } as any
+        });
+        const part = resp?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
+        if (!part) throw new Error("no audio in the reply");
+        const pcm = Buffer.from(part.inlineData.data, "base64");
+        const rate = Number(/rate=(\d+)/.exec(String(part.inlineData.mimeType || ""))?.[1]) || 24000;
+        // 16-bit mono PCM -> WAV.
+        const head = Buffer.alloc(44);
+        head.write("RIFF", 0);
+        head.writeUInt32LE(36 + pcm.length, 4);
+        head.write("WAVE", 8);
+        head.write("fmt ", 12);
+        head.writeUInt32LE(16, 16);
+        head.writeUInt16LE(1, 20);
+        head.writeUInt16LE(1, 22);
+        head.writeUInt32LE(rate, 24);
+        head.writeUInt32LE(rate * 2, 28);
+        head.writeUInt16LE(2, 32);
+        head.writeUInt16LE(16, 34);
+        head.write("data", 36);
+        head.writeUInt32LE(pcm.length, 40);
+        res.setHeader("Content-Type", "audio/wav");
+        res.setHeader("Cache-Control", "no-store");
+        return res.send(Buffer.concat([head, pcm]));
+      } catch (err: any) {
+        lastErr = err;
+      }
+    }
+    console.warn("AI Assistant: speak failed:", lastErr?.message || lastErr);
+    res.status(502).json({ error: "Could not read the answer aloud." });
   });
 
   app.post("/api/assistant/chat", authenticateToken, async (req: any, res: any) => {

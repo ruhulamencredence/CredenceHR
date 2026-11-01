@@ -832,6 +832,8 @@ export interface User {
   // Approve Application -> "Add approver": ask one more person to approve a
   // request waiting on them first (ApprovalRoutes.ts) — off by default.
   can_add_adhoc_approver?: boolean;
+  // AI Assistant -> speak a question / hear the answer (off by default).
+  can_use_assistant_voice?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
   can_sign_documents?: boolean;
   can_view_payslip?: boolean;

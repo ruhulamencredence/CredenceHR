@@ -1910,6 +1910,13 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_add_adhoc_approver: " + err.message);
   }
+  // AI Assistant — voice (speak a question, hear the answer). Off by default;
+  // the speech goes to Google (Gemini) to be written down (AiAssistantRoutes.ts).
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_use_assistant_voice TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_use_assistant_voice: " + err.message);
+  }
   // Approver Type override (Template editor's "Layer 1" card) — when a
   // Template is built with its first Layer explicitly set to something other
   // than the default virtual "Supervisor" position (i.e. an Employee or Admin
