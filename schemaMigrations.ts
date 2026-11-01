@@ -4,6 +4,7 @@
  */
 
 import { ensureAccountBlockSchema } from "./AccountBlock";
+import { widenEnum } from "./enumWiden";
 import { ensureOnboardingSchema } from "./OnboardingSelfServiceRoutes";
 import { ensureHrReminderSchema } from "./HrRemindersRoutes";
 import { ensureActiveUsersSchema } from "./ActiveUsersRoutes";
@@ -1968,41 +1969,21 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add approval_template_steps.label column: " + err.message);
     }
   }
-  // Widen request_type to add 'asset' (Asset Requisition, routed through this
-  // same Dynamic Approval Engine — see createTemplateApprovalRequest) onto
-  // the original ENUM('conveyance','leave','timesheet'). MODIFY COLUMN is
-  // safe to re-run every startup (no-op once already widened), unlike ADD
-  // COLUMN's ER_DUP_FIELDNAME pattern above.
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'asset': " + err.message);
+  // request_type: conveyance, leave, timesheet, asset (Asset Requisition),
+  // vehicle (Vehicle Requisition), mobile (Mobile Bill limit raise —
+  // MobileBillRoutes.ts), loan (loan / salary advance — LoanRequestRoutes.ts).
+  // widenEnum only ever adds values: the old chain of narrower MODIFYs blanked
+  // 'vehicle' / 'mobile' / 'loan' on every restart under a non-strict
+  // sql_mode (see enumWiden.ts).
+  const REQUEST_TYPES = ["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"];
+  for (const table of ["approval_templates", "employee_template_assignments"]) {
+    try {
+      await widenEnum(dbPool, table, "request_type", REQUEST_TYPES, "NOT NULL");
+    } catch (err: any) {
+      console.warn(`⚠️ Could not widen ${table}.request_type: ` + err.message);
+    }
   }
-  // Widen request_type to add 'vehicle' (Vehicle Requisition, routed through
-  // this same Dynamic Approval Engine — see the Vehicle Requisition
-  // Flowchart's single "HR/Admin Review" layer, LAYER_NAMES in
-  // ApprovalTemplateManager.tsx).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'vehicle': " + err.message);
-  }
-  // 'mobile' — Mobile Bill limit raise requests (MobileBillRoutes.ts).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'mobile': " + err.message);
-  }
-  // 'loan' — Self Service loan / salary advance requests (LoanRequestRoutes.ts).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'loan': " + err.message);
-  }
+  await repairBlankTemplateRequestTypes(dbPool);
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
   // Submitting one NEVER touches the `attendance` table directly — it only
@@ -2478,4 +2459,63 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // what gives departments and Module Access layers their company_id. On an
   // existing one every step is already done and is skipped.
   await ensureCompanySchema(dbPool);
+}
+
+// Templates / assignments whose request_type was blanked by the old ENUM
+// chain (see enumWiden.ts). The type is worked out from what the template
+// was actually used for — approval requests made on it, its other
+// assignments, a Vehicle Maintainer layer — and, failing that, its name.
+// Anything still unknown is left as is and logged.
+async function repairBlankTemplateRequestTypes(dbPool: any): Promise<void> {
+  try {
+    const [blank]: any = await dbPool.query("SELECT id, name FROM approval_templates WHERE request_type = ''");
+    const SOURCE_TO_TYPE: Record<string, string> = {
+      user_claim: "conveyance",
+      leave_application: "leave",
+      attendance_correction: "timesheet",
+      asset_requisition: "asset",
+      vehicle_requisition: "vehicle",
+      mobile_limit_request: "mobile",
+      advance_request: "loan"
+    };
+    for (const t of blank || []) {
+      let type: string | null = null;
+      try {
+        const [used]: any = await dbPool.query("SELECT source_type FROM approval_requests WHERE template_id = ? LIMIT 1", [t.id]);
+        type = SOURCE_TO_TYPE[used?.[0]?.source_type] || null;
+      } catch {
+        /* older DB without template_id — try the next clue */
+      }
+      if (!type) {
+        const [asg]: any = await dbPool.query("SELECT request_type FROM employee_template_assignments WHERE template_id = ? AND request_type <> '' LIMIT 1", [t.id]);
+        type = asg?.[0]?.request_type || null;
+      }
+      if (!type) {
+        const [vm]: any = await dbPool.query("SELECT id FROM approval_template_steps WHERE template_id = ? AND approver_type = 'vehicle_maintainer' LIMIT 1", [t.id]);
+        if (vm?.length) type = "vehicle";
+      }
+      if (!type) {
+        const n = String(t.name || "").toLowerCase();
+        type = /vehicle|ride|car|গাড়ি|গাড়ি/.test(n) ? "vehicle" : /mobile|sim|phone|মোবাইল/.test(n) ? "mobile" : /loan|advance|ঋণ|অগ্রিম/.test(n) ? "loan" : null;
+      }
+      if (type) {
+        await dbPool.query("UPDATE approval_templates SET request_type = ? WHERE id = ?", [type, t.id]);
+        console.log(`✔ Approval template #${t.id} "${t.name}": Request Type restored to '${type}'.`);
+      } else {
+        console.warn(`⚠️ Approval template #${t.id} "${t.name}" has no Request Type and none could be worked out — set it again in Approval Chain -> Templates.`);
+      }
+    }
+    // Assignments: take the type from their template; drop a blank row when
+    // the employee already has a proper one for that type.
+    const [blankAsg]: any = await dbPool.query(
+      "SELECT eta.id, eta.employee_user_id, t.request_type FROM employee_template_assignments eta JOIN approval_templates t ON t.id = eta.template_id WHERE eta.request_type = '' AND t.request_type <> ''"
+    );
+    for (const a of blankAsg || []) {
+      const [dup]: any = await dbPool.query("SELECT id FROM employee_template_assignments WHERE employee_user_id = ? AND request_type = ?", [a.employee_user_id, a.request_type]);
+      if (dup?.length) await dbPool.query("DELETE FROM employee_template_assignments WHERE id = ?", [a.id]);
+      else await dbPool.query("UPDATE employee_template_assignments SET request_type = ? WHERE id = ?", [a.request_type, a.id]);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not repair blank approval template Request Types: " + err.message);
+  }
 }

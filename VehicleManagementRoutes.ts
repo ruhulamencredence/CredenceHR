@@ -45,6 +45,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { runsBackgroundJobs } from "./jobRunner";
+import { widenEnum } from "./enumWiden";
 
 interface VehicleManagementRouteDeps {
   authenticateToken: any;
@@ -192,17 +193,23 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_requisitions table exists: " + err.message);
   }
-  // Widen status for installs created before the Dynamic Approval Engine
-  // integration added the 'ongoing' status (workflow-approved but not yet
-  // vehicle+driver assigned is 'approved'; assigned and the ride actually
-  // underway is 'ongoing' — previously 'approved' meant what 'ongoing' means
-  // now, back when this file did its own direct approve+assign in one step).
+  // status: 'ongoing' (assigned and the ride underway — 'approved' means
+  // workflow-approved but no vehicle yet), 'expired' (start time plus grace
+  // passed while still waiting — expireOverdueRides), 'assigned' (vehicle and
+  // driver given, ride not started — Start Ride turns it 'ongoing').
+  // widenEnum only adds values; the old chain of narrower MODIFYs blanked
+  // 'assigned' / 'expired' rides on every restart under a non-strict sql_mode
+  // (see enumWiden.ts).
   try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending'`
+    await widenEnum(
+      dbPool,
+      "vehicle_requisitions",
+      "status",
+      ["pending", "approved", "assigned", "ongoing", "rejected", "cancelled", "completed", "expired"],
+      "NOT NULL DEFAULT 'pending'"
     );
   } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'ongoing': " + err.message);
+    console.warn("⚠️ Could not widen vehicle_requisitions.status: " + err.message);
   }
   // driver_user_id — added so the assigned driver can be an actual employee
   // account (Employee Tracking's location_pings, keyed by user_id) instead of
@@ -219,27 +226,6 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
     }
   }
-  // 'expired' — the ride's start time (plus the grace time below) passed
-  // while the request was still waiting on approval or a vehicle. See
-  // expireOverdueRides.
-  try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'expired': " + err.message);
-  }
-  // 'assigned' — a vehicle and driver are given but the ride hasn't started
-  // yet (a ride booked for later). It becomes 'ongoing' only when the driver,
-  // whoever assigned it, or Vehicle Management presses Start Ride
-  // (POST .../:id/start).
-  try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','assigned','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'assigned': " + err.message);
-  }
   // When the "ride starts soon" reminder went out, and when the request expired.
   // assigned_at / started_at / start_reminded_at — the Start Ride step above.
   for (const col of ["deadline_reminded_at", "expired_at", "assigned_at", "started_at", "start_reminded_at"]) {
@@ -248,6 +234,16 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
     }
+  }
+  // Rides whose status the old ENUM chain blanked: only 'assigned' and
+  // 'expired' could be lost, and an expired ride carries expired_at.
+  try {
+    const [fixed]: any = await dbPool.query(
+      "UPDATE vehicle_requisitions SET status = IF(expired_at IS NOT NULL, 'expired', 'assigned') WHERE status = ''"
+    );
+    if (fixed?.affectedRows) console.log(`✔ ${fixed.affectedRows} vehicle requisition(s): blank status restored.`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not restore blank vehicle requisition statuses: " + err.message);
   }
   // Who gave the vehicle (may differ from decided_by, the final approver) and
   // who pressed Start Ride.
