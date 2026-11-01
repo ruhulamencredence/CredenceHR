@@ -2721,6 +2721,12 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c), voice });
   });
 
+  // How to switch "thinking" off differs by model family: Gemini 3 takes
+  // thinkingLevel MINIMAL, Gemini 2.5 thinkingBudget 0, some take neither
+  // (they answer 400 INVALID_ARGUMENT). Each model's working one is kept.
+  const THINK_OFF: (Record<string, any> | null)[] = [{ thinkingLevel: "MINIMAL" }, { thinkingBudget: 0 }, null];
+  const thinkOffFor = new Map<string, number>();
+
   // POST /api/assistant/transcribe { audio_base64, mime_type } -> { text }:
   // a spoken question (WAV from the page, at most ~1 minute) written down as
   // it was said — Bangla in Bangla script, English in English.
@@ -2753,9 +2759,11 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const why: string[] = [];
     let quota = 0;
     for (const model of models) {
-      for (const withThinkingOff of [true, false]) {
+      const firstTry = thinkOffFor.get(model) ?? 0;
+      for (let ti = firstTry; ti < THINK_OFF.length; ti++) {
         const left = deadline - Date.now();
         if (left < 3000) break;
+        const think = THINK_OFF[ti];
         try {
           const resp: any = await ai.models.generateContent({
             model,
@@ -2763,23 +2771,27 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
             config: {
               temperature: 0,
               maxOutputTokens: 300,
-              ...(withThinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+              ...(think ? { thinkingConfig: think } : {}),
               httpOptions: { timeout: Math.min(14000, left) }
             } as any
           });
+          thinkOffFor.set(model, ti);
           let text = String(resp?.text || "").replace(/\s+/g, " ").trim();
           // A reply that repeats one phrase over and over: keep it once.
           const rep = /^(.{4,80}?)(?:\s*\1){2,}/.exec(text);
           if (rep) text = rep[1].trim();
           geminiWorked();
-          console.log(`AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model} in ${Date.now() - t0} ms`);
+          console.log(
+            `AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model}` +
+              ` (${think ? JSON.stringify(think) : "default thinking"}) in ${Date.now() - t0} ms`
+          );
           return res.json({ text: text.slice(0, 1000) });
         } catch (err: any) {
           const msg = String(err?.message || err).slice(0, 160);
-          // This model doesn't take the "thinking off" setting: same model without it.
-          if (withThinkingOff && /thinking/i.test(msg) && /INVALID_ARGUMENT|\b400\b/.test(msg)) continue;
+          // This model doesn't take that way of turning thinking off: the next way.
+          if (ti < THINK_OFF.length - 1 && /INVALID_ARGUMENT|\b400\b/.test(msg) && !/API key/i.test(msg)) continue;
           if (QUOTA.test(msg)) quota++;
-          why.push(`${model}: ${msg}`);
+          why.push(`${model}${think ? ` ${JSON.stringify(think)}` : ""}: ${msg}`);
           break;
         }
       }
