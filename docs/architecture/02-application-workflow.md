@@ -291,6 +291,8 @@ flowchart TD
   DISB --> PDF["Bill PDF ও Payment Voucher PDF<br/>'Approved By' সহ"]
 ```
 
+**Conveyance Disburser (Pay Out) layer:** টেমপ্লেটের শেষ ধাপ এই ধরনের হলে, আগের সব layer approve করার পর claim-টা এখনও Bill হয়নি, কিন্তু Admin Panel → **Disbursement**-এ উপরে "Claims waiting to be paid out" অংশে **Pending** হিসেবে দেখায় (`GET /api/disbursement/awaiting-claims`, Disbursement module লাগে)। সেই layer-এর লোক (বা Superadmin) এখান থেকে বা Approve Application থেকে Voucher দিয়ে **Disburse** করেন — claim approved হয়, নিজের Bill পায় ও paid হয় (`POST /api/my-approvals/:id/act`)। Disbursement module-এর অন্যরা দেখেন কার অপেক্ষায় আছে, কিন্তু Disburse করতে পারেন না।
+
 **Movement Claim** আলাদা: কর্মী কোথাও গেলে GPS-সহ ক্লেইম, একই Approval engine (`MovementClaimRoutes.ts`)।
 ফাইল: `ConveyanceBillClaimRoutes.ts`, `BillClaimPolicy.ts`।
 

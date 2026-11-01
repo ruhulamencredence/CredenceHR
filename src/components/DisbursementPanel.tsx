@@ -107,6 +107,64 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   const plainUsers = users.filter((u) => u.role === 'user');
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
+  // Claims approved by every Layer and now at a "Conveyance Disburser (Pay
+  // Out)" Layer — no Bill yet; Disburse here (or in Approve Application)
+  // makes the Bill and pays it (GET /api/disbursement/awaiting-claims).
+  interface AwaitingClaim {
+    approval_id: number;
+    user_claim_id: number;
+    user_id: number;
+    user_name: string | null;
+    employee_code: string;
+    designation: string;
+    department: string;
+    claim_date: string;
+    category: string;
+    description: string;
+    amount: number;
+    approved_amount: number;
+    waiting_on: string[];
+    can_disburse: boolean;
+  }
+  const [awaiting, setAwaiting] = useState<AwaitingClaim[]>([]);
+  const [awaitVoucher, setAwaitVoucher] = useState<Record<number, string>>({});
+  const [awaitBusy, setAwaitBusy] = useState<number | null>(null);
+  const [awaitMsg, setAwaitMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const loadAwaiting = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/disbursement/awaiting-claims'), { headers: authHeaders });
+      setAwaiting(res.ok ? await res.json() : []);
+    } catch {
+      setAwaiting([]);
+    }
+  };
+  useEffect(() => {
+    void loadAwaiting();
+  }, [token]);
+  const disburseAwaiting = async (c: AwaitingClaim) => {
+    const ok = await confirmDialog(
+      `Disburse ৳${c.approved_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })} to ${c.user_name || 'this employee'}? The claim is approved, put on its own Bill and marked paid.`
+    );
+    if (!ok) return;
+    setAwaitBusy(c.approval_id);
+    setAwaitMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/my-approvals/${c.approval_id}/act`), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approved', voucher_no: awaitVoucher[c.approval_id] || undefined })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not disburse this claim.');
+      setAwaitMsg({ ok: true, text: `Disbursed${data.voucher_no ? ` — voucher ${data.voucher_no}` : ''}.` });
+      await loadAwaiting();
+      void fetchBills();
+    } catch (err: any) {
+      setAwaitMsg({ ok: false, text: err.message || 'Could not disburse this claim.' });
+    } finally {
+      setAwaitBusy(null);
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [userFilter, setUserFilter] = useState('');
@@ -482,6 +540,63 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
             )}
           </div>
         </div>
+
+        {statusFilter !== 'disbursed' && awaiting.filter((c) => !userFilter || String(c.user_id) === userFilter).length > 0 && (
+          <div className="px-4 sm:px-6 pt-4">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60">
+              <div className="px-4 py-2.5 border-b border-amber-200 flex items-center gap-2">
+                <ReceiptText className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-bold text-slate-800">Claims waiting to be paid out</span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Pending</span>
+              </div>
+              <p className="px-4 pt-2 text-[11px] text-slate-500">
+                Approved by every Layer and now at the Conveyance Disburser Layer. No Bill yet — Disburse puts the claim on its own Bill and marks it paid.
+              </p>
+              {awaitMsg && <p className={`px-4 pt-2 text-xs font-medium ${awaitMsg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{awaitMsg.text}</p>}
+              <div className="divide-y divide-amber-100">
+                {awaiting
+                  .filter((c) => !userFilter || String(c.user_id) === userFilter)
+                  .map((c) => (
+                    <div key={c.approval_id} className="px-4 py-3 flex flex-col md:flex-row md:items-center gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-slate-800 truncate">
+                          {[c.user_name, c.employee_code, c.designation, c.department].filter(Boolean).join(' · ')}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Claim #{c.user_claim_id} · {formatDate(c.claim_date)} · {c.category}
+                          {c.description ? ` — ${c.description}` : ''}
+                        </div>
+                        <div className="text-[11px] text-slate-400">Waiting on: {c.waiting_on.join(', ') || '—'}</div>
+                      </div>
+                      <div className="text-sm font-bold text-slate-900 whitespace-nowrap">৳{c.approved_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</div>
+                      {c.can_disburse ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            aria-label="Voucher no"
+                            placeholder="Voucher no (blank = automatic)"
+                            value={awaitVoucher[c.approval_id] || ''}
+                            onChange={(e) => setAwaitVoucher((p) => ({ ...p, [c.approval_id]: e.target.value }))}
+                            className="w-44 text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={awaitBusy === c.approval_id}
+                            onClick={() => disburseAwaiting(c)}
+                            className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 whitespace-nowrap"
+                          >
+                            <Banknote className="w-3.5 h-3.5" /> {awaitBusy === c.approval_id ? 'Disbursing…' : 'Disburse'}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-500 whitespace-nowrap">Only the Disburser Layer pays this out</span>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {loadError && <p className="text-xs text-rose-600 px-6 pt-4">{loadError}</p>}
 

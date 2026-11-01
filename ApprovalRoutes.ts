@@ -1269,6 +1269,49 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // performApprovalAction as the Admin Panel's version, just without the
   // Admin Panel module gate. Still 403s if the caller isn't actually one of
   // the current step's approvers.
+  // GET /api/disbursement/awaiting-claims — Admin Panel -> Disbursement:
+  // Conveyance Bill Claims that every approver has passed and that now wait
+  // on a "Conveyance Disburser (Pay Out)" Layer. They have no Bill yet (the
+  // Disburse action makes one and pays it), so they are listed here as
+  // Pending beside the Bills. can_disburse: this account is one of that
+  // Layer's people (or the Superadmin) — they pay it out from here or from
+  // Approve Application (POST /api/my-approvals/:id/act); everyone else
+  // with Disbursement sees who it waits on.
+  app.get("/api/disbursement/awaiting-claims", authenticateToken, requireAdmin, requireModule("disbursement"), async (req: any, res) => {
+    try {
+      const requests: any[] = (await queryDB("SELECT * FROM approval_requests WHERE source_type = 'user_claim' AND status = 'pending'")) || [];
+      const out: any[] = [];
+      for (const r of requests) {
+        if (!(await isConveyanceDisburserStep(r).catch(() => false))) continue;
+        const uc: any = ((await queryDB("SELECT * FROM user_claims WHERE id = ?", [Number(r.source_id)])) || [])[0];
+        if (!uc || uc.status !== "pending") continue;
+        const people = await getCurrentStepApprovers(r).catch(() => [] as { user_id: number; user_name: string | null }[]);
+        const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        out.push({
+          approval_id: Number(r.id),
+          user_claim_id: Number(uc.id),
+          user_id: Number(uc.user_id),
+          user_name: owner.name || null,
+          employee_code: owner.employee_code || "",
+          designation: owner.designation || "",
+          department: owner.department || "",
+          claim_date: toDateOnlyString(uc.claim_date),
+          category: uc.category || "",
+          description: uc.description || "",
+          amount: Number(uc.amount),
+          approved_amount: uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount),
+          waiting_on: people.map((p) => p.user_name).filter(Boolean),
+          can_disburse: req.user.role === "superadmin" || people.some((p) => Number(p.user_id) === Number(req.user.id)),
+          since: r.updated_at || r.created_at || null
+        });
+      }
+      out.sort((a, b) => a.approval_id - b.approval_id);
+      res.json(out);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/my-approvals/:id/act", authenticateToken, async (req: any, res) => {
     try {
       const { id } = req.params;
