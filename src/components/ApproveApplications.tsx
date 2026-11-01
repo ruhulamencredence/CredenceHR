@@ -71,8 +71,6 @@ interface MyApprovalItem extends ClaimReviewFields {
     ride_date: string;
     start_time: string;
     estimated_duration_hours: number;
-    self_drive?: boolean;
-    rider_user_id?: number;
   } | null;
   asset_requisition_details?: {
     asset_category: string;
@@ -238,13 +236,6 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
   const [driverCandidates, setDriverCandidates] = useState<DriverOption[]>([]);
   const [assignForm, setAssignForm] = useState<Record<string, { vehicle_id: string; driver_user_id: string }>>({});
-  // The driver picked for a ride — a self-drive ride starts with the rider.
-  const driverFor = (item: MyApprovalItem) => {
-    const picked = assignForm[keyFor(item)]?.driver_user_id;
-    if (picked !== undefined) return picked;
-    const v = item.vehicle_requisition_details;
-    return v?.self_drive && v.rider_user_id ? String(v.rider_user_id) : '';
-  };
 
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
@@ -354,7 +345,7 @@ useLiveRefresh(() => load(true));
   // list on success, same as handleAct.
   const handleAssignAndApprove = async (item: MyApprovalItem) => {
     const key = keyFor(item);
-    const form = { vehicle_id: assignForm[key]?.vehicle_id || '', driver_user_id: driverFor(item) };
+    const form = assignForm[key];
     if (!form?.vehicle_id || !form?.driver_user_id) {
       setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
       return;
@@ -563,7 +554,6 @@ useLiveRefresh(() => load(true));
                               <span className="text-slate-400 font-semibold">When: </span>
                               {formatDate(item.vehicle_requisition_details.ride_date)} · {item.vehicle_requisition_details.start_time} · Est.{' '}
                               {formatDuration(item.vehicle_requisition_details.estimated_duration_hours)}
-                              {item.vehicle_requisition_details.self_drive && <span className="ml-1 font-semibold text-blue-700">· Self-drive (rider drives)</span>}
                             </div>
                             {item.vehicle_requisition_details.purpose && (
                               <div className="whitespace-pre-line break-words">
@@ -689,7 +679,7 @@ useLiveRefresh(() => load(true));
                         <div className="flex flex-wrap items-center gap-2">
                           <SearchSelect
                             value={assignForm[key]?.vehicle_id || ''}
-                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: e.target.value, driver_user_id: driverFor(item) } }))}
+                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: e.target.value, driver_user_id: prev[key]?.driver_user_id || '' } }))}
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a vehicle…</option>
@@ -700,14 +690,13 @@ useLiveRefresh(() => load(true));
                             ))}
                           </SearchSelect>
                           <SearchSelect
-                            value={driverFor(item)}
+                            value={assignForm[key]?.driver_user_id || ''}
                             onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: prev[key]?.vehicle_id || '', driver_user_id: e.target.value } }))}
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a driver…</option>
-                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id, item.vehicle_requisition_details?.rider_user_id).map((d) => (
+                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id).map((d) => (
                               <option key={d.id} value={d.id}>
-                                {item.vehicle_requisition_details?.rider_user_id === d.id ? 'Rider (self-drive): ' : ''}
                                 {driverOptionLabel(d, assignForm[key]?.vehicle_id)}
                               </option>
                             ))}
