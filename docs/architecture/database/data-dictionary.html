@@ -15661,6 +15661,105 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>ucompany_asset_tag</code>(company_id,asset_tag)</p>
+<h3 id="vehicle_drivers"><code>vehicle_drivers</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>employee_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td>FK → <code>all_employees.id</code></td>
+</tr>
+<tr>
+<td><code>license_no</code></td>
+<td>varchar(60)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>license_type</code></td>
+<td>varchar(20)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>license_expiry</code></td>
+<td>date</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>usual_vehicle_id</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>is_active</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 1</td>
+<td></td>
+</tr>
+<tr>
+<td><code>note</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>license_alerted_for</code></td>
+<td>date</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp() on update current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Unique: <code>unique_driver_employee</code>(employee_id)</p>
 <h3 id="vehicle_requisitions"><code>vehicle_requisitions</code></h3>
 <table>
 <thead>

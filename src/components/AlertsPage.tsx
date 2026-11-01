@@ -133,7 +133,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         ? () => onOpenVehicleManagement('trips')
         : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
-        : alert.type === 'vehicle_requisition' && onOpenVehicleManagement
+        : alert.type === 'vehicle_requisition' && alert.related_type !== 'vehicle_driver' && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('status')
         : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
         ? onOpenConveyanceClaim
@@ -266,6 +266,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
         : alert.type === 'device_request' && alert.related_type === 'user_device_decision'
         ? undefined
+        : alert.type === 'vehicle_requisition' && alert.related_type === 'vehicle_driver'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'vehicle_management' }))
         : alert.type === 'asset_requisition' && alert.related_type === 'asset_return'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'asset_management' }))
         : alert.type === 'device_request'

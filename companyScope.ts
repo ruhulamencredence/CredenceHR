@@ -68,6 +68,7 @@ const EMPLOYEE_TABLES = new Set([
   "hr_letters",
   "hr_onboarding_items",
   "late_waivers",
+  "vehicle_drivers",
   "payroll_line_items",
   "payrolls",
   "pending_bonuses",

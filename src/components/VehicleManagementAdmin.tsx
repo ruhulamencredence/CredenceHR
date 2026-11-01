@@ -33,6 +33,8 @@ import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 
 import { SearchSelect } from './Combobox';
+import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { VehicleDriversPanel } from './VehicleDriversPanel';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -107,14 +109,24 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
   const [viewingMapFor, setViewingMapFor] = useState<number | null>(null);
   const [viewingDetailsFor, setViewingDetailsFor] = useState<number | null>(null);
+  // Drivers for a ride: Inventory -> Drivers once it is in use (driverPicker.ts).
+  const [driverOptions, setDriverOptions] = useState<DriverOption[]>([]);
+  const loadDriverOptions = () =>
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((rows) => setDriverOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
       .then((r) => r.json())
       .then((rows) => setPeople(Array.isArray(rows) ? rows : []))
       .catch(() => {});
+    void loadDriverOptions();
   }, []);
 
   const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
+  // Inventory: Vehicles | Drivers (VehicleDriversPanel.tsx).
+  const [inventoryView, setInventoryView] = useState<'vehicles' | 'drivers'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -538,9 +550,9 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {people.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name}
+                        {sortDrivers(driverOptions, assignForm.vehicle_id).map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {driverOptionLabel(d, assignForm.vehicle_id)}
                           </option>
                         ))}
                       </SearchSelect>
@@ -693,6 +705,23 @@ useLiveRefresh(() => loadRequisitions());
       )}
 
       {tab === 'inventory' && (
+        <div className="inline-flex rounded-xl bg-slate-100 p-1 mb-4" role="tablist">
+          {(['vehicles', 'drivers'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={inventoryView === k}
+              onClick={() => setInventoryView(k)}
+              className={`px-4 py-1.5 text-sm font-semibold rounded-lg ${inventoryView === k ? 'bg-blue-600 text-white' : 'text-slate-600'}`}
+            >
+              {k === 'vehicles' ? `Vehicles (${vehicles.length})` : 'Drivers'}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === 'inventory' && inventoryView === 'drivers' && <VehicleDriversPanel vehicles={vehicles} onChanged={() => void loadDriverOptions()} />}
+      {tab === 'inventory' && inventoryView === 'vehicles' && (
         <div className="space-y-6">
           <form onSubmit={addVehicle} className="grid grid-cols-4 gap-3 items-end max-w-3xl">
             <div>

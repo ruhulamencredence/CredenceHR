@@ -2929,6 +2929,25 @@ Unique: `ucompany_uniq_leave_category_policy`(company_id,category_key)
 
 Unique: `ucompany_asset_tag`(company_id,asset_tag)
 
+### `vehicle_drivers`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `employee_id` | int(11) | না |  | FK → `all_employees.id` |
+| `license_no` | varchar(60) | হ্যাঁ |  | |
+| `license_type` | varchar(20) | হ্যাঁ |  | |
+| `license_expiry` | date | হ্যাঁ |  | |
+| `usual_vehicle_id` | int(11) | হ্যাঁ |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `note` | varchar(255) | হ্যাঁ |  | |
+| `license_alerted_for` | date | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `unique_driver_employee`(employee_id)
+
 ### `vehicle_requisitions`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

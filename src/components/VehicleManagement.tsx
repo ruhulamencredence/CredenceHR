@@ -24,6 +24,7 @@ import { setHeaderPageTitle } from '../lib/headerPageTitle';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
 import { ArrowLeft, ArrowRight, CalendarDays, ChevronRight, Car, X, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
+import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 import { SearchSelect } from './Combobox';
 import {
   RIDE_CARD,
@@ -222,9 +223,10 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   // and an account created straight as a login (e.g. bulk-created via POST
   // /api/users/bulk) is never linked to an all_employees row, so it would be
   // invisible in the Directory despite being a perfectly real driver account.
-  const [driverCandidates, setDriverCandidates] = useState<{ id: number; name: string }[]>([]);
+  // Inventory -> Drivers once it is in use (driverPicker.ts).
+  const [driverCandidates, setDriverCandidates] = useState<DriverOption[]>([]);
   useEffect(() => {
-    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders() })
       .then((r) => r.json())
       .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
@@ -578,9 +580,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
       </SearchSelect>
       <SearchSelect value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a driver…</option>
-        {driverCandidates.map((d) => (
+        {sortDrivers(driverCandidates, value.vehicle_id).map((d) => (
           <option key={d.id} value={d.id}>
-            {d.name}
+            {driverOptionLabel(d, value.vehicle_id)}
           </option>
         ))}
       </SearchSelect>

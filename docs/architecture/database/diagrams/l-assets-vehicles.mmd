@@ -66,6 +66,13 @@ erDiagram
     varchar pickup_location
     varchar destination
   }
+  vehicle_drivers {
+    int id PK
+    int employee_id FK
+    varchar license_no
+    date license_expiry
+    int usual_vehicle_id
+  }
   vehicles {
     int id PK
     varchar vehicle_no
@@ -87,5 +94,6 @@ erDiagram
   users ||--o{ asset_requisitions : "employee_user_id"
   users ||--o{ asset_requisitions : "manager_id"
   vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
+  all_employees ||--o{ vehicle_drivers : "employee_id"
   users ||--o{ vehicle_requisitions : "driver_user_id"
   users ||--o{ vehicle_requisitions : "employee_user_id"
