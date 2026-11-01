@@ -34,6 +34,7 @@ import { ModulePath } from './ModulePath';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
+import { ReturnAssetModal, ReturnsToReceive, AssetTimelineModal, HistoryButton, useReturnsToReceive } from './AssetHandover';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 import { LoadingBlock } from './LoadingBlock';
@@ -61,7 +62,15 @@ interface AssignedAsset {
   quantity?: number | string | null;
   unit?: string | null;
   handover_note?: string | null;
+  given_by_name?: string | null;
+  handed_to_kind?: string | null;
+  handed_to_name?: string | null;
+  return_via_kind?: string | null;
+  return_via_name?: string | null;
 }
+
+const returnWaitText = (a: AssignedAsset) =>
+  `Return sent${a.return_via_kind === 'employee' || a.return_via_kind === 'other' ? ` through ${a.return_via_name}` : ''} — waiting for ${a.given_by_name || 'the store'} to receive it.`;
 
 // "5 reams" — only shown for items handed over with a quantity.
 const qtyLabel = (a: AssignedAsset) => (a.quantity != null && a.quantity !== '' ? `${Number(a.quantity)} ${a.unit || 'pcs'}` : null);
@@ -153,7 +162,7 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-type AssetTab = 'my-assets' | 'status' | 'fulfill';
+type AssetTab = 'my-assets' | 'status' | 'fulfill' | 'returns';
 
 // Web list columns (same table-style rows as Book a Ride's Ride Status).
 const ASSET_LIST_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_260px]';
@@ -175,7 +184,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   // One-shot request from the Dashboard's My Asset quick access: a tab, or
   // 'new' to open the New Requisition popup straight away.
   const [quickAccess] = useState(() => takeQuickAccessTab('myAsset'));
-  const [tab, setTab] = useState<AssetTab>(quickAccess === 'status' ? 'status' : 'my-assets');
+  const [tab, setTab] = useState<AssetTab>(quickAccess === 'status' ? 'status' : quickAccess === 'returns' ? 'returns' : 'my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -191,6 +200,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   const [fulfillingFor, setFulfillingFor] = useState<Requisition | null>(null);
   // Requisition whose History is open (AssetRequisitionHistoryModal).
   const [historyFor, setHistoryFor] = useState<number | null>(null);
+  // Return popup, an item's hand-to-hand history, and the items coming back
+  // to this account (it handed them over, or it runs Asset Management).
+  const [returning, setReturning] = useState<AssignedAsset | null>(null);
+  const [timelineFor, setTimelineFor] = useState<number | null>(null);
+  const returnsToReceive = useReturnsToReceive(localStorage.getItem('mpr_token') || '');
   // Issues reported on items THIS account handed over — only returned when
   // the server's FULFILLER_CAN_RESOLVE_CLAIMS switch is on (currently off,
   // so this section stays hidden).
@@ -304,6 +318,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     if (tab === 'status') void loadRequisitions(true);
     if (tab === 'fulfill') void loadMyClaims();
     void loadAwaitingFulfillment(true);
+    void returnsToReceive.reload();
   });
 
   // Runs once on mount, regardless of which tab is active, purely so the
@@ -320,20 +335,6 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not acknowledge.');
-      loadMyAssets();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function requestReturn(assignmentId: number) {
-    try {
-      const res = await fetch(apiUrl(`/api/assets/assignments/${assignmentId}/request-return`), {
-        method: 'POST',
-        headers: authHeaders()
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not submit return request.');
       loadMyAssets();
     } catch (err: any) {
       setError(err.message);
@@ -412,7 +413,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   const TABS: { key: AssetTab; label: string; count?: number }[] = [
     { key: 'my-assets', label: 'My Assets' },
     { key: 'status', label: 'Status' },
-    { key: 'fulfill', label: 'Approved by Me', count: awaitingFulfillment.length }
+    { key: 'fulfill', label: 'Approved by Me', count: awaitingFulfillment.length },
+    // Only for an account something is coming back to.
+    ...(returnsToReceive.rows.length > 0 || tab === 'returns'
+      ? [{ key: 'returns' as AssetTab, label: 'Returns to receive', count: returnsToReceive.rows.length }]
+      : [])
   ];
 
   return (
@@ -598,7 +603,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                               {ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}: {a.pending_claim.description}
                             </div>
                           )}
-                          {a.return_requested_at && <div className="text-xs text-amber-700">Return requested — awaiting IT/Admin.</div>}
+                          {a.return_requested_at && <div className="text-xs text-amber-700">{returnWaitText(a)}</div>}
                         </div>
                         <div className="flex flex-wrap justify-end gap-1.5">
                           {!a.pending_claim && !a.acknowledged_at && (
@@ -622,12 +627,13 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           )}
                           {!a.pending_claim && !a.return_requested_at && (
                             <button
-                              onClick={() => requestReturn(a.assignment_id)}
+                              onClick={() => setReturning(a)}
                               className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
                             >
                               Return / Replace
                             </button>
                           )}
+                          <HistoryButton onClick={() => setTimelineFor(a.asset_id)} />
                         </div>
                       </div>
                       {renderReportForm(a)}
@@ -662,7 +668,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           {a.handover_note && <p className="text-[11px] text-slate-500 mt-0.5">Note: {a.handover_note}</p>}
                           {a.return_requested_at && (
                             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
-                              <Clock className="w-3 h-3" /> Return requested — awaiting IT/Admin.
+                              <Clock className="w-3 h-3 shrink-0" /> {returnWaitText(a)}
                             </div>
                           )}
                         </div>
@@ -713,12 +719,13 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           )}
                           {!a.return_requested_at && (
                             <button
-                              onClick={() => requestReturn(a.assignment_id)}
+                              onClick={() => setReturning(a)}
                               className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
                             >
                               Request Return / Replace
                             </button>
                           )}
+                          <HistoryButton small onClick={() => setTimelineFor(a.asset_id)} />
                         </div>
                       )}
 
@@ -833,6 +840,16 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
               )
             )}
 
+            {tab === 'returns' && (
+              <ReturnsToReceive
+                token={localStorage.getItem('mpr_token') || ''}
+                rows={returnsToReceive.rows}
+                all={returnsToReceive.all}
+                onChanged={() => void returnsToReceive.reload()}
+                onHistory={(id) => setTimelineFor(id)}
+              />
+            )}
+
             {tab === 'fulfill' && (
               <div className="space-y-3">
                 <div className="rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs px-3.5 py-2.5">
@@ -934,6 +951,24 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
 
       {historyFor !== null && (
         <AssetRequisitionHistoryModal token={localStorage.getItem('mpr_token') || ''} requisitionId={historyFor} onClose={() => setHistoryFor(null)} />
+      )}
+
+      {returning && (
+        <ReturnAssetModal
+          token={localStorage.getItem('mpr_token') || ''}
+          assignmentId={returning.assignment_id}
+          itemLabel={`${returning.name} (${returning.asset_tag})`}
+          givenBy={returning.given_by_name}
+          onClose={() => setReturning(null)}
+          onDone={() => {
+            setReturning(null);
+            loadMyAssets();
+          }}
+        />
+      )}
+
+      {timelineFor !== null && (
+        <AssetTimelineModal token={localStorage.getItem('mpr_token') || ''} assetId={timelineFor} onClose={() => setTimelineFor(null)} />
       )}
 
       {fulfillingFor && (

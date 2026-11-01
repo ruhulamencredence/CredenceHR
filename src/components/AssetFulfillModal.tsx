@@ -22,6 +22,7 @@ import { X, Trash2, PackageCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
+import { PersonPicker, PersonValue, SELF_PERSON, personBody, personProblem } from './AssetHandover';
 
 export interface RequestedItem {
   item_name: string;
@@ -81,6 +82,12 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
   );
   const [condition, setCondition] = useState<'new' | 'good'>('good');
   const [remarks, setRemarks] = useState('');
+  // Who actually took the items: the requester, or someone on their behalf.
+  const [handedTo, setHandedTo] = useState<PersonValue>(SELF_PERSON);
+  const [handedAt, setHandedAt] = useState(() => {
+    const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60e3);
+    return d.toISOString().slice(0, 16);
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +102,8 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
         return setError(`Item #${i + 1}: at most ${l.max_quantity} ${l.unit || 'pcs'} were requested.`);
       }
     }
+    const who = personProblem(handedTo, 'Handed over to');
+    if (who) return setError(who);
     setSaving(true);
     try {
       const url =
@@ -107,6 +116,8 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
         body: JSON.stringify({
           condition_on_assign: condition,
           remarks: remarks.trim() || undefined,
+          handed_to: personBody(handedTo),
+          handed_over_at: handedAt ? new Date(handedAt).toISOString() : undefined,
           items: lines.map((l) => ({
             item_name: l.item_name.trim(),
             requested_index: l.requested_index,
@@ -131,13 +142,13 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-3 sm:p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget && !saving) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+      <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
               <PackageCheck className="w-4.5 h-4.5 text-emerald-600" />
@@ -149,8 +160,8 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
               </p>
             </div>
           </div>
-          <button type="button" onClick={onClose} disabled={saving} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="Close">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} disabled={saving} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -158,7 +169,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
           {error && <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5">{error}</div>}
 
           {/* Same look as the PEPM report table: bordered cells, blue header. */}
-          <div className="overflow-x-auto border border-slate-200 rounded-lg">
+          <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
             <table className="w-full min-w-[860px] border-collapse text-[11px] leading-snug">
               <thead className="bg-blue-50">
                 <tr>
@@ -226,8 +237,31 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
 
           <p className="text-[11px] text-slate-400">Only the requested items can be handed over — remove a line or lower its quantity if something isn't given.</p>
 
-          <div className="grid sm:grid-cols-2 gap-3">
-            <label>
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="liquid-glass-inset rounded-2xl p-3">
+              <span className="block text-[11px] font-semibold text-slate-600 mb-1.5">Handed over to</span>
+              <PersonPicker
+                token={token}
+                value={handedTo}
+                onChange={setHandedTo}
+                selfLabel={`${requesterName || 'The requester'} — in person`}
+                otherLabel="Someone else on their behalf"
+                pickLabel="Who received it"
+              />
+            </div>
+            <div className="space-y-3">
+            <label className="block">
+              <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Handed over on</span>
+              <input
+                type="datetime-local"
+                value={handedAt}
+                max={new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 16)}
+                onChange={(e) => setHandedAt(e.target.value)}
+                className={inputClass}
+                aria-label="Handed over on"
+              />
+            </label>
+            <label className="block">
               <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Condition</span>
               <select value={condition} onChange={(e) => setCondition(e.target.value as 'new' | 'good')} className={inputClass}>
                 <option value="new">New</option>
@@ -235,23 +269,24 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
               </select>
             </label>
             {mode === 'approve' && (
-              <label>
+              <label className="block">
                 <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Remarks (optional)</span>
                 <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className={inputClass} />
               </label>
             )}
+            </div>
           </div>
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm font-semibold rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">
+        <div className="px-5 py-3 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="liquid-glass-chip px-4 py-2 text-sm font-semibold rounded-full text-slate-700">
             Cancel
           </button>
           <button
             type="button"
             onClick={submit}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="liquid-glass-button flex items-center gap-1.5 px-5 py-2 text-sm font-semibold rounded-full disabled:opacity-50"
           >
             {saving ? <Spinner size={14} /> : <PackageCheck className="w-4 h-4" />} Fulfill & Hand Over
           </button>

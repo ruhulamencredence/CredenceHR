@@ -419,8 +419,15 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <h2 id="notification">আরও কিছু notification</h2>
 <ul>
 <li><strong>নতুন ফোন (Device Access):</strong> Superadmin approve করলে অ্যাকাউন্টটা "New phone approved" পায়, ফিরিয়ে দিলে "New phone not approved" (<code>DeviceRoutes.ts</code>)।</li>
-<li><strong>Asset ফেরত চাওয়া:</strong> কর্মী My Asset থেকে ফেরত চাইলে Asset Management module-ওয়ালা সবাই আর Superadmin "Asset return requested" পান; click করলে Asset Management খোলে (<code>AssetManagementRoutes.ts</code>)।</li>
+<li><strong>Asset ফেরত চাওয়া:</strong> নিচে "Asset: কার হাতে দেওয়া, ফেরত কীভাবে যায়" দেখুন।</li>
 <li><strong>E-sign বাতিল:</strong> HR সই নেওয়া বাতিল করলে যাঁর সইয়ের অপেক্ষায় ছিল তিনি "Signature no longer needed" পান (<code>ESignRoutes.ts</code>)।</li>
+</ul>
+<h2 id="asset">Asset: কার হাতে দেওয়া, ফেরত কীভাবে যায়</h2>
+<ul>
+<li><strong>দেওয়া (Fulfill &amp; Hand Over):</strong> store keeper ফর্মে লেখেন কার হাতে দিলেন — কর্মী নিজে, নাকি তাঁর হয়ে অন্য কেউ (Employee হলে নাম · ID · পদ · বিভাগ লিখে খুঁজে; বাইরের কেউ হলে নাম আর মোবাইল দুটোই লাগে), কবে (ভবিষ্যতের সময় নেয় না) আর অবস্থা। Asset কর্মীর নামেই থাকে; কর্মী alert-এ জানেন কার হাতে দেওয়া হলো, আর আগের মতো Accept &amp; Acknowledge করেন। Fulfill আর Approve &amp; Fulfill দুই পথেই একই (<code>asset_assignments.handed_to_*</code>, <code>handed_over_at</code>)।</li>
+<li><strong>ফেরত পাঠানো:</strong> কর্মী My Asset → Return / Replace-এ কারণ (Not needed / Replace — faulty / Leaving / Other), নিজের চোখে অবস্থা (Good / Damaged / Lost) আর "কীভাবে store-এ পৌঁছাবে" (নিজে আনবেন, নাকি কারও মাধ্যমে — Employee বা নাম + মোবাইল) দেন। Damaged / Lost / Other হলে note লাগে। একই item-এ দ্বিতীয়বার ফেরত পাঠানো যায় না। ফেরত যায় <strong>যিনি দিয়েছিলেন সেই store keeper-এর কাছে</strong>: তিনি "Asset coming back to you" alert পান; Asset Management-এর লোকজন আর Superadmin "Asset return requested" পান। দুটো alert-ই click করলে My Asset → Returns to receive খোলে।</li>
+<li><strong>গ্রহণ (Receive):</strong> My Asset-এ "Returns to receive" ট্যাব শুধু তখনই দেখায় যখন কিছু ফেরত আসছে — store keeper নিজের দেওয়া item দেখেন, Asset Management সবগুলো (Admin Panel → Asset Management → Returns to receive-এও)। Receive-এ কার কাছ থেকে পেলেন (আগে থেকে ভরা) আর অবস্থা মিলিয়ে দেন: Good → stock-এ (available), Damaged → Maintenance, Lost → disposed। কর্মী "Return received" alert পান, item তাঁর নাম থেকে সরে যায়। store keeper না থাকলে বা তাঁর অ্যাকাউন্ট বন্ধ হলে Asset Management গ্রহণ করে।</li>
+<li><strong>ইতিহাস:</strong> প্রতিটা item-এ History — দেওয়া (কে, কার হাতে, কার হয়ে), Acknowledge, ফেরত পাঠানো (কার মাধ্যমে, কারণ), গ্রহণ (কে, কার কাছ থেকে, অবস্থা), নতুনটা উপরে (<code>GET /api/assets/:id/timeline</code>)। Asset Management সব দেখে; কর্মী নিজের অংশ; যে store keeper দিয়েছিলেন তিনিও।</li>
 </ul>
 <h2 id="admin-dashboard-coming-up-next-60-days">Admin Dashboard: Coming up — next 60 days</h2>
 <p>HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও চুক্তি শেষ, ডকুমেন্টের মেয়াদ, অবসর, increment; ৩০ দিন আগের মেয়াদোত্তীর্ণ থেকে ৬০ দিন সামনে, পাশে Confirm / Extend / Renew / Increment বোতাম) Admin Dashboard-এও দেখায় — শুধু যাঁদের HR Operations আর তার "Reminders — receive &amp; view" layer আছে। এটা দেখালে ছোট "HR Alerts" (৩০ দিন) বক্সটা আর আলাদা করে দেখায় না; layer না থাকলে আগের মতো HR Alerts থাকে।</p>

@@ -138,7 +138,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
         ? onOpenConveyanceClaim
         : alert.type === 'asset_requisition' && alert.related_type !== 'asset_return' && onOpenMyAsset
-        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
+        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : alert.related_type === 'asset_return_incoming' ? 'returns' : 'my-assets')
         : alert.type === 'resignation'
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
