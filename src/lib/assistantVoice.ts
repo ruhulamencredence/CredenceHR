@@ -62,10 +62,20 @@ export async function stopRecording(keep: boolean): Promise<Blob | null> {
   }
   const rec = mediaRecorder;
   if (!rec) return null;
+  mediaRecorder = null; // a second stop (e.g. the 1-minute limit) finds nothing
+  // Never wait forever: an already-stopped recorder fires no "stop" event.
   const done = new Promise<void>((resolve) => {
     rec.onstop = () => resolve();
+    setTimeout(resolve, 2500);
   });
-  if (rec.state !== 'inactive') rec.stop();
+  if (rec.state !== 'inactive') {
+    try {
+      rec.requestData?.();
+    } catch {
+      /* not recording */
+    }
+    rec.stop();
+  }
   await done;
   const type = rec.mimeType || 'audio/webm';
   releaseMic();
@@ -77,7 +87,14 @@ export async function stopRecording(keep: boolean): Promise<Blob | null> {
 // back to the original bytes when the browser can't decode them.
 export async function toWavBase64(blob: Blob): Promise<{ base64: string; mime: string }> {
   const raw = await blob.arrayBuffer();
-  try {
+  const original = () => ({ base64: bytesToBase64(new Uint8Array(raw)), mime: (blob.type || 'audio/webm').split(';')[0] });
+  // Some phones' web views never finish decoding: give it 6 seconds, then
+  // send the recording as it is.
+  return Promise.race([toWav(raw).catch(() => original()), new Promise<{ base64: string; mime: string }>((r) => setTimeout(() => r(original()), 6000))]);
+}
+
+async function toWav(raw: ArrayBuffer): Promise<{ base64: string; mime: string }> {
+  {
     const Ctx: typeof AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
     const ctx = new Ctx();
     const decoded = await ctx.decodeAudioData(raw.slice(0));
@@ -112,8 +129,6 @@ export async function toWavBase64(blob: Blob): Promise<{ base64: string; mime: s
       v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
     }
     return { base64: bytesToBase64(new Uint8Array(buf)), mime: 'audio/wav' };
-  } catch {
-    return { base64: bytesToBase64(new Uint8Array(raw)), mime: (blob.type || 'audio/webm').split(';')[0] };
   }
 }
 

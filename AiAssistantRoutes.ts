@@ -2736,8 +2736,11 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!data) return res.status(400).json({ error: "No recording." });
     if (!/^audio\/(wav|x-wav|mp3|mpeg|aac|ogg|flac|webm|mp4)/.test(mime)) return res.status(400).json({ error: "Unsupported recording." });
     if (Buffer.byteLength(data, "base64") > 4 * 1024 * 1024) return res.status(400).json({ error: "রেকর্ডিং অনেক লম্বা — এক মিনিটের মধ্যে বলুন।" });
+    const t0 = Date.now();
     try {
-      const resp: any = await generateWithFallback(ai, {
+      // At most ~30 s in all (each model gets 20 s): the page stops waiting at 40.
+      const resp: any = await Promise.race([
+        generateWithFallback(ai, {
         contents: [
           {
             role: "user",
@@ -2753,13 +2756,18 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
           }
         ],
         config: { temperature: 0 }
-      });
+        }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(Object.assign(new Error("timeout"), { timeout: true })), 30000))
+      ]);
       const text = String(resp?.text || "").trim().slice(0, 1000);
       geminiWorked();
+      console.log(`AI Assistant: transcribed ${Math.round(Buffer.byteLength(data, "base64") / 1024)} KB ${mime} in ${Date.now() - t0} ms`);
       res.json({ text });
     } catch (err: any) {
       if (err?.quotaExhausted) pauseGemini();
-      console.warn("AI Assistant: transcribe failed:", err?.message || err);
+      console.warn(`AI Assistant: transcribe failed after ${Date.now() - t0} ms (${mime}):`, err?.message || err);
+      if (err?.timeout) return res.status(504).json({ error: "উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+      if (err?.quotaExhausted) return res.status(503).json({ error: "এখন ভয়েস ব্যস্ত (Gemini-র সীমা শেষ) — কিছুক্ষণ পর চেষ্টা করুন বা লিখে প্রশ্ন করুন।" });
       res.status(502).json({ error: "কথাটা বোঝা গেল না — আবার বলুন বা লিখে প্রশ্ন করুন।" });
     }
   });

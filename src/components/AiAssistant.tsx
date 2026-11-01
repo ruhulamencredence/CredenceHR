@@ -242,6 +242,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   // True until the answer being read actually makes sound.
   const [speakLoading, setSpeakLoading] = useState(false);
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopping = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Live support (AssistantSupport.tsx): 'bot' = the Assistant, 'live' = my
@@ -438,6 +439,9 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   };
 
   const stopRec = async (keep: boolean) => {
+    // Only once per recording (the ■ button and the 1-minute limit can both fire).
+    if (stopping.current) return;
+    stopping.current = true;
     if (recTimer.current) clearInterval(recTimer.current);
     recTimer.current = null;
     if (!keep) {
@@ -450,11 +454,22 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       const blob = await stopRecording(true);
       if (!blob || blob.size < 1200) throw new Error('কিছু শোনা যায়নি — মাইক চেপে আবার বলুন।');
       const { base64, mime } = await toWavBase64(blob);
-      const r = await fetch(apiUrl('/api/assistant/transcribe'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ audio_base64: base64, mime_type: mime })
-      });
+      // The server gives up after ~30 s; never spin longer than that here.
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 40000);
+      let r: Response;
+      try {
+        r = await fetch(apiUrl('/api/assistant/transcribe'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ audio_base64: base64, mime_type: mime }),
+          signal: ctl.signal
+        });
+      } catch {
+        throw new Error('উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।');
+      } finally {
+        clearTimeout(timer);
+      }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'কথাটা বোঝা গেল না — আবার বলুন।');
       const text = String(d.text || '').trim();
@@ -479,12 +494,13 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       return;
     }
     setRecSecs(0);
+    stopping.current = false;
     setRecState('recording');
+    const startedAt = Date.now();
     recTimer.current = setInterval(() => {
-      setRecSecs((sec) => {
-        if (sec + 1 >= MAX_RECORD_SECONDS) void stopRec(true);
-        return sec + 1;
-      });
+      const sec = Math.floor((Date.now() - startedAt) / 1000);
+      setRecSecs(sec);
+      if (sec >= MAX_RECORD_SECONDS) void stopRec(true);
     }, 1000);
   };
 
