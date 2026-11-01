@@ -59,7 +59,7 @@ interface PayrollRouteDeps {
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
   requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary" | "custom_report") => Promise<boolean>;
   // The Monthly Attendance Report's per-person month (AttendanceRoutes.ts) —
   // the Department Summary adds it up so both always agree.
   computeMonthlyReport: (user: any, query: any) => Promise<any>;
@@ -2403,6 +2403,276 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // ?departments=A,B narrows; active employees only. Needs the Attendance
   // Reports layer "dept_summary". Returns the totals per department and one
   // row per person (for "who is it" and the Excel export).
+  // ---- Attendance Report Builder (Monthly Attendance Report -> Custom Report)
+  // One row per person per day in [from, to] (at most 92 days) with every
+  // attendance fact — status, In / Out, hours, Delay / Extreme Delay and
+  // minutes late, early leave, overtime, missing Out, shift, source,
+  // project, leave type, holiday — filtered by any conditions on any of them
+  // ("In after 09:05", "Out before 18:00", "hours < 8", "status absent"),
+  // shown as detail rows or summarised by employee / department /
+  // designation / date with "only groups where late >= 3". Present / Absent /
+  // Leave come from the Monthly report (computeMonthlyReport: holidays,
+  // roster, leave, joining date, Department scope); Delay / Extreme Delay
+  // from payroll's late policy; shift start / end from the Duty Roster, else
+  // the late policy's start and the office end time given (default 18:00).
+  // Needs the Attendance Reports layer "custom_report".
+  const CR_FIELDS: Record<string, "time" | "number" | "enum" | "text" | "bool" | "date"> = {
+    date: "date", weekday: "enum", employee_name: "text", employee_code: "text", designation: "text", department: "text", status: "enum",
+    in_time: "time", out_time: "time", work_hours: "number", late: "enum", late_minutes: "number", early_leave_minutes: "number",
+    overtime_minutes: "number", missing_out: "bool", shift: "text", shift_start: "time", shift_end: "time", source: "enum", project: "text", leave_type: "text", holiday: "text"
+  };
+  const CR_GROUPS = ["none", "employee", "department", "designation", "date", "weekday", "status"];
+  const CR_METRICS = ["employees", "days", "present", "absent", "leave", "late", "delay", "extreme", "missing_out", "early_leave", "overtime_days", "avg_in", "avg_out", "avg_hours", "total_ot_hours", "attendance_pct"];
+  const minOf = (hm: string | null) => (hm && /^\d{1,2}:\d{2}/.test(hm) ? Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5)) : null);
+  const hmOf = (m: number | null) => (m == null || !Number.isFinite(m) ? null : `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(Math.round(m) % 60).padStart(2, "0")}`);
+  const timeOf = (v: any) => /(\d{2}:\d{2})/.exec(String(v || ""))?.[1] || null;
+
+  async function attendanceCustomRows(user: any, from: string, to: string, officeEnd: string) {
+    const months: string[] = [];
+    for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = shiftMonthYear(m, 1)) months.push(m);
+    const people = new Map<number, any>();
+    const days: { uid: number; d: any }[] = [];
+    for (const m of months) {
+      const rep = await computeMonthlyReport(user, { year: Number(m.slice(0, 4)), month: Number(m.slice(5, 7)), status: "active" });
+      for (const u of rep.users || []) {
+        people.set(Number(u.user_id), u);
+        for (const d of u.days || []) if (d.date >= from && d.date <= to && !d.future && !d.before_joining) days.push({ uid: Number(u.user_id), d });
+      }
+    }
+    const uids = [...people.keys()];
+    const emps: any[] = uids.length
+      ? ((await queryDB(
+          `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id FROM all_employees WHERE user_id IN (${uids.map(() => "?").join(",")})`,
+          uids
+        )) || []).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId())
+      : [];
+    const empByUser = new Map<number, any>(emps.map((e: any) => [Number(e.user_id), e]));
+    const roster = await loadRoster(queryDB, from, to, emps.map((e: any) => Number(e.id)));
+    // Delay / Extreme Delay and each salary month's late policy.
+    const late = new Map<string, "delay" | "extreme">();
+    const policyByDate = new Map<string, any>();
+    if (emps.length) {
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, from, to);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 6; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const a = period.start < from ? from : period.start;
+        const b = period.end > to ? to : period.end;
+        if (a <= b) {
+          const policy = await getLatePolicyForMonth(monthYear);
+          for (let d = a; d <= b; d = new Date(Date.parse(d + "T00:00:00Z") + 864e5).toISOString().slice(0, 10)) policyByDate.set(d, policy);
+          const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(emps, a, b, holidayMapsByGroup, branchTypeByUserId, policy);
+          for (const e of emps) {
+            for (const d of lateDatesByEmployee.get(Number(e.id)) || []) late.set(`${e.user_id}|${d}`, "delay");
+            for (const d of extremeLateDatesByEmployee.get(Number(e.id)) || []) late.set(`${e.user_id}|${d}`, "extreme");
+          }
+        }
+        monthYear = shiftMonthYear(monthYear, 1);
+      }
+    }
+    const WD = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const endDefault = minOf(officeEnd) ?? 18 * 60;
+    return days.map(({ uid, d }) => {
+      const u = people.get(uid);
+      const e = empByUser.get(uid) || {};
+      const rd = e.id ? roster.get(Number(e.id), d.date) : undefined;
+      const shift = rd && !rd.is_off ? rd.shift : null;
+      const policy = policyByDate.get(d.date);
+      const startMin = shift ? minOf(timeOf(shift.start_time)) : minOf(timeOf(policy?.shift_start_time) || "09:00");
+      const endMin = shift ? minOf(timeOf(shift.end_time)) : endDefault;
+      const inT = timeOf(d.check_in_at);
+      const outT = timeOf(d.check_out_at);
+      const outNext = !!(d.check_out_at && String(d.check_out_at).slice(0, 10) > d.date);
+      const inM = minOf(inT);
+      const outM = outT ? minOf(outT)! + (outNext ? 1440 : 0) : null;
+      const status = d.present ? "present" : d.day_type ? (d.day_type === "weekend" ? "weekend" : d.day_type === "off" ? "off" : "holiday") : d.leave_type ? "leave" : "absent";
+      const lateKind = d.present ? late.get(`${uid}|${d.date}`) || "none" : "none";
+      const endAdj = endMin != null && startMin != null && endMin < startMin ? endMin + 1440 : endMin;
+      // Worked on a rostered Off day / Weekend / Holiday: never late or
+      // early, and every minute worked is overtime (as payroll counts it).
+      const offDay = !!(rd?.is_off || (!shift && d.day_type));
+      const worked = inM != null && outM != null && outM > inM ? outM - inM : 0;
+      return {
+        date: d.date,
+        weekday: WD[new Date(d.date + "T00:00:00Z").getUTCDay()],
+        user_id: uid,
+        employee_name: e.name || u?.user_name || "",
+        employee_code: e.employee_code || "",
+        designation: e.designation || "",
+        department: u?.department || e.department || "No department",
+        status,
+        in_time: inT,
+        out_time: outT,
+        work_hours: inM != null && outM != null && outM > inM ? Math.round(((outM - inM) / 60) * 100) / 100 : null,
+        late: lateKind,
+        late_minutes: !offDay && inM != null && startMin != null && inM > startMin ? inM - startMin : 0,
+        early_leave_minutes: !offDay && outM != null && endAdj != null && outM < endAdj ? endAdj - outM : 0,
+        overtime_minutes: offDay ? worked : outM != null && endAdj != null && outM > endAdj ? outM - endAdj : 0,
+        missing_out: !!(d.present && inT && !outT),
+        shift: shift ? shift.name : rd?.is_off ? "Off" : "",
+        shift_start: hmOf(startMin),
+        shift_end: hmOf(endMin),
+        source: d.source || "",
+        project: d.project_name || "",
+        leave_type: d.leave_type || "",
+        holiday: d.holiday_title || ""
+      };
+    });
+  }
+
+  const crMatch = (row: any, c: { field: string; op: string; value?: any; value2?: any }) => {
+    const type = CR_FIELDS[c.field];
+    const v = row[c.field];
+    if (!type) return true;
+    if (c.op === "is_empty") return v === null || v === "" || v === undefined;
+    if (c.op === "not_empty") return !(v === null || v === "" || v === undefined);
+    if (type === "bool") return c.op === "is_false" ? !v : !!v;
+    if (type === "time") {
+      const m = minOf(v);
+      const a = minOf(String(c.value || ""));
+      const b = minOf(String(c.value2 || ""));
+      if (m == null || a == null) return false;
+      if (c.op === "after") return m > a;
+      if (c.op === "at_or_after") return m >= a;
+      if (c.op === "before") return m < a;
+      if (c.op === "at_or_before") return m <= a;
+      if (c.op === "between") return b != null && m >= a && m <= b;
+      return false;
+    }
+    if (type === "number") {
+      const n = Number(v);
+      const a = Number(c.value);
+      if (v === null || v === undefined || !Number.isFinite(n) || !Number.isFinite(a)) return false;
+      return c.op === "gt" ? n > a : c.op === "gte" ? n >= a : c.op === "lt" ? n < a : c.op === "lte" ? n <= a : c.op === "eq" ? n === a : c.op === "between" ? n >= a && n <= Number(c.value2) : false;
+    }
+    if (type === "date") {
+      const a = String(c.value || "");
+      return c.op === "after" ? v > a : c.op === "before" ? v < a : c.op === "eq" ? v === a : true;
+    }
+    const list = (Array.isArray(c.value) ? c.value : String(c.value ?? "").split(",")).map((x: any) => String(x).trim().toLowerCase()).filter(Boolean);
+    const sv = String(v ?? "").toLowerCase();
+    if (c.op === "in" || c.op === "eq") return list.includes(sv);
+    if (c.op === "not_in" || c.op === "neq") return !list.includes(sv);
+    if (c.op === "contains") return list.some((x: string) => sv.includes(x));
+    return true;
+  };
+
+  const crSummarise = (rows: any[], groupBy: string) => {
+    const keyOf = (r: any) => (groupBy === "employee" ? `${r.employee_name}${r.employee_code ? ` (${r.employee_code})` : ""}` : groupBy === "none" ? "All" : String(r[groupBy] ?? ""));
+    const groups = new Map<string, any[]>();
+    for (const r of rows) {
+      const k = keyOf(r);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    return [...groups.entries()].map(([key, rs]) => {
+      const present = rs.filter((r) => r.status === "present");
+      const working = rs.filter((r) => ["present", "absent", "leave"].includes(r.status));
+      const ins = present.map((r) => minOf(r.in_time)).filter((x): x is number => x != null);
+      const outs = present.map((r) => minOf(r.out_time)).filter((x): x is number => x != null);
+      const hours = present.map((r) => r.work_hours).filter((x) => x != null) as number[];
+      const first = rs[0];
+      return {
+        key,
+        department: groupBy === "employee" ? first.department : undefined,
+        designation: groupBy === "employee" ? first.designation : undefined,
+        employees: new Set(rs.map((r) => r.user_id)).size,
+        days: rs.length,
+        present: present.length,
+        absent: rs.filter((r) => r.status === "absent").length,
+        leave: rs.filter((r) => r.status === "leave").length,
+        late: rs.filter((r) => r.late !== "none").length,
+        delay: rs.filter((r) => r.late === "delay").length,
+        extreme: rs.filter((r) => r.late === "extreme").length,
+        missing_out: rs.filter((r) => r.missing_out).length,
+        early_leave: rs.filter((r) => r.early_leave_minutes > 0).length,
+        overtime_days: rs.filter((r) => r.overtime_minutes > 0).length,
+        avg_in: hmOf(avg(ins)),
+        avg_out: hmOf(avg(outs)),
+        avg_hours: avg(hours) == null ? null : Math.round(avg(hours)! * 100) / 100,
+        total_ot_hours: Math.round((rs.reduce((a, r) => a + (r.overtime_minutes || 0), 0) / 60) * 100) / 100,
+        attendance_pct: working.length ? Math.round(((present.filter((r) => true).length + rs.filter((r) => r.status === "leave").length) / working.length) * 1000) / 10 : null
+      };
+    });
+  };
+
+  const crGate = async (req: any, res: any) => {
+    if (await hasModuleLayer(req.user, "attendance_reports", "custom_report")) return true;
+    res.status(403).json({ error: "You don't have access to the Attendance Report Builder. Ask your Superadmin to grant it." });
+    return false;
+  };
+
+  app.post("/api/attendance/report/custom", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await crGate(req, res))) return;
+      const b = req.body || {};
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      let from = DATE_RE.test(String(b.from || "")) ? String(b.from) : today;
+      let to = DATE_RE.test(String(b.to || "")) ? String(b.to) : from;
+      if (to > today) to = today;
+      if (from > to) [from, to] = [to, from];
+      if ((Date.parse(to) - Date.parse(from)) / 864e5 + 1 > 92) return res.status(400).json({ error: "Pick at most 92 days (about 3 months)." });
+      const officeEnd = /^\d{2}:\d{2}$/.test(String(b.office_end || "")) ? String(b.office_end) : "18:00";
+      const conditions = (Array.isArray(b.conditions) ? b.conditions : []).filter((c: any) => c && CR_FIELDS[c.field]).slice(0, 12);
+      const match = b.match === "any" ? "any" : "all";
+      const groupBy = CR_GROUPS.includes(b.group_by) ? b.group_by : "none";
+      const view = b.view === "summary" ? "summary" : "detail";
+      const departments: string[] = Array.isArray(b.departments) ? b.departments.map(String) : [];
+      const employee = String(b.employee || "").trim().toLowerCase();
+      const employeeIds: number[] = Array.isArray(b.employee_ids) ? b.employee_ids.map(Number).filter(Boolean) : [];
+      let rows = await attendanceCustomRows(req.user, from, to, officeEnd);
+      if (departments.length) rows = rows.filter((r) => departments.includes(r.department));
+      if (employeeIds.length) rows = rows.filter((r) => employeeIds.includes(r.user_id));
+      if (employee) rows = rows.filter((r) => r.employee_name.toLowerCase().includes(employee) || r.employee_code.toLowerCase() === employee);
+      if (conditions.length) rows = rows.filter((r) => (match === "any" ? conditions.some((c: any) => crMatch(r, c)) : conditions.every((c: any) => crMatch(r, c))));
+      rows.sort((a, c) => a.date.localeCompare(c.date) || a.department.localeCompare(c.department) || a.employee_name.localeCompare(c.employee_name));
+      const totals = crSummarise(rows, "none")[0] || null;
+      if (view === "summary") {
+        let groups = crSummarise(rows, groupBy === "none" ? "department" : groupBy);
+        const h = b.having;
+        if (h && CR_METRICS.includes(h.metric) && Number.isFinite(Number(h.value))) {
+          const n = Number(h.value);
+          groups = groups.filter((g: any) => {
+            const v = Number(g[h.metric]);
+            return h.op === "lte" ? v <= n : h.op === "eq" ? v === n : h.op === "lt" ? v < n : h.op === "gt" ? v > n : v >= n;
+          });
+        }
+        const sortBy = CR_METRICS.includes(b.sort) ? b.sort : null;
+        groups.sort((a: any, c: any) => (sortBy ? Number(c[sortBy] ?? 0) - Number(a[sortBy] ?? 0) : 0) || String(a.key).localeCompare(String(c.key)));
+        return res.json({ from, to, view, group_by: groupBy === "none" ? "department" : groupBy, office_end: officeEnd, total_rows: rows.length, totals, groups });
+      }
+      res.json({ from, to, view, office_end: officeEnd, total_rows: rows.length, totals, rows: rows.slice(0, 20000) });
+    } catch (err: any) {
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to build the report." });
+    }
+  });
+
+  // The people the builder's Employee picker may offer (the same Department
+  // scope as the report) — Name · Employee ID · Designation · Department.
+  app.get("/api/attendance/report/custom/people", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await crGate(req, res))) return;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const rep = await computeMonthlyReport(req.user, { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)), status: "active", limit: 200, page: 1 });
+      const all: any[] = [];
+      const pages = Math.max(1, Math.ceil(Number(rep.total || 0) / 200));
+      for (let p = 1; p <= pages; p++) {
+        const r = p === 1 ? rep : await computeMonthlyReport(req.user, { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)), status: "active", limit: 200, page: p });
+        all.push(...(r.users || []));
+      }
+      const uids = all.map((u) => Number(u.user_id));
+      const emps: any[] = uids.length ? (await queryDB(`SELECT user_id, employee_id AS employee_code, designation FROM all_employees WHERE user_id IN (${uids.map(() => "?").join(",")})`, uids)) || [] : [];
+      const byUser = new Map<number, any>(emps.map((e: any) => [Number(e.user_id), e]));
+      res.json(all.map((u) => ({ user_id: Number(u.user_id), name: u.user_name, employee_code: byUser.get(Number(u.user_id))?.employee_code || "", designation: byUser.get(Number(u.user_id))?.designation || "", department: u.department || "" })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/attendance/report/department-summary", authenticateToken, requireAdmin, async (req: any, res) => {
     try {
       if (!(await hasModuleLayer(req.user, "attendance_reports", "dept_summary"))) {

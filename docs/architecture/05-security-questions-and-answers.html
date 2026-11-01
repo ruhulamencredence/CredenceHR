@@ -134,6 +134,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>HR-এর Custom attendance report বা AI Assistant দিয়ে কি সীমার বাইরের department-এর হাজিরা দেখা যায়?</td>
+<td>না। Attendance Report Builder আলাদা layer <code>custom_report</code>-এর পেছনে (API ও ট্যাব দুটোই), ডাটা আসে Monthly report-এর একই হিসাব থেকে, তাই Department সীমা ও কোম্পানি ফিল্টার একই থাকে। Assistant একই API প্রশ্নকারীর token দিয়ে ডাকে। টেস্টে layer ছাড়া Admin 403 পেয়েছেন, HR-সীমিত Admin Finance চাইলে খালি পেয়েছেন।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>লোকেশন ট্র্যাকিং কি সম্মতি ছাড়া?</td>
 <td>না। আলাদা সুইচ (ডিফল্ট বন্ধ) ও ব্যবহারকারীকে নোটিশ ও সম্মতির পেজ।</td>
 <td>✅</td>

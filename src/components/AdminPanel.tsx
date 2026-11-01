@@ -22,6 +22,7 @@ import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ManagementDashboard } from './ManagementDashboard';
 import { DepartmentAttendanceSummary } from './DepartmentAttendanceSummary';
+import { AttendanceReportBuilder } from './AttendanceReportBuilder';
 import { UserEmployeeModal } from './UserEmployeeModal';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
@@ -1065,7 +1066,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // User's day-by-day Present/Absent grid for one month) and Date Wise
   // (Present vs Absent split for one specific day).
   const now = new Date();
-  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept'>('month');
+  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept' | 'custom'>('month');
   // Admin Panel -> Approvals has two engines side by side: the OLD single
   // global chain (ApprovalManager — its own "Queue"/"Manage Chain" views) and
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
@@ -4193,9 +4194,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     Department Summary
                   </button>
                 )}
+                {attendanceReportsLayer('custom_report') && (
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceReportView('custom')}
+                    className={`text-xs px-3 py-2 font-semibold transition-colors border-l border-slate-200 ${
+                      attendanceReportView === 'custom' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Custom Report
+                  </button>
+                )}
               </div>
 
-              {attendanceReportView !== 'dept' && (<>
+              {attendanceReportView !== 'dept' && attendanceReportView !== 'custom' && (<>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
                 <SearchSelect
@@ -4365,6 +4377,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
           {attendanceReportView === 'dept' ? (
             <DepartmentAttendanceSummary token={token} projects={projects} departments={reportDepartments} />
+          ) : attendanceReportView === 'custom' ? (
+            <AttendanceReportBuilder token={token} departments={reportDepartments} />
           ) : attendanceReportView === 'month' ? (
             loadingMonthlyReport && !monthlyReport ? (
               <p className="text-xs text-slate-400 text-center py-12">Loading report...</p>

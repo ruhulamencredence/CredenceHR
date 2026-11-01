@@ -777,6 +777,57 @@ export function parseMovementRequest(text: string) {
   return { action, purpose: action === "check_out" ? "" : purpose.slice(0, 255) };
 }
 
+// Attendance questions with conditions, for the Report Builder:
+// "aj 9:05 er pore ke ke asche", "6 tar age ke ber hoye geche", "ei mase 3
+// bar er beshi late kara", "check out den nai kara", "8 ghontar kom kaj",
+// "department wise ei maser late". Returns the builder's arguments (empty
+// when the question has no condition the builder adds anything for).
+export function parseAttendanceQuestion(text: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।!?]/g, " ").replace(/\s+/g, " ")} `;
+  const out: Record<string, any> = {};
+  const OUTW = /(ber|বের|out|আউট|chole|চলে|left|leave kor|gese|geche|গেছে|beriye|বেরিয়ে|bahir)/;
+  const INW = /(asche|asc?he|esheche|eseche|এসেছে|আসছে|aschhe|in\b|ইন|dhuk|ঢুক|came|arrive|reached|pouch)/;
+  for (const x of parseClockTimes(raw)) {
+    const after = t.slice(x.at, x.at + 28);
+    const around = t.slice(Math.max(0, x.at - 26), x.at + 30);
+    const isAfter = /(por|pore|পরে|pare|after|beyond|late)/.test(after) && !/(age|আগে|before)/.test(after.split(/(por|pore|পরে|after)/)[0]);
+    const isBefore = /(age|আগে|before|er age|এর আগে)/.test(after);
+    const isOut = OUTW.test(around) && !(INW.test(around) && !OUTW.test(after));
+    // "6 tar age ber hoyeche": a leaving time of 1–8 o'clock without
+    // "sokal / am" is in the evening.
+    let hmv = x.hm;
+    const h = Number(hmv.slice(0, 2));
+    if (isOut && h >= 1 && h <= 8 && !/(sokal|সকাল|\bam\b|a\.m)/.test(around)) hmv = `${String(h + 12).padStart(2, "0")}${hmv.slice(2)}`;
+    if (isOut) out[isAfter ? "out_after" : "out_before"] = hmv;
+    else if (isBefore) out.in_before = x.hm;
+    else out.in_after = x.hm;
+  }
+  if (/(onek deri|অনেক দেরি|extreme)/.test(t)) out.late = "extreme";
+  else if (/(\blate\b|deri|দেরি|লেট)/.test(t) && !out.in_after) out.late = "any";
+  if (/(absent|অনুপস্থিত|anupasthit|asheni|আসেনি|ase nai)/.test(t)) out.status = "absent";
+  else if (/(chuti|ছুটি|on leave|leave e)/.test(t)) out.status = "leave";
+  if (/(check ?out (?:den|dey|dei)? ?(?:ni|nai|nai)|out (?:den|dey) ?n[ai]|check-?out দেয়নি|আউট দেয়নি|missing (?:out|check ?out)|forgot to check out|check out kore ni)/.test(t)) out.missing_out = true;
+  const hrs = /(\d+(?:\.\d+)?)\s*(?:ghontar|ghonta|ঘণ্টার|ঘণ্টা|hours?|hrs?)\s*(kom|কম|less|under|er kom|beshi|বেশি|more|over)/.exec(t);
+  if (hrs) out[/kom|কম|less|under/.test(hrs[2]) ? "max_hours" : "min_hours"] = Number(hrs[1]);
+  if (/(overtime|ওভারটাইম|\bot\b)/.test(t)) out.overtime = true;
+  if (/(early leave|agei ber|আগেই বের|তাড়াতাড়ি বের|taratari ber|left early)/.test(t)) out.early_leave = true;
+  const n = /(\d+)\s*(?:bar|বার|times?|din|দিন|dine)\s*(?:er|এর)?\s*(?:beshi|বেশি|or more|\+|ba tar beshi|বা তার বেশি)/.exec(t) || /(?:more than|at least|kompokkhe)\s*(\d+)/.exec(t);
+  if (n) {
+    out.view = "summary";
+    out.group_by = "employee";
+    out.min_count = Number(n[1]);
+  }
+  if (/(department wise|department onujayi|department hisabe|ডিপার্টমেন্ট অনুযায়ী|বিভাগ অনুযায়ী|বিভাগভিত্তিক|by department)/.test(t)) { out.view = "summary"; out.group_by = "department"; }
+  else if (/(employee wise|কর্মী অনুযায়ী|kar koto|কার কত|per person|by employee)/.test(t)) { out.view = "summary"; out.group_by = "employee"; }
+  else if (/(din wise|date wise|দিনভিত্তিক|প্রতিদিন|daily|by date|dine dine)/.test(t)) { out.view = "summary"; out.group_by = "date"; }
+  // "Sales department-er late" (not "late department wise": that groups).
+  const dept = /([a-z&]{2,}|[ঀ-৿]{2,})\s+(?:department|dept|বিভাগ|বিভাগের|ডিপার্টমেন্ট)(?!\s*(?:wise|onujayi|hisabe|অনুযায়ী|ভিত্তিক))/.exec(t)?.[1];
+  const NOT_DEPT = /^(wise|onujayi|hisabe|sob|সব|kon|কোন|er|এর|late|লেট|deri|দেরি|absent|leave|chuti|ছুটি|ajker|আজকের|maser|মাসের|report|ei|এই|all|every|each|protiti|প্রতিটি)$/;
+  if (dept && !NOT_DEPT.test(dept)) out.department = dept;
+  return out;
+}
+
 // "Rahim er chuti koto" -> "rahim": the word(s) right before a separate
 // "er" / "-এর" / "এর" ("ajker" and "মাসের" are not names).
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
@@ -1242,6 +1293,93 @@ const TOOLS: Tool[] = [
         actions: [{ label: "Reports & Insights খুলুন", nav: "admin:reports_insights" }],
         report: report(String(r.body?.title || key), `${key}-${body.from}-${body.to}`, cols.map((x) => x.label), rows.map((x) => cols.map((col) => (x[col.key] === null || x[col.key] === undefined ? "" : typeof x[col.key] === "number" ? x[col.key] : String(x[col.key])))),
           [["Period", r.body?.from ? `${enDate(r.body.from)} – ${enDate(r.body.to)}` : "-"], ...(body.department ? [["Department", body.department] as [string, string]] : []), ...summary.map((x) => [x.label, String(x.value)] as [string, string])])
+      };
+    }
+  },
+  {
+    name: "attendance_custom_report",
+    description:
+      "Attendance Report Builder: answer any attendance question with conditions, per person per day, over a period (from / to YYYY-MM-DD, default today; at most 92 days). " +
+      "Conditions: in_after / in_before / out_before / out_after (HH:MM 24-hour), status (present | absent | leave | holiday | weekend), late (any | delay | extreme), " +
+      "missing_out (true = checked in but no check-out), min_hours / max_hours (work hours), overtime (true), early_leave (true = left before shift / office end), office_end (HH:MM, default 18:00). " +
+      "view detail (rows) or summary with group_by employee | department | designation | date | weekday; min_count with count_of (late | absent | leave | missing_out | early_leave | overtime_days | present) keeps only groups with at least that many — e.g. 'late 3+ times this month' = view summary, group_by employee, late any, min_count 3. department / employee narrow it.",
+    params: {
+      from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" },
+      in_after: { type: "string", description: "HH:MM" }, in_before: { type: "string", description: "HH:MM" }, out_before: { type: "string", description: "HH:MM" }, out_after: { type: "string", description: "HH:MM" },
+      status: { type: "string", description: "present | absent | leave | holiday | weekend" }, late: { type: "string", description: "any | delay | extreme" },
+      missing_out: { type: "boolean", description: "Checked in, no check-out" }, min_hours: { type: "number", description: "Worked at least" }, max_hours: { type: "number", description: "Worked less than" },
+      overtime: { type: "boolean", description: "Worked past the shift / office end" }, early_leave: { type: "boolean", description: "Left before the shift / office end" }, office_end: { type: "string", description: "HH:MM" },
+      view: { type: "string", description: "detail | summary" }, group_by: { type: "string", description: "employee | department | designation | date | weekday" },
+      min_count: { type: "number", description: "Only groups with at least this many (summary)" }, count_of: { type: "string", description: "What min_count counts" },
+      department: { type: "string", description: "Department (optional)" }, employee: { type: "string", description: "Name or employee ID (optional)" }
+    },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const hm = (v: any) => (/^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v).padStart(5, "0") : "");
+      // "3 bar er beshi late" with no period = this month so far.
+      const from = isDate(args?.from) ? String(args.from) : Number(args?.min_count) > 0 ? `${c.today.slice(0, 7)}-01` : c.today;
+      const to = isDate(args?.to) ? String(args.to) : isDate(args?.from) ? from : c.today;
+      const conds: any[] = [];
+      if (hm(args?.in_after)) conds.push({ field: "in_time", op: "after", value: hm(args.in_after) });
+      if (hm(args?.in_before)) conds.push({ field: "in_time", op: "before", value: hm(args.in_before) });
+      if (hm(args?.out_before)) conds.push({ field: "out_time", op: "before", value: hm(args.out_before) });
+      if (hm(args?.out_after)) conds.push({ field: "out_time", op: "after", value: hm(args.out_after) });
+      if (["present", "absent", "leave", "holiday", "weekend"].includes(String(args?.status))) conds.push({ field: "status", op: "in", value: [String(args.status)] });
+      if (args?.late === "delay" || args?.late === "extreme") conds.push({ field: "late", op: "in", value: [String(args.late)] });
+      else if (args?.late === "any") conds.push({ field: "late", op: "in", value: ["delay", "extreme"] });
+      if (args?.missing_out === true) conds.push({ field: "missing_out", op: "is_true", value: true });
+      if (Number(args?.min_hours) > 0) conds.push({ field: "work_hours", op: "gte", value: Number(args.min_hours) });
+      if (Number(args?.max_hours) > 0) conds.push({ field: "work_hours", op: "lt", value: Number(args.max_hours) });
+      if (args?.overtime === true) conds.push({ field: "overtime_minutes", op: "gt", value: 0 });
+      if (args?.early_leave === true) conds.push({ field: "early_leave_minutes", op: "gt", value: 0 });
+      const view = args?.view === "summary" || args?.min_count ? "summary" : "detail";
+      const groupBy = ["employee", "department", "designation", "date", "weekday"].includes(String(args?.group_by)) ? String(args.group_by) : "employee";
+      const countOf = ["late", "absent", "leave", "missing_out", "early_leave", "overtime_days", "present", "delay", "extreme"].includes(String(args?.count_of))
+        ? String(args.count_of)
+        : args?.late ? "late" : args?.status === "absent" ? "absent" : args?.status === "leave" ? "leave" : args?.missing_out ? "missing_out" : args?.early_leave ? "early_leave" : args?.overtime ? "overtime_days" : "days";
+      const body = {
+        from, to, conditions: conds, match: "all", view, group_by: groupBy,
+        having: Number(args?.min_count) > 0 ? { metric: countOf, op: "gte", value: Number(args.min_count) } : null,
+        sort: view === "summary" ? countOf : "",
+        office_end: hm(args?.office_end) || "18:00",
+        departments: [], employee: String(args?.employee || "")
+      };
+      const r = await callApiPost(c.req, "/api/attendance/report/custom", body);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: { error: r.body?.error } } : fail(r.status);
+      const dq = String(args?.department || "").trim().toLowerCase();
+      const when = from === to ? bnDate(from) : `${bnDate(from)} – ${bnDate(to)}`;
+      const condText = [
+        hm(args?.in_after) && `${bn(hm(args.in_after))}-এর পরে এসেছেন`, hm(args?.in_before) && `${bn(hm(args.in_before))}-এর আগে এসেছেন`,
+        hm(args?.out_before) && `${bn(hm(args.out_before))}-এর আগে বের হয়েছেন`, hm(args?.out_after) && `${bn(hm(args.out_after))}-এর পরে বের হয়েছেন`,
+        args?.status === "absent" && "অনুপস্থিত", args?.status === "leave" && "ছুটিতে", args?.status === "present" && "উপস্থিত",
+        args?.late === "extreme" ? "অনেক দেরি" : args?.late === "delay" ? "দেরি" : args?.late === "any" ? "দেরি / অনেক দেরি" : "",
+        args?.missing_out && "check-out দেননি", Number(args?.max_hours) > 0 && `${bn(args.max_hours)} ঘণ্টার কম কাজ`, Number(args?.min_hours) > 0 && `${bn(args.min_hours)} ঘণ্টা বা বেশি কাজ`,
+        args?.overtime && "overtime", args?.early_leave && "আগেই বের হয়েছেন"
+      ].filter(Boolean).join(", ");
+      if (view === "summary") {
+        const groups: any[] = (r.body?.groups || []).filter((g: any) => !dq || String(g.key || "").toLowerCase().includes(dq) || String(g.department || "").toLowerCase().includes(dq));
+        const BY: Record<string, string> = { employee: "কর্মী", department: "Department", designation: "পদ", date: "দিন", weekday: "বার" };
+        const text = `**হাজিরা — ${when}**${condText ? ` (${condText})` : ""}, ${BY[groupBy]} অনুযায়ী${body.having ? `, ${bn(body.having.value)} বা বেশি` : ""}: ${bn(groups.length)}টি\n` +
+          groups.slice(0, 15).map((g) => `• **${g.key}**${g.department && groupBy === "employee" ? ` (${g.department})` : ""}: উপস্থিত ${bn(g.present)}, অনুপস্থিত ${bn(g.absent)}, ছুটি ${bn(g.leave)}, দেরি ${bn(g.late)}${g.extreme ? ` (অনেক ${bn(g.extreme)})` : ""}${g.missing_out ? `, check-out নেই ${bn(g.missing_out)}` : ""}${g.early_leave ? `, আগে বের ${bn(g.early_leave)}` : ""}${g.overtime_days ? `, overtime ${bn(g.overtime_days)} দিন (${bn(g.total_ot_hours)} ঘণ্টা)` : ""}${g.avg_in ? `, গড় ইন ${bn(g.avg_in)}` : ""}`).join("\n") +
+          (groups.length > 15 ? `\n…আরও ${bn(groups.length - 15)}টি (পুরোটা PDF / Excel-এ)` : "") + (groups.length ? "" : "এই শর্তে কেউ নেই।");
+        return {
+          ok: true, text, data: { from, to, group_by: groupBy, groups: groups.slice(0, 40) },
+          actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports" }],
+          report: report("Attendance Report", `Attendance-Report-${from}-${to}`, [BY[groupBy], ...(groupBy === "employee" ? ["Department"] : []), "Employees", "Days", "Present", "Absent", "Leave", "Late", "Extreme", "No check-out", "Left early", "Overtime days", "Avg in", "Avg out", "Avg hours", "OT hours", "Attendance %"],
+            groups.map((g) => [g.key, ...(groupBy === "employee" ? [g.department || ""] : []), g.employees, g.days, g.present, g.absent, g.leave, g.late, g.extreme, g.missing_out, g.early_leave, g.overtime_days, g.avg_in || "", g.avg_out || "", g.avg_hours ?? "", g.total_ot_hours, g.attendance_pct ?? ""]),
+            [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
+        };
+      }
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !dq || String(x.department || "").toLowerCase().includes(dq));
+      const line = (x: any) => `• **${x.employee_name}**${x.department ? ` — ${x.department}` : ""}${from !== to ? `, ${bnDate(x.date)}` : ""}: ${x.status === "present" ? `ইন ${bn(x.in_time || "—")}, আউট ${bn(x.out_time || "—")}${x.late !== "none" ? (x.late === "extreme" ? " · অনেক দেরি" : " · দেরি") : ""}` : x.status === "absent" ? "অনুপস্থিত" : x.status === "leave" ? `ছুটি${x.leave_type ? ` (${x.leave_type})` : ""}` : x.status}`;
+      const text = `**হাজিরা — ${when}**${condText ? ` (${condText})` : ""}: ${bn(rows.length)}টি\n` + (rows.length ? rows.slice(0, 20).map(line).join("\n") + (rows.length > 20 ? `\n…আরও ${bn(rows.length - 20)}টি (পুরোটা PDF / Excel-এ)` : "") : "এই শর্তে কেউ নেই।");
+      return {
+        ok: true, text, data: { from, to, total: rows.length, rows: rows.slice(0, 50).map((x) => ({ date: x.date, name: x.employee_name, department: x.department, status: x.status, in: x.in_time, out: x.out_time, late: x.late, hours: x.work_hours })) },
+        actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports" }],
+        report: report("Attendance Report", `Attendance-Report-${from}-${to}`, ["Date", "Name", "Employee ID", "Department", "Status", "In", "Out", "Hours", "Late", "Minutes late", "Left early (min)", "Overtime (min)", "No check-out"],
+          rows.map((x) => [x.date, x.employee_name, x.employee_code, x.department, x.status, x.in_time || "", x.out_time || "", x.work_hours ?? "", x.late === "none" ? "" : x.late, x.late_minutes || "", x.early_leave_minutes || "", x.overtime_minutes || "", x.missing_out ? "Yes" : ""]),
+          [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
       };
     }
   },
@@ -2825,6 +2963,25 @@ const periodOf = (t: string, c: Ctx): { from?: string; to?: string; month?: stri
   if (hasAny(t, ["this year", "ei bochor", "ei bochhor", "এই বছর", "এ বছর", "e bochor", "চলতি বছর"])) return { from: `${ym.slice(0, 4)}-01-01`, to: c.today };
   if (hasAny(t, [" aj ", " ajke ", " আজ ", " আজকে ", " today "])) return { from: c.today, to: c.today, date: c.today };
   if (hasAny(t, ["gotokal", "গতকাল", "yesterday"])) { const d = addDays(c.today, -1); return { from: d, to: d, date: d }; }
+  // Week = Saturday to Friday (the office week here).
+  const weekStart = addDays(c.today, -((new Date(`${c.today}T00:00:00Z`).getUTCDay() + 1) % 7));
+  if (hasAny(t, ["last week", "goto soptah", "gotosoptah", "goto saptah", "গত সপ্তাহ", "ager soptah", "আগের সপ্তাহ"])) return { from: addDays(weekStart, -7), to: addDays(weekStart, -1) };
+  if (hasAny(t, ["this week", "ei soptah", "ei saptah", "এই সপ্তাহ", "চলতি সপ্তাহ", "ei week"])) return { from: weekStart, to: c.today };
+  if (hasAny(t, ["this month", "ei mas", "ei mash", "এই মাস", "চলতি মাস", "ei month", "e mase", "e mashe"])) return { from: `${ym}-01`, to: c.today, month: ym, month_year: ym };
+  // "28 october" / "october 28" / "২৮ অক্টোবর" -> that one day.
+  const words = toAsciiDigits(t).trim().split(" ");
+  for (let i = 0; i < words.length; i++) {
+    const m = monthOf(words[i].replace(/(er|এর|-এর|e|তে)$/, ""));
+    if (!m) continue;
+    const dm = /^(\d{1,2})(?:st|nd|rd|th|ই|শে|তারিখ)?$/.exec(words[i - 1] || "") || /^(\d{1,2})(?:st|nd|rd|th|ই|শে|তারিখ)?$/.exec(words[i + 1] || "");
+    const dd = dm ? Number(dm[1]) : 0;
+    if (dd >= 1 && dd <= 31) {
+      const [ty, tm] = ym.split("-").map(Number);
+      const mm = `${m > tm ? ty - 1 : ty}-${String(m).padStart(2, "0")}`;
+      const d = `${mm}-${String(dd).padStart(2, "0")}`;
+      if (d <= lastDay(mm)) return { from: d, to: d, date: d, month: mm, month_year: mm };
+    }
+  }
   for (const w of t.trim().split(" ")) {
     const m = monthOf(w.replace(/(er|এর|-এর|e|তে)$/, ""));
     if (m) {
@@ -2855,6 +3012,8 @@ const INTENTS: Intent[] = [
   reportIntent("attendance_summary", ["attendance summary", "hajira summary", "মাসের হাজিরা রিপোর্ট", "attendance report sobar"]),
   reportIntent("remote_attendance", ["remote attendance report", "gps attendance", "remote check in report"]),
   reportIntent("leave_applications", ["leave application report", "ছুটির আবেদনের রিপোর্ট"]),
+  { tool: "attendance_custom_report", keys: ["er pore ke ke asche", "এর পরে কে কে এসেছে", "er age ke ber", "এর আগে কে বের", "check out den nai", "চেক আউট দেয়নি", "ghontar kom kaj", "ঘণ্টার কম কাজ", "bar er beshi late", "বারের বেশি দেরি", "custom attendance report", "attendance report builder"],
+    args: (t, c) => ({ ...parseAttendanceQuestion(t), ...periodOf(t, c) }) },
   { tool: "attendance_department_summary", keys: ["department summary", "department wise attendance", "department onujayi hajira", "বিভাগ অনুযায়ী হাজিরা", "department e koto absent", "department wise absent", "ডিপার্টমেন্ট অনুযায়ী"],
     args: (t, c) => { const p = periodOf(t, c); return p.date ? { date: p.date } : p.month ? { month: p.month } : hasAny(t, ["mas", "month", "মাস"]) ? { month: c.today.slice(0, 7) } : {}; } },
   { tool: "payroll_month_comparison", keys: ["salary comparison", "beton er tulona", "বেতনের তুলনা", "salary difference", "beton keno barlo", "ager maser sathe beton", "বেতন কেন বাড়ল", "বেতন কেন কমল", "payroll comparison"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
@@ -3018,6 +3177,16 @@ const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকার�
 const RIDE_WORDS = ["gari", "gaari", "গাড়ি", "গাড়ী", "car", "ride", "রাইড", "vehicle", "ভেহিকেল", "microbus", "মাইক্রো"];
 const RIDE_ASK = ["book", "বুক", "lagbe", "লাগবে", "chai", "চাই", "dorkar", "দরকার", "nibo", "নেব", "nite", "নিতে", "need", "want", "requisition", "রিকুইজিশন", "jabo", "যাব", "যাবো", "pathao", "পাঠাও"];
 const RIDE_STATUS = ["status", "স্ট্যাটাস", "kothay", "কোথায়", "ki holo", "কী হল", "কি হলো", "approve", "অনুমোদন", "koyta", "কয়টা", "list", "তালিকা", "cancel", "বাতিল", "driver ke", "কে চালাবে"];
+// An attendance question the Report Builder answers: a clock time with
+// came / left, no check-out, work hours, overtime, early leave, "N times",
+// or attendance by department / person / day. Plain "aj ke absent" /
+// "aj ke late" keep their own answers.
+const wantsAttendanceQuery = (t: string, raw: string) => {
+  const att = /(asche|asc?he|এসেছে|আসছে|eseche|esheche|ber|বের|out|আউট|in time|ইন টাইম|attendance|হাজিরা|hajira|late|দেরি|deri|লেট|absent|অনুপস্থিত|check ?out|check ?in|overtime|ওভারটাইম|ghonta|ঘণ্টা|hours?|chole|চলে|left|came|arrive|ঢুক|dhuk)/.test(t);
+  if (!att) return false;
+  const p = parseAttendanceQuestion(raw);
+  return !!(p.in_after || p.in_before || p.out_before || p.out_after || p.missing_out || p.min_hours || p.max_hours || p.overtime || p.early_leave || p.min_count || p.group_by || (p.department && (p.status || p.late)));
+};
 // Starting / ending a Movement Claim ("movement check in koro", "client
 // visit e jacchi movement", "pouche gechi movement check out") — not asking
 // about past claims ("movement claim koto", "kototi").
@@ -3044,6 +3213,14 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     return { reply: r.text, actions: r.actions || [] };
   }
 
+  // "aj 9:05 er pore ke ke asche", "6 tar age ke ber hoye geche", "ei mase
+  // 3 bar er beshi late kara" -> the Attendance Report Builder.
+  if (wantsAttendanceQuery(t, message) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "attendance_custom_report")!;
+    if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
+    const r = await tool.run(c, { ...parseAttendanceQuestion(message), ...periodOf(t, c) });
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+  }
   // "client visit e jacchi movement check in koro" -> a Movement Claim card
   if (wantsMovement(t) && !asksHow) {
     const tool = TOOLS.find((x) => x.name === "prepare_movement_claim")!;
@@ -3245,6 +3422,8 @@ interface LearnedRow { question: string; tool: string | null; help_id: string | 
 const TRAINING: [string, string, Record<string, any>?][] = [
   ["e bochor ke koto casual leave niyeche", "company_report", { report: "leave_taken" }], ["এই মাসে কত টাকার bill দেওয়া বাকি", "company_report", { report: "bill_disbursements" }],
   ["kon gari koto cholse ei mase", "company_report", { report: "vehicle_utilization" }], ["asset register dekhao", "company_report", { report: "asset_register" }],
+  ["aj 9:05 er pore ke ke asche", "attendance_custom_report"], ["আজ ৬টার আগে কে কে বের হয়ে গেছে", "attendance_custom_report"], ["ei mase 3 bar er beshi late kara korse", "attendance_custom_report"],
+  ["gotokal check out den nai kara", "attendance_custom_report"], ["who came after 9:15 today", "attendance_custom_report"], ["ei soptahe 8 ghontar kom kaj korse ke", "attendance_custom_report"],
   ["department wise ajker hajira", "attendance_department_summary"], ["ei mase kon department e beshi absent", "attendance_department_summary"],
   ["gotomaser sathe beton er parthokko", "payroll_month_comparison"], ["এ মাসে বেতন কেন বেড়েছে", "payroll_month_comparison"], ["salary sheet dekhao", "payroll_salary_sheet"],
   ["kar kar document jama dewa baki", "employee_records_report", { preset: "pending_documents" }], ["blood group onujayi talika", "employee_records_report", { preset: "blood_group_directory" }],
