@@ -28,7 +28,7 @@ interface ClaimCardProps {
 // Same geolocation flow AttendanceCard.tsx / AuthScreen.tsx already use:
 // Capacitor's plugin on the native Android app build, plain
 // navigator.geolocation on the web build.
-async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+export async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {

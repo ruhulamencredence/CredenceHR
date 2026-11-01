@@ -68,7 +68,20 @@ interface ToolResult {
 // A form the Assistant filled in but did NOT submit — the chat shows it as an
 // editable card and only the person's own button posts it, to the same API
 // (with all its checks) the page itself uses.
-export type AssistantDraft = LeaveDraft | RideDraft | CorrectionDraft;
+export type AssistantDraft = LeaveDraft | RideDraft | CorrectionDraft | MovementDraft;
+
+// Movement Claim -> a live GPS Check In (purpose) or Check Out of the open
+// claim. The card takes the device's location when its button is pressed
+// and posts to /api/claims/check-in or /api/claims/:id/check-out — both
+// stamp "now", so nothing can be back-dated.
+export interface MovementDraft {
+  kind: "movement_claim";
+  mode: "check_in" | "check_out";
+  purpose: string;
+  remarks: string;
+  claim_id: number | null; // the open claim (check_out)
+  since: string | null; // when it was checked in
+}
 
 // Book a Ride -> POST /api/vehicles/requisitions.
 export interface RideDraft {
@@ -687,6 +700,32 @@ export function parseCorrectionRequest(text: string, today: string) {
   return { attendance_date: date, check_in, check_out, remarks: why.slice(0, 250) };
 }
 
+// "client er office e jacchi movement check in koro" / "pouche gechi
+// movement check out" -> which way and the purpose in their words.
+export function parseMovementRequest(text: string) {
+  const raw = String(text || "").trim();
+  const t = ` ${raw.toLowerCase().replace(/[,।!?]/g, " ").replace(/\s+/g, " ")} `;
+  const out = /(check ?out|চেক আউট|pouch|পৌঁছ|reached|kaj shesh|কাজ শেষ|fir(?:e|i)chi|ফিরে|ফিরছি|firlam|back to office|end|শেষ)/.test(t);
+  const action = out ? "check_out" : /(check ?in|চেক ইন|start|শুরু|shuru|jacchi|যাচ্ছি|jabo|যাব|going|ber hocchi|বের হচ্ছি)/.test(t) ? "check_in" : "";
+  // The clause with "jacchi / যাচ্ছি / going" (else the words after
+  // "purpose / for / jonno"), minus the request words. Word by word: \b
+  // doesn't see Bangla letters.
+  const VERB = /(jacchi|যাচ্ছি|jabo|যাব|যাবো|jete hobe|যেতে হবে|going to|going|যাচ্ছিলাম)/i;
+  const clauses = raw.split(/[,।;]/).map((x) => x.trim()).filter(Boolean);
+  const post = /(?:purpose|uddeshyo|উদ্দেশ্য|\bfor\b|jonno|জন্য)\s*[:\-]?\s+(.{3,120})$/i.exec(raw);
+  const pick = clauses.find((x) => VERB.test(x)) || (post && post[1]) || "";
+  const FILL = new Set(["movement", "মুভমেন্ট", "claim", "ক্লেইম", "ক্লেম", "koro", "করো", "kore", "করে", "dao", "দাও", "please", "plz", "start", "ekta", "একটা", "a", "an", "the",
+    "amar", "আমার", "ami", "আমি", "now", "ekhon", "এখন", "e", "te", "তে", "এ", "jacchi", "যাচ্ছি", "jabo", "যাব", "যাবো", "going", "to", "hobe", "হবে", "jete", "যেতে", "i'm", "im", "am", "for"]);
+  let purpose = pick
+    .replace(/check ?in|check ?out|চেক ইন|চেক আউট/gi, " ")
+    .split(/\s+/)
+    .filter((w) => w && !FILL.has(w.toLowerCase()))
+    .join(" ")
+    .trim();
+  if (purpose) purpose = purpose.charAt(0).toUpperCase() + purpose.slice(1);
+  return { action, purpose: action === "check_out" ? "" : purpose.slice(0, 255) };
+}
+
 // "Rahim er chuti koto" -> "rahim": the word(s) right before a separate
 // "er" / "-এর" / "এর" ("ajker" and "মাসের" are not names).
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
@@ -1058,6 +1097,48 @@ const TOOLS: Tool[] = [
       const onRecord = day[0] ? `রেকর্ডে আছে ইন ${bn(hhmm(day[0].check_in_at) || "—")}, আউট ${bn(hhmm(day[0].check_out_at) || "—")}। ` : "ওই দিনের কোনো হাজিরা রেকর্ডে নেই। ";
       const text = `${bnDate(date)}-এর হাজিরা ঠিক করার খসড়া তৈরি করেছি। ${onRecord}নিচে ইন / আউট সময় আর কারণ দেখে **Submit করুন** চাপুন — এটা অনুমোদনের জন্য যাবে; আপনি না চাপলে কিছু জমা হবে না।`;
       return { ok: true, text, draft, data: { drafted: true, submitted: false, attendance_date: date, check_in: draft.check_in, check_out: draft.check_out, on_record: day.map((r: any) => ({ project: r.project_name, in: hhmm(r.check_in_at), out: hhmm(r.check_out_at) })), note: "Shown to the user as a form; they must review it and press Submit themselves." } };
+    }
+  },
+  {
+    name: "prepare_movement_claim",
+    description:
+      "Movement Claim (GPS travel record for office work): prepare (do NOT submit) a Check In with a purpose when they are heading out (client visit, bank, site…), " +
+      "or a Check Out of their open claim when they have reached / finished. The card takes the phone's location when the employee presses its button. " +
+      "action: check_in | check_out (omit to decide from whether a claim is open).",
+    params: {
+      action: { type: "string", description: "check_in or check_out" },
+      purpose: { type: "string", description: "Where / why they are going, short, their words (check_in)" },
+      remarks: { type: "string", description: "Optional note" }
+    },
+    available: (c) => isSuper(c) || c.flags.can_view_movement_claims,
+    run: async (c, args) => {
+      const st = await callApi(c.req, "/api/claims/status");
+      if (!st.ok && st.status === 403) return NO_ACCESS;
+      const open = st.ok && st.body && st.body.id ? st.body : null;
+      const want = args?.action === "check_out" || args?.action === "check_in" ? String(args.action) : open ? "check_out" : "check_in";
+      const remarks = String(args?.remarks || "").slice(0, 300);
+      const nav = [{ label: "Movement Claim খুলুন", nav: "claims:movementClaims" }];
+      if (want === "check_out" && !open) {
+        return { ok: true, text: "আপনার কোনো Movement Claim খোলা নেই — আগে Check In করতে হবে। কোথায় যাচ্ছেন বললে Check In-এর কার্ড দিয়ে দেব।", data: { open_claim: null }, actions: nav };
+      }
+      if (open) {
+        const since = String(open.check_in_at || "");
+        const draft: MovementDraft = { kind: "movement_claim", mode: "check_out", purpose: String(open.purpose || ""), remarks, claim_id: Number(open.id), since };
+        const pre = want === "check_in" ? "আগের Movement Claim এখনো খোলা — নতুনটা শুরু করার আগে সেটার Check Out করতে হবে। " : "";
+        return {
+          ok: true,
+          text: `${pre}খোলা Claim: **${draft.purpose}** (Check In ${bnDate(since.slice(0, 10))} ${bn(since.slice(11, 16))})। পৌঁছে বা কাজ শেষে নিচে **Check Out** চাপুন — তখনকার লোকেশন নেওয়া হবে।`,
+          draft,
+          data: { drafted: true, submitted: false, mode: "check_out", open_claim: { purpose: draft.purpose, since }, note: "The card takes the phone's location when they press Check Out." }
+        };
+      }
+      const draft: MovementDraft = { kind: "movement_claim", mode: "check_in", purpose: String(args?.purpose || "").slice(0, 255), remarks, claim_id: null, since: null };
+      return {
+        ok: true,
+        text: `Movement Claim-এর Check In তৈরি${draft.purpose ? ` — **${draft.purpose}**` : ""}। ${draft.purpose ? "" : "কোথায় / কেন যাচ্ছেন লিখে দিন, "}বের হওয়ার সময় নিচে **Check In** চাপুন — তখনকার লোকেশন নেওয়া হবে। আপনি না চাপলে কিছু জমা হবে না।`,
+        draft,
+        data: { drafted: true, submitted: false, mode: "check_in", purpose: draft.purpose, note: "The card takes the phone's location when they press Check In." }
+      };
     }
   },
   // ---- The asker's own things (each reads the asker's own API) ----
@@ -2261,6 +2342,7 @@ const INTENTS: Intent[] = [
   // Forms the Assistant fills (cards the person submits) — in INTENTS so a
   // wording Gemini answered with them is learned: the local engine then fills
   // the same card with its own reading of the question.
+  { tool: "prepare_movement_claim", keys: ["movement check in", "movement check out", "movement claim start", "মুভমেন্ট চেক ইন", "মুভমেন্ট চেক আউট"], args: (t) => parseMovementRequest(t) },
   { tool: "prepare_ride_booking", keys: ["book a ride", "gari book", "car book", "গাড়ি বুক", "gari lagbe", "গাড়ি লাগবে", "car lagbe", "ride book"], args: (t, c) => parseRideRequest(t, c.today) },
   { tool: "prepare_attendance_correction", keys: ["timesheet edit", "attendance correction", "hajira thik", "হাজিরা ঠিক", "check in dite bhule", "চেক ইন দিতে ভুলে", "punch dite bhule"], args: (t, c) => parseCorrectionRequest(t, c.today) },
   { tool: "my_leave_balance", keys: ["leave balance", "balance", "ব্যালেন্স", "chuti koto", "chuti baki", "koto chuti", "ছুটি কত", "কত ছুটি", "ছুটি বাকি", "বাকি ছুটি", "leave baki", "leave koto", "leave left", "how many leave", "কয় দিন ছুটি", "koydin chuti"] },
@@ -2390,6 +2472,13 @@ const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকার�
 const RIDE_WORDS = ["gari", "gaari", "গাড়ি", "গাড়ী", "car", "ride", "রাইড", "vehicle", "ভেহিকেল", "microbus", "মাইক্রো"];
 const RIDE_ASK = ["book", "বুক", "lagbe", "লাগবে", "chai", "চাই", "dorkar", "দরকার", "nibo", "নেব", "nite", "নিতে", "need", "want", "requisition", "রিকুইজিশন", "jabo", "যাব", "যাবো", "pathao", "পাঠাও"];
 const RIDE_STATUS = ["status", "স্ট্যাটাস", "kothay", "কোথায়", "ki holo", "কী হল", "কি হলো", "approve", "অনুমোদন", "koyta", "কয়টা", "list", "তালিকা", "cancel", "বাতিল", "driver ke", "কে চালাবে"];
+// Starting / ending a Movement Claim ("movement check in koro", "client
+// visit e jacchi movement", "pouche gechi movement check out") — not asking
+// about past claims ("movement claim koto", "kototi").
+const wantsMovement = (t: string) =>
+  hasAny(t, ["movement", "মুভমেন্ট"]) &&
+  hasAny(t, ["check in", "checkin", "check out", "checkout", "চেক ইন", "চেক আউট", "start", "শুরু", "shuru", "jacchi", "যাচ্ছি", "jabo", "যাব", "pouch", "পৌঁছ", "kaj shesh", "কাজ শেষ", "end", "koro", "করো", "dao", "দাও", "kore", "করে"]) &&
+  !hasAny(t, ["koto", "কত", "kototi", "কতটি", "koyta", "কয়টা", "list", "তালিকা", "history", "ki holo", "কী হল", "status", "total", "মোট", "km", "কিলো", "kivabe", "কিভাবে", "কীভাবে"]);
 const wantsRide = (t: string) => hasAny(t, RIDE_WORDS) && hasAny(t, RIDE_ASK) && !hasAny(t, RIDE_STATUS);
 // Correcting a day's In / Out ("check in dite bhule gechi", "timesheet edit",
 // "hajira thik kore dao") — not asking what the timesheet shows.
@@ -2409,6 +2498,13 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     return { reply: r.text, actions: r.actions || [] };
   }
 
+  // "client visit e jacchi movement check in koro" -> a Movement Claim card
+  if (wantsMovement(t) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "prepare_movement_claim")!;
+    if (!toolAvailable(tool, c)) return { reply: "Movement Claim আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+    const r = await tool.run(c, parseMovementRequest(message));
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), draft: r.draft };
+  }
   // "kal 10 tay gulshan jabo gari lagbe" -> a Book a Ride draft card
   if (wantsRide(t) && !asksHow) {
     const r = await TOOLS.find((x) => x.name === "prepare_ride_booking")!.run(c, parseRideRequest(message, c.today));
@@ -2504,7 +2600,7 @@ async function matchWithSpelling(c: Ctx, message: string): Promise<Answer | null
   // A form request is read as typed (spelling fixes would change the
   // reason / place words that go into the card).
   const asTyped = norm(message);
-  if (wantsRide(asTyped) || wantsCorrection(asTyped)) {
+  if (wantsMovement(asTyped) || wantsRide(asTyped) || wantsCorrection(asTyped)) {
     const r = await matchLocal(c, message);
     if (r) return r;
   }
@@ -2601,6 +2697,8 @@ interface LearnedRow { question: string; tool: string | null; help_id: string | 
 // with what answers it ("help:<id>" = a how-to entry). Known from the start,
 // before Gemini has taught anything; what Gemini teaches is added on top.
 const TRAINING: [string, string, Record<string, any>?][] = [
+  ["client visit e jacchi movement check in koro", "prepare_movement_claim"], ["movement claim check in kore dao", "prepare_movement_claim"], ["মুভমেন্ট চেক ইন করো ব্যাংকে যাচ্ছি", "prepare_movement_claim"],
+  ["pouche gechi movement check out koro", "prepare_movement_claim"], ["movement claim shesh koro", "prepare_movement_claim"], ["start a movement claim for site visit", "prepare_movement_claim"],
   ["kal sokal 10 tay office theke gulshan jabo gari lagbe", "prepare_ride_booking"], ["ekta gari book kore dao", "prepare_ride_booking"], ["আমার একটা গাড়ি লাগবে", "prepare_ride_booking"],
   ["book a car for tomorrow 3pm", "prepare_ride_booking"], ["client meeting e jete hobe car dorkar", "prepare_ride_booking"], ["গাড়ি বুক করে দাও", "prepare_ride_booking"],
   ["gotokal check in dite bhule gechi", "prepare_attendance_correction"], ["amar timesheet edit kore dao", "prepare_attendance_correction"], ["হাজিরা ঠিক করে দাও", "prepare_attendance_correction"],
@@ -2877,7 +2975,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- Reply in the user's language; default to Bangla. Banglish questions get Bangla answers. Be short and friendly; use bullet lines for lists.\n` +
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
-    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
+    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"); start / end a Movement Claim (heading out for office work, reached / finished) -> prepare_movement_claim ("Check In" / "Check Out" — the card takes the phone's location then). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access. When app_help returns several entries, answer with the one that fits the question best and keep its steps, order and button names as written (you may translate into the user's language) — don't merge entries into a process of your own or add steps that aren't there.\n` +

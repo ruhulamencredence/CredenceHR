@@ -18,7 +18,7 @@
 // speaker button (lib/assistantVoice.ts).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CalendarCheck, Car, CheckCircle2, Clock, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Car, CheckCircle2, Clock, MapPin, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
 import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
@@ -30,6 +30,7 @@ import { useIsPhone, useScrolling } from '../lib/useScrolling';
 
 import { SearchSelect } from './Combobox';
 import { DurationPicker } from './DurationPicker';
+import { getCurrentCoords } from './ClaimCard';
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
 // Nothing is sent until the person presses "জমা দিন" on the card.
@@ -68,7 +69,17 @@ interface CorrectionDraft {
   options: { project_id: number; name: string; check_in: string; check_out: string }[];
   today: string;
 }
-type AnyDraft = LeaveDraft | RideDraft | CorrectionDraft;
+// Movement Claim: a live Check In (purpose) or Check Out of the open claim —
+// the phone's location is taken when the button is pressed.
+interface MovementDraft {
+  kind: 'movement_claim';
+  mode: 'check_in' | 'check_out';
+  purpose: string;
+  remarks: string;
+  claim_id: number | null;
+  since: string | null;
+}
+type AnyDraft = LeaveDraft | RideDraft | CorrectionDraft | MovementDraft;
 // What the card says once it's done (and the page it points to).
 type DraftDone = (result: 'submitted' | 'cancelled', done?: { text: string; action?: Action }) => void;
 interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; draft?: AnyDraft; draftDone?: 'submitted' | 'cancelled'; report?: AssistantReport }
@@ -406,6 +417,76 @@ const CorrectionDraftCard: React.FC<{ token: string; draft: CorrectionDraft; onD
   );
 };
 
+// Movement Claim Check In / Check Out from the Assistant -> the same
+// /api/claims/check-in and /api/claims/:id/check-out the Movement Claim card
+// uses, with the location taken now (getCurrentCoords, ClaimCard.tsx).
+const MovementDraftCard: React.FC<{ token: string; draft: MovementDraft; onDone: DraftDone }> = ({ token, draft, onDone }) => {
+  const isIn = draft.mode === 'check_in';
+  const [purpose, setPurpose] = useState(draft.purpose);
+  const [remarks, setRemarks] = useState(draft.remarks);
+  const [saving, setSaving] = useState<'' | 'locating' | 'sending'>('');
+  const [error, setError] = useState('');
+  const submit = async () => {
+    if (isIn && !purpose.trim()) return setError('কোথায় / কেন যাচ্ছেন লিখুন।');
+    setError('');
+    setSaving('locating');
+    try {
+      const { latitude, longitude } = await getCurrentCoords();
+      setSaving('sending');
+      const r = await fetch(apiUrl(isIn ? '/api/claims/check-in' : `/api/claims/${draft.claim_id}/check-out`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(isIn ? { purpose: purpose.trim(), latitude, longitude, remarks: remarks.trim() || undefined } : { latitude, longitude, remarks: remarks.trim() || undefined })
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || 'জমা হয়নি।');
+      onDone('submitted', {
+        text: isIn
+          ? `✅ Movement Claim-এ Check In হয়েছে — ${purpose.trim()}। পৌঁছে বা কাজ শেষে আমাকে বলুন "movement check out" — অথবা Movement Claim পাতা থেকে Check Out করুন।`
+          : `✅ Check Out হয়েছে — ${draft.purpose}${d?.distance_km != null ? `, সোজা দূরত্ব ${d.distance_km} km` : ''}। Claim সম্পূর্ণ।`,
+        action: { label: 'Movement Claim খুলুন', nav: 'claims:movementClaims' }
+      });
+    } catch (e: any) {
+      setError(e.message || 'জমা হয়নি।');
+    } finally {
+      setSaving('');
+    }
+  };
+  return (
+    <div className="mt-2.5 rounded-2xl bg-white/55 border border-white/80 p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-800">
+        <MapPin className="w-4 h-4" /> Movement Claim — {isIn ? 'Check In' : 'Check Out'}
+      </div>
+      {isIn ? (
+        <label className="block text-[11px] text-slate-500">
+          কোথায় / কেন যাচ্ছেন
+          <input value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={255} placeholder="যেমন: Client meeting, Gulshan" className={cardField} />
+        </label>
+      ) : (
+        <p className="text-xs text-slate-700">
+          <span className="font-semibold">{draft.purpose}</span>
+          {draft.since && <span className="block text-[11px] text-slate-500">Check In: {draft.since.slice(0, 16).replace('T', ' ')}</span>}
+        </p>
+      )}
+      <label className="block text-[11px] text-slate-500">
+        মন্তব্য (ঐচ্ছিক)
+        <input value={remarks} onChange={(e) => setRemarks(e.target.value)} maxLength={300} className={cardField} />
+      </label>
+      <p className="text-[11px] text-slate-500">বোতাম চাপলে এখনকার লোকেশন আর সময় নেওয়া হবে।</p>
+      {error && <p className="text-[11px] text-rose-600">{error}</p>}
+      <div className="flex gap-2 pt-0.5">
+        <button type="button" onClick={submit} disabled={!!saving} className="liquid-glass-button flex-1 rounded-full py-2 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+          {saving === 'locating' ? 'লোকেশন নিচ্ছি…' : saving === 'sending' ? 'জমা হচ্ছে…' : isIn ? 'Check In' : 'Check Out'}
+        </button>
+        <button type="button" onClick={() => onDone('cancelled')} disabled={!!saving} className="liquid-glass-chip rounded-full px-4 py-2 text-xs text-slate-700">
+          বাতিল
+        </button>
+      </div>
+    </div>
+  );
+};
+
 interface Props {
   token: string;
   user: User | null;
@@ -626,7 +707,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     if (!message || busy) return;
     const history = msgs.slice(-10).map((m) => ({
       role: m.role,
-      text: m.text + (m.draftDone === 'submitted' ? ` [The user submitted this ${m.draft?.kind === 'ride_booking' ? 'ride request' : m.draft?.kind === 'attendance_correction' ? 'attendance correction' : 'leave application'}.]` : m.draftDone === 'cancelled' ? ' [The user cancelled this draft.]' : m.draft ? ' [Draft shown, not submitted yet.]' : '')
+      text: m.text + (m.draftDone === 'submitted' ? ` [The user submitted this ${m.draft?.kind === 'ride_booking' ? 'ride request' : m.draft?.kind === 'attendance_correction' ? 'attendance correction' : m.draft?.kind === 'movement_claim' ? `movement claim ${m.draft.mode === 'check_in' ? 'check in' : 'check out'}` : 'leave application'}.]` : m.draftDone === 'cancelled' ? ' [The user cancelled this draft.]' : m.draft ? ' [Draft shown, not submitted yet.]' : '')
     }));
     setMsgs((m) => [...m, { role: 'user', text: message }]);
     setInput('');
@@ -901,6 +982,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                       {m.draft && !m.draftDone && m.draft.kind === 'leave_application' && <LeaveDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
                       {m.draft && !m.draftDone && m.draft.kind === 'ride_booking' && <RideDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
                       {m.draft && !m.draftDone && m.draft.kind === 'attendance_correction' && <CorrectionDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
+                      {m.draft && !m.draftDone && m.draft.kind === 'movement_claim' && <MovementDraftCard token={token} draft={m.draft} onDone={(r, done) => finishDraft(i, r, done)} />}
                       {m.draft && m.draftDone === 'submitted' && (
                         <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> জমা দেওয়া হয়েছে</p>
                       )}
