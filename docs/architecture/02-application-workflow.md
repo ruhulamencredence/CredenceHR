@@ -345,6 +345,16 @@ flowchart LR
 
 "Welcome back!"-এর বদলে (`DashboardGreeting.tsx`): ক্যালেন্ডারের পাতায় আজকের তারিখ, সময় অনুযায়ী শুভেচ্ছা, একটাই সার্চ বক্স (Ctrl K) — Pages (sidebar-এর নিজের মেনু, তাই যার যে পেজ খোলার অনুমতি নেই তা আসে না; `src/lib/navRegistry.ts`), People (Employee Directory, যা সবাই আগে থেকেই দেখে) আর "Waiting for you" (নিজের Approve Application তালিকা)। পাশে Check in (My Attendance কার্ডে নিয়ে যায়, check-in থাকলে Check out), + মেনুতে দ্রুত কাজ (Apply leave, New MPR entry, Book a ride, Conveyance claim, Request to HR — যার যেটা আছে)। নিচে আজকের চিপ: check-in হয়েছে কিনা ও কখন (`GET /api/attendance/today-summary` — শুধু নিজের সময়), কয়টা অনুমোদন অপেক্ষায়, কয়টা কাজের শেষ দিন আজ বা পেরিয়েছে।
 
+## Monthly Attendance Report → Department Summary
+
+Admin Panel → Monthly Attendance Report-এর তৃতীয় ট্যাব **Department Summary** (Attendance Reports module-এর layer `dept_summary`; সাধারণ পড়া, তাই layer না রাখা অ্যাকাউন্ট ডিফল্টে পায়; Superadmin সবসময়)।
+
+- **One day:** বাছা দিনে প্রতি department-এ কতজন Present, Absent, Leave, Delay, Extreme Delay। **Whole month:** মাসের প্রতিটি দিন যোগ করে (person-days), আজ পর্যন্ত।
+- Present / Absent / Leave আসে Monthly report-এর একই হিসাব থেকে (`computeMonthlyReport`: Weekend/Holiday, Duty Roster, approved leave, joining date); Delay / Extreme Delay payroll-এর late policy থেকে (`computeLateDatesByEmployee`, salary month অনুযায়ী)। Delay-এর দিনও Present-এ গোনা। Attendance % = (Present + Leave) ÷ working days। শুধু Active কর্মী।
+- Filter: Departments (একাধিক), Project। Department সীমা থাকা Admin শুধু নিজের department দেখেন।
+- যেকোনো সংখ্যায় চাপলে কারা — দিনে কে কখন ঢুকেছে বা কোন ছুটি, মাসে কার কত দিন। PDF (department টেবিল) ও Excel (Summary + People শিট)।
+- API: `GET /api/attendance/report/department-summary?mode=day&date=` বা `mode=month&year=&month=` (`PayrollRoutes.ts`)।
+
 ## Management Dashboard (পুরো কোম্পানি, এক মাস)
 
 Admin Panel → **Management Dashboard** (মডিউল `management_dashboard`; Module Access-এ যাকে দেওয়া হয় সে-ই দেখে, Superadmin সবসময়)। একটা read-only API (`GET /api/management-dashboard?month=YYYY-MM&departments=…`, `ManagementDashboardRoutes.ts`) চালু টেবিলগুলো থেকে হিসাব করে, নিজের কোনো টেবিল নেই। মাস আর Department (একাধিক) বাছা যায়, সব সংখ্যা আগের মাসের সাথে তুলনাসহ:

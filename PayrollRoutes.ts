@@ -59,7 +59,10 @@ interface PayrollRouteDeps {
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
   requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary") => Promise<boolean>;
+  // The Monthly Attendance Report's per-person month (AttendanceRoutes.ts) —
+  // the Department Summary adds it up so both always agree.
+  computeMonthlyReport: (user: any, query: any) => Promise<any>;
   // Attendance Reports' Department-wise scope (null = every Department).
   getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
   // The account's granted Admin Panel modules — the Dashboard calendar lets
@@ -595,7 +598,7 @@ export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
 const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope, computeMonthlyReport } = deps;
 
   // Builds one employee's payroll disbursement split for a given Net Salary,
   // from that employee's active employee_payment_accounts rows (Admin Panel
@@ -2375,6 +2378,151 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // payroll uses. Needs the "Late list" layer of Attendance Reports
   // (explicit-only) and keeps to that account's Departments. Read by the
   // Credence Assistant ("aj ke ke late").
+  // Monthly Attendance Report -> Department Summary: per department, how many
+  // were Present / Absent / on Leave / Delay / Extreme Delay — on one day
+  // (?mode=day&date=) or added up over a month (?mode=month&year=&month=,
+  // person-days). Present / Absent / Leave come from the Monthly report
+  // itself (computeMonthlyReport: same holidays, roster, leave, joining date
+  // and Department scope); Delay / Extreme Delay from the late policy payroll
+  // uses (computeLateDatesByEmployee). Delay days are also Present days.
+  // ?departments=A,B narrows; active employees only. Needs the Attendance
+  // Reports layer "dept_summary". Returns the totals per department and one
+  // row per person (for "who is it" and the Excel export).
+  app.get("/api/attendance/report/department-summary", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "attendance_reports", "dept_summary"))) {
+        return res.status(403).json({ error: "You don't have access to the Department Summary. Ask your Superadmin to grant it." });
+      }
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const mode = req.query.mode === "month" ? "month" : "day";
+      let year: number, month: number, date: string | null = null;
+      if (mode === "day") {
+        date = String(req.query.date || "");
+        if (!DATE_RE.test(date)) return res.status(400).json({ error: "A valid date (YYYY-MM-DD) is required." });
+        year = Number(date.slice(0, 4));
+        month = Number(date.slice(5, 7));
+      } else {
+        year = Number(req.query.year);
+        month = Number(req.query.month);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+          return res.status(400).json({ error: "A valid year and month (1-12) are required." });
+        }
+      }
+      const wanted = String(req.query.departments || "")
+        .split(",")
+        .map((d) => d.trim())
+        .filter(Boolean);
+      const report = await computeMonthlyReport(req.user, {
+        year,
+        month,
+        status: "active",
+        ...(req.query.project_id ? { project_id: req.query.project_id } : {})
+      });
+      const users: any[] = (report.users || []).filter((u: any) => !wanted.length || wanted.includes(u.department || ""));
+      const prefix = `${year}-${String(month).padStart(2, "0")}`;
+      const monthStart = `${prefix}-01`;
+      const monthEnd = `${prefix}-${String(report.days_in_month).padStart(2, "0")}`;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const from = mode === "day" ? date! : monthStart;
+      const to = mode === "day" ? date! : monthEnd < today ? monthEnd : today;
+
+      // Delay / Extreme Delay dates per login, salary month by salary month
+      // (the late policy can differ between them).
+      const delayByUser = new Map<number, Set<string>>();
+      const extremeByUser = new Map<number, Set<string>>();
+      const empRows: any[] = users.length
+        ? ((await queryDB(
+            `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id
+               FROM all_employees WHERE user_id IN (${users.map(() => "?").join(",")})`,
+            users.map((u: any) => Number(u.user_id))
+          )) || []).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId())
+        : [];
+      const empByUser = new Map<number, any>(empRows.map((e: any) => [Number(e.user_id), e]));
+      if (empRows.length && from <= to) {
+        const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, from, to);
+        const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+        let monthYear = await salaryMonthOf(from);
+        for (let i = 0; i < 3; i++) {
+          const period = await getSalaryPeriod(monthYear);
+          if (period.start > to) break;
+          const a = period.start < from ? from : period.start;
+          const b = period.end > to ? to : period.end;
+          if (a <= b) {
+            const policy = await getLatePolicyForMonth(monthYear);
+            const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(empRows, a, b, holidayMapsByGroup, branchTypeByUserId, policy);
+            for (const e of empRows) {
+              const uid = Number(e.user_id);
+              for (const d of lateDatesByEmployee.get(Number(e.id)) || []) {
+                if (!delayByUser.has(uid)) delayByUser.set(uid, new Set());
+                delayByUser.get(uid)!.add(d);
+              }
+              for (const d of extremeLateDatesByEmployee.get(Number(e.id)) || []) {
+                if (!extremeByUser.has(uid)) extremeByUser.set(uid, new Set());
+                extremeByUser.get(uid)!.add(d);
+              }
+            }
+          }
+          monthYear = shiftMonthYear(monthYear, 1);
+        }
+      }
+
+      const people = users.map((u: any) => {
+        const e = empByUser.get(Number(u.user_id)) || {};
+        const days: any[] = mode === "day" ? [u.days?.[Number(date!.slice(8, 10)) - 1]].filter(Boolean) : u.days || [];
+        let working = 0, present = 0, absent = 0, leave = 0, delay = 0, extreme = 0;
+        let checkIn: string | null = null, leaveType: string | null = null, off: string | null = null;
+        for (const d of days) {
+          if (d.future || d.before_joining) continue;
+          const isWorking = !d.day_type;
+          if (isWorking) working++;
+          if (d.present) {
+            if (isWorking) present++;
+            checkIn = d.check_in_at || checkIn;
+            const ext = extremeByUser.get(Number(u.user_id))?.has(d.date);
+            if (ext) extreme++;
+            else if (delayByUser.get(Number(u.user_id))?.has(d.date)) delay++;
+          } else if (!isWorking) off = d.holiday_title || d.day_type;
+          else if (d.leave_type) {
+            leave++;
+            leaveType = d.leave_type;
+          } else absent++;
+        }
+        return {
+          user_id: Number(u.user_id),
+          name: e.name || u.user_name,
+          employee_code: e.employee_code || "",
+          designation: e.designation || "",
+          department: u.department || "No department",
+          working,
+          present,
+          absent,
+          leave,
+          delay,
+          extreme,
+          check_in_at: mode === "day" ? checkIn : null,
+          leave_type: mode === "day" ? leaveType : null,
+          off: mode === "day" ? off : null
+        };
+      });
+
+      const byDept = new Map<string, any>();
+      for (const p of people) {
+        if (!byDept.has(p.department)) byDept.set(p.department, { department: p.department, employees: 0, working: 0, present: 0, absent: 0, leave: 0, delay: 0, extreme: 0 });
+        const t = byDept.get(p.department);
+        t.employees++;
+        for (const k of ["working", "present", "absent", "leave", "delay", "extreme"]) t[k] += p[k];
+      }
+      const pct = (t: any) => (t.working > 0 ? Math.round(((t.present + t.leave) / t.working) * 1000) / 10 : null);
+      const departments = [...byDept.values()].map((t) => ({ ...t, attendance_pct: pct(t) })).sort((a, b) => a.department.localeCompare(b.department));
+      const total: any = { employees: 0, working: 0, present: 0, absent: 0, leave: 0, delay: 0, extreme: 0 };
+      for (const t of departments) for (const k of Object.keys(total)) total[k] += t[k];
+      total.attendance_pct = pct(total);
+      res.json({ mode, date, year, month, from, to, departments, total, people });
+    } catch (err: any) {
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to load the Department Summary." });
+    }
+  });
+
   app.get("/api/attendance/report/late", authenticateToken, requireAdmin, async (req: any, res) => {
     try {
       if (!(await hasModuleLayer(req.user, "attendance_reports", "late_list"))) {

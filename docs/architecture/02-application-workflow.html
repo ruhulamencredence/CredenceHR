@@ -292,6 +292,15 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <hr />
 <h2 id="dashboard-">Dashboard-এর উপরের অংশ (কম্পিউটারে)</h2>
 <p>"Welcome back!"-এর বদলে (<code>DashboardGreeting.tsx</code>): ক্যালেন্ডারের পাতায় আজকের তারিখ, সময় অনুযায়ী শুভেচ্ছা, একটাই সার্চ বক্স (Ctrl K) — Pages (sidebar-এর নিজের মেনু, তাই যার যে পেজ খোলার অনুমতি নেই তা আসে না; <code>src/lib/navRegistry.ts</code>), People (Employee Directory, যা সবাই আগে থেকেই দেখে) আর "Waiting for you" (নিজের Approve Application তালিকা)। পাশে Check in (My Attendance কার্ডে নিয়ে যায়, check-in থাকলে Check out), + মেনুতে দ্রুত কাজ (Apply leave, New MPR entry, Book a ride, Conveyance claim, Request to HR — যার যেটা আছে)। নিচে আজকের চিপ: check-in হয়েছে কিনা ও কখন (<code>GET /api/attendance/today-summary</code> — শুধু নিজের সময়), কয়টা অনুমোদন অপেক্ষায়, কয়টা কাজের শেষ দিন আজ বা পেরিয়েছে।</p>
+<h2 id="monthly-attendance-report-department-summary">Monthly Attendance Report → Department Summary</h2>
+<p>Admin Panel → Monthly Attendance Report-এর তৃতীয় ট্যাব <strong>Department Summary</strong> (Attendance Reports module-এর layer <code>dept_summary</code>; সাধারণ পড়া, তাই layer না রাখা অ্যাকাউন্ট ডিফল্টে পায়; Superadmin সবসময়)।</p>
+<ul>
+<li><strong>One day:</strong> বাছা দিনে প্রতি department-এ কতজন Present, Absent, Leave, Delay, Extreme Delay। <strong>Whole month:</strong> মাসের প্রতিটি দিন যোগ করে (person-days), আজ পর্যন্ত।</li>
+<li>Present / Absent / Leave আসে Monthly report-এর একই হিসাব থেকে (<code>computeMonthlyReport</code>: Weekend/Holiday, Duty Roster, approved leave, joining date); Delay / Extreme Delay payroll-এর late policy থেকে (<code>computeLateDatesByEmployee</code>, salary month অনুযায়ী)। Delay-এর দিনও Present-এ গোনা। Attendance % = (Present + Leave) ÷ working days। শুধু Active কর্মী।</li>
+<li>Filter: Departments (একাধিক), Project। Department সীমা থাকা Admin শুধু নিজের department দেখেন।</li>
+<li>যেকোনো সংখ্যায় চাপলে কারা — দিনে কে কখন ঢুকেছে বা কোন ছুটি, মাসে কার কত দিন। PDF (department টেবিল) ও Excel (Summary + People শিট)।</li>
+<li>API: <code>GET /api/attendance/report/department-summary?mode=day&amp;date=</code> বা <code>mode=month&amp;year=&amp;month=</code> (<code>PayrollRoutes.ts</code>)।</li>
+</ul>
 <h2 id="management-dashboard">Management Dashboard (পুরো কোম্পানি, এক মাস)</h2>
 <p>Admin Panel → <strong>Management Dashboard</strong> (মডিউল <code>management_dashboard</code>; Module Access-এ যাকে দেওয়া হয় সে-ই দেখে, Superadmin সবসময়)। একটা read-only API (<code>GET /api/management-dashboard?month=YYYY-MM&amp;departments=…</code>, <code>ManagementDashboardRoutes.ts</code>) চালু টেবিলগুলো থেকে হিসাব করে, নিজের কোনো টেবিল নেই। মাস আর Department (একাধিক) বাছা যায়, সব সংখ্যা আগের মাসের সাথে তুলনাসহ:</p>
 <ul>

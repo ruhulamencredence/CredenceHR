@@ -54,7 +54,7 @@ interface AttendanceRouteDeps {
   getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
 }
 
-export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps) {
+export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps): { computeMonthlyReport: (user: any, query: any) => Promise<any> } {
   const {
     authenticateToken,
     requireAdmin,
@@ -836,310 +836,319 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   });
 
-  app.get("/api/attendance/report/monthly", authenticateToken, requireAdmin, requireModule("attendance_reports"), async (req: any, res) => {
-    try {
-      const year = Number(req.query.year);
-      const month = Number(req.query.month); // 1-12
-      if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-        return res.status(400).json({ error: "A valid year and month (1-12) are required." });
-      }
-      const project_id = req.query.project_id ? Number(req.query.project_id) : null;
-      const user_id = req.query.user_id ? Number(req.query.user_id) : null;
-      const department = req.query.department ? String(req.query.department).trim() : null;
-      // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
-      const empStatus = String(req.query.status || "all");
+  // The Monthly Attendance Report's numbers (one person per row, each day's
+  // status) — shared by GET /api/attendance/report/monthly and the
+  // Department Summary (PayrollRoutes.ts), so both count the same way.
+  // `query`: year, month, project_id, user_id, department, status, limit,
+  // page, slim. Throws an Error with statusCode 400/403 on bad input.
+  const computeMonthlyReport = async (user: any, query: any): Promise<any> => {
+    const year = Number(query.year);
+    const month = Number(query.month); // 1-12
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      throw Object.assign(new Error("A valid year and month (1-12) are required."), { statusCode: 400 });
+    }
+    const project_id = query.project_id ? Number(query.project_id) : null;
+    const user_id = query.user_id ? Number(query.user_id) : null;
+    const department = query.department ? String(query.department).trim() : null;
+    // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
+    const empStatus = String(query.status || "all");
 
-      // Department-wise scope (see the deps comment above). null = unrestricted.
-      // A department query param outside the caller's scope is rejected up
-      // front (400) rather than silently returning an empty/wrong report —
-      // this only ever fires for a scoped Admin/User deliberately typing
-      // another Department into the request, since the UI's own dropdown
-      // (GET /api/attendance/report/departments) already only offers
-      // Departments they're allowed to see.
-      const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
-      if (deptScope && department && !deptScope.includes(department)) {
-        return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
-      }
+    // Department-wise scope (see the deps comment above). null = unrestricted.
+    // A department query param outside the caller's scope is rejected up
+    // front (400) rather than silently returning an empty/wrong report —
+    // this only ever fires for a scoped Admin/User deliberately typing
+    // another Department into the request, since the UI's own dropdown
+    // (GET /api/attendance/report/departments) already only offers
+    // Departments they're allowed to see.
+    const deptScope = user.role === "superadmin" ? null : await getAttendanceReportDeptScope(user.id);
+    if (deptScope && department && !deptScope.includes(department)) {
+      throw Object.assign(new Error("You don't have access to this Department's Attendance Report."), { statusCode: 403 });
+    }
 
-      const monthStr = String(month).padStart(2, "0");
-      const prefix = `${year}-${monthStr}`;
-      const daysInMonth = new Date(year, month, 0).getDate();
-      const monthStart = `${prefix}-01`;
-      const todayStr = todayInDhaka();
-      const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
+    const monthStr = String(month).padStart(2, "0");
+    const prefix = `${year}-${monthStr}`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthStart = `${prefix}-01`;
+    const todayStr = todayInDhaka();
+    const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
 
-      const [projects, users] = await Promise.all([
-        queryDB("SELECT * FROM projects"),
-        queryDB("SELECT id, name, email, role, created_at FROM users")
-      ]);
-      const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
+    const [projects, users] = await Promise.all([
+      queryDB("SELECT * FROM projects"),
+      queryDB("SELECT id, name, email, role, created_at FROM users")
+    ]);
+    const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
-      // Department comes from the Employee Directory row linked to this login
-      // account (all_employees.user_id) — no department column of its own on
-      // users, same lookup pattern GET /api/leave-balances uses. This is the
-      // plain-text `department` mirror, kept in sync with the structured
-      // Department (Admin Panel -> Departments) by resolveEmployeeDepartment,
-      // so it stays correct whether that row was set via the Department
-      // dropdown or (on an older row) never migrated off free text.
-      const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
-      const departmentByUserId = new Map<number, string>();
-      const inactiveUserIds = new Set<number>();
-      for (const e of allEmployeesForDept) {
-        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
-      }
-      const statusMatches = (id: number) =>
-        empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
+    // Department comes from the Employee Directory row linked to this login
+    // account (all_employees.user_id) — no department column of its own on
+    // users, same lookup pattern GET /api/leave-balances uses. This is the
+    // plain-text `department` mirror, kept in sync with the structured
+    // Department (Admin Panel -> Departments) by resolveEmployeeDepartment,
+    // so it stays correct whether that row was set via the Department
+    // dropdown or (on an older row) never migrated off free text.
+    const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
+    const departmentByUserId = new Map<number, string>();
+    const inactiveUserIds = new Set<number>();
+    for (const e of allEmployeesForDept) {
+      if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+      if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+    }
+    const statusMatches = (id: number) =>
+      empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
-      const filteredUsers = users.filter(
-        (u: any) =>
-          (u.role === "user" || u.role === "admin") &&
-          (!user_id || u.id === user_id) &&
-          (!department || departmentByUserId.get(u.id) === department) &&
-          statusMatches(u.id) &&
-          // Department-wise scope, unfiltered-request case: `department` was
-          // already validated to be within deptScope above when given, so
-          // this only bites when the caller left the Department filter blank
-          // (wants "all Departments") but is actually scoped to a subset —
-          // narrow silently to their allowed Department(s) rather than
-          // erroring, same as leaving any other filter blank means "don't
-          // filter on this", not "you must pick one".
-          (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
+    const filteredUsers = users.filter(
+      (u: any) =>
+        (u.role === "user" || u.role === "admin") &&
+        (!user_id || u.id === user_id) &&
+        (!department || departmentByUserId.get(u.id) === department) &&
+        statusMatches(u.id) &&
+        // Department-wise scope, unfiltered-request case: `department` was
+        // already validated to be within deptScope above when given, so
+        // this only bites when the caller left the Department filter blank
+        // (wants "all Departments") but is actually scoped to a subset —
+        // narrow silently to their allowed Department(s) rather than
+        // erroring, same as leaving any other filter blank means "don't
+        // filter on this", not "you must pick one".
+        (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
+    );
+    // ?limit=&page= : one page of employees (by name), for the on-screen
+    // grid — at ~1,500 staff the whole month was ~12 MB and every
+    // person's 31 days were worked out on each open. Without limit (the
+    // PDF export, the Admin Dashboard, the Assistant) it is everyone, as
+    // before.
+    filteredUsers.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+    const limit = query.limit !== undefined ? Math.min(200, Math.max(1, Math.floor(Number(query.limit)) || 50)) : 0;
+    const total = filteredUsers.length;
+    const page = limit ? Math.min(Math.max(1, Math.floor(Number(query.page)) || 1), Math.max(1, Math.ceil(total / limit))) : 1;
+    const relevantUsers = limit ? filteredUsers.slice((page - 1) * limit, page * limit) : filteredUsers;
+    const pageUserIds = new Set<number>(relevantUsers.map((u: any) => Number(u.id)));
+
+    // Only this month's rows (idx_attendance_date) — reading the whole
+    // table every time made the report, and the Admin Dashboard that loads
+    // it, slower every day. A page reads only its own people's rows.
+    const pageIds = [...pageUserIds];
+    const rows: any[] = limit
+      ? pageIds.length
+        ? ((await queryDB(
+            `SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ? AND user_id IN (${pageIds.map(() => "?").join(",")})`,
+            [monthStart, monthEnd, ...pageIds]
+          )) || []).filter((r: any) => pageUserIds.has(Number(r.user_id)))
+        : []
+      : await queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]);
+
+    // Global Calendar (Admin Panel -> Holidays) — any date the Superadmin (or
+    // whoever's been granted the "holidays" module) has marked Weekend or
+    // Holiday here is excluded from absent_days below entirely, whether or
+    // not the person actually checked in that day.
+    // Head Office and Project-site Employees can each have their own
+    // Weekend/Holiday calendar (Admin Panel -> Holidays) — both fetched
+    // once up front, then picked per-user below via branchTypeByUserId
+    // (all_employees.branch_id -> branches.branch_type), same "resolve
+    // every user's own value once, look it up per-row" shape
+    // departmentByUserId above already uses.
+    const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+    const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+
+    const byUser = new Map<number, Map<string, any>>();
+    for (const r of rows) {
+      const dateStr = String(r.attendance_date).slice(0, 10);
+      if (!dateStr.startsWith(prefix)) continue;
+      if (project_id && Number(r.project_id) !== project_id) continue;
+      if (!byUser.has(r.user_id)) byUser.set(r.user_id, new Map());
+      byUser.get(r.user_id)!.set(dateStr, r);
+    }
+
+    // Office Attendance (ZKTeco) fallback — used ONLY to fill in a day/user
+    // that has NO Remote (GPS) attendance row at all. Remote Attendance above
+    // is never touched or overridden by this; it's purely a gap-filler so a
+    // user who skipped the GPS check-in but did punch the office biometric
+    // device isn't wrongly counted Absent. Skipped entirely when filtering by
+    // project_id, since Office Attendance has no project of its own.
+    const officeByUserDate = new Map<string, any>();
+    if (!project_id) {
+      const employees = await queryDB(
+        "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
       );
-      // ?limit=&page= : one page of employees (by name), for the on-screen
-      // grid — at ~1,500 staff the whole month was ~12 MB and every
-      // person's 31 days were worked out on each open. Without limit (the
-      // PDF export, the Admin Dashboard, the Assistant) it is everyone, as
-      // before.
-      filteredUsers.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
-      const limit = req.query.limit !== undefined ? Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50)) : 0;
-      const total = filteredUsers.length;
-      const page = limit ? Math.min(Math.max(1, Math.floor(Number(req.query.page)) || 1), Math.max(1, Math.ceil(total / limit))) : 1;
-      const relevantUsers = limit ? filteredUsers.slice((page - 1) * limit, page * limit) : filteredUsers;
-      const pageUserIds = new Set<number>(relevantUsers.map((u: any) => Number(u.id)));
-
-      // Only this month's rows (idx_attendance_date) — reading the whole
-      // table every time made the report, and the Admin Dashboard that loads
-      // it, slower every day. A page reads only its own people's rows.
-      const pageIds = [...pageUserIds];
-      const rows: any[] = limit
-        ? pageIds.length
-          ? ((await queryDB(
-              `SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ? AND user_id IN (${pageIds.map(() => "?").join(",")})`,
-              [monthStart, monthEnd, ...pageIds]
-            )) || []).filter((r: any) => pageUserIds.has(Number(r.user_id)))
-          : []
-        : await queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]);
-
-      // Global Calendar (Admin Panel -> Holidays) — any date the Superadmin (or
-      // whoever's been granted the "holidays" module) has marked Weekend or
-      // Holiday here is excluded from absent_days below entirely, whether or
-      // not the person actually checked in that day.
-      // Head Office and Project-site Employees can each have their own
-      // Weekend/Holiday calendar (Admin Panel -> Holidays) — both fetched
-      // once up front, then picked per-user below via branchTypeByUserId
-      // (all_employees.branch_id -> branches.branch_type), same "resolve
-      // every user's own value once, look it up per-row" shape
-      // departmentByUserId above already uses.
-      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
-      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
-
-      const byUser = new Map<number, Map<string, any>>();
-      for (const r of rows) {
-        const dateStr = String(r.attendance_date).slice(0, 10);
-        if (!dateStr.startsWith(prefix)) continue;
-        if (project_id && Number(r.project_id) !== project_id) continue;
-        if (!byUser.has(r.user_id)) byUser.set(r.user_id, new Map());
-        byUser.get(r.user_id)!.set(dateStr, r);
-      }
-
-      // Office Attendance (ZKTeco) fallback — used ONLY to fill in a day/user
-      // that has NO Remote (GPS) attendance row at all. Remote Attendance above
-      // is never touched or overridden by this; it's purely a gap-filler so a
-      // user who skipped the GPS check-in but did punch the office biometric
-      // device isn't wrongly counted Absent. Skipped entirely when filtering by
-      // project_id, since Office Attendance has no project of its own.
-      const officeByUserDate = new Map<string, any>();
-      if (!project_id) {
-        const employees = await queryDB(
-          "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
+      const pinByUserId = new Map<number, string>(
+        employees.filter((e: any) => pageUserIds.has(Number(e.user_id))).map((e: any) => [e.user_id, e.zk_device_pin])
+      );
+      if (pinByUserId.size > 0) {
+        const officeLogs = await queryDB(
+          // Same single-punch guard — a day with exactly one punch (e.g.
+          // today, before the person has punched Out) must report
+          // check_out_at as NULL, not the same timestamp as check_in_at.
+          `SELECT device_user_pin, DATE(punch_time) AS attendance_date,
+                  MIN(punch_time) AS check_in_at,
+                  CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at
+           FROM zk_attendance_logs
+           WHERE DATE(punch_time) BETWEEN ? AND ?
+           GROUP BY device_user_pin, DATE(punch_time)`,
+          [monthStart, monthEnd]
         );
-        const pinByUserId = new Map<number, string>(
-          employees.filter((e: any) => pageUserIds.has(Number(e.user_id))).map((e: any) => [e.user_id, e.zk_device_pin])
-        );
-        if (pinByUserId.size > 0) {
-          const officeLogs = await queryDB(
-            // Same single-punch guard — a day with exactly one punch (e.g.
-            // today, before the person has punched Out) must report
-            // check_out_at as NULL, not the same timestamp as check_in_at.
-            `SELECT device_user_pin, DATE(punch_time) AS attendance_date,
-                    MIN(punch_time) AS check_in_at,
-                    CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at
-             FROM zk_attendance_logs
-             WHERE DATE(punch_time) BETWEEN ? AND ?
-             GROUP BY device_user_pin, DATE(punch_time)`,
-            [monthStart, monthEnd]
-          );
-          const officeByPinDate = new Map<string, any>();
-          for (const o of officeLogs) {
-            officeByPinDate.set(`${o.device_user_pin}|${String(o.attendance_date).slice(0, 10)}`, o);
-          }
-          for (const [userId, pin] of pinByUserId) {
-            for (let d = 1; d <= daysInMonth; d++) {
-              const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
-              const o = officeByPinDate.get(`${pin}|${dateStr}`);
-              if (o) officeByUserDate.set(`${userId}|${dateStr}`, o);
-            }
-          }
+        const officeByPinDate = new Map<string, any>();
+        for (const o of officeLogs) {
+          officeByPinDate.set(`${o.device_user_pin}|${String(o.attendance_date).slice(0, 10)}`, o);
         }
-      }
-
-      // Joining Date per login — a day before someone joined is blank on the
-      // report, never Absent (same as a day that hasn't happened yet).
-      const joinRows = await queryDB("SELECT id, user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
-      const joiningDateByUserId = new Map<number, string>();
-      const employeeIdByUserId = new Map<number, number>();
-      for (const j of joinRows) {
-        if (j.joining_date) joiningDateByUserId.set(Number(j.user_id), String(j.joining_date).slice(0, 10));
-        employeeIdByUserId.set(Number(j.user_id), Number(j.id));
-      }
-      // Duty Roster: an Off day counts like a Weekend, a rostered shift on a
-      // Weekend/Holiday is a working day.
-      const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
-
-      // Approved leave: a working day on leave with no check-in is Leave,
-      // not Absent.
-      const leaveByUserDate = new Map<string, string>();
-      if (relevantUsers.length) {
-        const leaveRows = await queryDB(
-          `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
-            WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${relevantUsers.map(() => "?").join(",")})`,
-          [monthEnd, monthStart, ...relevantUsers.map((u: any) => u.id)]
-        );
-        for (const l of leaveRows) {
-          const start = String(l.start_date).slice(0, 10);
-          const end = String(l.end_date).slice(0, 10);
+        for (const [userId, pin] of pinByUserId) {
           for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
-            if (dateStr >= start && dateStr <= end) leaveByUserDate.set(`${l.user_id}|${dateStr}`, String(l.leave_type));
+            const o = officeByPinDate.get(`${pin}|${dateStr}`);
+            if (o) officeByUserDate.set(`${userId}|${dateStr}`, o);
           }
         }
       }
+    }
 
-      const result = relevantUsers.map((u: any) => {
-        const dayMap = byUser.get(u.id) || new Map<string, any>();
-        const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
-        const baseHolidays = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
-        const employeeId = employeeIdByUserId.get(Number(u.id));
-        const holidayMap = employeeId ? roster.holidaysFor(employeeId, baseHolidays) : baseHolidays;
-        let presentDays = 0;
-        let completeDays = 0;
-        let holidayDays = 0;
-        let absentDays = 0;
-        let leaveDays = 0;
-        const days: any[] = [];
+    // Joining Date per login — a day before someone joined is blank on the
+    // report, never Absent (same as a day that hasn't happened yet).
+    const joinRows = await queryDB("SELECT id, user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
+    const joiningDateByUserId = new Map<number, string>();
+    const employeeIdByUserId = new Map<number, number>();
+    for (const j of joinRows) {
+      if (j.joining_date) joiningDateByUserId.set(Number(j.user_id), String(j.joining_date).slice(0, 10));
+      employeeIdByUserId.set(Number(j.user_id), Number(j.id));
+    }
+    // Duty Roster: an Off day counts like a Weekend, a rostered shift on a
+    // Weekend/Holiday is a working day.
+    const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
+
+    // Approved leave: a working day on leave with no check-in is Leave,
+    // not Absent.
+    const leaveByUserDate = new Map<string, string>();
+    if (relevantUsers.length) {
+      const leaveRows = await queryDB(
+        `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
+          WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${relevantUsers.map(() => "?").join(",")})`,
+        [monthEnd, monthStart, ...relevantUsers.map((u: any) => u.id)]
+      );
+      for (const l of leaveRows) {
+        const start = String(l.start_date).slice(0, 10);
+        const end = String(l.end_date).slice(0, 10);
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
-          // A day that hasn't happened yet, or came before this person
-          // joined, is never Absent.
-          const isFuture = dateStr > todayStr;
-          const beforeJoining = !!joiningDate && dateStr < joiningDate;
-          const rec: any = dayMap.get(dateStr);
-          let hasIn = !!rec?.check_in_at;
-          let hasOut = !!rec?.check_out_at;
-          let checkInAt = rec?.check_in_at || null;
-          let checkOutAt = rec?.check_out_at || null;
-          let projectName = rec ? (projectMap.get(rec.project_id)?.project_name || null) : null;
-          let source: "remote" | "office" | null = rec ? "remote" : null;
-          // Remote (GPS) check-in/out remarks — Office (ZKTeco) punches carry
-          // no remarks field at all, so this stays null on an office-sourced day.
-          let checkInRemarks: string | null = rec?.check_in_remarks || null;
-          let checkOutRemarks: string | null = rec?.check_out_remarks || null;
-
-          // Fallback: no Remote attendance this day -> use Office Attendance if it exists.
-          if (!rec) {
-            const office = officeByUserDate.get(`${u.id}|${dateStr}`);
-            if (office) {
-              hasIn = true;
-              hasOut = !!office.check_out_at;
-              checkInAt = office.check_in_at;
-              checkOutAt = office.check_out_at;
-              projectName = null;
-              source = "office";
-            }
-          }
-
-          // Global Calendar (Weekend/Holiday) — a date set here counts toward
-          // neither presentDays nor absent_days below, even when the person
-          // didn't check in; it's not a normal working day at all.
-          const holiday = holidayMap.get(dateStr);
-          const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || null : null;
-          if (holiday) holidayDays++;
-          else if (leaveType) leaveDays++;
-          else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
-
-          if (hasIn) presentDays++;
-          if (hasIn && hasOut) completeDays++;
-          days.push({
-            date: dateStr,
-            present: hasIn,
-            check_in_at: checkInAt,
-            check_out_at: checkOutAt,
-            project_name: projectName,
-            source,
-            check_in_remarks: checkInRemarks,
-            check_out_remarks: checkOutRemarks,
-            day_type: holiday ? holiday.day_type : null,
-            holiday_title: holiday ? holiday.title : null,
-            future: isFuture,
-            before_joining: beforeJoining,
-            leave_type: leaveType
-          });
+          if (dateStr >= start && dateStr <= end) leaveByUserDate.set(`${l.user_id}|${dateStr}`, String(l.leave_type));
         }
-        return {
-          user_id: u.id,
-          user_name: u.name,
-          user_role: u.role,
-          department: departmentByUserId.get(u.id) || null,
-          present_days: presentDays,
-          complete_days: completeDays,
-          holiday_days: holidayDays,
-          absent_days: absentDays,
-          leave_days: leaveDays,
-          days
-        };
-      });
+      }
+    }
 
-      result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
-      // ?slim=dashboard : the Admin Dashboard only needs each day's Present / Absent totals
-      // (worked out here, as day_counts) and today's + yesterday's full cell per person
-      // (check-in / out times); every other day's cell is sent as null.
-      if (String(req.query.slim || "") === "dashboard") {
-        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
-        const [ty, tm, td] = todayStr.split("-").map(Number);
-        const keep = new Set<number>(ty === year && tm === month ? [td, td - 1] : []);
-        const dayCounts = Array.from({ length: daysInMonth }, (_, i) => {
-          let present = 0;
-          let absent = 0;
-          for (const u of result) {
-            const d = u.days?.[i];
-            if (!d) continue;
-            if (d.present) present++;
-            else if (!d.day_type && !d.leave_type && !d.future && !d.before_joining) absent++;
+    const result = relevantUsers.map((u: any) => {
+      const dayMap = byUser.get(u.id) || new Map<string, any>();
+      const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
+      const baseHolidays = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
+      const employeeId = employeeIdByUserId.get(Number(u.id));
+      const holidayMap = employeeId ? roster.holidaysFor(employeeId, baseHolidays) : baseHolidays;
+      let presentDays = 0;
+      let completeDays = 0;
+      let holidayDays = 0;
+      let absentDays = 0;
+      let leaveDays = 0;
+      const days: any[] = [];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
+        // A day that hasn't happened yet, or came before this person
+        // joined, is never Absent.
+        const isFuture = dateStr > todayStr;
+        const beforeJoining = !!joiningDate && dateStr < joiningDate;
+        const rec: any = dayMap.get(dateStr);
+        let hasIn = !!rec?.check_in_at;
+        let hasOut = !!rec?.check_out_at;
+        let checkInAt = rec?.check_in_at || null;
+        let checkOutAt = rec?.check_out_at || null;
+        let projectName = rec ? (projectMap.get(rec.project_id)?.project_name || null) : null;
+        let source: "remote" | "office" | null = rec ? "remote" : null;
+        // Remote (GPS) check-in/out remarks — Office (ZKTeco) punches carry
+        // no remarks field at all, so this stays null on an office-sourced day.
+        let checkInRemarks: string | null = rec?.check_in_remarks || null;
+        let checkOutRemarks: string | null = rec?.check_out_remarks || null;
+
+        // Fallback: no Remote attendance this day -> use Office Attendance if it exists.
+        if (!rec) {
+          const office = officeByUserDate.get(`${u.id}|${dateStr}`);
+          if (office) {
+            hasIn = true;
+            hasOut = !!office.check_out_at;
+            checkInAt = office.check_in_at;
+            checkOutAt = office.check_out_at;
+            projectName = null;
+            source = "office";
           }
-          return { day: i + 1, present, absent };
-        });
-        return res.json({
-          year,
-          month,
-          days_in_month: daysInMonth,
-          day_counts: dayCounts,
-          users: result.map((u: any) => ({ ...u, days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : null)) }))
+        }
+
+        // Global Calendar (Weekend/Holiday) — a date set here counts toward
+        // neither presentDays nor absent_days below, even when the person
+        // didn't check in; it's not a normal working day at all.
+        const holiday = holidayMap.get(dateStr);
+        const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || null : null;
+        if (holiday) holidayDays++;
+        else if (leaveType) leaveDays++;
+        else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
+
+        if (hasIn) presentDays++;
+        if (hasIn && hasOut) completeDays++;
+        days.push({
+          date: dateStr,
+          present: hasIn,
+          check_in_at: checkInAt,
+          check_out_at: checkOutAt,
+          project_name: projectName,
+          source,
+          check_in_remarks: checkInRemarks,
+          check_out_remarks: checkOutRemarks,
+          day_type: holiday ? holiday.day_type : null,
+          holiday_title: holiday ? holiday.title : null,
+          future: isFuture,
+          before_joining: beforeJoining,
+          leave_type: leaveType
         });
       }
-      res.json({ year, month, days_in_month: daysInMonth, users: result, ...(limit ? { total, page, limit } : {}) });
+      return {
+        user_id: u.id,
+        user_name: u.name,
+        user_role: u.role,
+        department: departmentByUserId.get(u.id) || null,
+        present_days: presentDays,
+        complete_days: completeDays,
+        holiday_days: holidayDays,
+        absent_days: absentDays,
+        leave_days: leaveDays,
+        days
+      };
+    });
+
+    result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+    // ?slim=dashboard : the Admin Dashboard only needs each day's Present / Absent totals
+    // (worked out here, as day_counts) and today's + yesterday's full cell per person
+    // (check-in / out times); every other day's cell is sent as null.
+    if (String(query.slim || "") === "dashboard") {
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const [ty, tm, td] = todayStr.split("-").map(Number);
+      const keep = new Set<number>(ty === year && tm === month ? [td, td - 1] : []);
+      const dayCounts = Array.from({ length: daysInMonth }, (_, i) => {
+        let present = 0;
+        let absent = 0;
+        for (const u of result) {
+          const d = u.days?.[i];
+          if (!d) continue;
+          if (d.present) present++;
+          else if (!d.day_type && !d.leave_type && !d.future && !d.before_joining) absent++;
+        }
+        return { day: i + 1, present, absent };
+      });
+      return {
+        year,
+        month,
+        days_in_month: daysInMonth,
+        day_counts: dayCounts,
+        users: result.map((u: any) => ({ ...u, days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : null)) }))
+      };
+    }
+    return { year, month, days_in_month: daysInMonth, users: result, ...(limit ? { total, page, limit } : {}) } as any;
+  };
+
+  app.get("/api/attendance/report/monthly", authenticateToken, requireAdmin, requireModule("attendance_reports"), async (req: any, res) => {
+    try {
+      res.json(await computeMonthlyReport(req.user, req.query));
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message });
     }
   });
 
@@ -1308,4 +1317,6 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       res.status(500).json({ error: err.message });
     }
   });
+
+  return { computeMonthlyReport };
 }

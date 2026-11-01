@@ -407,8 +407,11 @@ const EXIT_LAYER_KEYS = ["read", "exit_dues", "exit_pdf", "exit_clearance_setup"
 const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
 // Attendance Reports: "read" = the reports as they always were; "late_list"
 // = who came late on a day, by name (the Assistant's "aj ke ke late").
-// Explicit-only — the no-saved-layers default is "read" alone.
-const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
+// Explicit-only. "dept_summary" = Monthly Attendance Report -> Department
+// Summary (present / absent / leave / delay / extreme delay per department,
+// a day or a month): plain reading, so the no-saved-layers default is
+// "read" + "dept_summary".
+const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary"] as const;
 // Mail Administration (MailRoutes.ts): "read" = the list of everyone's
 // connected Credence Mail mailboxes; "mail_open" = open someone's mailbox
 // (read only); "mail_password" = see a mailbox's saved password. Both
@@ -2657,9 +2660,11 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "data_import"
             ? []
+          : moduleKey === "attendance_reports"
+            ? ["read", "dept_summary"]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2687,9 +2692,11 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "data_import"
         ? []
+      : moduleKey === "attendance_reports"
+        ? ["read", "dept_summary"]
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2861,7 +2868,7 @@ async function startServer() {
   // below via registerAttendanceRoutes(), right after the other split-out
   // modules. ZK biometric device routes (office_attendance) are unaffected
   // and still live further down in this file.
-  registerAttendanceRoutes(app, {
+  const { computeMonthlyReport } = registerAttendanceRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
@@ -2986,7 +2993,8 @@ async function startServer() {
     hasModuleLayer,
     getAdminModules,
     queryDB,
-    getAttendanceReportDeptScope
+    getAttendanceReportDeptScope,
+    computeMonthlyReport
   });
 
   // Asset Management (Employee Profile -> My Assets / New Requisition /

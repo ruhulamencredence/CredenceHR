@@ -21,6 +21,7 @@ import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ManagementDashboard } from './ManagementDashboard';
+import { DepartmentAttendanceSummary } from './DepartmentAttendanceSummary';
 import { UserEmployeeModal } from './UserEmployeeModal';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
@@ -1064,7 +1065,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // User's day-by-day Present/Absent grid for one month) and Date Wise
   // (Present vs Absent split for one specific day).
   const now = new Date();
-  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date'>('month');
+  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept'>('month');
   // Admin Panel -> Approvals has two engines side by side: the OLD single
   // global chain (ApprovalManager — its own "Queue"/"Manage Chain" views) and
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
@@ -1350,7 +1351,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     if (activeTab !== 'attendance_reports') return;
     if (attendanceReportView === 'month') fetchMonthlyReport();
-    else fetchDailyReport();
+    else if (attendanceReportView === 'date') fetchDailyReport();
     if (reportDepartments.length === 0) fetchReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, attendanceReportView]);
@@ -2945,6 +2946,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const saved = user.module_permission_layers?.hr_operations;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
+  // Attendance Reports layers (Module Access -> Monthly Attendance Report).
+  const attendanceReportsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.attendance_reports;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -4175,8 +4182,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 >
                   Date Wise
                 </button>
+                {attendanceReportsLayer('dept_summary') && (
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceReportView('dept')}
+                    className={`text-xs px-3 py-2 font-semibold transition-colors border-l border-slate-200 ${
+                      attendanceReportView === 'dept' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Department Summary
+                  </button>
+                )}
               </div>
 
+              {attendanceReportView !== 'dept' && (<>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
                 <SearchSelect
@@ -4340,10 +4359,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                 </>
               )}
+              </>)}
             </div>
           </div>
 
-          {attendanceReportView === 'month' ? (
+          {attendanceReportView === 'dept' ? (
+            <DepartmentAttendanceSummary token={token} projects={projects} departments={reportDepartments} />
+          ) : attendanceReportView === 'month' ? (
             loadingMonthlyReport && !monthlyReport ? (
               <p className="text-xs text-slate-400 text-center py-12">Loading report...</p>
             ) : monthlyReportTotal(monthlyReport) === 0 ? (

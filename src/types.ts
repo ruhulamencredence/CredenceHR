@@ -97,7 +97,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_conveyance' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_conveyance' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'dept_summary';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -199,7 +199,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // Attendance Reports -> who came late on a day, by name. Explicit only.
   attendance_reports: [
     { key: 'read', label: 'Attendance Reports' },
-    { key: 'late_list', label: 'Late list (who came late)' }
+    { key: 'late_list', label: 'Late list (who came late)' },
+    { key: 'dept_summary', label: 'Department Summary (present / absent / leave / delay by department)' }
   ],
   // Mail Administration -> open someone's mailbox (read only) and see a
   // mailbox's saved password. Both explicit only, both logged.
