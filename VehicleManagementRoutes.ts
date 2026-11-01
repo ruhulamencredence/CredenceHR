@@ -746,9 +746,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     if (!destination) throw new Error("Destination is required.");
     if (!rideDate) throw new Error("Ride date is required.");
     if (!startTime) throw new Error("Start time is required.");
+    // Picked as minutes, hours, a half day or a full day (DurationPicker.tsx),
+    // stored in hours: 5 minutes up to 10 days.
     if (!Number.isFinite(duration) || duration <= 0) {
-      throw new Error("Estimated duration must be greater than 0 hours.");
+      throw new Error("Estimated duration must be greater than 0.");
     }
+    if (duration < 5 / 60 - 0.005) throw new Error("Estimated duration must be at least 5 minutes.");
+    if (duration > 240) throw new Error("Estimated duration can be at most 240 hours (10 days).");
     const start = rideStartAt(rideDate, startTime);
     if (!start) throw new Error("Ride date or start time is not valid.");
     // A minute of slack for a form filled in right at the current time.

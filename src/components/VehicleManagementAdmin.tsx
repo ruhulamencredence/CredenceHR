@@ -36,6 +36,8 @@ import { SearchSelect } from './Combobox';
 import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 import { VehicleDriversPanel } from './VehicleDriversPanel';
 import { confirmDialog } from '../lib/confirmDialog';
+import { DurationPicker } from './DurationPicker';
+import { formatDuration } from '../lib/rideDuration';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -430,7 +432,7 @@ useLiveRefresh(() => loadRequisitions());
                 <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status === 'assigned' ? 'assigned — not started' : r.status}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+                {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
@@ -716,16 +718,12 @@ useLiveRefresh(() => loadRequisitions());
                   className="w-full border rounded px-3 py-2 text-sm"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
-                <input
-                  required
-                  type="number"
-                  min={0.5}
-                  step="0.5"
+              <div className="col-span-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration</label>
+                <DurationPicker
                   value={emergencyForm.estimated_duration_hours}
-                  onChange={(e) => setEmergencyForm({ ...emergencyForm, estimated_duration_hours: Number(e.target.value) })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  onChange={(h) => setEmergencyForm({ ...emergencyForm, estimated_duration_hours: h })}
+                  className="border rounded px-3 py-2 text-sm"
                 />
               </div>
             </div>

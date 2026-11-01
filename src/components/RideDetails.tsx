@@ -8,6 +8,7 @@
 // assignment and return, from GET /api/vehicles/requisitions/:id/trip-details),
 // plus vehicle, driver, timing, extension and approval history.
 
+import { formatDuration } from '../lib/rideDuration';
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -245,7 +246,7 @@ export function RideDetails({ requisitionId, onClose }: RideDetailsProps) {
                 <Row label="Destination" value={data.destination} />
                 <Row
                   label="Scheduled"
-                  value={`${String(data.ride_date).slice(0, 10)} at ${data.start_time} · Est. ${data.estimated_duration_hours} hr`}
+                  value={`${String(data.ride_date).slice(0, 10)} at ${data.start_time} · Est. ${formatDuration(data.estimated_duration_hours)}`}
                 />
                 <Row label="Vehicle" value={data.vehicle_no ? `${data.vehicle_model || ''} (${data.vehicle_no})` : '—'} />
                 <Row label="Driver" value={data.driver_name ? `${data.driver_name}${data.driver_mobile ? ` — ${data.driver_mobile}` : ''}` : '—'} />

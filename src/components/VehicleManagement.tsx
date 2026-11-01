@@ -11,6 +11,8 @@
 // read/write split and fetch-with-Bearer-token pattern AssetManagement.tsx
 // already uses.
 
+import { DurationPicker } from './DurationPicker';
+import { formatDuration } from '../lib/rideDuration';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
@@ -551,7 +553,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
 
   // Desktop rows/cards sit on the frosted white card; mobile keeps the glass one.
   const card = wideWeb ? RIDE_CARD : GLASS_CARD;
-  const hours = (n: number) => `${n} hr${Number(n) === 1 ? '' : 's'}`;
+  const hours = (n: number) => formatDuration(n);
   const when = (r: Requisition) => `${String(r.ride_date).slice(0, 10)} · ${r.start_time}`;
   const counts = requisitions.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {});
   const shownRides =
@@ -833,17 +835,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 <label className={RIDE_LABEL}>Start Time</label>
                 <input required type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className={RIDE_INPUT} />
               </div>
-              <div className={wideWeb ? 'col-span-2' : ''}>
-                <label className={RIDE_LABEL}>Est. Duration (hrs)</label>
-                <input
-                  required
-                  type="number"
-                  min={0.5}
-                  step="0.5"
-                  value={form.estimated_duration_hours}
-                  onChange={(e) => setForm({ ...form, estimated_duration_hours: Number(e.target.value) })}
-                  className={RIDE_INPUT}
-                />
+              <div className={wideWeb ? 'col-span-2' : 'col-span-2 sm:col-span-3'}>
+                <label className={RIDE_LABEL}>Est. Duration</label>
+                <DurationPicker value={form.estimated_duration_hours} onChange={(h) => setForm({ ...form, estimated_duration_hours: h })} className={RIDE_INPUT} />
               </div>
             </div>
             {submitMessage && <RideBanner tone="error">{submitMessage}</RideBanner>}
@@ -1318,15 +1312,11 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     className={RIDE_INPUT}
                   />
                 </div>
-                <div>
-                  <label className={RIDE_LABEL}>Est. Duration (hrs)</label>
-                  <input
-                    required
-                    type="number"
-                    min={0.5}
-                    step="0.5"
+                <div className="col-span-3">
+                  <label className={RIDE_LABEL}>Est. Duration</label>
+                  <DurationPicker
                     value={directBookForm.estimated_duration_hours}
-                    onChange={(e) => setDirectBookForm({ ...directBookForm, estimated_duration_hours: Number(e.target.value) })}
+                    onChange={(h) => setDirectBookForm({ ...directBookForm, estimated_duration_hours: h })}
                     className={RIDE_INPUT}
                   />
                 </div>
