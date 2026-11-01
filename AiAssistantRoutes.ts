@@ -2736,40 +2736,63 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!data) return res.status(400).json({ error: "No recording." });
     if (!/^audio\/(wav|x-wav|mp3|mpeg|aac|ogg|flac|webm|mp4)/.test(mime)) return res.status(400).json({ error: "Unsupported recording." });
     if (Buffer.byteLength(data, "base64") > 4 * 1024 * 1024) return res.status(400).json({ error: "রেকর্ডিং অনেক লম্বা — এক মিনিটের মধ্যে বলুন।" });
+    const bytes = Buffer.byteLength(data, "base64");
+    // A 16 kHz mono WAV is 32 000 bytes a second (other formats: unknown).
+    const secs = /wav/.test(mime) ? Math.round(Math.max(0, bytes - 44) / 32000) : null;
+    if (secs !== null && secs < 1) return res.status(400).json({ error: "কিছু শোনা যায়নি — মাইক চেপে আবার বলুন।" });
     const t0 = Date.now();
-    try {
-      // At most ~30 s in all (each model gets 20 s): the page stops waiting at 40.
-      const resp: any = await Promise.race([
-        generateWithFallback(ai, {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { inlineData: { mimeType: mime.split(";")[0], data } },
-              {
-                text:
-                  "Write down exactly what is said in this recording — a question to an HR app assistant. " +
-                  "Bangla in Bangla script, English words in English, Banglish as it is spoken. " +
-                  "Only the words, no notes or quotes. If nothing is said, answer with an empty line."
-              }
-            ]
-          }
-        ],
-        config: { temperature: 0 }
-        }),
-        new Promise<never>((_, rej) => setTimeout(() => rej(Object.assign(new Error("timeout"), { timeout: true })), 30000))
-      ]);
-      const text = String(resp?.text || "").trim().slice(0, 1000);
-      geminiWorked();
-      console.log(`AI Assistant: transcribed ${Math.round(Buffer.byteLength(data, "base64") / 1024)} KB ${mime} in ${Date.now() - t0} ms`);
-      res.json({ text });
-    } catch (err: any) {
-      if (err?.quotaExhausted) pauseGemini();
-      console.warn(`AI Assistant: transcribe failed after ${Date.now() - t0} ms (${mime}):`, err?.message || err);
-      if (err?.timeout) return res.status(504).json({ error: "উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।" });
-      if (err?.quotaExhausted) return res.status(503).json({ error: "এখন ভয়েস ব্যস্ত (Gemini-র সীমা শেষ) — কিছুক্ষণ পর চেষ্টা করুন বা লিখে প্রশ্ন করুন।" });
-      res.status(502).json({ error: "কথাটা বোঝা গেল না — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+    const deadline = t0 + 28000;
+    const prompt =
+      "Transcribe this short recording: a question to an HR app assistant. " +
+      "Bangla in Bangla script, English words in English, Banglish as it is spoken. " +
+      "Reply with only the words that were said, once — no notes, quotes or repetition. If nothing is said, reply with nothing.";
+    // Fast models first. Each try is short, the reply is capped (a model that
+    // starts repeating itself on noise or silence would otherwise run until
+    // the deadline), and "thinking" is off — writing down speech needs none.
+    const models = (process.env.GEMINI_TRANSCRIBE_MODEL || "gemini-flash-lite-latest,gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
+    const why: string[] = [];
+    let quota = 0;
+    for (const model of models) {
+      for (const withThinkingOff of [true, false]) {
+        const left = deadline - Date.now();
+        if (left < 3000) break;
+        try {
+          const resp: any = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime.split(";")[0], data } }, { text: prompt }] }],
+            config: {
+              temperature: 0,
+              maxOutputTokens: 300,
+              ...(withThinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+              httpOptions: { timeout: Math.min(14000, left) }
+            } as any
+          });
+          let text = String(resp?.text || "").replace(/\s+/g, " ").trim();
+          // A reply that repeats one phrase over and over: keep it once.
+          const rep = /^(.{4,80}?)(?:\s*\1){2,}/.exec(text);
+          if (rep) text = rep[1].trim();
+          geminiWorked();
+          console.log(`AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model} in ${Date.now() - t0} ms`);
+          return res.json({ text: text.slice(0, 1000) });
+        } catch (err: any) {
+          const msg = String(err?.message || err).slice(0, 160);
+          // This model doesn't take the "thinking off" setting: same model without it.
+          if (withThinkingOff && /thinking/i.test(msg) && /INVALID_ARGUMENT|\b400\b/.test(msg)) continue;
+          if (QUOTA.test(msg)) quota++;
+          why.push(`${model}: ${msg}`);
+          break;
+        }
+      }
     }
+    console.warn(
+      `AI Assistant: transcribe failed after ${Date.now() - t0} ms (${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? `, ${secs} s` : ""}) — ${why.join(" | ") || "no time left"}`
+    );
+    if (quota && quota === why.length) {
+      pauseGemini();
+      return res.status(503).json({ error: "এখন ভয়েস ব্যস্ত (Gemini-র সীমা শেষ) — কিছুক্ষণ পর চেষ্টা করুন বা লিখে প্রশ্ন করুন।" });
+    }
+    if (Date.now() >= deadline - 3000) return res.status(504).json({ error: "উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+    res.status(502).json({ error: "কথাটা বোঝা গেল না — আবার বলুন বা লিখে প্রশ্ন করুন।" });
   });
 
   // POST /api/assistant/speak { text } -> audio/wav: the answer read out by
