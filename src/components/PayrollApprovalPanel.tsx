@@ -18,6 +18,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PayrollPaymentVouchers } from './PayrollPaymentVouchers';
 import { LoadingBlock } from './LoadingBlock';
+import { PayrollSalarySheet } from './PayrollSalarySheet';
 
 interface ApprovalState {
   month_year: string;
@@ -84,6 +85,14 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<null | 'return' | 'pay' | 'submit' | 'approve'>(null);
+  // Salary sheet on screen (Payroll layer "approval_sheet").
+  const [canSheet, setCanSheet] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/payroll/approval-access'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanSheet(!!d?.approval_sheet))
+      .catch(() => setCanSheet(false));
+  }, [token]);
 
   const load = useCallback(() => {
     setError('');
@@ -239,6 +248,9 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
               <p className="text-[11px] text-slate-400 mt-2">While Audit has it, this month's salaries can't be generated, edited or deleted.</p>
             )}
           </div>
+
+          {/* Every employee's salary on screen, to check before approving / paying. */}
+          {canSheet && s!.runs > 0 && <PayrollSalarySheet token={token} month={month} />}
 
           {/* Bank / MFS wise payment vouchers for Accounts (the software doesn't send money). */}
           {(data.status === 'approved' || data.status === 'paid') && s!.runs > 0 && (

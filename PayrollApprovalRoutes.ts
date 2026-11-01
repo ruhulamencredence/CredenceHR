@@ -34,7 +34,7 @@ type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -297,14 +297,16 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log, edit] = await Promise.all([
+    const [audit, pay, log, edit, sheet] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
       hasModuleLayer(req.user, "payroll", "access_log"),
-      hasModuleLayer(req.user, "payroll", "read")
+      hasModuleLayer(req.user, "payroll", "read"),
+      hasModuleLayer(req.user, "payroll", "approval_sheet")
     ]);
     // edit = HR's "Payroll" layer; without it the account only views.
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit });
+    // approval_sheet = the Salary sheet table in Approval.
+    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet });
   });
 
   // ---- one month's approval state ---------------------------------------
@@ -547,6 +549,82 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // Accounts' payment sheet: each employee's net pay split over their bank /
   // MFS accounts (the run's snapshot), for the bank upload / advice.
+  // Payroll -> Approval -> Salary sheet (layer "approval_sheet"): the
+  // month's salaries on screen, one row per employee — days, earnings,
+  // deductions, net, hold and where it is paid — with last month's net
+  // beside it, so Audit / Accounts can check the sheet before approving or
+  // paying instead of only exporting it.
+  app.get("/api/payroll/approval/:month/salary-sheet", authenticateToken, requireAdmin, requireModuleLayer("payroll", "approval_sheet"), async (req: any, res: any) => {
+    try {
+      const month = String(req.params.month);
+      if (!MONTH_RE.test(month)) return bad(res, "Choose a month.");
+      const runs: any[] =
+        (await queryDB(
+          `SELECT p.*, e.name AS employee_name, e.employee_id AS employee_code, e.department, e.designation
+             FROM payrolls p JOIN all_employees e ON e.id = p.employee_id
+            WHERE p.month_year = ? ORDER BY e.name ASC`,
+          [month]
+        )) || [];
+      const [y, mo] = month.split("-").map(Number);
+      const prevMonth = `${mo === 1 ? y - 1 : y}-${String(mo === 1 ? 12 : mo - 1).padStart(2, "0")}`;
+      const prev: any[] = (await queryDB("SELECT employee_id, net_salary FROM payrolls WHERE month_year = ?", [prevMonth])) || [];
+      const prevNet = new Map<number, number>(prev.map((r: any) => [Number(r.employee_id), money(r.net_salary)]));
+      const splits: any[] = runs.length
+        ? await queryDB(`SELECT * FROM payroll_payment_splits WHERE payroll_id IN (${runs.map(() => "?").join(",")}) ORDER BY id ASC`, runs.map((r) => r.id)).catch(() => [])
+        : [];
+      const paidTo = (id: number) =>
+        splits
+          .filter((s: any) => Number(s.payroll_id) === Number(id))
+          .map((s: any) => {
+            const where = s.account_type === "mfs" ? s.provider || s.account_label || "MFS" : s.account_type === "cash" ? "Cash" : s.bank_name || s.account_label || "Bank";
+            return `${where}${s.account_number ? ` ${s.account_number}` : ""}`;
+          })
+          .join(" + ");
+      const rows = runs.map((r: any) => {
+        const last = prevNet.get(Number(r.employee_id));
+        return {
+          id: Number(r.id),
+          employee_id: Number(r.employee_id),
+          employee_code: r.employee_code || "",
+          employee_name: r.employee_name,
+          department: r.department || "",
+          designation: r.designation || "",
+          working_days: Number(r.total_working_days) || 0,
+          present_days: Number(r.present_days) || 0,
+          absent_days: Number(r.absent_days) || 0,
+          leave_days: Number(r.leave_days) || 0,
+          lwp_days: Number(r.lwp_days) || 0,
+          late_count: Number(r.late_count) || 0,
+          late_deduction_days: Number(r.late_deduction_days) || 0,
+          overtime_hours: Number(r.overtime_hours) || 0,
+          basic: money(r.basic_amount),
+          allowances: money(r.allowances_total),
+          overtime: money(r.overtime_amount),
+          bonus: money(r.bonus_amount),
+          extra_pay: money(r.item_earnings),
+          gross: money(r.gross_earned),
+          absent_deduction: money(r.absent_deduction),
+          late_deduction: money(r.late_deduction_amount),
+          tax: money(r.tax_deduction),
+          pf: money(r.pf_deduction),
+          advance: money(r.advance_deduction),
+          other_deduction: money(r.other_deduction),
+          extra_deduction: money(r.item_deductions),
+          total_deduction: money(r.total_deduction),
+          net: money(r.net_salary),
+          last_net: last ?? null,
+          status: Number(r.is_held) ? "held" : r.payment_status,
+          hold_reason: Number(r.is_held) ? r.hold_reason || null : null,
+          remarks: r.remarks || null,
+          paid_to: paidTo(r.id)
+        };
+      });
+      res.json({ month_year: month, previous_month: prevMonth, rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/payroll/approval/:month/payment-sheet", ...gate, async (req: any, res: any) => {
     try {
       const month = String(req.params.month);
