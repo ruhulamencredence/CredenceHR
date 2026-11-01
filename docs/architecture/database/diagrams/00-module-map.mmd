@@ -7,7 +7,7 @@ flowchart LR
   F["F. Claims, Conveyance & Mobile Bill<br/>(17 টেবিল)"]
   B["B. Company, Organisation & Employees<br/>(21 টেবিল)"]
   C["C. Leave<br/>(10 টেবিল)"]
-  L["L. Assets & Vehicles<br/>(9 টেবিল)"]
+  L["L. Assets & Vehicles<br/>(10 টেবিল)"]
   J["J. Documents & E-Signature<br/>(6 টেবিল)"]
   E["E. Payroll & Salary<br/>(14 টেবিল)"]
   I["I. Performance, Grievance, Exit, Targets & Tasks<br/>(16 টেবিল)"]
@@ -29,6 +29,7 @@ flowchart LR
   B -->|6 FK| E
   B -->|5 FK| H
   B -->|4 FK| J
+  B -->|1 FK| L
   B -->|1 FK| M
   G -->|1 FK| A
   I -->|1 FK| E

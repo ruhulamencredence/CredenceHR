@@ -57,6 +57,15 @@ erDiagram
     date purchase_date
     enum status
   }
+  vehicle_drivers {
+    int id PK
+    int employee_id FK
+    varchar license_no
+    varchar license_type
+    date license_expiry
+    int usual_vehicle_id
+    tinyint is_active
+  }
   vehicle_requisitions {
     int id PK
     int employee_user_id FK
@@ -66,13 +75,6 @@ erDiagram
     varchar pickup_location
     varchar destination
   }
-  vehicle_drivers {
-    int id PK
-    int employee_id FK
-    varchar license_no
-    date license_expiry
-    int usual_vehicle_id
-  }
   vehicles {
     int id PK
     varchar vehicle_no
@@ -80,6 +82,9 @@ erDiagram
     varchar vehicle_type
     enum status
     int company_id
+  }
+  all_employees {
+    int id PK
   }
   users {
     int id PK
@@ -93,7 +98,7 @@ erDiagram
   assets ||--o{ asset_requisitions : "assigned_asset_id"
   users ||--o{ asset_requisitions : "employee_user_id"
   users ||--o{ asset_requisitions : "manager_id"
-  vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
   all_employees ||--o{ vehicle_drivers : "employee_id"
+  vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
   users ||--o{ vehicle_requisitions : "driver_user_id"
   users ||--o{ vehicle_requisitions : "employee_user_id"
