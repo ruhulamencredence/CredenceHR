@@ -13,6 +13,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
@@ -187,6 +188,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // neither is an approval_requests row — see the design note on GET
 // /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
+  // Short, so it fits beside the round header buttons.
+  usePhoneHeaderTitle('Approvals');
   // Same isNativeApp split as LeaveManage.tsx / Timesheet.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this
@@ -419,16 +422,20 @@ useLiveRefresh(() => load(true));
   };
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    // Phone: no page colour of its own (the header's glow shows through)
+    // and the title sits in the header (usePhoneHeaderTitle).
+    <div className="w-full min-h-[calc(100vh-4rem)] md:bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Approve Application']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Approve Application']} onBack={onBack} />
+          </div>
         )}
 
         <ApproverSignatureCard token={token} />
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
+            <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5 text-blue-600" />
               </div>
@@ -463,6 +470,10 @@ useLiveRefresh(() => load(true));
                     }`}
                   >
                     {label}
+                    {/* Phone: the count sits here, the title row is hidden. */}
+                    {key === 'pending' && items.length > 0 && (
+                      <span className={`md:hidden ml-1.5 px-1.5 rounded-full text-[11px] ${view === key ? 'bg-white/25' : 'bg-blue-100 text-blue-700'}`}>{items.length}</span>
+                    )}
                   </button>
                 ))}
               </div>

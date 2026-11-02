@@ -181,8 +181,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const headerPageTitle = useHeaderPageTitle();
   const showMobilePageTitle = !!headerPageTitle;
   const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
-  // Timesheet / My Claims / Leave on a phone: the header blends into the
-  // page — no purple bar, round white buttons, the theme's glow behind it —
+  // Timesheet / My Claims / Leave / My Tasks / My Targets / Approve
+  // Application / Documents to Sign on a phone (BLENDED_HEADER_TITLES): the
+  // header blends into the page — no purple bar, round white buttons, the
+  // picked (or the theme's) glow behind it —
   // and turns to frosted glass once the page scrolls under it. Every other
   // page keeps the purple header (`purple`).
   const blend = transparentHeader && !!headerPageTitle && BLENDED_HEADER_TITLES.has(headerPageTitle);
@@ -326,7 +328,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <span
-              className={blend ? 'text-[19px] font-extrabold tracking-tight truncate' : 'text-base font-semibold truncate'}
+              className={blend ? `${(headerPageTitle?.length ?? 0) > 14 ? 'text-[17px]' : 'text-[19px]'} font-extrabold tracking-tight truncate` : 'text-base font-semibold truncate'}
               style={{ color: purple ? 'white' : 'var(--g-text)' }}
             >
               {headerPageTitle}

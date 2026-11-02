@@ -13,7 +13,7 @@ import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
 import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
-import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent } from '../lib/backgroundTheme';
+import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent, HEADER_GLOWS, HeaderGlowId, applyHeaderGlow, effectiveHeaderGlow } from '../lib/backgroundTheme';
 
 interface ProfilePageProps {
   user: User;
@@ -105,6 +105,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const handlePickMonoAccent = (id: MonoAccentId) => {
     applyMonoAccent(id, true);
     setMonoAccent(id);
+  };
+  // Phone page header colour (phone profile only, HeaderGlowPicker below).
+  const [headerGlow, setHeaderGlow] = useState<HeaderGlowId | null>(() => effectiveHeaderGlow(getSavedBackgroundTheme()));
+  useEffect(() => {
+    // Not picked yet -> it follows the theme, so the tick moves with it.
+    setHeaderGlow(effectiveHeaderGlow(bgTheme));
+  }, [bgTheme]);
+  const handlePickHeaderGlow = (id: HeaderGlowId) => {
+    applyHeaderGlow(id, true);
+    setHeaderGlow(id);
   };
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
@@ -275,6 +285,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             </p>
             <section className="gemini-card overflow-hidden">
               <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} />
+              <HeaderGlowPicker selected={headerGlow} onPick={handlePickHeaderGlow} />
             </section>
           </div>
 
@@ -552,6 +563,36 @@ const ProfileRow: React.FC<{
     </div>
   );
 };
+
+// "Phone page header" — the colour of the soft light behind the header of
+// the blended phone pages (Timesheet, My Claims, Leave, My Tasks…; see
+// backgroundTheme.ts HEADER_GLOWS). Per device, applied on tap.
+const HeaderGlowPicker: React.FC<{ selected: HeaderGlowId | null; onPick: (id: HeaderGlowId) => void }> = ({ selected, onPick }) => (
+  <div className="px-4 py-3.5 border-t" style={{ borderColor: 'var(--g-border)' }}>
+    <p className="text-[11px] mb-2.5" style={{ color: 'var(--g-text-muted)' }}>
+      Page header colour — Timesheet, My Claims, Leave, My Tasks, My Targets, Approve Application (Approvals), Documents to Sign.
+    </p>
+    <div className="flex items-center gap-3">
+      {HEADER_GLOWS.map((g) => {
+        const on = g.id === selected;
+        return (
+          <button key={g.id} type="button" onClick={() => onPick(g.id)} aria-label={`${g.label} page header`} aria-pressed={on} className="flex flex-col items-center gap-1.5">
+            <span
+              className="w-14 h-10 rounded-2xl flex items-center justify-center"
+              style={{
+                background: g.swatch,
+                boxShadow: on ? '0 0 0 2.5px var(--g-surface), 0 0 0 4.5px var(--g-accent)' : 'inset 0 0 0 1px rgba(0,0,0,0.06)'
+              }}
+            >
+              {on && <BadgeCheck className="w-4 h-4" style={{ color: 'var(--g-accent)' }} />}
+            </span>
+            <span className="text-[11px]" style={{ color: on ? 'var(--g-text)' : 'var(--g-text-muted)' }}>{g.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
 
 // "Appearance" row — three tappable swatches for the app's own background
 // gradient (see backgroundTheme.ts). A per-device preference (localStorage),

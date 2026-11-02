@@ -7,7 +7,7 @@ import PrivacyPolicy from './components/PrivacyPolicy.tsx';
 import VerifyPage from './components/VerifyPage.tsx';
 import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
 import type { User } from './types.ts';
-import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
+import { applyBackgroundTheme, applyHeaderGlow, getSavedBackgroundTheme, getSavedHeaderGlow } from './lib/backgroundTheme.ts';
 import { Capacitor } from '@capacitor/core';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
@@ -31,6 +31,7 @@ try {
   // not available — website look
 }
 applyBackgroundTheme(getSavedBackgroundTheme());
+applyHeaderGlow(getSavedHeaderGlow());
 
 // /chat is Chat's own standalone tab (see App.tsx's openChat, which
 // window.open()s this exact path on the web instead of showing Chat inside

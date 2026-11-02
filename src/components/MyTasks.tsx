@@ -14,12 +14,14 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ClipboardList, Plus, Send } from 'lucide-react';
 import { User } from '../types';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { api, NewTaskForm, RecurrenceList, RequestToHrForm, Task, TaskAccess, TaskCard, TaskDrawer, takePendingTaskId } from './TaskParts';
 import { LoadingBlock } from './LoadingBlock';
 
 type Tab = 'assigned' | 'requested' | 'team' | 'repeat';
 
 export const MyTasks: React.FC<{ token: string; user: User; onBack?: () => void }> = ({ token, user, onBack }) => {
+  usePhoneHeaderTitle('My Tasks');
   const isNativeApp = Capacitor.isNativePlatform();
   const [access, setAccess] = useState<TaskAccess | null>(null);
   const [data, setData] = useState<{ assigned: Task[]; requested: Task[]; team: Task[] } | null>(null);
@@ -73,9 +75,10 @@ useLiveRefresh(() => load());
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Tasks']} />}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Tasks']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />
