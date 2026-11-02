@@ -63,6 +63,9 @@ interface Ctx {
   // salary month which start day applies. Attendance questions about "this
   // month" / "salary month" use the salary month's dates, not the calendar's.
   salaryStarts: { start_day: number; effective_month: string }[];
+  // The question said "salary month" (set by localAnswer, which rewrites
+  // those words before matching).
+  salaryAsked?: boolean;
 }
 
 interface ToolResult {
@@ -1350,8 +1353,8 @@ const TOOLS: Tool[] = [
     run: async (c, args) => {
       const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
       const hm = (v: any) => (/^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v).padStart(5, "0") : "");
-      // "3 bar er beshi late" with no period = this salary month so far.
-      const from = isDate(args?.from) ? String(args.from) : Number(args?.min_count) > 0 ? salaryPeriod(c, salaryMonthOf(c, c.today)).start : c.today;
+      // "3 bar er beshi late" with no period = this month so far.
+      const from = isDate(args?.from) ? String(args.from) : Number(args?.min_count) > 0 ? `${c.today.slice(0, 7)}-01` : c.today;
       const to = isDate(args?.to) ? String(args.to) : isDate(args?.from) ? from : c.today;
       const conds: any[] = [];
       if (hm(args?.in_after)) conds.push({ field: "in_time", op: "after", value: hm(args.in_after) });
@@ -2113,23 +2116,61 @@ const TOOLS: Tool[] = [
   },
   {
     name: "employee_attendance",
-    description: "HR (Monthly Attendance Report access): one employee's attendance for a month — present, absent, holiday days, and late days when the Late list is allowed. name = part of their name; month_year 'YYYY-MM' (default this month).",
-    params: { name: { type: "string", description: "Employee name (or part of it)." }, month_year: { type: "string", description: "YYYY-MM; default this month." } },
+    description: "HR (Monthly Attendance Report access): one employee's attendance — present, absent, leave, holiday days, and late days when the Late list is allowed. name = part of their name. A calendar month by default (month_year 'YYYY-MM', default this month); when the user asks for the SALARY month, pass from / to (the salary month's dates) and salary_month instead.",
+    params: {
+      name: { type: "string", description: "Employee name (or part of it)." },
+      month_year: { type: "string", description: "Calendar month YYYY-MM; default this month." },
+      from: { type: "string", description: "Salary month start YYYY-MM-DD (only for a salary month)." },
+      to: { type: "string", description: "Salary month end YYYY-MM-DD." },
+      salary_month: { type: "string", description: "The salary month's YYYY-MM (with from / to)." }
+    },
     available: (c) => hasMod(c, "attendance_reports"),
     run: async (c, args) => {
       const q = String(args?.name || "").trim().toLowerCase();
       if (q.length < 2) return { ok: false, text: "কার হাজিরা চান? নাম লিখুন — যেমন \"Rahim-এর এ মাসের হাজিরা\"।" };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      // A salary month (from / to) can span two calendar months: each one's
+      // Monthly Attendance Report is read and only the days in range counted.
+      const ranged = isDate(args?.from) && isDate(args?.to) && String(args.from) <= String(args.to);
       const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
-      const [y, m] = ym.split("-").map(Number);
-      const r = await callApi(c.req, `/api/attendance/report/monthly?year=${y}&month=${m}`);
-      if (!r.ok) return fail(r.status);
-      const hits: any[] = (r.body?.users || []).filter((u: any) => String(u.user_name || "").toLowerCase().includes(q)).slice(0, 3);
-      if (!hits.length) return { ok: true, text: `${bnMonth(ym)}-এর রিপোর্টে "${args.name}" নামে কাউকে পাওয়া যায়নি (আপনার দেখার department-এর বাইরে হতে পারে)।`, data: { results: [] } };
+      const sm = /^\d{4}-\d{2}$/.test(String(args?.salary_month || "")) ? String(args.salary_month) : "";
+      const lastDay = (m: string) => { const [y, mo] = m.split("-").map(Number); return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`; };
+      const from = ranged ? String(args.from) : `${ym}-01`;
+      const toFull = ranged ? String(args.to) : lastDay(ym);
+      const to = toFull > c.today ? c.today : toFull;
+      const months: string[] = [];
+      for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = monthShift(m, 1)) months.push(m);
+      const people = new Map<number, { user_id: number; user_name: string; department: string; present: number; absent: number; leave: number; holiday: number }>();
+      for (const m of months) {
+        const [y, mo] = m.split("-").map(Number);
+        const r = await callApi(c.req, `/api/attendance/report/monthly?year=${y}&month=${mo}`);
+        if (!r.ok) return fail(r.status);
+        for (const u of (r.body?.users || []).filter((x: any) => String(x.user_name || "").toLowerCase().includes(q))) {
+          const k = people.get(Number(u.user_id)) || { user_id: Number(u.user_id), user_name: String(u.user_name), department: String(u.department || ""), present: 0, absent: 0, leave: 0, holiday: 0 };
+          if (!ranged) {
+            k.present += Number(u.present_days) || 0;
+            k.absent += Number(u.absent_days) || 0;
+            k.leave += Number(u.leave_days) || 0;
+            k.holiday += Number(u.holiday_days) || 0;
+          } else {
+            for (const d of u.days || []) {
+              if (!d?.date || d.date < from || d.date > to || d.future || d.before_joining) continue;
+              if (d.present) k.present++;
+              else if (d.day_type) k.holiday++;
+              else if (d.leave_type) k.leave++;
+              else k.absent++;
+            }
+          }
+          people.set(k.user_id, k);
+        }
+      }
+      const hits = [...people.values()].slice(0, 3);
+      const label = ranged ? `${sm ? `বেতনের মাস ${bnMonth(sm)}, ` : ""}${bnDate(from)} – ${bnDate(to)}` : bnMonth(ym);
+      if (!hits.length) return { ok: true, text: `${label}-এর রিপোর্টে "${args.name}" নামে কাউকে পাওয়া যায়নি (আপনার দেখার department-এর বাইরে হতে পারে)।`, data: { results: [] } };
       // Late days only through the Late list (its own layer).
       const lates = new Map<number, { delay: number; extreme: number }>();
-      const end = ym === c.today.slice(0, 7) ? c.today : `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
       let lateAllowed = true;
-      for (let d = `${ym}-01`; d <= end && lateAllowed; d = addDays(d, 1)) {
+      for (let d = from; d <= to && lateAllowed; d = addDays(d, 1)) {
         const lr = await callApi(c.req, `/api/attendance/report/late?date=${d}`);
         if (lr.status === 403) { lateAllowed = false; break; }
         for (const x of lr.body?.late || []) {
@@ -2140,14 +2181,14 @@ const TOOLS: Tool[] = [
           lates.set(h.user_id, k);
         }
       }
-      const text = `${bnMonth(ym)}-এর হাজিরা:\n` + hits.map((u) => {
+      const text = `${label}-এর হাজিরা:\n` + hits.map((u) => {
         const l = lates.get(u.user_id);
-        return `• **${u.user_name}**${u.department ? ` (${u.department})` : ""} — উপস্থিত ${bn(u.present_days)} দিন, অনুপস্থিত ${bn(u.absent_days)}, ছুটির দিন ${bn(u.holiday_days)}` +
+        return `• **${u.user_name}**${u.department ? ` (${u.department})` : ""} — উপস্থিত ${bn(u.present)} দিন, অনুপস্থিত ${bn(u.absent)}, ছুটি ${bn(u.leave)}, ছুটির দিন ${bn(u.holiday)}` +
           (lateAllowed ? `, দেরি ${bn(l?.delay || 0)}${l?.extreme ? ` (অনেক দেরি ${bn(l.extreme)})` : ""}` : "");
       }).join("\n");
       return {
         ok: true, text,
-        data: { month: ym, results: hits.map((u) => ({ name: u.user_name, department: u.department, present: u.present_days, absent: u.absent_days, holidays: u.holiday_days, ...(lateAllowed ? { late: lates.get(u.user_id)?.delay || 0, extreme_late: lates.get(u.user_id)?.extreme || 0 } : {}) })) },
+        data: { from, to, ...(sm ? { salary_month: sm } : { month: ym }), results: hits.map((u) => ({ name: u.user_name, department: u.department, present: u.present, absent: u.absent, leave: u.leave, holidays: u.holiday, ...(lateAllowed ? { late: lates.get(u.user_id)?.delay || 0, extreme_late: lates.get(u.user_id)?.extreme || 0 } : {}) })) },
         actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }]
       };
     }
@@ -3040,24 +3081,33 @@ const salaryMonthNote = (c: Ctx) => {
   const q = salaryPeriod(c, prev);
   return (
     `Salary months don't follow the calendar here: the current salary month ${cur} runs ${p.start} to ${p.end}; the previous one, ${prev}, ran ${q.start} to ${q.end}. ` +
-    `For attendance / late / absent questions, "this month", "my salary month" and "last month" mean these salary months: pass month_year (the salary month's YYYY-MM) to my_attendance_summary, and these from / to dates to the other attendance tools. Say the dates in the answer.\n`
+    `The asker's OWN attendance (my_attendance_summary, my_late_days) always counts by salary month: "this month" / "last month" there mean these salary months (month_year = the salary month's YYYY-MM; my_late_days gets these from / to). ` +
+    `Reports on OTHER people (employee_attendance, attendance_custom_report) count calendar months as the report pages do — use these salary-month dates there only when the user says "salary month" / "বেতনের মাস" (employee_attendance: from, to, salary_month). Say the dates in the answer.\n`
   );
 };
 
-// Attendance questions: a month means a SALARY month (Payroll -> Salary month
-// setting) — "this month" / "salary month" = the one today is in, "last
-// month" the one before, "october" = the October salary month. A day, a week
-// or a year stays as periodOf reads it.
-const attPeriodOf = (t: string, c: Ctx): { from?: string; to?: string; month?: string; date?: string; month_year?: string; salary_month?: string } => {
+// Attendance questions and SALARY months (Payroll -> Salary month setting).
+//   own — the asker's own attendance: a month is always a salary month, as
+//         My Attendance has always counted it.
+//   hr  — reports on others (Monthly Attendance, Report Builder): a month is
+//         the calendar month, as the report pages count it, unless the
+//         question says "salary month" — then Payroll's dates.
+// "this month" = the salary month today is in, "last month" the one before,
+// "october" = the October salary month. A day, a week or a year stays as
+// periodOf reads it.
+const salaryAskedIn = (t: string, c: Ctx) => !!c.salaryAsked || hasAny(t, SALARY_MONTH);
+const attPeriodOf = (t: string, c: Ctx, scope: "own" | "hr" = "own"): { from?: string; to?: string; month?: string; date?: string; month_year?: string; salary_month?: string } => {
+  if (scope === "hr" && !salaryAskedIn(t, c)) return periodOf(t, c);
   const cur = salaryMonthOf(c, c.today);
   const whole = (ym: string) => {
     const p = salaryPeriod(c, ym);
     return { from: p.start, to: p.end > c.today ? c.today : p.end, month: ym, month_year: ym, salary_month: ym };
   };
-  if (hasAny(t, LAST_MONTH)) return whole(monthShift(cur, -1));
-  if (hasAny(t, THIS_MONTH) || hasAny(t, SALARY_MONTH)) return whole(cur);
+  if (hasAny(t, LAST_MONTH) || /(goto|gato|last|previous|ager|আগের|গত)\s*(salary|স্যালারি|বেতন|beton|payroll)/.test(t)) return whole(monthShift(cur, -1));
+  if (hasAny(t, THIS_MONTH)) return whole(cur);
   const p = periodOf(t, c);
   if (p.month && !p.date) return whole(p.month);
+  if (salaryAskedIn(t, c)) return whole(cur);
   return p;
 };
 
@@ -3081,7 +3131,7 @@ const INTENTS: Intent[] = [
   reportIntent("remote_attendance", ["remote attendance report", "gps attendance", "remote check in report"]),
   reportIntent("leave_applications", ["leave application report", "ছুটির আবেদনের রিপোর্ট"]),
   { tool: "attendance_custom_report", keys: ["er pore ke ke asche", "এর পরে কে কে এসেছে", "er age ke ber", "এর আগে কে বের", "check out den nai", "চেক আউট দেয়নি", "ghontar kom kaj", "ঘণ্টার কম কাজ", "bar er beshi late", "বারের বেশি দেরি", "custom attendance report", "attendance report builder"],
-    args: (t, c) => ({ ...parseAttendanceQuestion(t), ...attPeriodOf(t, c) }) },
+    args: (t, c) => ({ ...parseAttendanceQuestion(t), ...attPeriodOf(t, c, "hr") }) },
   { tool: "attendance_department_summary", keys: ["department summary", "department wise attendance", "department onujayi hajira", "বিভাগ অনুযায়ী হাজিরা", "department e koto absent", "department wise absent", "ডিপার্টমেন্ট অনুযায়ী"],
     args: (t, c) => { const p = periodOf(t, c); return p.date ? { date: p.date } : p.month ? { month: p.month } : hasAny(t, ["mas", "month", "মাস"]) ? { month: c.today.slice(0, 7) } : {}; } },
   { tool: "payroll_month_comparison", keys: ["salary comparison", "beton er tulona", "বেতনের তুলনা", "salary difference", "beton keno barlo", "ager maser sathe beton", "বেতন কেন বাড়ল", "বেতন কেন কমল", "payroll comparison"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
@@ -3142,7 +3192,11 @@ const INTENTS: Intent[] = [
   { tool: "employee_leave_balance", keys: [" er chuti koto", " er leave balance", "এর ছুটি কত", "-এর ছুটি কত", " er koto chuti", "এর কত ছুটি", " er chuti baki", "এর ছুটি বাকি"],
     args: (t) => ({ name: nameBefore(t) }) },
   { tool: "employee_attendance", keys: [" er hajira", "এর হাজিরা", "-এর হাজিরা", " er attendance", "এর attendance", " er present", "koydin absent", "কয়দিন অনুপস্থিত", " er late", "এর দেরি"],
-    args: (t, c) => ({ name: nameBefore(t), month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined }) },
+    args: (t, c) => {
+      // "Nasrin er salary month er hajira": Payroll's dates; else the calendar month.
+      const p = attPeriodOf(t, c, "hr");
+      return p.salary_month ? { name: nameBefore(t), from: p.from, to: p.to, salary_month: p.salary_month } : { name: nameBefore(t), month_year: p.month || (hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined) };
+    } },
   { tool: "stuck_applications", keys: ["atke ache", "আটকে আছে", "stuck", "din dhore pending", "দিন ধরে পেন্ডিং", "din dhore pore", "অনেকদিন পড়ে", "onekdin pending", "3 din", "৩ দিন"],
     args: (t) => { const n = /(\d{1,2})\s*(?:din|দিন|days?)/.exec(toAsciiDigits(t))?.[1]; return { days: n ? Number(n) : 3 }; } },
   { tool: "exits_overview", keys: ["ke ke chole jacche", "কে কে চলে যাচ্ছে", "exit list", "exit koyta", "কয়টা exit", "offboarding", "অফবোর্ডিং", "resign koreche", "রিজাইন করেছে", "kar clearance", "কার clearance", "settlement baki", "সেটেলমেন্ট বাকি", "last working day ke"] },
@@ -3253,7 +3307,11 @@ const wantsAttendanceQuery = (t: string, raw: string) => {
   const att = /(asche|asc?he|এসেছে|আসছে|eseche|esheche|ber|বের|out|আউট|in time|ইন টাইম|attendance|হাজিরা|hajira|late|দেরি|deri|লেট|absent|অনুপস্থিত|check ?out|check ?in|overtime|ওভারটাইম|ghonta|ঘণ্টা|hours?|chole|চলে|left|came|arrive|ঢুক|dhuk)/.test(t);
   if (!att) return false;
   const p = parseAttendanceQuestion(raw);
-  return !!(p.in_after || p.in_before || p.out_before || p.out_after || p.missing_out || p.min_hours || p.max_hours || p.overtime || p.early_leave || p.min_count || p.group_by || (p.department && (p.status || p.late)));
+  // "goto maser kara late / absent chilo": who, over a month — a list of
+  // people (a single day stays with the day's own late / absent answers).
+  const who = hasAny(t, ["kara", "কারা", "ke ke", "কে কে", "kon kon", "কোন কোন", "who "]);
+  const overMonth = hasAny(t, LAST_MONTH) || hasAny(t, THIS_MONTH) || hasAny(t, SALARY_MONTH);
+  return !!(p.in_after || p.in_before || p.out_before || p.out_after || p.missing_out || p.min_hours || p.max_hours || p.overtime || p.early_leave || p.min_count || p.group_by || (p.department && (p.status || p.late)) || (who && overMonth && (p.late || p.status)));
 };
 // Starting / ending a Movement Claim ("movement check in koro", "client
 // visit e jacchi movement", "pouche gechi movement check out") — not asking
@@ -3286,7 +3344,7 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   if (wantsAttendanceQuery(t, message) && !asksHow) {
     const tool = TOOLS.find((x) => x.name === "attendance_custom_report")!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
-    const r = await tool.run(c, { ...parseAttendanceQuestion(message), ...attPeriodOf(t, c) });
+    const r = await tool.run(c, { ...parseAttendanceQuestion(message), ...attPeriodOf(t, c, "hr") });
     return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
   }
   // "client visit e jacchi movement check in koro" -> a Movement Claim card
@@ -3340,7 +3398,11 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     if (kind) {
       const tool = TOOLS.find((x) => x.name === kind)!;
       if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
-      const r = await tool.run(c, { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined });
+      // The same period rules as the intent (calendar month; Payroll's dates
+      // when "salary month" is said).
+      const intent = INTENTS.find((i) => i.tool === kind);
+      const args = kind === "employee_attendance" && intent?.args ? { ...intent.args(t, c), name: other } : { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined };
+      const r = await tool.run(c, args);
       return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
     }
   }
@@ -3437,8 +3499,13 @@ async function localAnswer(c: Ctx, message: string, history: { role: string; tex
   // "amar salary month er attendance" is about attendance in the salary
   // month we are in, not about Payroll: read it as "ei maser attendance"
   // (attPeriodOf turns "ei mas" into the salary month's dates).
-  if (hasAny(norm(message), SALARY_MONTH) && /(attendance|hajira|হাজিরা|present|absent|late|deri|দেরি|লেট|উপস্থিত|অনুপস্থিত|এটেন্ডেন্স|অ্যাটেনডেন্স|in time|out time)/i.test(message)) {
-    message = message.replace(/(salary|স্যালারি|বেতনের|বেতন|beton\s*er|betoner|payroll)\s*(month|mash|mas|মাস|মান্থ)(\s*(er|এর))?/gi, " ei maser ").replace(/\s+/g, " ").trim();
+  if (hasAny(norm(message), SALARY_MONTH) && /(attendance|hajira|হাজিরা|present|absent|late|deri|দেরি|লেট|উপস্থিত|অনুপস্থিত|এটেন্ডেন্স|অ্যাটেনডেন্স|in time|out time|check ?in|check ?out|চেক ইন|চেক আউট|overtime|ওভারটাইম|ghonta|ঘণ্টা|asche|এসেছে|ber hoy|বের)/i.test(message)) {
+    // "goto / last / আগের salary month" -> the salary month before.
+    message = message
+      .replace(/(goto|gato|last|previous|ager|আগের|গত)?\s*(salary|স্যালারি|বেতনের|বেতন|beton\s*er|betoner|payroll)\s*(month|mash|mas|মাস|মান্থ)(\s*(er|এর))?/gi, (_m, prev) => (prev ? " gotomaser " : " ei maser "))
+      .replace(/\s+/g, " ")
+      .trim();
+    c = { ...c, salaryAsked: true };
   }
   const t = norm(message);
   // A question that is (nearly) one Gemini answered, or a built-in example,
