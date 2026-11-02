@@ -315,8 +315,14 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                   JPEG or PNG, at least 800×800px and less than 5MB
                 </p>
                 {data.photo_needs_approval && (
-                  <button type="button" onClick={() => setRulesOpen(true)} className="mt-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11.5px] bg-violet-50 text-violet-800">
-                    🛡️ নতুন ছবি Superadmin অনুমোদন দিলে বসবে · <span className="underline font-semibold">ছবির নিয়ম</span>
+                  <button
+                    type="button"
+                    onClick={() => setRulesOpen(true)}
+                    className="mt-2 inline-block rounded-2xl px-3 py-1.5 text-[11.5px] font-semibold leading-snug text-center border"
+                    // Blue on purpose, as fixed colours: the app theme recolours Tailwind's blue.
+                    style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
+                  >
+                    New photo shows after Superadmin approval · <u className="font-bold whitespace-nowrap">Photo rules</u>
                   </button>
                 )}
                 <PhotoRulesSheet
