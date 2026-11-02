@@ -19,7 +19,6 @@ import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil a
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
-import { CHAT_CONVERSATION_BACKGROUND } from '../../lib/backgroundTheme';
 import type { ChatMessage, ChatReaction, ChatRoom, ChatDirectoryUser } from '../../types';
 import { UserAvatar } from '../UserAvatar';
 
@@ -31,11 +30,13 @@ const DOODLE =
 
 export const CHAT_WALLPAPERS: { id: string; label: string; css: string; swatch: string }[] = [
   {
-    // The look Chat always had: Frosted Glass under a soft lavender wash.
-    id: 'frosted',
-    label: 'Frosted',
-    swatch: '#ece6fb',
-    css: `radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.22), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.3), transparent 65%), linear-gradient(180deg, rgba(253,252,255,0.86), rgba(245,240,255,0.86)), ${CHAT_CONVERSATION_BACKGROUND}`
+    // The default: an almost white page with a soft lavender wash in two
+    // corners. (Replaced "Frosted", the Frosted Glass look, which was
+    // removed; a chat still saved as "frosted" shows this one.)
+    id: 'soft',
+    label: 'Soft',
+    swatch: '#f1ecfd',
+    css: 'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.28), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.4), transparent 65%), linear-gradient(180deg, #fdfcff 0%, #f5f0ff 100%)'
   },
   { id: 'doodle', label: 'Doodle', swatch: '#efeae2', css: `${DOODLE} 0 0 / 140px 140px repeat, #efeae2` },
   { id: 'plain', label: 'Plain', swatch: '#f4f4f5', css: '#f4f4f5' },
@@ -64,7 +65,7 @@ export const WallpaperPicker: React.FC<{ token: string; roomId: number; current?
       setBusy(false);
     }
   };
-  const on = current || 'frosted';
+  const on = CHAT_WALLPAPERS.some((w) => w.id === current) ? current : CHAT_WALLPAPERS[0].id;
   return (
     <div className="px-4 py-3">
       <div className="text-xs font-semibold uppercase text-slate-400 mb-2 flex items-center gap-2">

@@ -1294,8 +1294,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               }}
             />
             {/* The account's wallpaper for this chat (Contact / Group info ->
-                Chat wallpaper); "Frosted" — faint Frosted Glass under a soft
-                lavender wash — when none is picked. */}
+                Chat wallpaper); "Soft" — a soft lavender wash — when none is
+                picked. */}
             <div
               ref={messagesContainerRef}
               className="flex-1 overflow-y-auto p-4 space-y-2"

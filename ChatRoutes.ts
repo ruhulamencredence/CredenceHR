@@ -1021,7 +1021,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // PUT /api/chat/rooms/:id/wallpaper — { wallpaper, forAll } this
   // account's background for one conversation, or (forAll) its default for
   // every chat (clears the per-chat ones). wallpaper null = back to default.
-  const WALLPAPERS = new Set(["frosted", "doodle", "plain", "mint", "sky", "blush", "lavender", "sand", "slate"]);
+  const WALLPAPERS = new Set(["soft", "doodle", "plain", "mint", "sky", "blush", "lavender", "sand", "slate"]);
   app.put("/api/chat/rooms/:id/wallpaper", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
