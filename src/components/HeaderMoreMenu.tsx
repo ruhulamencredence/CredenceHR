@@ -82,7 +82,10 @@ export const HeaderMoreMenu: React.FC<{
       {open &&
         createPortal(
           <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="More">
-            <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => setOpen(false)} />
+            {/* Clear, not the usual dimmed/blurred liquid-glass-backdrop: the
+                page stays sharp behind this small menu (asked for). A tap
+                anywhere outside the card still closes it. */}
+            <div className="absolute inset-0" onClick={() => setOpen(false)} />
             {/* Positioned by this wrapper — .liquid-glass sets position: relative. */}
             <div className="absolute right-3 w-[min(280px,calc(100vw-24px))]" style={{ top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 60px)' }}>
               <div className="liquid-glass liquid-glass-in rounded-[32px] rounded-tr-md p-2">
