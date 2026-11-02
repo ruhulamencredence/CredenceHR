@@ -172,6 +172,58 @@ function loadVoices(): Promise<SpeechSynthesisVoice[]> {
 async function deviceVoice(lang: 'bn' | 'en'): Promise<SpeechSynthesisVoice | null> {
   return (await loadVoices()).find((v) => v.lang?.toLowerCase().startsWith(lang)) || null;
 }
+
+// ---- which voice ------------------------------------------------------------
+// Each person picks a voice in the Assistant (the 🔊 button); it is kept on
+// this device. "auto" = the phone's own voice when it has one for the
+// language, else Gemini's default. "device:<id>" = one of the phone's Bangla
+// voices. "gemini:<Name>" = that Gemini voice (the server accepts only the
+// names below — AiAssistantRoutes.ts TTS_VOICES).
+export type VoicePref = string;
+export const GEMINI_VOICES: { name: string; label: string; desc: string }[] = [
+  { name: 'Aoede', label: 'মিষ্টি ও প্রাণবন্ত', desc: 'নারী কণ্ঠ' },
+  { name: 'Leda', label: 'তরুণ ও হাসিখুশি', desc: 'নারী কণ্ঠ' },
+  { name: 'Despina', label: 'নরম ও মসৃণ', desc: 'নারী কণ্ঠ' },
+  { name: 'Sulafat', label: 'উষ্ণ ও আন্তরিক', desc: 'নারী কণ্ঠ' },
+  { name: 'Achernar', label: 'কোমল', desc: 'নারী কণ্ঠ' },
+  { name: 'Vindemiatrix', label: 'শান্ত ও ভদ্র', desc: 'নারী কণ্ঠ' },
+  { name: 'Callirrhoe', label: 'সহজ ও স্বাভাবিক', desc: 'নারী কণ্ঠ' },
+  { name: 'Zephyr', label: 'উজ্জ্বল', desc: 'নারী কণ্ঠ' },
+  { name: 'Kore', label: 'দৃঢ় ও স্পষ্ট (আগের)', desc: 'নারী কণ্ঠ' },
+  { name: 'Achird', label: 'বন্ধুসুলভ', desc: 'পুরুষ কণ্ঠ' },
+  { name: 'Puck', label: 'উচ্ছ্বসিত', desc: 'পুরুষ কণ্ঠ' },
+  { name: 'Algieba', label: 'মসৃণ', desc: 'পুরুষ কণ্ঠ' },
+  { name: 'Umbriel', label: 'সহজ ও শান্ত', desc: 'পুরুষ কণ্ঠ' },
+  { name: 'Sadachbia', label: 'প্রাণবন্ত', desc: 'পুরুষ কণ্ঠ' },
+  { name: 'Charon', label: 'তথ্যবহুল, গম্ভীর', desc: 'পুরুষ কণ্ঠ' }
+];
+const PREF_KEY = 'credence_assistant_voice';
+export function getVoicePref(): VoicePref {
+  try {
+    return localStorage.getItem(PREF_KEY) || 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+export function setVoicePref(v: VoicePref) {
+  try {
+    localStorage.setItem(PREF_KEY, v);
+  } catch {
+    /* kept for this visit only */
+  }
+}
+// The phone's / computer's own Bangla voices (Android's Google voice has a
+// few; iPhone has none).
+export async function deviceBanglaVoices(): Promise<{ id: string; label: string }[]> {
+  return (await loadVoices())
+    .filter((v) => v.lang?.toLowerCase().startsWith('bn'))
+    .map((v) => ({ id: v.voiceURI || v.name, label: v.name }));
+}
+// A short sentence in the picked voice, so people can hear it before choosing.
+export const SAMPLE_TEXT = 'আসসালামু আলাইকুম! আমি Credence Assistant। আপনার ছুটি, হাজিরা বা যেকোনো প্রশ্নে আমি সাহায্য করতে পারি।';
+export function previewVoice(pref: VoicePref, token: string, onPlaying?: () => void): Promise<void> {
+  return speak(SAMPLE_TEXT, token, onPlaying, pref);
+}
 // Warm the voice list up early (the Assistant calls this when it opens).
 export function prepareVoices() {
   void loadVoices();
@@ -196,8 +248,9 @@ function splitForSpeech(text: string): string[] {
   return out;
 }
 const clipCache = new Map<string, Promise<Blob>>();
-function fetchClip(text: string, token: string): Promise<Blob> {
-  const hit = clipCache.get(text);
+function fetchClip(text: string, token: string, voice: string): Promise<Blob> {
+  const key = `${voice}|${text}`;
+  const hit = clipCache.get(key);
   if (hit) return hit;
   // Never wait more than 50 s for a piece (the server stops trying at ~40).
   const ctl = new AbortController();
@@ -205,7 +258,7 @@ function fetchClip(text: string, token: string): Promise<Blob> {
   const p = fetch(apiUrl('/api/assistant/speak'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(voice ? { voice } : {}) }),
     signal: ctl.signal
   })
     .then(async (r) => {
@@ -213,8 +266,8 @@ function fetchClip(text: string, token: string): Promise<Blob> {
       return r.blob();
     })
     .finally(() => clearTimeout(timer));
-  p.catch(() => clipCache.delete(text));
-  clipCache.set(text, p);
+  p.catch(() => clipCache.delete(key));
+  clipCache.set(key, p);
   if (clipCache.size > 60) clipCache.delete(clipCache.keys().next().value as string);
   return p;
 }
@@ -301,13 +354,21 @@ function playBlob(blob: Blob, id: number): Promise<void> {
 // Reads `text` aloud; resolves when it has finished (or was stopped).
 // onPlaying fires when sound actually starts (the button shows "loading"
 // until then).
-export async function speak(text: string, token: string, onPlaying?: () => void): Promise<void> {
+export async function speak(text: string, token: string, onPlaying?: () => void, pref: VoicePref = getVoicePref()): Promise<void> {
   stopSpeaking();
   const id = playId;
   const words = speakableText(text);
   if (!words) return;
   const lang = isBangla(words) ? 'bn' : 'en';
-  const voice = await deviceVoice(lang);
+  const gemini = pref.startsWith('gemini:') ? pref.slice(7) : '';
+  let voice: SpeechSynthesisVoice | null = null;
+  if (!gemini) {
+    const all = await loadVoices();
+    const picked = pref.startsWith('device:') ? all.find((v) => (v.voiceURI || v.name) === pref.slice(7)) : undefined;
+    // A picked phone voice reads only its own language; anything else uses
+    // the phone's voice for that language.
+    voice = picked && picked.lang?.toLowerCase().startsWith(lang) ? picked : await deviceVoice(lang);
+  }
   if (id !== playId) return;
   if (voice) {
     await new Promise<void>((resolve) => {
@@ -325,12 +386,12 @@ export async function speak(text: string, token: string, onPlaying?: () => void)
   const parts = splitForSpeech(words);
   // Ask for the first two pieces at once; each later one while the one
   // before it plays.
-  const clips = parts.map((_, i) => (i < 2 ? fetchClip(parts[i], token) : null));
+  const clips = parts.map((_, i) => (i < 2 ? fetchClip(parts[i], token, gemini) : null));
   for (let i = 0; i < parts.length; i++) {
     if (id !== playId) return;
-    const blob = await (clips[i] || fetchClip(parts[i], token));
+    const blob = await (clips[i] || fetchClip(parts[i], token, gemini));
     if (id !== playId) return;
-    if (i + 2 < parts.length && !clips[i + 2]) clips[i + 2] = fetchClip(parts[i + 2], token);
+    if (i + 2 < parts.length && !clips[i + 2]) clips[i + 2] = fetchClip(parts[i + 2], token, gemini);
     if (i === 0) onPlaying?.();
     await playBlob(blob, id);
   }

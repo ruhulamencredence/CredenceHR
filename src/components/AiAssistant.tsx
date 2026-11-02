@@ -19,7 +19,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarCheck, Car, CheckCircle2, Clock, MapPin, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
-import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64, unlockAudio } from '../lib/assistantVoice';
+import { GEMINI_VOICES, MAX_RECORD_SECONDS, deviceBanglaVoices, getVoicePref, prepareVoices, previewVoice, setVoicePref, speak, startRecording, stopRecording, stopSpeaking, toWavBase64, unlockAudio } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
@@ -528,6 +528,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   // Voice: allowed for this account (status.voice), recording / writing-down
   // state, and which answer is being read aloud.
   const [voice, setVoice] = useState(false);
+  const [voicePicker, setVoicePicker] = useState(false);
   const [recState, setRecState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
   const [recSecs, setRecSecs] = useState(0);
   const [voiceErr, setVoiceErr] = useState('');
@@ -875,6 +876,15 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
             close. On a computer the page stays sharp and usable next to the
             Assistant — no backdrop at all. */}
         <div className="md:hidden fixed inset-0 z-[80] liquid-glass-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
+        {voicePicker && (
+          <VoicePicker
+            token={token}
+            onClose={() => {
+              stopSpeaking();
+              setVoicePicker(false);
+            }}
+          />
+        )}
         {/* With the keyboard open the sheet sits right on top of it and is
             only as tall as what is left below the status bar, so the message
             box never goes under the keyboard (useKeyboardInset). */}
@@ -899,6 +909,17 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
               <div className="min-w-0 flex-1">
                 <h3 className="text-base font-bold text-slate-900 leading-tight">{view === 'bot' ? 'Credence Assistant' : view === 'live' ? 'Live support' : 'Support inbox'}</h3>
               </div>
+              {view === 'bot' && voice && (
+                <button
+                  type="button"
+                  onClick={() => setVoicePicker(true)}
+                  title="কণ্ঠ বদলান"
+                  aria-label="Choose voice"
+                  className="liquid-glass-chip p-1.5 text-slate-600 hover:text-slate-900 rounded-full"
+                >
+                  <Volume2 className="w-4 h-4" />
+                </button>
+              )}
               {view === 'bot' && msgs.length > 0 && (
                 <button
                   type="button"
@@ -1125,6 +1146,93 @@ export default AiAssistant;
 // ---- the phone edge tab ------------------------------------------------------
 const TAB_KEY = 'credence_assistant_tab_y';
 const TAB_H = 48;
+
+// The 🔊 button in the Assistant's header: pick the voice answers are read
+// in, hear each one first. Kept on this device (lib/assistantVoice.ts).
+const VoicePicker: React.FC<{ token: string; onClose: () => void }> = ({ token, onClose }) => {
+  const [pref, setPref] = useState(getVoicePref());
+  const [device, setDevice] = useState<{ id: string; label: string }[]>([]);
+  const [playing, setPlaying] = useState<{ id: string; loading: boolean } | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    void deviceBanglaVoices().then(setDevice);
+  }, []);
+  const choose = (v: string) => {
+    setPref(v);
+    setVoicePref(v);
+  };
+  const play = async (v: string) => {
+    if (playing?.id === v) {
+      stopSpeaking();
+      setPlaying(null);
+      return;
+    }
+    unlockAudio(); // inside the tap (iPhone)
+    setErr('');
+    setPlaying({ id: v, loading: true });
+    try {
+      await previewVoice(v, token, () => setPlaying((p) => (p?.id === v ? { id: v, loading: false } : p)));
+    } catch {
+      setErr('কণ্ঠটা শোনানো গেল না — একটু পরে আবার চেষ্টা করুন।');
+    } finally {
+      setPlaying((p) => (p?.id === v ? null : p));
+    }
+  };
+  const Row: React.FC<{ id: string; title: string; sub: string }> = ({ id, title, sub }) => (
+    <div className={`flex items-center gap-2 rounded-2xl px-3 py-2 ${pref === id ? 'bg-violet-100/80 ring-1 ring-violet-300' : ''}`}>
+      <button type="button" onClick={() => choose(id)} aria-pressed={pref === id} className="flex-1 min-w-0 flex items-center gap-2.5 text-left">
+        <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${pref === id ? 'border-violet-600 bg-violet-600 shadow-[inset_0_0_0_3px_white]' : 'border-slate-300'}`} />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-slate-800 truncate">{title}</span>
+          <span className="block text-[11px] text-slate-500 truncate">{sub}</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => void play(id)}
+        aria-label={playing?.id === id ? 'Stop' : `Listen to ${title}`}
+        className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-violet-700"
+      >
+        {playing?.id === id ? playing.loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3 h-3" /> : <Volume2 className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+  return (
+    <>
+      <div className="fixed inset-0 z-[90] liquid-glass-backdrop" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-[91] flex items-end sm:items-center justify-center p-3 pointer-events-none">
+        <div role="dialog" aria-label="Choose voice" className="pointer-events-auto liquid-glass liquid-glass-in rounded-[32px] w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
+          <div className="flex items-center gap-3 px-5 pt-5 pb-2">
+            <span className="liquid-glass-inset w-10 h-10 rounded-2xl flex items-center justify-center text-violet-700 shrink-0">
+              <Volume2 className="w-5 h-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-bold text-slate-900 leading-tight">কণ্ঠ বেছে নিন</h3>
+              <p className="text-[11px] text-slate-500">🔊 চেপে শুনে দেখুন, পছন্দেরটায় টিক দিন</p>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip p-1.5 text-slate-600 rounded-full">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="overflow-y-auto px-3 pb-2 space-y-1">
+            <Row id="auto" title="ফোনের নিজের কণ্ঠ (স্বয়ংক্রিয়)" sub="সাথে সাথে বাজে; ফোনে বাংলা কণ্ঠ না থাকলে নিচের ডিফল্ট" />
+            {device.length > 1 && device.map((d, i) => <Row key={d.id} id={`device:${d.id}`} title={`ফোনের কণ্ঠ ${i + 1}`} sub={d.label} />)}
+            <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Gemini-র কণ্ঠ (আরও স্বাভাবিক, আসতে ২–৩ সেকেন্ড)</p>
+            {GEMINI_VOICES.map((g) => (
+              <Row key={g.name} id={`gemini:${g.name}`} title={g.label} sub={`${g.desc} · ${g.name}`} />
+            ))}
+          </div>
+          {err && <p className="px-5 text-xs text-rose-600">{err}</p>}
+          <div className="p-4 pt-2">
+            <button type="button" onClick={onClose} className="liquid-glass-button rounded-full w-full py-2.5 text-sm font-semibold">
+              ঠিক আছে
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
 
 const EdgeTab: React.FC<{ count: number; onOpen: () => void }> = ({ count, onOpen }) => {
   const scrolling = useScrolling();

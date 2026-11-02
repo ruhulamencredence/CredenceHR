@@ -3959,6 +3959,9 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     return ttsModels;
   };
   const ttsCache = new Map<string, { at: number; wav: Buffer }>();
+  // The voices a person may pick in the Assistant (src/lib/assistantVoice.ts
+  // shows the same list); anything else falls back to GEMINI_TTS_VOICE.
+  const TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Despina", "Callirrhoe", "Sulafat", "Achernar", "Vindemiatrix", "Zephyr", "Puck", "Achird", "Charon", "Algieba", "Umbriel", "Sadachbia"]);
   app.post("/api/assistant/speak", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
@@ -3967,7 +3970,9 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!ai) return res.status(503).json({ error: "Voice is not available." });
     const text = String(req.body?.text || "").replace(/[*_#`>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
     if (!text) return res.status(400).json({ error: "Nothing to read." });
-    const hit = ttsCache.get(text);
+    const voiceName = TTS_VOICES.has(String(req.body?.voice || "")) ? String(req.body.voice) : process.env.GEMINI_TTS_VOICE || "Kore";
+    const cacheKey = `${voiceName}|${text}`;
+    const hit = ttsCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 10 * 60_000) {
       res.setHeader("Content-Type", "audio/wav");
       res.setHeader("Cache-Control", "no-store");
@@ -3985,7 +3990,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
           contents: [{ role: "user", parts: [{ text }] }],
           config: {
             responseModalities: ["AUDIO"],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.GEMINI_TTS_VOICE || "Kore" } } },
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
             httpOptions: { timeout: 30000 }
           } as any
         });
@@ -4011,7 +4016,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
         const wav = Buffer.concat([head, pcm]);
         if (preferredTtsModel !== model) console.log(`AI Assistant: reading aloud with ${model} (${Date.now() - t0} ms)`);
         preferredTtsModel = model;
-        ttsCache.set(text, { at: Date.now(), wav });
+        ttsCache.set(cacheKey, { at: Date.now(), wav });
         if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
         res.setHeader("Content-Type", "audio/wav");
         res.setHeader("Cache-Control", "no-store");
