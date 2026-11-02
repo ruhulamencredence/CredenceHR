@@ -83,15 +83,21 @@ export const PhotoRulesSheet: React.FC<{ open: boolean; onClose: () => void; onP
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   useBackButtonClose(open, onClose);
+  // Start from step 1 each time the sheet OPENS — only then. The parent
+  // passes a new onClose on every render it does (alerts, live refresh…),
+  // and resetting on that threw people back to step 1 while they were
+  // clicking through, so step 3 could never be reached.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     setStep(0);
     setAgreed(false);
     setWhy(null);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
 
   const picked = (e: React.ChangeEvent<HTMLInputElement>) => {
