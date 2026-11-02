@@ -35,7 +35,8 @@ export async function downloadAssistantPdf(token: string, r: AssistantReport, pr
   });
   finalizePdfPageNumbers(doc);
   if (mode === 'email') {
-    await emailReport(doc, { fileName: `${r.file}.pdf`, title: r.title });
+    // From the asker's own mailbox (Credence Mail), never the server's account.
+    await emailReport(doc, { fileName: `${r.file}.pdf`, title: r.title, fromOwnMailbox: true });
     return;
   }
   await savePdfCrossPlatform(doc, `${r.file}.pdf`);

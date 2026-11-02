@@ -484,6 +484,20 @@ const SYNC_ROLES = ["inbox", "sent", "junk"];
 const INITIAL_SYNC = Math.max(20, Number(process.env.MAIL_INITIAL_SYNC) || 200);
 const BATCH_MAX = 300;
 
+// Mail sent AS a person from another part of the app (the AI Assistant's
+// report Email): from that person's own connected mailbox (the default one),
+// through the same path as Compose -> Send, so it lands in their Sent folder.
+// Never falls back to the server's SMTP account. Filled in by
+// registerMailRoutes.
+export interface OwnMailbox { email: string; name: string; internalOnly: boolean }
+export let ownMailboxOf: (user: any) => Promise<OwnMailbox | null> = async () => null;
+export let sendFromOwnMailbox: (
+  user: any,
+  m: { to: string[]; subject: string; html: string; files: { name: string; type: string; dataUrl: string }[] }
+) => Promise<{ from: string; internal: number; external: number }> = async () => {
+  throw Object.assign(new Error("Credence Mail isn't running on this server."), { status: 503 });
+};
+
 export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailDeps) {
   const { authenticateToken, queryDB, isMySQL, requireModuleLayer, hasModuleLayer } = deps;
 
@@ -2600,6 +2614,36 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const files = filesFrom(b.attachments);
     if (keep.length || files.length || previousId) await saveFiles(id, files, keep);
   }
+
+  // For the rest of the app (see ownMailboxOf / sendFromOwnMailbox above).
+  // Only for people Credence Mail is turned on for, from their own mailbox.
+  ownMailboxOf = async (user: any) => {
+    if (!isMySQL() || !(await hasMail(user))) return null;
+    const a = (await accountsOf(Number(user.id)))[0];
+    return a ? { email: a.email, name: a.display_name || a.email, internalOnly: isInternalBox(a) } : null;
+  };
+  sendFromOwnMailbox = async (user, m) => {
+    if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+    if (!(await hasMail(user))) throw bad("Credence Mail isn't turned on for your account — ask the Superadmin (Module Access → Mail).", 403);
+    const userId = Number(user.id);
+    const box = (await accountsOf(userId))[0];
+    if (!box) throw bad("Connect your mailbox first: Self Service → Mail → add your email account. Then send again.", 409);
+    const groupCheck = await expandGroups(box, m.to);
+    const denied = groupCheck.groups.filter((x) => x.denied);
+    if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you.`, 403);
+    const b = { accountId: box.id, to: m.to, cc: [], bcc: [], subject: m.subject, body: m.html, attachments: m.files };
+    const { a, id } = await upsertLocal(userId, b, ["Outbox"]);
+    await attachFor(id, b);
+    try {
+      const d = await deliver(a, await messageOf(userId, id));
+      io.to(`user:${userId}`).emit("mail:changed", { accountId: Number(a.id) });
+      return { from: a.email, ...d };
+    } catch (e: any) {
+      const msg = `Not sent: ${e?.response || e?.message || e}`;
+      await queryDB("UPDATE mail_messages SET labels_json = ?, send_error = ? WHERE id = ?", [JSON.stringify(["Drafts"]), msg.slice(0, 500), id]);
+      throw bad(`${msg}. It was kept in your Mail Drafts.`, 502);
+    }
+  };
 
   // Send now, or later (scheduledAt) — { accountId, to, cc, bcc, subject,
   // body, attachments: [{ name, type, dataUrl }], inReplyTo,

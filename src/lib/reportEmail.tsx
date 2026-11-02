@@ -69,6 +69,9 @@ export interface EmailReportOptions {
   fileName: string;
   title: string;
   subject?: string;
+  /** Send from the person's own Credence Mail mailbox (the AI Assistant does) —
+   *  never from the server's SMTP account. */
+  fromOwnMailbox?: boolean;
 }
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -91,7 +94,7 @@ export async function emailReport(file: jsPDFType | Blob | ArrayBuffer, opts: Em
     document.body.appendChild(host);
     root = createRoot(host);
   }
-  root!.render(<EmailReportCard key={Date.now()} base64={base64} fileName={fileName} title={opts.title} subject={opts.subject || opts.title} onClose={() => root?.render(<></>)} />);
+  root!.render(<EmailReportCard key={Date.now()} base64={base64} fileName={fileName} title={opts.title} subject={opts.subject || opts.title} own={!!opts.fromOwnMailbox} onClose={() => root?.render(<></>)} />);
 }
 
 interface Person {
@@ -107,9 +110,11 @@ const sizeText = (b64: string) => {
   return kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
 };
 
-function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }: { base64: string; fileName: string; title: string; subject: string; onClose: () => void }) {
+function EmailReportCard({ base64, fileName, title, subject: subject0, own, onClose }: { base64: string; fileName: string; title: string; subject: string; own: boolean; onClose: () => void }) {
   const [people, setPeople] = useState<Person[] | null>(null);
   const [mailer, setMailer] = useState(true);
+  // own: the person's own mailbox (undefined = still looking, null = none).
+  const [ownBox, setOwnBox] = useState<{ email: string; name: string; internalOnly: boolean } | null | undefined>(undefined);
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<Person[]>([]);
   const [typed, setTyped] = useState('');
@@ -117,7 +122,7 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [done, setDone] = useState<{ sent: string[]; failed: { email: string; error: string }[] } | null>(null);
+  const [done, setDone] = useState<{ sent: string[]; failed: { email: string; error: string }[]; from?: string | null } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const headers = useMemo(() => ({ Authorization: `Bearer ${authToken || localStorage.getItem('mpr_token') || ''}` }), []);
 
@@ -125,7 +130,10 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
     searchRef.current?.focus();
     fetch(apiUrl('/api/reports/email/access'), { headers })
       .then((r) => r.json())
-      .then((j) => setMailer(!!j.mailer))
+      .then((j) => {
+        setMailer(!!j.mailer);
+        setOwnBox(j.own || null);
+      })
       .catch(() => {});
     fetch(apiUrl('/api/reports/email/recipients'), { headers })
       .then(async (r) => {
@@ -156,17 +164,18 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
   const send = async () => {
     if (!count) return setErr('Pick at least one person or type an email address.');
     if (badTyped.length) return setErr(`Not an email address: ${badTyped.join(', ')}`);
+    if (own && !ownBox) return setErr('Connect your mailbox first: Self Service → Mail → add your email account.');
     setBusy(true);
     setErr('');
     try {
       const r = await fetch(apiUrl('/api/reports/email'), {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, file_name: fileName, subject, message, user_ids: picked.map((p) => p.id), emails: typedList, file_base64: base64 })
+        body: JSON.stringify({ title, file_name: fileName, subject, message, user_ids: picked.map((p) => p.id), emails: typedList, file_base64: base64, ...(own ? { via: 'own' } : {}) })
       });
       const j = await r.json().catch(() => null);
       if (!r.ok) throw new Error(j?.error || `Couldn't send (${r.status})`);
-      setDone({ sent: j.sent || [], failed: j.failed || [] });
+      setDone({ sent: j.sent || [], failed: j.failed || [], from: j.from || null });
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -198,6 +207,7 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
                 <div className="text-sm text-slate-700 min-w-0">
                   <p className="font-semibold text-slate-900">Sent to {done.sent.length} {done.sent.length === 1 ? 'person' : 'people'}</p>
                   <p className="text-xs text-slate-500 break-words mt-0.5">{done.sent.join(', ')}</p>
+                  {done.from && <p className="text-xs text-slate-500 mt-1">From your mailbox {done.from} — a copy is in your Mail → Sent.</p>}
                   {done.failed.length > 0 && <p className="text-xs text-rose-600 mt-2 break-words">Not sent: {done.failed.map((f) => `${f.email} (${f.error})`).join(', ')}</p>}
                 </div>
               </div>
@@ -212,7 +222,18 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
                 <span className="text-xs font-semibold text-slate-800 truncate flex-1">{fileName}</span>
                 <span className="text-[11px] text-slate-500 shrink-0">{sizeText(base64)}</span>
               </div>
-              {!mailer && <p className="text-xs text-amber-700 bg-amber-50/80 rounded-xl px-3 py-2 mt-3">Email isn't set up on the server yet (SMTP settings) — the Superadmin has to add them before reports can be sent.</p>}
+              {own && ownBox && (
+                <p className="text-xs text-slate-600 mt-3">
+                  From: <span className="font-semibold text-slate-800">{ownBox.name !== ownBox.email ? `${ownBox.name} <${ownBox.email}>` : ownBox.email}</span>
+                  {ownBox.internalOnly && <span className="block text-amber-700 mt-0.5">This mailbox works only inside CredenceHR — colleagues get it, outside addresses can't until you connect it with its password (Mail → Mailboxes).</span>}
+                </p>
+              )}
+              {own && ownBox === null && (
+                <p className="text-xs text-amber-700 bg-amber-50/80 rounded-xl px-3 py-2 mt-3">
+                  This goes from your own email, and no mailbox is connected yet. Open Self Service → Mail, add your email account, then send again.
+                </p>
+              )}
+              {!own && !mailer && <p className="text-xs text-amber-700 bg-amber-50/80 rounded-xl px-3 py-2 mt-3">Email isn't set up on the server yet (SMTP settings) — the Superadmin has to add them before reports can be sent.</p>}
 
               <label className="block text-xs font-semibold text-slate-600 mt-4 mb-1.5">To — people in the app</label>
               {picked.length > 0 && (
@@ -275,7 +296,7 @@ function EmailReportCard({ base64, fileName, title, subject: subject0, onClose }
               <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} placeholder="Please find the attached report." className="w-full px-3 py-2 rounded-xl border border-white/60 bg-white/70 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" />
 
               {err && <p className="text-xs text-rose-600 mt-3">{err}</p>}
-              <button type="button" onClick={send} disabled={busy || !count} className="liquid-glass-button rounded-full w-full py-2.5 text-sm font-semibold mt-4 inline-flex items-center justify-center gap-2 disabled:opacity-60">
+              <button type="button" onClick={send} disabled={busy || !count || (own && !ownBox)} className="liquid-glass-button rounded-full w-full py-2.5 text-sm font-semibold mt-4 inline-flex items-center justify-center gap-2 disabled:opacity-60">
                 <Send className="w-4 h-4" /> {busy ? 'Sending…' : count ? `Send to ${count}` : 'Send'}
               </button>
             </>

@@ -20,6 +20,7 @@
 
 import type { Express } from "express";
 import { isMailerConfigured, sendMail } from "./mailer";
+import { ownMailboxOf, sendFromOwnMailbox } from "./MailRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -85,7 +86,10 @@ export function registerReportEmailRoutes(app: Express, { authenticateToken, que
   };
 
   app.get("/api/reports/email/access", authenticateToken, async (req: any, res: any) => {
-    res.json({ allowed: await canEmailReports(queryDB, Number(req.user.id)), mailer: isMailerConfigured() });
+    // own: the asker's own Credence Mail mailbox (used by the AI Assistant's
+    // Email — that mail goes from it, never from the server's SMTP account).
+    const own = await ownMailboxOf(req.user).catch(() => null);
+    res.json({ allowed: await canEmailReports(queryDB, Number(req.user.id)), mailer: isMailerConfigured(), own });
   });
 
   app.get("/api/reports/email/recipients", authenticateToken, gate, async (req: any, res: any) => {
@@ -143,7 +147,8 @@ export function registerReportEmailRoutes(app: Express, { authenticateToken, que
       for (const e of typed) if (!to.has(e)) to.set(e, e);
       if (to.size === 0) return res.status(400).json({ error: "Pick at least one person or type an email address." });
       if (to.size > MAX_REPORT_RECIPIENTS) return res.status(400).json({ error: `At most ${MAX_REPORT_RECIPIENTS} recipients at a time.` });
-      if (!isMailerConfigured()) return res.status(400).json({ error: "Email isn't set up on the server yet (SMTP settings). Ask the Superadmin." });
+      const viaOwn = b.via === "own";
+      if (!viaOwn && !isMailerConfigured()) return res.status(400).json({ error: "Email isn't set up on the server yet (SMTP settings). Ask the Superadmin." });
 
       const me = ((await queryDB("SELECT name FROM users WHERE id = ?", [req.user.id])) || [])[0];
       const company = ((await queryDB("/*unscoped*/ SELECT name FROM companies WHERE id = ?", [req.companyId ?? 1]).catch(() => [])) || [])[0];
@@ -151,8 +156,30 @@ export function registerReportEmailRoutes(app: Express, { authenticateToken, que
       const attachments = [{ filename: fileName, content, contentType: isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }];
       const sent: string[] = [];
       const failed: { email: string; error: string }[] = [];
+      let from: string | null = null;
+      if (viaOwn) {
+        // From the sender's own mailbox, as one ordinary mail to everyone
+        // picked (filed in their Sent) — no fallback to the server's account.
+        try {
+          const r = await sendFromOwnMailbox(req.user, {
+            to: [...to.keys()],
+            subject,
+            html,
+            files: [{ name: fileName, type: attachments[0].contentType, dataUrl: `data:${attachments[0].contentType};base64,${content.toString("base64")}` }]
+          });
+          from = r.from;
+          sent.push(...to.keys());
+        } catch (e: any) {
+          const msg = String(e?.message || e);
+          await queryDB(
+            "INSERT INTO report_email_log (company_id, sent_by, report_title, file_name, recipients_json, failed_json) VALUES (?, ?, ?, ?, ?, ?)",
+            [req.companyId ?? null, req.user.id, title, fileName, "[]", JSON.stringify([...to.keys()].map((email) => ({ email, error: msg.slice(0, 300) })))]
+          ).catch(() => {});
+          return res.status(Number(e?.status) || 502).json({ error: msg });
+        }
+      }
       // One email per recipient, so nobody sees the others' addresses.
-      for (const email of to.keys()) {
+      if (!viaOwn) for (const email of to.keys()) {
         const r = await sendMail({ to: email, subject, html, attachments });
         if (r.success) sent.push(email);
         else failed.push({ email, error: r.error || "Failed" });
@@ -162,7 +189,7 @@ export function registerReportEmailRoutes(app: Express, { authenticateToken, que
         [req.companyId ?? null, req.user.id, title, fileName, JSON.stringify(sent), failed.length ? JSON.stringify(failed) : null]
       ).catch(() => {});
       if (!sent.length) return res.status(502).json({ error: failed[0]?.error || "Couldn't send the email.", failed });
-      res.json({ success: true, sent, failed });
+      res.json({ success: true, sent, failed, from });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
