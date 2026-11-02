@@ -1886,6 +1886,7 @@ export type AlertType =
   | 'mpr_dispatch'
   // Someone asked HR for a new password (login page) — opens Users -> Password requests.
   | 'password_request'
+  | 'profile_photo'
   // A notice drafted from a Budget import, waiting to be checked and published — opens Notices.
   | 'notice_draft'
   | 'requisition'

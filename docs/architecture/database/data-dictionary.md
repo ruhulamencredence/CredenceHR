@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২৩টি টেবিল, ২৪২০টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২৪টি টেবিল, ২৪৩৩টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1258,9 +1258,9 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
-| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `features_rev` | int(11) | না | default 1 | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 
 ### `admin_module_permission_layers`
 
@@ -1400,6 +1400,20 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `group_id` | int(11) | না |  | |
 | `company_id` | int(11) | না |  | কোম্পানি-মালিকানা (code-level scope) |
 | `visited_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `profile_photo_requests`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `photo_mimetype` | varchar(150) | হ্যাঁ |  | |
+| `photo_data` | longblob | হ্যাঁ |  | |
+| `status` | enum('pending','approved','rejected','cancelled') | না | default 'pending' | |
+| `decided_by` | int(11) | হ্যাঁ |  | |
+| `decided_at` | timestamp | হ্যাঁ |  | |
+| `reject_reason` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `session_policy`
 
@@ -1541,12 +1555,9 @@ Unique: `uniq_session_key`(session_key)
 | `can_manage_leave` | tinyint(1) | না | default 0 | |
 | `can_view_movement_claims` | tinyint(1) | না | default 0 | |
 | `can_view_conveyance_claims` | tinyint(1) | না | default 0 | |
-| `can_save_ride_places` | tinyint(1) | না | default 0 | |
-| `chat_about` | varchar(140) | হ্যাঁ |  | |
 | `group_id` | int(11) | না | default 1 | |
 | `is_platform_admin` | tinyint(1) | না | default 0 | |
 | `can_view_group_directory` | tinyint(1) | না | default 0 | |
-| `can_work_all_companies` | tinyint(1) | না | default 0 | |
 | `max_devices` | int(11) | না | default 1 | |
 | `sessions_valid_after` | datetime(3) | হ্যাঁ |  | |
 | `can_view_budget_module` | tinyint(1) | না | default 1 | |
@@ -1562,7 +1573,6 @@ Unique: `uniq_session_key`(session_key)
 | `must_change_password` | tinyint(1) | না | default 0 | |
 | `onboarding_expires_at` | datetime | হ্যাঁ |  | |
 | `can_use_calls` | tinyint(1) | না | default 0 | |
-| `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_use_ai_assistant` | tinyint(1) | না | default 1 | |
 | `can_export_assistant_reports` | tinyint(1) | না | default 0 | |
 | `can_handle_assistant_support` | tinyint(1) | না | default 0 | |
@@ -1573,21 +1583,25 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_mobile_bill` | tinyint(1) | না | default 0 | |
 | `can_view_group_dashboard` | tinyint(1) | না | default 0 | |
 | `attendance_project_id` | int(11) | হ্যাঁ |  | FK → `projects.id` |
-| `can_add_adhoc_approver` | tinyint(1) | না | default 0 | |
-| `can_use_assistant_voice` | tinyint(1) | না | default 0 | |
 | `can_use_mail` | tinyint(1) | না | default 0 | |
+| `can_view_roster` | tinyint(1) | না | default 0 | |
+| `can_sign_documents` | tinyint(1) | না | default 0 | |
+| `can_save_ride_places` | tinyint(1) | না | default 0 | |
+| `chat_about` | varchar(140) | হ্যাঁ |  | |
+| `can_work_all_companies` | tinyint(1) | না | default 0 | |
+| `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_view_mail_directory` | tinyint(1) | না | default 0 | |
 | `can_use_mail_groups` | tinyint(1) | না | default 0 | |
-| `can_view_roster` | tinyint(1) | না | default 0 | |
 | `can_take_break` | tinyint(1) | না | default 0 | |
 | `can_give_feedback` | tinyint(1) | না | default 0 | |
 | `can_use_fingerprint` | tinyint(1) | না | default 0 | |
 | `can_receive_material` | tinyint(1) | না | default 0 | |
 | `can_return_dispatch` | tinyint(1) | না | default 0 | |
-| `can_sign_documents` | tinyint(1) | না | default 0 | |
 | `can_view_payslip` | tinyint(1) | না | default 0 | |
 | `can_email_reports` | tinyint(1) | না | default 0 | |
 | `can_request_items` | tinyint(1) | না | default 0 | |
+| `can_add_adhoc_approver` | tinyint(1) | না | default 0 | |
+| `can_use_assistant_voice` | tinyint(1) | না | default 0 | |
 
 Unique: `email`(email), `username`(username)
 
@@ -2374,6 +2388,7 @@ Unique: `unique_company_name`(company_id,name)
 | `status` | enum('active','completed') | হ্যাঁ | default 'active' | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `kind` | varchar(10) | না | default 'advance' | |
 
 ### `employee_change_log`
 
@@ -3016,6 +3031,7 @@ Unique: `unique_driver_employee`(employee_id)
 | `destination_lat` | decimal(10,7) | হ্যাঁ |  | |
 | `destination_lng` | decimal(10,7) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `self_drive` | tinyint(1) | না | default 0 | |
 
 ### `vehicles`
 
@@ -3082,6 +3098,7 @@ Unique: `uniq_signature_document`(document_id)
 | `ip` | varchar(64) | হ্যাঁ |  | |
 | `user_agent` | varchar(255) | হ্যাঁ |  | |
 | `decline_reason` | varchar(500) | হ্যাঁ |  | |
+| `on_line` | tinyint(1) | না | default 0 | |
 
 Unique: `uniq_doc_step`(document_id,step_order)
 
@@ -3312,9 +3329,10 @@ Unique: `uq_payroll_batch`(company_id,month_year)
 | `late_deduction_amount` | decimal(10,2) | না | default 0.00 | |
 | `payment_date` | date | হ্যাঁ |  | |
 | `payment_reference` | varchar(150) | হ্যাঁ |  | |
-| `last_edited_by` | int(11) | হ্যাঁ |  | |
 | `item_earnings` | decimal(10,2) | না | default 0.00 | |
 | `item_deductions` | decimal(10,2) | না | default 0.00 | |
+| `last_edited_by` | int(11) | হ্যাঁ |  | |
+| `loan_deduction` | decimal(10,2) | না | default 0.00 | |
 
 Unique: `unique_employee_month`(employee_id,month_year)
 
@@ -3716,10 +3734,10 @@ Unique: `unique_step_order`(step_order)
 | `group_id` | int(11) | না | default 1 | |
 | `template_id` | int(11) | হ্যাঁ |  | FK → `approval_templates.id` |
 | `supervisor_step_user_id` | int(11) | হ্যাঁ |  | FK → `users.id` |
+| `awaiting_approver` | tinyint(1) | না | default 0 | |
 | `adhoc_approver_id` | int(11) | হ্যাঁ |  | |
 | `adhoc_added_by` | int(11) | হ্যাঁ |  | |
 | `adhoc_note` | varchar(500) | হ্যাঁ |  | |
-| `awaiting_approver` | tinyint(1) | না | default 0 | |
 | `stuck_since` | datetime | হ্যাঁ |  | |
 | `supervisor_pinned` | tinyint(1) | না | default 0 | |
 

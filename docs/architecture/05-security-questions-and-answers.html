@@ -134,6 +134,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>কেউ কি নিজের profile ছবি যা খুশি বদলে দিতে পারে?</td>
+<td>না। নতুন ছবি Superadmin-এর অনুমোদনের অপেক্ষায় থাকে, ততক্ষণ পুরনো ছবি দেখায়; Superadmin পুরনো-নতুন পাশাপাশি দেখে Approve বা কারণসহ Reject করেন। অনুমোদনের API শুধু Superadmin-এর (টেস্টে অন্য admin 403)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Payroll-এর Top Sheet (সাইট-ভিত্তিক বেতন) কে দেখে?</td>
 <td>যাঁর Payroll module-এ "Approval — Top Sheet (view)" layer আছে (layer সেভ না থাকা Payroll ব্যবহারকারী ডিফল্টে পান; Audit / Accounts-এর "View only" থাকলে আলাদা টিক লাগে), আর Superadmin। API আর পাতার অংশ দুটোই এই layer দেখে; টেস্টে layer ছাড়া 403। এটা শুধু দেখা — approve / pay আগের নিয়মেই।</td>
 <td>✅</td>

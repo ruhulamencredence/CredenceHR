@@ -99,6 +99,7 @@
   "password_reset_settings",
   "payroll_access_log",
   "platform_visits",
+  "profile_photo_requests",
   "session_policy",
   "startup_migrations",
   "user_access_audit",

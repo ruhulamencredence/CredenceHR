@@ -5,8 +5,8 @@ erDiagram
     varchar description
     text features_json
     text modules_json
-    int company_id
     tinyint is_default
+    int features_rev
   }
   admin_module_permission_layers {
     int id PK
@@ -85,6 +85,15 @@ erDiagram
     int group_id
     int company_id
     timestamp visited_at
+  }
+  profile_photo_requests {
+    int id PK
+    int user_id FK
+    varchar photo_mimetype
+    longblob photo_data
+    enum status
+    timestamp decided_at
+    varchar reject_reason
   }
   session_policy {
     int id PK
@@ -187,6 +196,7 @@ erDiagram
   users ||--o{ password_reset_requests : "user_id"
   users ||..o{ payroll_access_log : "user_id"
   users ||..o{ platform_visits : "user_id"
+  users ||--o{ profile_photo_requests : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_devices : "user_id"
   users ||--o{ user_profile_details : "user_id"

@@ -54,6 +54,7 @@ import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL
 import { UserBulkBar } from './UserBulkBar';
 import { ModuleAccessPage } from './ModuleAccessPage';
 import { PasswordRequestsPopup } from './PasswordRequestsPopup';
+import { ProfilePhotoRequestsPopup } from './ProfilePhotoRequestsPopup';
 import { JobEditDetailsPopup } from './JobEditDetailsPopup';
 import { FeedbackAdmin } from './feedback/FeedbackAdmin';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
@@ -745,12 +746,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Users -> Password requests (Forgot password, layer "password_requests");
   // a "Password reset request" alert opens it too.
   const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // Users -> Photo approvals (Superadmin only): new profile photos waiting;
+  // a "New Profile Photo to Approve" alert opens it too.
+  const [showPhotoRequests, setShowPhotoRequests] = useState(false);
+  const [photoRequestCount, setPhotoRequestCount] = useState(0);
   // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
   const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
   useEffect(() => {
     const open = () => setShowPasswordRequests(true);
     window.addEventListener('credence:password-requests', open);
     return () => window.removeEventListener('credence:password-requests', open);
+  }, []);
+  useEffect(() => {
+    const open = () => setShowPhotoRequests(true);
+    window.addEventListener('credence:photo-requests', open);
+    return () => window.removeEventListener('credence:photo-requests', open);
   }, []);
   useEffect(() => {
     if (pendingModuleAccessUser == null || activeTab !== 'users') return;
@@ -800,6 +810,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (activeTab === 'users') loadAccessTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+  // How many new profile photos wait for the Superadmin (badge on Photo approvals).
+  useEffect(() => {
+    if (activeTab !== 'users' || !isSuperAdmin) return;
+    fetch(apiUrl('/api/profile/photo-requests'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPhotoRequestCount(Array.isArray(d) ? d.length : 0))
+      .catch(() => {});
+  }, [activeTab, isSuperAdmin, token]);
   const toggleUserSelected = (id: number) =>
     setSelectedUserIds((prev) => {
       const next = new Set(prev);
@@ -6592,6 +6610,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               >
                 <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
               </button>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoRequests(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <UserCheck className="w-3.5 h-3.5" /> Photo approvals
+                  {photoRequestCount > 0 && <span className="ml-0.5 min-w-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] text-center">{photoRequestCount}</span>}
+                </button>
+              )}
               {usersLayer('password_requests') && (
                 <button
                   type="button"
@@ -7632,6 +7660,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
+      {showPhotoRequests && isSuperAdmin && (
+        <ProfilePhotoRequestsPopup token={token} onClose={() => setShowPhotoRequests(false)} onChanged={setPhotoRequestCount} />
+      )}
       {showPasswordRequests && usersLayer('password_requests') && (
         <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />
       )}

@@ -357,6 +357,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'interview'
         ? // Admin Panel -> Recruitment (ATS); opens only for an account with that module.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'recruitment' }))
+        : alert.type === 'profile_photo' && alert.related_type === 'profile_photo_request'
+        ? // Admin Panel -> Users -> Photo approvals (Superadmin; AdminPanel.tsx listens).
+          () => {
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'users' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:photo-requests')), 300);
+          }
         : alert.type === 'password_request'
         ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
           () => {

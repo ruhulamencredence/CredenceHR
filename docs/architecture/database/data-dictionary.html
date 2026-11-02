@@ -11,7 +11,7 @@ pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:
 img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
 details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="on" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="data-dictionary-credencehr">Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)</h1>
 <blockquote>
-<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২২৩টি টেবিল, ২৪২০টি কলাম)।
+<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২২৪টি টেবিল, ২৪৩৩টি কলাম)।
 <code>PK</code> = প্রাইমারি কী, <code>FK</code> = ঘোষিত foreign key (→ কোন টেবিল), <code>logical</code> = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।</p>
 </blockquote>
 <h2 id="k-communication-notices-chat-mail-assistant-feedback">K. Communication: Notices, Chat, Mail, Assistant, Feedback</h2>
@@ -6628,13 +6628,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
-<td><code>company_id</code></td>
-<td>int(11)</td>
-<td>না</td>
-<td>default 1</td>
-<td>কোম্পানি-মালিকানা (code-level scope)</td>
-</tr>
-<tr>
 <td><code>is_default</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
@@ -6647,6 +6640,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>না</td>
 <td>default 1</td>
 <td></td>
+</tr>
+<tr>
+<td><code>company_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>default 1</td>
+<td>কোম্পানি-মালিকানা (code-level scope)</td>
 </tr>
 </tbody>
 </table>
@@ -7346,6 +7346,83 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>visited_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="profile_photo_requests"><code>profile_photo_requests</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td>FK → <code>users.id</code></td>
+</tr>
+<tr>
+<td><code>photo_mimetype</code></td>
+<td>varchar(150)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>photo_data</code></td>
+<td>longblob</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>enum('pending','approved','rejected','cancelled')</td>
+<td>না</td>
+<td>default 'pending'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>decided_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>decided_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>reject_reason</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
 <td>timestamp</td>
 <td>হ্যাঁ</td>
 <td>default current_timestamp()</td>
@@ -8077,20 +8154,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
-<td><code>can_save_ride_places</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
-<td><code>chat_about</code></td>
-<td>varchar(140)</td>
-<td>হ্যাঁ</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td><code>group_id</code></td>
 <td>int(11)</td>
 <td>না</td>
@@ -8106,13 +8169,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>can_view_group_directory</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
-<td><code>can_work_all_companies</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
 <td>default 0</td>
@@ -8224,13 +8280,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
-<td><code>can_use_chat</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 1</td>
-<td></td>
-</tr>
-<tr>
 <td><code>can_use_ai_assistant</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
@@ -8301,24 +8350,52 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>FK → <code>projects.id</code></td>
 </tr>
 <tr>
-<td><code>can_add_adhoc_approver</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
-<td><code>can_use_assistant_voice</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
 <td><code>can_use_mail</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
 <td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_view_roster</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_sign_documents</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_save_ride_places</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>chat_about</code></td>
+<td>varchar(140)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_work_all_companies</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_use_chat</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 1</td>
 <td></td>
 </tr>
 <tr>
@@ -8330,13 +8407,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>can_use_mail_groups</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
-<td><code>can_view_roster</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
 <td>default 0</td>
@@ -8378,13 +8448,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
-<td><code>can_sign_documents</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td></td>
-</tr>
-<tr>
 <td><code>can_view_payslip</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
@@ -8400,6 +8463,20 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>can_request_items</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_add_adhoc_approver</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>can_use_assistant_voice</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
 <td>default 0</td>
@@ -12653,6 +12730,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>default current_timestamp()</td>
 <td></td>
 </tr>
+<tr>
+<td><code>kind</code></td>
+<td>varchar(10)</td>
+<td>না</td>
+<td>default 'advance'</td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <h3 id="employee_change_log"><code>employee_change_log</code></h3>
@@ -16199,6 +16283,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>default 1</td>
 <td>কোম্পানি-মালিকানা (code-level scope)</td>
 </tr>
+<tr>
+<td><code>self_drive</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <h3 id="vehicles"><code>vehicles</code></h3>
@@ -16510,6 +16601,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>varchar(500)</td>
 <td>হ্যাঁ</td>
 <td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>on_line</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
 <td></td>
 </tr>
 </tbody>
@@ -17754,13 +17852,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
-<td><code>last_edited_by</code></td>
-<td>int(11)</td>
-<td>হ্যাঁ</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td><code>item_earnings</code></td>
 <td>decimal(10,2)</td>
 <td>না</td>
@@ -17769,6 +17860,20 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>item_deductions</code></td>
+<td>decimal(10,2)</td>
+<td>না</td>
+<td>default 0.00</td>
+<td></td>
+</tr>
+<tr>
+<td><code>last_edited_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>loan_deduction</code></td>
 <td>decimal(10,2)</td>
 <td>না</td>
 <td>default 0.00</td>
@@ -19961,6 +20066,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>FK → <code>users.id</code></td>
 </tr>
 <tr>
+<td><code>awaiting_approver</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
 <td><code>adhoc_approver_id</code></td>
 <td>int(11)</td>
 <td>হ্যাঁ</td>
@@ -19979,13 +20091,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>varchar(500)</td>
 <td>হ্যাঁ</td>
 <td></td>
-<td></td>
-</tr>
-<tr>
-<td><code>awaiting_approver</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
 <td></td>
 </tr>
 <tr>
