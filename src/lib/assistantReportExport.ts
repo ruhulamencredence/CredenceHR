@@ -11,7 +11,6 @@
 import { isNativePlatform, savePdfCrossPlatform, saveWorkbookCrossPlatform } from './saveFile';
 import { drawStandardHeader, loadPdfCompany, standardTable } from './pdfStandard';
 import { finalizePdfPageNumbers } from './pdfLetterhead';
-import { emailReport } from './reportEmail';
 
 export interface AssistantReport {
   title: string;
@@ -35,8 +34,15 @@ export async function downloadAssistantPdf(token: string, r: AssistantReport, pr
   });
   finalizePdfPageNumbers(doc);
   if (mode === 'email') {
-    // From the asker's own mailbox (Credence Mail), never the server's account.
-    await emailReport(doc, { fileName: `${r.file}.pdf`, title: r.title, fromOwnMailbox: true });
+    // Credence Mail's own New message window: from the asker's own mailbox
+    // with their signature, the PDF attached — never the server's account.
+    const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+    const { openMailCompose } = await import('../components/mail/ComposeLauncher');
+    openMailCompose(token, {
+      subject: r.title,
+      body: `<div>Please find the attached report: <b>${esc(r.title)}</b>.</div><div><br></div>`,
+      files: [{ name: `${r.file}.pdf`, type: 'application/pdf', dataUrl: String(doc.output('datauristring')).replace(/^data:application\/pdf;[^,]*,/, 'data:application/pdf;base64,') }]
+    });
     return;
   }
   await savePdfCrossPlatform(doc, `${r.file}.pdf`);
