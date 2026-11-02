@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২৩টি টেবিল, ২৪২০টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২৩টি টেবিল, ২৪২২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2374,6 +2374,7 @@ Unique: `unique_company_name`(company_id,name)
 | `status` | enum('active','completed') | হ্যাঁ | default 'active' | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `kind` | varchar(10) | না | default 'advance' | |
 
 ### `employee_change_log`
 
@@ -3313,6 +3314,7 @@ Unique: `uq_payroll_batch`(company_id,month_year)
 | `payment_date` | date | হ্যাঁ |  | |
 | `payment_reference` | varchar(150) | হ্যাঁ |  | |
 | `last_edited_by` | int(11) | হ্যাঁ |  | |
+| `loan_deduction` | decimal(10,2) | না | default 0.00 | |
 | `item_earnings` | decimal(10,2) | না | default 0.00 | |
 | `item_deductions` | decimal(10,2) | না | default 0.00 | |
 
