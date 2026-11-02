@@ -1085,7 +1085,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         : mobileActiveSection === 'noticeBoard'
         ? 'Notice Board'
         : mobileActiveSection === 'leave'
-        ? 'Leave Applications'
+        ? // Short, so it fits beside the round header buttons.
+          'Leave'
         : mobileActiveSection === 'timesheet'
         ? // Timesheet.tsx sets this itself too (it's also reachable straight
           // from GlobalSidebar, with this panel unmounted) — matching it here
@@ -3374,10 +3375,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           // shadow underneath for a soft 3D "floating button" feel, instead
           // of the old flat solid color. Shadow flattens on press for
           // tactile feedback.
-          className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-blue-400/90 via-blue-600/90 to-indigo-700/90 shadow-[0_10px_28px_-6px_rgba(37,99,235,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(37,99,235,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
-          style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
+          // A pill in the accent colour, centred above the bottom bar (clear
+          // of the Assistant button at the right edge).
+          className="md:hidden fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform"
+          style={{
+            bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))',
+            background: 'var(--g-accent, #7f00ff)',
+            boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)'
+          }}
         >
-          <Plus className="w-3.5 h-3.5" /> Add Check In/Out
+          <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Add Check In/Out
         </button>
       )}
 

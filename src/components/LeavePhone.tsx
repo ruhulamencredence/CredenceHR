@@ -81,11 +81,11 @@ export const LeaveGauge: React.FC<{
     // A shorter drop shadow than .liquid-glass's own, so it doesn't spill
     // over the Review / Approved / Rejected switch below.
     <div
-      className="liquid-glass rounded-[26px] px-3 pt-3 pb-3 flex flex-col items-center gap-2"
-      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.35), 0 10px 22px -16px rgba(15,23,42,.35)' }}
+      className="liquid-glass rounded-[28px] px-4 pt-4 pb-4 flex flex-col items-center gap-3"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.35), 0 10px 30px -16px rgba(var(--g-accent-rgb,127,0,255),.3)' }}
     >
-      <div className="relative w-[168px] h-[90px]">
-        <svg width="168" height="90" viewBox="0 0 200 108" role="img" aria-label={`${big} ${caption}`}>
+      <div className="relative w-[200px] h-[108px]">
+        <svg width="200" height="108" viewBox="0 0 200 108" role="img" aria-label={`${big} ${caption}`}>
           <path d={ARC} fill="none" stroke="rgba(99,0,198,.10)" strokeWidth="14" strokeLinecap="round" />
           {[...arcs].reverse().map((a) =>
             a.len > 0 ? (
@@ -102,8 +102,8 @@ export const LeaveGauge: React.FC<{
           )}
         </svg>
         <div className="absolute inset-x-0 bottom-1 text-center">
-          <div className="text-[22px] font-extrabold leading-none tracking-tight" style={{ color: centerColor }}>{big}</div>
-          <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{caption}</div>
+          <div className="text-[28px] font-extrabold leading-none tracking-tight" style={{ color: centerColor }}>{big}</div>
+          <div className="text-[11px] text-zinc-500 mt-1 truncate">{caption}</div>
         </div>
       </div>
       {/* One row: up to five types share the width; more scroll sideways. */}
@@ -133,8 +133,8 @@ export const LeaveGauge: React.FC<{
           );
         })}
       </div>
-      <button type="button" onClick={onSubmit} className="liquid-glass-button w-full min-h-[40px] rounded-full text-[13px] font-extrabold flex items-center justify-center gap-1.5">
-        <Plus className="w-4 h-4" /> Submit leave
+      <button type="button" onClick={onSubmit} className="liquid-glass-button w-full min-h-[52px] rounded-full text-[15px] font-extrabold flex items-center justify-center gap-2">
+        <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Submit leave
       </button>
     </div>
   );
@@ -149,12 +149,20 @@ const STATUS = {
   rejected: { label: 'Rejected', soft: '#ffe4e6', fg: '#9f1239' }
 };
 
+// "Casual" -> "CL", "Sick" -> "SL", "Leave Without Pay" -> "LWP".
+const typeBadge = (label: string) => {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length > 1) return words.map((w) => w[0]).join('').slice(0, 3).toUpperCase();
+  return `${(words[0] || 'L')[0]}L`.toUpperCase();
+};
+
+// One application on a phone: type badge, type + purpose, status chip; a
+// From / To / Days row; and who it waits on or who decided it.
 export const LeavePhoneCard: React.FC<{ app: LeaveApplication; typeLabel: string; style: { soft: string; fg: string } }> = ({ app: a, typeLabel, style }) => {
   const start = String(a.start_date).slice(0, 10);
   const end = String(a.end_date).slice(0, 10);
-  const range = start === end ? `${dayMonth(start)} ${start.slice(0, 4)}` : `${dayMonth(start)} – ${dayMonth(end)} ${end.slice(0, 4)}`;
   const st = STATUS[a.status];
-  const decided = a.decided_at ? ` on ${dayMonth(String(a.decided_at).slice(0, 10))}` : '';
+  const decided = a.decided_at ? ` · ${dayMonth(String(a.decided_at).slice(0, 10))}` : '';
   const note =
     a.status === 'pending'
       ? a.no_approver
@@ -166,31 +174,40 @@ export const LeavePhoneCard: React.FC<{ app: LeaveApplication; typeLabel: string
       ? `Reason: ${a.remarks}`
       : `Rejected${a.decided_by_name ? ` by ${a.decided_by_name}` : ''}${decided}`;
   const Icon = a.status === 'pending' ? Clock : a.status === 'approved' ? Check : X;
+  const title = /leave/i.test(typeLabel) ? typeLabel : `${typeLabel} leave`;
+  const cell = (label: string, value: string) => (
+    <div className="min-w-0">
+      <div className="text-[10.5px] font-semibold text-zinc-500">{label}</div>
+      <div className="text-[12.5px] font-bold text-slate-900 mt-0.5 truncate">{value}</div>
+    </div>
+  );
 
   return (
     // No backdrop-blur per card (a blur layer per list item stutters on
-    // Android); a more opaque white keeps the glass look.
-    <div className="rounded-[22px] p-3 flex flex-col gap-2.5 bg-white/80 border border-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_8px_20px_-14px_rgba(15,23,42,.35)]">
+    // Android).
+    <div className="rounded-[24px] px-4 py-3.5 flex flex-col gap-3 bg-white shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.28),0_2px_6px_-2px_rgba(15,23,42,.06)]">
       <div className="flex items-center gap-3">
-        <div className="w-12 h-[52px] rounded-2xl flex flex-col items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,.8)]" style={{ background: style.soft, color: style.fg }}>
-          <span className="text-lg font-extrabold leading-none">{Number(start.slice(8, 10))}</span>
-          <span className="text-[10px] font-bold mt-[3px]">{MONTH_SHORT[Number(start.slice(5, 7)) - 1]}</span>
+        <div className="w-10 h-10 rounded-[14px] flex items-center justify-center shrink-0 text-xs font-extrabold" style={{ background: style.soft, color: style.fg }}>
+          {typeBadge(typeLabel)}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-slate-900 truncate">
-            {typeLabel} · {plural(Number(a.day_count))}
-          </div>
-          <div className="text-xs text-zinc-500 mt-0.5 truncate">{range}</div>
+          <div className="text-sm font-bold text-slate-900 truncate">{title}</div>
+          {a.purpose && <div className="text-[11.5px] font-medium text-zinc-500 mt-0.5 truncate">{a.purpose}</div>}
         </div>
         <div className="text-[11px] font-bold px-2.5 py-[5px] rounded-full whitespace-nowrap" style={{ background: st.soft, color: st.fg }}>
           {st.label}
         </div>
       </div>
+      <div className="grid grid-cols-3 gap-2 rounded-2xl bg-slate-50/80 px-3 py-2.5">
+        {cell('From', `${dayMonth(start)}${start.slice(0, 4) !== end.slice(0, 4) ? ` ${start.slice(0, 4)}` : ''}`)}
+        {cell('To', `${dayMonth(end)} ${end.slice(0, 4)}`)}
+        {cell('Days', String(Number(a.day_count)))}
+      </div>
       <div
-        className="liquid-glass-inset rounded-[14px] px-2.5 py-2 text-xs flex items-start gap-1.5"
+        className="text-xs flex items-start gap-1.5"
         style={{ color: a.status === 'pending' ? '#92400e' : a.status === 'rejected' ? '#9f1239' : '#3f3f46' }}
       >
-        <Icon className="w-3.5 h-3.5 shrink-0 mt-px" />
+        <Icon className="w-3.5 h-3.5 shrink-0 mt-px" style={a.status === 'approved' ? { color: '#16a34a' } : undefined} />
         <span className="min-w-0 break-words">{note}</span>
       </div>
     </div>

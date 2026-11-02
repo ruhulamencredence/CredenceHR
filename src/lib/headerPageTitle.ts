@@ -39,3 +39,8 @@ export function useHeaderPageTitle(): string | null {
   }, []);
   return title;
 }
+
+// Phone pages whose header blends into the page: no coloured bar, round
+// white buttons, dark title, and the theme's soft glow behind it (Navbar.tsx,
+// index.css .hdr-blend / .page-glow).
+export const BLENDED_HEADER_TITLES = new Set(['Timesheet', 'My Claims', 'Leave']);

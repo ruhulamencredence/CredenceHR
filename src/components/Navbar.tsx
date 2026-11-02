@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { User, chatAllowed } from '../types';
 import { Shield, LogOut, Search, X, Calendar } from 'lucide-react';
@@ -10,7 +11,7 @@ import { WeatherBadge } from './WeatherBadge';
 import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
-import { useHeaderPageTitle } from '../lib/headerPageTitle';
+import { BLENDED_HEADER_TITLES, useHeaderPageTitle } from '../lib/headerPageTitle';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
 // stacked vertically, matching the app's own rounded-corner language (the
@@ -180,6 +181,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   const headerPageTitle = useHeaderPageTitle();
   const showMobilePageTitle = !!headerPageTitle;
   const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
+  // Timesheet / My Claims / Leave on a phone: the header blends into the
+  // page — no purple bar, round white buttons, the theme's glow behind it —
+  // and turns to frosted glass once the page scrolls under it. Every other
+  // page keeps the purple header (`purple`).
+  const blend = transparentHeader && !!headerPageTitle && BLENDED_HEADER_TITLES.has(headerPageTitle);
+  const purple = transparentHeader && !blend;
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    if (!blend) return;
+    const on = () => setScrolled(window.scrollY > 6);
+    on();
+    window.addEventListener('scroll', on, { passive: true });
+    return () => window.removeEventListener('scroll', on);
+  }, [blend]);
+  // The app's status bar: dark clock/battery on the light blended header,
+  // white on the purple one.
+  useEffect(() => {
+    if (!isNativeApp) return;
+    import('@capacitor/status-bar')
+      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: blend ? Style.Light : Style.Dark }))
+      .catch(() => {});
+  }, [blend, isNativeApp]);
   // A page-title takeover (e.g. "Select a Budget") means this page owns the
   // whole mobile header row — its own search icon (if some other, unrelated
   // page had left one docked) and the Weather badge both get out of the way
@@ -203,8 +226,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const photoUrl = useProfilePhoto(token, photoVersion);
 
   return (
+    <>
+    {blend && createPortal(<div className="page-glow" aria-hidden="true" />, document.body)}
     <header
-      className="sticky top-0 z-50"
+      className={`sticky top-0 z-50 ${blend ? `hdr-blend${scrolled ? ' hdr-blend-scrolled' : ''}` : ''}`}
       style={{
         // On the native Android APK the header no longer sits on plain
         // transparent/page background — it's filled with the same violet
@@ -212,7 +237,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         // #welcomeBannerGradient stops) so the header visually fuses with the
         // banner directly below it into one continuous card, instead of
         // looking like two separate pieces.
-        background: transparentHeader
+        background: blend
+          ? undefined
+          : transparentHeader
           ? 'var(--g-header-gradient, linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%))'
           : 'var(--g-surface)',
         borderBottom: transparentHeader ? 'none' : '1px solid var(--g-border)',
@@ -252,7 +279,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               showing. Desktop (md and up) still hides this button — the
               GlobalSidebar persistent variant is its desktop navigation now.
               On the native app the
-              header is the purple gradient (transparentHeader — see above),
+              header is the purple gradient (`purple` — see above),
               where the old muted-gray icon color was nearly invisible; white
               on a soft translucent pill keeps it visible there while the
               plain web header (light background) keeps the original muted
@@ -260,12 +287,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenMobileMenu}
-            className={`md:hidden -ml-1 w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-              transparentHeader
+            className={`md:hidden -ml-1 rounded-xl flex items-center justify-center shrink-0 transition-colors ${blend ? 'hdr-round hdr-menu' : 'w-9 h-9'} ${
+              purple
                 ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
                 : 'hover:opacity-70'
             }`}
-            style={transparentHeader ? undefined : { color: 'var(--g-text-muted)' }}
+            style={purple || blend ? undefined : { color: 'var(--g-text-muted)' }}
             aria-label="Open menu"
           >
             <ThreeDotsMenuIcon className="w-[18px] h-[18px]" />
@@ -299,8 +326,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <span
-              className="text-base font-semibold truncate"
-              style={{ color: transparentHeader ? 'white' : 'var(--g-text)' }}
+              className={blend ? 'text-[19px] font-extrabold tracking-tight truncate' : 'text-base font-semibold truncate'}
+              style={{ color: purple ? 'white' : 'var(--g-text)' }}
             >
               {headerPageTitle}
             </span>
@@ -319,7 +346,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="relative flex-1">
                   <Search
                     className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2"
-                    style={{ color: transparentHeader ? 'rgba(255,255,255,0.75)' : 'var(--g-text-muted)' }}
+                    style={{ color: purple ? 'rgba(255,255,255,0.75)' : 'var(--g-text-muted)' }}
                   />
                   <input
                     autoFocus
@@ -328,7 +355,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onChange={(e) => headerSearchReg?.onChange(e.target.value)}
                     placeholder={headerSearchReg?.placeholder || 'Search…'}
                     className={`w-full pl-9 pr-8 py-2 rounded-xl text-sm focus:outline-none ${
-                      transparentHeader
+                      purple
                         ? 'bg-white/15 text-white placeholder-white/70'
                         : 'bg-slate-50 text-slate-900 border border-slate-200'
                     }`}
@@ -337,7 +364,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     type="button"
                     onClick={() => setMobileSearchOpen(false)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
-                    style={{ color: transparentHeader ? 'white' : 'var(--g-text-muted)' }}
+                    style={{ color: purple ? 'white' : 'var(--g-text-muted)' }}
                     aria-label="Close search"
                   >
                     <X className="w-4 h-4" />
@@ -348,11 +375,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={() => setMobileSearchOpen(true)}
                   className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
-                    transparentHeader
+                    purple
                       ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
                       : 'hover:opacity-70'
                   }`}
-                  style={transparentHeader ? undefined : { color: 'var(--g-text-muted)' }}
+                  style={purple ? undefined : { color: 'var(--g-text-muted)' }}
                   aria-label="Search"
                 >
                   <Search className="w-[18px] h-[18px]" />
@@ -382,7 +409,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               in App.tsx in case another entry point still needs it. */}
 
           {/* Today's Date & Day — web header only, hidden on the native
-              Android APK (transparentHeader's own purple gradient header
+              Android APK (the purple header
               already has less room, and the mobile page-title/date isn't
               needed there the way it is on a wide desktop browser tab). */}
           {!isNativeApp && (
@@ -398,7 +425,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Company switcher — only for accounts in more than one company. */}
           <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
-            <CompanySwitcher token={token} transparent={transparentHeader} />
+            <CompanySwitcher token={token} transparent={purple} />
           </div>
 
           {/* Live weather — free (no API key, no permission prompt of its
@@ -408,7 +435,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               or offline. Hidden on mobile while a page-title takeover (e.g.
               "Select a Budget") owns the header row — desktop keeps it. */}
           <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
-            <WeatherBadge transparent={transparentHeader} />
+            <WeatherBadge transparent={purple} />
           </div>
 
           {/* Personal Alerts bell — on by default for every account (no
@@ -417,6 +444,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
+          <div className="hdr-chip">
           <AlertsBell
             token={token}
             onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
@@ -438,10 +466,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
             onViewAll={onOpenAlerts}
           />
+          </div>
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}
-          {!isChatOpen && chatAllowed(user) && <ChatBell token={token} onOpenChat={onOpenChat} />}
+          {!isChatOpen && chatAllowed(user) && (
+            <div className="hdr-chip">
+              <ChatBell token={token} onOpenChat={onOpenChat} />
+            </div>
+          )}
 
           <div className="hidden lg:block text-right mr-1">
             <div className="text-sm font-medium leading-tight" style={{ color: 'var(--g-text)' }}>{user.name}</div>
@@ -465,7 +498,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenProfile}
-            className={`w-9 h-9 rounded-full items-center justify-center text-sm font-semibold flex-shrink-0 transition-opacity hover:opacity-80 overflow-hidden ${
+            className={`hdr-avatar w-9 h-9 rounded-full items-center justify-center text-sm font-semibold flex-shrink-0 transition-opacity hover:opacity-80 overflow-hidden ${
               isProfilePageOpen ? 'hidden' : 'flex'
             }`}
             style={photoUrl ? undefined : avatarColors}
@@ -490,5 +523,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
     </header>
+    </>
   );
 };

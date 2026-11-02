@@ -16,7 +16,7 @@ import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusMod
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
-import { AttendanceGauge, DayStatus, PeriodButton, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, periodLabel, useIsPhone } from './TimesheetPhone';
+import { AttendanceGauge, DayStatus, PeriodPill, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, TodayCheckInPill, periodLabel, useIsPhone } from './TimesheetPhone';
 
 interface TimesheetProps {
   token: string;
@@ -550,7 +550,7 @@ useLiveRefresh(() => loadData());
       <div className="flex flex-col gap-3">
         <AttendanceGauge counts={gaugeCounts(datesAsc)} period={periodLabel(period)} filter={statusFilter} onFilter={setStatusFilter} />
         <div className="flex items-center justify-between px-1 pt-1">
-          <div className="text-[13px] font-bold text-zinc-700">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
+          <div className="text-[17px] font-bold text-slate-900">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
           {statusFilter && (
             <button type="button" onClick={() => setStatusFilter(null)} className="text-xs font-semibold text-[color:var(--g-accent,#7f00ff)] px-1 py-1.5">
               Show all
@@ -567,8 +567,17 @@ useLiveRefresh(() => loadData());
             const outs = (recs.map((r) => r.check_out_at).filter(Boolean) as string[]).sort();
             const holiday = holidayByDate.get(d);
             const times = recs.length ? `${formatTime(ins[0])} – ${outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}` : st === 'weekend' ? 'Weekend' : st === 'holiday' ? 'Holiday' : '—';
+            // First In to last Out, e.g. "8 h 44 m".
+            const worked =
+              ins.length && outs.length
+                ? (() => {
+                    const mins = Math.round((new Date(outs[outs.length - 1]).getTime() - new Date(ins[0]).getTime()) / 60000);
+                    return mins > 0 ? `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, '0')} m` : '';
+                  })()
+                : '';
+            const projects = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
             const where = recs.length
-              ? Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ') || 'Checked in'
+              ? [worked, projects].filter(Boolean).join(' · ') || 'Checked in'
               : st === 'leave'
               ? leaveByDate.get(d) || 'Leave'
               : holiday
@@ -580,6 +589,8 @@ useLiveRefresh(() => loadData());
                 key={d}
                 dateStr={d}
                 status={st}
+                inAt={ins.length ? formatTime(ins[0]) : undefined}
+                outAt={outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}
                 times={times}
                 where={where}
                 correction={corr?.status === 'pending' ? 'pending' : corr?.status === 'rejected' ? 'rejected' : undefined}
@@ -635,8 +646,16 @@ useLiveRefresh(() => loadData());
               switcher uses. Extra top padding on mobile since the header row
               above is hidden there. */}
           {isPhone ? (
-            <div className="mx-3 mt-1">
-              <PeriodButton period={period} onClick={() => setSheetOpen(true)} />
+            <div className="mx-3 mt-2 flex flex-col gap-3">
+              <PeriodPill period={period} today={today} minYear={yearOptions[yearOptions.length - 1]} onOpen={() => setSheetOpen(true)} onChange={applyPeriod} />
+              {(() => {
+                // Today's check-in, whatever period is on screen.
+                const recs = byDate.get(today) || [];
+                const ins = (recs.map((r) => r.check_in_at).filter(Boolean) as string[]).sort();
+                if (!ins.length) return null;
+                const where = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
+                return <TodayCheckInPill at={formatTime(ins[0])} status={dayStatus(today)} where={where} />;
+              })()}
             </div>
           ) : (
           <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">

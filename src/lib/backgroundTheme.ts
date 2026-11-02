@@ -146,6 +146,9 @@ export function applyMonoAccent(id: MonoAccentId, remember = false): void {
 // different one from ProfilePage.tsx.
 export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): void {
   const theme = BACKGROUND_THEMES.find((t) => t.id === id) || BACKGROUND_THEMES[0];
+  // Which background is on, for styles that follow it (the phone header's
+  // glow, index.css .page-glow).
+  document.documentElement.dataset.bg = theme.id;
   if (theme.ui) document.documentElement.dataset.ui = theme.ui;
   else delete document.documentElement.dataset.ui;
   document.documentElement.style.setProperty('--g-bg-gradient', theme.ui === 'mono' ? monoGradient(getSavedMonoAccent()) : theme.gradient);

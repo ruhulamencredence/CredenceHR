@@ -155,7 +155,7 @@ useLiveRefresh(() => load(true));
   return (
     <>
     {isPhone ? (
-      <div className="flex flex-col gap-3.5 px-1 pt-1 pb-8">
+      <div className="flex flex-col gap-3.5 px-1 pt-2 pb-8">
         {!balanceLoading && leaveTypes.length === 0 && (
           <button type="button" onClick={() => setShowNewModal(true)} className="liquid-glass-button w-full min-h-[46px] rounded-full text-sm font-extrabold flex items-center justify-center gap-1.5">
             <Plus className="w-4 h-4" /> Submit leave
@@ -164,7 +164,7 @@ useLiveRefresh(() => load(true));
         {balanceLoading ? null : leaveTypes.length > 0 && (
           <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} onSubmit={() => setShowNewModal(true)} />
         )}
-        <div className="liquid-glass-inset grid grid-cols-3 gap-1 p-1 rounded-full">
+        <div className="grid grid-cols-3 gap-1 p-[5px] rounded-full bg-white/75 border border-white/90 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]">
           {TABS.map((t) => {
             const on = tab === t.key;
             return (
@@ -173,8 +173,8 @@ useLiveRefresh(() => load(true));
                 type="button"
                 aria-pressed={on}
                 onClick={() => setTab(t.key)}
-                className={`min-h-[38px] rounded-full text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                  on ? 'bg-white/95 text-[color:var(--g-accent,#7f00ff)] shadow-sm' : 'text-zinc-600'
+                className={`min-h-[40px] rounded-full text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                  on ? 'bg-white text-[color:var(--g-accent,#7f00ff)] shadow-[0_4px_12px_-6px_rgba(var(--g-accent-rgb,127,0,255),.45)]' : 'text-zinc-600'
                 }`}
               >
                 {t.label}
@@ -192,7 +192,7 @@ useLiveRefresh(() => load(true));
         {loading ? (
           <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
         ) : phoneApps.filter((a) => a.status === tab).length === 0 ? (
-          <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">
+          <div className="rounded-[24px] bg-white/80 p-6 text-center text-[13px] text-zinc-500">
             {tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved leave here.' : 'No rejected leave.'}
             {tab === 'pending' && !typeFilter && <p className="mt-1 text-xs text-zinc-400">Ready for some time off? Tap "Submit leave".</p>}
           </div>

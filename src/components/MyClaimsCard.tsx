@@ -125,7 +125,10 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       className={
         desktop
           ? 'mt-4 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col'
-          : 'bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]'
+          : // Phone: the cards sit straight on the page under the blended
+            // header (Navbar.tsx), no panel around them; room at the bottom
+            // for the floating "Add Check In/Out" button.
+            'flex flex-col pb-24 min-h-[calc(100dvh-14rem)]'
       }
     >
       {onBack && (
@@ -142,9 +145,15 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           page's own "My Claims" title in the logo's place (see
           headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
           a redundant duplicate. The count badge stays (it's live data). */}
-      <div className={`flex items-center gap-3 px-5 py-4 border-b shrink-0 ${desktop ? 'border-slate-100' : 'border-white/40'}`}>
+      <div className={desktop ? 'flex items-center gap-3 px-5 py-4 border-b shrink-0 border-slate-100' : 'shrink-0 px-1 pt-2 pb-1'}>
         {desktop && <h3 className="text-sm font-bold text-slate-900">My Movement Claims</h3>}
-        <div className="flex-1 flex items-center gap-1 rounded-full bg-white/60 p-1 text-xs font-semibold max-w-sm ml-auto">
+        <div
+          className={
+            desktop
+              ? 'flex-1 flex items-center gap-1 rounded-full bg-white/60 p-1 text-xs font-semibold max-w-sm ml-auto'
+              : 'grid grid-cols-3 gap-1 rounded-full bg-white/75 border border-white/90 p-[5px] text-[13px] font-semibold shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]'
+          }
+        >
           {(
             [
               ['all', 'All', claims.length],
@@ -156,12 +165,22 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               key={key}
               type="button"
               onClick={() => setFilter(key)}
-              className={`flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-full transition-colors ${
-                filter === key ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
+              aria-pressed={filter === key}
+              className={
+                desktop
+                  ? `flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-full transition-colors ${
+                      filter === key ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`
+                  : `min-h-[40px] inline-flex items-center justify-center gap-1.5 rounded-full transition-colors ${filter === key ? 'text-white' : 'text-zinc-600'}`
+              }
+              style={!desktop && filter === key ? { background: 'var(--g-accent, #7f00ff)', boxShadow: '0 6px 14px -6px rgba(var(--g-accent-rgb,127,0,255),.6)' } : undefined}
             >
               {label}
-              <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] inline-flex items-center justify-center ${filter === key ? 'bg-white/25' : 'bg-slate-200'}`}>
+              <span
+                className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] inline-flex items-center justify-center ${
+                  filter === key ? 'bg-white/25' : desktop ? 'bg-slate-200' : 'bg-slate-900/[.06] font-bold'
+                }`}
+              >
                 {n}
               </span>
             </button>
@@ -173,7 +192,13 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       {loading ? (
         <LoadingBlock />
       ) : shown.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400">
+        <div
+          className={
+            desktop
+              ? 'flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400'
+              : 'mx-1 mt-3 rounded-[24px] bg-white/80 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400'
+          }
+        >
           <Inbox className="w-5 h-5 text-slate-300" />
           <p className="text-sm">
             {claims.length === 0
@@ -184,7 +209,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           </p>
         </div>
       ) : (
-        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 overflow-y-auto p-3 space-y-2.5'}>
+        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 px-1 pt-3 space-y-3'}>
           {shown.map((c) => {
             // undefined = lookup not resolved yet, null = it resolved to nothing
             // (falls back to plain coordinates below), string = the place name.
@@ -207,17 +232,31 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
             // makes it visually obvious these are separate, individual claims.
             <div
               key={c.id}
-              className="rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]"
+              className={
+                desktop
+                  ? 'rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]'
+                  : 'rounded-[24px] bg-white px-4 py-3.5 space-y-3 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.28),0_2px_6px_-2px_rgba(15,23,42,.06)]'
+              }
             >
-              {/* Purpose + Check In date/time on one line, e.g. "Kakoli, 19-Sep-2026
-                  4:24 PM" — the status badge sits at the end of the same row. */}
+              {/* Purpose + Check In date/time, e.g. "Kakoli, 19-Sep-2026
+                  4:24 PM" (on a phone: the purpose, the date and time under
+                  it) — the status badge sits at the end of the same row. */}
               <div className="flex items-start justify-between gap-3">
-                <span className="text-sm font-medium text-slate-900 truncate">
-                  {c.purpose}, {formatDate(c.check_in_at)}{' '}
-                  {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                </span>
+                {desktop ? (
+                  <span className="text-sm font-medium text-slate-900 truncate">
+                    {c.purpose}, {formatDate(c.check_in_at)}{' '}
+                    {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                ) : (
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-slate-900 truncate">{c.purpose}</span>
+                    <span className="block text-[11.5px] font-medium text-zinc-500 mt-0.5">
+                      {formatDate(c.check_in_at)} · {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </span>
+                )}
                 <span
-                  className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  className={`shrink-0 font-semibold rounded-full border ${desktop ? 'text-[10px] px-2 py-0.5' : 'text-[11px] font-bold px-2.5 py-1 border-transparent'} ${
                     c.status === 'open'
                       ? 'bg-amber-50 text-amber-700 border-amber-200'
                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -236,7 +275,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                 // the Check Out point, each a clickable place-name link, same
                 // visual language as the pickup/drop-off list on a ride-hailing
                 // app's trip history.
-                <div className="flex items-start gap-2.5 pt-0.5">
+                <div className={`flex items-start gap-2.5 ${desktop ? 'pt-0.5' : 'rounded-2xl bg-slate-50/80 px-3 py-2.5'}`}>
                   <div className="flex flex-col items-center pt-1">
                     <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
                     <span className="w-px flex-1 min-h-[8px] border-l border-dashed border-slate-300" />
@@ -260,7 +299,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                   </div>
                 </div>
               ) : (
-                <div className="flex items-start gap-2.5 pt-0.5">
+                <div className={`flex items-start gap-2.5 ${desktop ? 'pt-0.5' : 'rounded-2xl bg-slate-50/80 px-3 py-2.5'}`}>
                   <LogIn className="w-3 h-3 text-emerald-700 shrink-0 mt-1" />
                   <div className="flex-1 min-w-0 space-y-1">
                     <button
@@ -283,7 +322,12 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                 <button
                   type="button"
                   onClick={onCheckOut}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg py-2 transition-colors"
+                  className={
+                    desktop
+                      ? 'w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg py-2 transition-colors'
+                      : 'w-full min-h-[42px] flex items-center justify-center gap-1.5 text-[13px] font-bold text-white rounded-full active:scale-[0.99] transition-transform'
+                  }
+                  style={desktop ? undefined : { background: 'var(--g-accent, #7f00ff)' }}
                 >
                   <LogOut className="w-3.5 h-3.5" /> Check Out
                 </button>
