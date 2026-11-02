@@ -163,8 +163,7 @@ export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): v
 
 // Phone page header colour (Profile -> Appearance, phone only): the soft
 // light behind the header of the blended phone pages (Timesheet, My Claims,
-// Leave, My Tasks, My Targets, Approve Application, Documents to Sign —
-// headerPageTitle.ts BLENDED_HEADER_TITLES, index.css .page-glow). Three
+// Leave… — headerPageTitle.ts BLENDED_HEADER_TITLES, index.css .page-glow). Three
 // choices; until one is picked the glow follows the background theme as
 // before. Per device, like the background (<html data-glow="...">).
 export type HeaderGlowId = 'violet' | 'orange' | 'sky';

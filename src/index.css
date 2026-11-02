@@ -58,8 +58,13 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
+/* `backwards`, not `both`: once the slide ends the page keeps no transform
+   at all. A held identity transform still makes the page the containing
+   block for its position: fixed children, so the floating "New Claim" /
+   "Submit leave" buttons rode up with the page instead of sitting above the
+   bottom nav. */
 .mobile-page-in {
-  animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) both;
+  animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) backwards;
 }
 /* Phones: a bottom-nav page slides in from the side of the tab tapped —
    from the right going forward (Home -> Claim -> Timesheet -> Leave), from
@@ -75,10 +80,10 @@
 }
 @media (max-width: 767px) {
   html[data-page-dir="forward"] .mobile-page-in {
-    animation: mobile-page-in-forward 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: mobile-page-in-forward 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
   }
   html[data-page-dir="back"] .mobile-page-in {
-    animation: mobile-page-in-back 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: mobile-page-in-back 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
   }
 }
 /* Reduce motion: a plain fade, nothing sliding. */
@@ -707,9 +712,8 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
 }
 
 /*
-  Phone header blended into the page (Navbar.tsx `blend` — Timesheet,
-  My Claims, Leave, My Tasks, My Targets, Approve Application, Documents
-  to Sign):
+  Phone header blended into the page (Navbar.tsx `blend` — the pages in
+  headerPageTitle.ts BLENDED_HEADER_TITLES: Timesheet, My Claims, Leave…):
   round Back, centred title, one round button, no coloured bar. A soft
   glow sits behind the top of the page (.page-glow, fading out downwards),
   the buttons are round white chips, and once the page scrolls under the header it turns to

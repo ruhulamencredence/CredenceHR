@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Coffee, Play, Square } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
@@ -47,6 +48,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const stopwatch = (sec: number) => `${Math.floor(sec / 3600)}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`;
 
 export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('Break Time');
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<MyBreakDay | null>(null);
   const [loadedAt, setLoadedAt] = useState(0);
@@ -107,8 +109,9 @@ export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Break Time']} />}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Break Time']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />

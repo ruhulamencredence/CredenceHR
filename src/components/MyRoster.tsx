@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CalendarRange, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { shiftTime, type Shift } from '../lib/roster';
@@ -50,6 +51,7 @@ const monthLabel = (month: string) => {
 const dayLabel = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
 export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Duty Roster');
   const isNativeApp = Capacitor.isNativePlatform();
   const now = new Date();
   const [month, setMonth] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
@@ -95,9 +97,10 @@ export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ tok
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-4xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Duty Roster']} />}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Duty Roster']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />

@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ChevronDown, Eye, FileDown, ReceiptText } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
@@ -39,6 +40,7 @@ interface ListData {
 const dateText = (d: string | null) => (d ? new Date(String(d).length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dhaka' }) : '');
 
 export const MyPayslips: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Payslip');
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<ListData | null>(null);
   const [error, setError] = useState('');
@@ -112,8 +114,9 @@ export const MyPayslips: React.FC<{ token: string; onBack?: () => void }> = ({ t
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-3xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Payslip']} />}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Payslip']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />

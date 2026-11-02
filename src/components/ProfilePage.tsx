@@ -570,7 +570,7 @@ const ProfileRow: React.FC<{
 const HeaderGlowPicker: React.FC<{ selected: HeaderGlowId | null; onPick: (id: HeaderGlowId) => void }> = ({ selected, onPick }) => (
   <div className="px-4 py-3.5 border-t" style={{ borderColor: 'var(--g-border)' }}>
     <p className="text-[11px] mb-2.5" style={{ color: 'var(--g-text-muted)' }}>
-      Page header colour — Timesheet, My Claims, Leave, My Tasks, My Targets, Approve Application, Documents to Sign.
+      Page header colour — the light header of Timesheet, Leave, My Claims, My Tasks, Approve Application, Payslip and the other Self Service pages.
     </p>
     <div className="flex items-center gap-3">
       {HEADER_GLOWS.map((g) => {

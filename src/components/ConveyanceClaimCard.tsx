@@ -103,8 +103,9 @@ useLiveRefresh(() => fetchClaims(true));
 
   return (
     <>
+      {/* Desktop only — on a phone the blended header has the title and Back. */}
       {!isNativeApp && (
-        <div className="px-2 sm:px-0">
+        <div className="hidden md:block px-2 sm:px-0">
           <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Conveyance Bill Claim']} onBack={onBack} />
         </div>
       )}

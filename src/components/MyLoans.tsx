@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, HandCoins, Plus, X } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -75,6 +76,7 @@ async function call<T>(token: string, path: string, init?: RequestInit): Promise
 }
 
 export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Loan / Advance');
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<MyLoansData | null>(null);
   const [error, setError] = useState('');
@@ -107,9 +109,10 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Loan / Advance']} />}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Loan / Advance']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />

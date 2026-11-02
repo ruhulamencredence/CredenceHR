@@ -186,9 +186,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const headerPageTitle = useHeaderPageTitle();
   const showMobilePageTitle = !!headerPageTitle;
   const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
-  // Timesheet / My Claims / Leave / My Tasks / My Targets / Approve
-  // Application / Documents to Sign on a phone (BLENDED_HEADER_TITLES): the
-  // header blends into the page — no purple bar, round white buttons, the
+  // The Self Service pages in BLENDED_HEADER_TITLES (Timesheet, My Claims,
+  // Leave, My Tasks, Payslip…) on a phone: the header blends into the page — no purple bar, round white buttons, the
   // picked (or the theme's) glow behind it —
   // and turns to frosted glass once the page scrolls under it. Every other
   // page keeps the purple header (`purple`).
