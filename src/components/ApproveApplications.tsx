@@ -188,8 +188,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // neither is an approval_requests row — see the design note on GET
 // /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
-  // Short, so it fits beside the round header buttons.
-  usePhoneHeaderTitle('Approvals');
+  usePhoneHeaderTitle('Approve Application');
   // Same isNativeApp split as LeaveManage.tsx / Timesheet.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this

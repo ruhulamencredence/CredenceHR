@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { User, chatAllowed } from '../types';
-import { Shield, LogOut, Search, X, Calendar } from 'lucide-react';
+import { Shield, LogOut, Search, X, Calendar, ChevronLeft } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { requestQuickAccessTab } from '../lib/quickAccess';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
+import { HeaderMoreMenu } from './HeaderMoreMenu';
 import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
@@ -107,6 +108,9 @@ interface NavbarProps {
   // AlertsBell's dropdown footer "View all" link — opens AlertsPage.tsx,
   // same full-page destination GlobalSidebar's own "Alerts" item opens.
   onOpenAlerts: () => void;
+  // The round Back button of the blended phone header — the same step back
+  // as the phone's own Back (App.tsx pageBackRef / backButtonStack.ts).
+  onPageBack?: () => void;
 }
 
 // Styled after the Gemini app's top bar: a plain white surface, the Credence
@@ -132,7 +136,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenProfile,
   onOpenChat,
   isChatOpen,
-  onOpenAlerts
+  onOpenAlerts,
+  onPageBack
 }) => {
   // Both the User Panel and the Admin Panel now get the fully transparent
   // header on the native Android APK (per request) — the web build keeps the
@@ -227,6 +232,33 @@ export const Navbar: React.FC<NavbarProps> = ({
       : { background: 'var(--g-accent-soft)', color: 'var(--g-accent)' };
   const photoUrl = useProfilePhoto(token, photoVersion);
 
+  // Personal Alerts bell — on by default for every account (no module
+  // grant needed). Clicking a Leave Application alert jumps to Self Service
+  // -> Leave Application. Shared by the normal header and the blended one.
+  const alertsBell = (
+    <AlertsBell
+      token={token}
+      onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
+      onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
+      onOpenVehicleManagement={(target) => {
+        // A ride update is about an existing ride — open Ride Status
+        // (or the assign screens for one still needing a vehicle).
+        requestQuickAccessTab('bookRide', target || 'status');
+        onGoToSelfServiceTab('vehicleManagement');
+      }}
+      onOpenConveyanceClaim={onGoToConveyanceBillClaim}
+      onOpenMyAsset={(target) => {
+        requestQuickAccessTab('myAsset', target);
+        onGoToSelfServiceTab('assetManagement');
+      }}
+      onOpenResignation={() => onGoToSelfServiceTab('resignation')}
+      onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
+      canOpenGrievanceAdmin={user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary')}
+      onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
+      onViewAll={onOpenAlerts}
+    />
+  );
+
   return (
     <>
     {blend && createPortal(<div className="page-glow" aria-hidden="true" />, document.body)}
@@ -263,6 +295,33 @@ export const Navbar: React.FC<NavbarProps> = ({
         paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))'
       }}
     >
+      {blend && (
+        // Phone pages in BLENDED_HEADER_TITLES: round Back on the left, the
+        // page title in the middle, one round button on the right —
+        // Timesheet's Alerts bell, the others a ⋮ with Alerts, Chat,
+        // Profile and the menu (HeaderMoreMenu.tsx).
+        <div className="w-full px-4 h-16 grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2">
+          <button type="button" onClick={onPageBack ?? onGoToDashboard} className="hdr-round" aria-label="Back">
+            <ChevronLeft className="w-[22px] h-[22px]" strokeWidth={2.4} />
+          </button>
+          <h1 className={`${(headerPageTitle?.length ?? 0) > 14 ? 'text-[19px]' : 'text-[21px]'} font-extrabold tracking-tight text-center truncate`} style={{ color: 'var(--g-text)' }}>
+            {headerPageTitle}
+          </h1>
+          {headerPageTitle === 'Timesheet' ? (
+            <div className="hdr-chip hdr-solo">{alertsBell}</div>
+          ) : (
+            <HeaderMoreMenu
+              token={token}
+              showChat={chatAllowed(user)}
+              onOpenAlerts={onOpenAlerts}
+              onOpenChat={onOpenChat}
+              onOpenProfile={onOpenProfile}
+              onOpenMenu={onOpenMobileMenu}
+            />
+          )}
+        </div>
+      )}
+      {!blend && (
       <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Logo, left-aligned. The desktop dropdown menus that used to sit
             next to it (Claims / Jobs / Budget / Manage / Workforce / Self
@@ -289,12 +348,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenMobileMenu}
-            className={`md:hidden -ml-1 rounded-xl flex items-center justify-center shrink-0 transition-colors ${blend ? 'hdr-round hdr-menu' : 'w-9 h-9'} ${
+            className={`md:hidden -ml-1 rounded-xl flex items-center justify-center shrink-0 transition-colors w-9 h-9 ${
               purple
                 ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
                 : 'hover:opacity-70'
             }`}
-            style={purple || blend ? undefined : { color: 'var(--g-text-muted)' }}
+            style={purple ? undefined : { color: 'var(--g-text-muted)' }}
             aria-label="Open menu"
           >
             <ThreeDotsMenuIcon className="w-[18px] h-[18px]" />
@@ -328,7 +387,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <span
-              className={blend ? `${(headerPageTitle?.length ?? 0) > 14 ? 'text-[17px]' : 'text-[19px]'} font-extrabold tracking-tight truncate` : 'text-base font-semibold truncate'}
+              className="text-base font-semibold truncate"
               style={{ color: purple ? 'white' : 'var(--g-text)' }}
             >
               {headerPageTitle}
@@ -446,29 +505,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
-          <div className="hdr-chip">
-          <AlertsBell
-            token={token}
-            onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
-            onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
-            onOpenVehicleManagement={(target) => {
-              // A ride update is about an existing ride — open Ride Status
-              // (or the assign screens for one still needing a vehicle).
-              requestQuickAccessTab('bookRide', target || 'status');
-              onGoToSelfServiceTab('vehicleManagement');
-            }}
-            onOpenConveyanceClaim={onGoToConveyanceBillClaim}
-            onOpenMyAsset={(target) => {
-              requestQuickAccessTab('myAsset', target);
-              onGoToSelfServiceTab('assetManagement');
-            }}
-            onOpenResignation={() => onGoToSelfServiceTab('resignation')}
-            onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
-            canOpenGrievanceAdmin={user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary')}
-            onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
-            onViewAll={onOpenAlerts}
-          />
-          </div>
+          <div className="hdr-chip">{alertsBell}</div>
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}
@@ -524,6 +561,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </div>
+      )}
     </header>
     </>
   );

@@ -50,7 +50,7 @@ export const BLENDED_HEADER_TITLES = new Set([
   'Leave',
   'My Tasks',
   'My Targets',
-  'Approvals', // Approve Application
+  'Approve Application',
   'Documents to Sign'
 ]);
 

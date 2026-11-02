@@ -131,7 +131,8 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
             'flex flex-col pb-24 min-h-[calc(100dvh-14rem)]'
       }
     >
-      {onBack && (
+      {/* Desktop only — on a phone the blended header has its own round Back. */}
+      {onBack && desktop && (
         <button
           type="button"
           onClick={onBack}

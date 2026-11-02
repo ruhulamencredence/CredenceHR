@@ -1461,6 +1461,11 @@ export default function App() {
         onOpenChat={openChat}
         isChatOpen={showChat}
         onOpenAlerts={sidebarNavProps.onOpenAlerts}
+        // The blended phone header's round Back: the same step as the
+        // phone's own Back button (a page's open popup first, then the page).
+        onPageBack={() => {
+          if (!closeTopmostOrReturnFalse()) pageBackRef.current();
+        }}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —

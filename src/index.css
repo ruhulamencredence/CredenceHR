@@ -708,9 +708,11 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
 
 /*
   Phone header blended into the page (Navbar.tsx `blend` — Timesheet,
-  My Claims, Leave): no coloured bar; the theme's soft glow sits behind the
-  top of the page (.page-glow, fading out downwards), the buttons are round
-  white chips, and once the page scrolls under the header it turns to
+  My Claims, Leave, My Tasks, My Targets, Approve Application, Documents
+  to Sign):
+  round Back, centred title, one round button, no coloured bar. A soft
+  glow sits behind the top of the page (.page-glow, fading out downwards),
+  the buttons are round white chips, and once the page scrolls under the header it turns to
   frosted glass so the content doesn't clash with the title.
 */
 .page-glow {
@@ -725,8 +727,8 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
     radial-gradient(120% 80% at 10% 0%, rgba(var(--glow-a), 0.75) 0%, rgba(var(--glow-a), 0) 60%),
     radial-gradient(90% 70% at 100% 0%, rgba(var(--glow-b), 0.65) 0%, rgba(var(--glow-b), 0) 55%),
     linear-gradient(180deg, rgba(var(--glow-tint, 255, 255, 255), var(--glow-tint-a, 0)) 0%, rgba(var(--glow-tint, 255, 255, 255), 0) 100%);
-  -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent);
-  mask-image: linear-gradient(180deg, #000 40%, transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
+  mask-image: linear-gradient(180deg, #000 55%, transparent);
 }
 /* Apple Glow: lavender + pink; Classic: sky blue + lavender; Mono: the
    colour touch (grey with "None"). */
@@ -767,15 +769,5 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
   justify-content: center;
   box-shadow: 0 6px 16px -8px rgba(var(--g-accent-rgb, 127, 0, 255), 0.35), 0 1px 2px rgba(15, 23, 42, 0.06);
 }
-.hdr-blend .hdr-menu {
-  margin-left: 0;
-  border-radius: 14px;
-  color: var(--g-accent) !important;
-}
-.hdr-blend .hdr-chip + .hdr-chip { margin-left: 4px; }
-.hdr-blend .hdr-chip { margin-right: 4px; }
-.hdr-blend .hdr-avatar {
-  width: 40px;
-  height: 40px;
-  box-shadow: 0 0 0 2px #ffffff, 0 6px 16px -8px rgba(var(--g-accent-rgb, 127, 0, 255), 0.45);
-}
+/* Timesheet's lone Alerts bell sits at the right edge of the header row. */
+.hdr-blend .hdr-solo { justify-self: end; }
