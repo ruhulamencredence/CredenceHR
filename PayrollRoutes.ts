@@ -1314,10 +1314,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (installment <= 0) return res.status(400).json({ error: "Monthly Installment must be a positive number." });
       if (installment > total) return res.status(400).json({ error: "Monthly Installment can't be more than the Total Amount." });
 
+      // Loan or Salary Advance (shown apart on the Top Sheet).
+      const kind = req.body?.kind === "loan" ? "loan" : "advance";
       const result = await queryDB(
-        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id]
+        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id, kind]
       );
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
@@ -1339,9 +1341,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const reason = req.body?.reason !== undefined ? String(req.body.reason).trim().slice(0, 255) : existing.reason;
       const status = req.body?.status === "completed" ? "completed" : req.body?.status === "active" ? "active" : existing.status;
 
+      const kind = req.body?.kind === "loan" || req.body?.kind === "advance" ? req.body.kind : existing.kind || "advance";
       await queryDB(
-        "UPDATE employee_advances SET monthly_installment = ?, reason = ?, status = ? WHERE id = ?",
-        [installment, reason, status, req.params.id]
+        "UPDATE employee_advances SET monthly_installment = ?, reason = ?, status = ?, kind = ? WHERE id = ?",
+        [installment, reason, status, kind, req.params.id]
       );
       res.json({ success: true });
     } catch (err: any) {
@@ -3417,12 +3420,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           [employeeId]
         );
         let advanceDeduction = 0;
+        // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+        let loanDeduction = 0;
         for (const adv of advances) {
           const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
           if (remaining <= 0) continue;
-          advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+          const inst = Math.min(Number(adv.monthly_installment), remaining);
+          advanceDeduction += inst;
+          if (adv.kind === "loan") loanDeduction += inst;
         }
         advanceDeduction = money(advanceDeduction);
+        loanDeduction = money(loanDeduction);
 
         // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
         const pay = await computePayLines(queryDB, employeeId, monthYear);
@@ -3452,6 +3460,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           tax_deduction: taxDeduction,
           pf_deduction: pfDeduction,
           advance_deduction: advanceDeduction,
+          loan_deduction: loanDeduction,
           other_deduction: otherDed,
           total_deduction: totalDeduction,
           net_salary: netSalary,
@@ -3557,12 +3566,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             [employeeId]
           );
           let advanceDeduction = 0;
+          // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+          let loanDeduction = 0;
           for (const adv of advances) {
             const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
             if (remaining <= 0) continue;
-            advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+            const inst = Math.min(Number(adv.monthly_installment), remaining);
+            advanceDeduction += inst;
+            if (adv.kind === "loan") loanDeduction += inst;
           }
           advanceDeduction = money(advanceDeduction);
+          loanDeduction = money(loanDeduction);
 
           // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
           const pay = await computePayLines(queryDB, employeeId, monthYear);
@@ -3597,6 +3611,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             ]
           );
           await savePayLines(queryDB, Number(result.insertId), employeeId, monthYear, pay.lines);
+          if (loanDeduction) await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(result.insertId)]);
           for (const split of paymentSplit) {
             await queryDB(
               `INSERT INTO payroll_payment_splits
@@ -3727,12 +3742,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [Number(employee_id)]
       );
       let advanceDeduction = 0;
+      // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+      let loanDeduction = 0;
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        advanceDeduction += inst;
+        if (adv.kind === "loan") loanDeduction += inst;
       }
       advanceDeduction = money(advanceDeduction);
+      loanDeduction = money(loanDeduction);
 
       // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
       const pay = await computePayLines(queryDB, Number(employee_id), String(month_year));
@@ -3758,6 +3778,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         ]
       );
       await savePayLines(queryDB, Number(result.insertId), Number(employee_id), String(month_year), pay.lines);
+      if (loanDeduction) await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(result.insertId)]);
       // Consume any staged bonus for this employee/month now that a real
       // run exists — prevents it from being offered/applied again.
       await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [Number(employee_id), month_year]);
@@ -3835,12 +3856,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [existing.employee_id]
       );
       let advanceDeduction = 0;
+      // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+      let loanDeduction = 0;
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        advanceDeduction += inst;
+        if (adv.kind === "loan") loanDeduction += inst;
       }
       advanceDeduction = money(advanceDeduction);
+      loanDeduction = money(loanDeduction);
 
       // Allowance & Adjustment lines, worked out again for this run (its own
       // earlier lines don't count against an adjustment's balance).
@@ -3865,6 +3891,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         ]
       );
       await savePayLines(queryDB, Number(existing.id), Number(existing.employee_id), String(existing.month_year), pay.lines);
+      await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(existing.id)]);
       res.json({ success: true, net_salary: netSalary });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update payroll." });

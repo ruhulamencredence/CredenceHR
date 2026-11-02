@@ -34,7 +34,7 @@ type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare" | "top_sheet";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -297,17 +297,18 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log, edit, sheet, compare] = await Promise.all([
+    const [audit, pay, log, edit, sheet, compare, top] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
       hasModuleLayer(req.user, "payroll", "access_log"),
       hasModuleLayer(req.user, "payroll", "read"),
       hasModuleLayer(req.user, "payroll", "approval_sheet"),
-      hasModuleLayer(req.user, "payroll", "month_compare")
+      hasModuleLayer(req.user, "payroll", "month_compare"),
+      hasModuleLayer(req.user, "payroll", "top_sheet")
     ]);
     // edit = HR's "Payroll" layer; without it the account only views.
     // approval_sheet = the Salary sheet table in Approval.
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare });
+    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare, top_sheet: top });
   });
 
   // ---- one month's approval state ---------------------------------------
@@ -621,6 +622,134 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         };
       });
       res.json({ month_year: month, previous_month: prevMonth, rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Payroll -> Approval -> Top Sheet (layer "top_sheet"): Accounts' salary
+  // top sheet — the month's salary by Branch / site (?by=department for
+  // Departments): Actual Salary, after the absent / late cut, Allowance,
+  // Arrear, Gross, Other Deduction, Advance, Loan, TDS, Employee
+  // Contribution (PF), Net, and how it is paid (Bank / Card / Cash / MFS),
+  // with each site's own sheet (one line per employee) and the HR / Audit /
+  // Accounts names that signed the month off. A salary on hold isn't paid
+  // this month, so it is left out (listed apart).
+  app.get("/api/payroll/approval/:month/top-sheet", authenticateToken, requireAdmin, requireModuleLayer("payroll", "top_sheet"), async (req: any, res: any) => {
+    try {
+      const month = String(req.params.month);
+      if (!MONTH_RE.test(month)) return bad(res, "Choose a month.");
+      const by = req.query.by === "department" ? "department" : "branch";
+      const runs: any[] =
+        (await queryDB(
+          `SELECT p.*, e.name AS employee_name, e.employee_id AS employee_code, e.department, e.designation, e.branch AS branch_text, e.branch_id,
+                  DATE_FORMAT(e.joining_date, '%Y-%m-%d') AS joining_date
+             FROM payrolls p JOIN all_employees e ON e.id = p.employee_id
+            WHERE p.month_year = ? ORDER BY e.name ASC`,
+          [month]
+        )) || [];
+      const ids = runs.map((r) => Number(r.id));
+      const inList = ids.map(() => "?").join(",");
+      const [branches, splits, lines] = await Promise.all([
+        queryDB("SELECT id, branch_name FROM branches").catch(() => []),
+        ids.length ? queryDB(`SELECT * FROM payroll_payment_splits WHERE payroll_id IN (${inList})`, ids).catch(() => []) : [],
+        ids.length ? queryDB(`SELECT payroll_id, source, kind, amount FROM payroll_line_items WHERE payroll_id IN (${inList})`, ids).catch(() => []) : []
+      ]);
+      const branchName = new Map<number, string>(((branches as any[]) || []).map((b: any) => [Number(b.id), String(b.branch_name || "")]));
+      // How each run is paid: its Bank / MFS / Cash split (a bank account
+      // named "... Card" — e.g. "EBL Card" — is the Card column), else the
+      // run's payment method.
+      const pay = new Map<number, { bank: number; card: number; cash: number; mfs: number }>();
+      for (const r of runs) pay.set(Number(r.id), { bank: 0, card: 0, cash: 0, mfs: 0 });
+      const withSplit = new Set<number>();
+      for (const sp of (splits as any[]) || []) {
+        const p = pay.get(Number(sp.payroll_id));
+        if (!p) continue;
+        withSplit.add(Number(sp.payroll_id));
+        const amt = money(sp.amount);
+        if (sp.account_type === "cash") p.cash += amt;
+        else if (sp.account_type === "mfs") p.mfs += amt;
+        else if (/card/i.test(`${sp.account_label || ""} ${sp.bank_name || ""}`)) p.card += amt;
+        else p.bank += amt;
+      }
+      // Arrear lines (Allowance & Adjustment -> Arrear) apart from the other extra pay.
+      const arrear = new Map<number, number>();
+      for (const l of (lines as any[]) || []) {
+        if (l.source === "adjustment" && l.kind === "earning") arrear.set(Number(l.payroll_id), money((arrear.get(Number(l.payroll_id)) || 0) + Number(l.amount)));
+      }
+      const groupOf = (r: any) =>
+        by === "department"
+          ? String(r.department || "").trim() || "No department"
+          : branchName.get(Number(r.branch_id)) || String(r.branch_text || "").trim() || "No branch";
+      const rowOf = (r: any) => {
+        const net = money(r.net_salary);
+        const p = pay.get(Number(r.id))!;
+        if (!withSplit.has(Number(r.id))) {
+          const m = String(r.payment_method || "");
+          if (/cash/i.test(m)) p.cash = net;
+          else if (/card/i.test(m)) p.card = net;
+          else if (/bkash|nagad|rocket|upay|mfs/i.test(m) && !/bank/i.test(m)) p.mfs = net;
+          else p.bank = net;
+        }
+        const actual = money(Number(r.basic_amount) + Number(r.allowances_total));
+        const after = money(actual - Number(r.absent_deduction));
+        const arr = arrear.get(Number(r.id)) || 0;
+        const allowance = money(Number(r.overtime_amount) + Number(r.bonus_amount) + Number(r.item_earnings) - arr);
+        const gross = money(after + allowance + arr);
+        const loan = money(r.loan_deduction);
+        const advance = money(Number(r.advance_deduction) - loan);
+        const other = money(Number(r.other_deduction) + Number(r.item_deductions));
+        const tds = money(r.tax_deduction);
+        const pf = money(r.pf_deduction);
+        return {
+          id: Number(r.id),
+          employee_code: r.employee_code || "",
+          employee_name: r.employee_name,
+          designation: r.designation || "",
+          department: r.department || "",
+          joining_date: r.joining_date || null,
+          working_days: Number(r.total_working_days) || 0,
+          present_days: Number(r.present_days) || 0,
+          actual, after, allowance, arrear: arr, gross, other, advance, loan, tds, pf,
+          total_deduction: money(other + advance + loan + tds + pf),
+          net,
+          bank: money(p.bank), card: money(p.card), cash: money(p.cash), mfs: money(p.mfs),
+          status: r.payment_status,
+          remarks: r.remarks || ""
+        };
+      };
+      const KEYS = ["actual", "after", "allowance", "arrear", "gross", "other", "advance", "loan", "tds", "pf", "total_deduction", "net", "bank", "card", "cash", "mfs"] as const;
+      const sum = (rows: any[]) => Object.fromEntries(KEYS.map((k) => [k, money(rows.reduce((t, x) => t + Number(x[k] || 0), 0))]));
+      const held = runs.filter((r) => Number(r.is_held));
+      const groups = new Map<string, any[]>();
+      for (const r of runs.filter((x) => !Number(x.is_held))) {
+        const g = groupOf(r);
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g)!.push(rowOf(r));
+      }
+      // Head Office first (as on the paper top sheet), then A–Z.
+      const names = [...groups.keys()].sort((a, b) => (/^head office$/i.test(a) ? -1 : /^head office$/i.test(b) ? 1 : a.localeCompare(b)));
+      const out = names.map((name) => ({ name, employees: groups.get(name)!.length, totals: sum(groups.get(name)!), rows: groups.get(name)! }));
+      const b = await batchFor(queryDB, month);
+      const who = await userNames([b?.submitted_by, b?.audited_by, b?.paid_by, ...runs.map((r) => r.generated_by)]);
+      const company = ((await queryDB("/*unscoped*/ SELECT name FROM companies WHERE id = ?", [req.companyId ?? 1]).catch(() => [])) || [])[0];
+      res.json({
+        month_year: month,
+        by,
+        company: company?.name || "",
+        status: b?.status || "draft",
+        payment_date: b?.payment_date || null,
+        payment_method: b?.payment_method || null,
+        payment_reference: b?.payment_reference || null,
+        signatures: {
+          prepared: { name: (b?.submitted_by && who.get(Number(b.submitted_by))) || who.get(Number(runs[0]?.generated_by)) || null, at: b?.submitted_at || null },
+          authorized: { name: (b?.audited_by && who.get(Number(b.audited_by))) || null, at: b?.audited_at || null },
+          approved: { name: (b?.paid_by && who.get(Number(b.paid_by))) || null, at: b?.paid_at || null }
+        },
+        totals: { employees: out.reduce((t, g) => t + g.employees, 0), ...sum(out.flatMap((g) => g.rows)) },
+        groups: out,
+        held: { count: held.length, net: money(held.reduce((t, r) => t + Number(r.net_salary || 0), 0)), people: held.map((r) => ({ name: r.employee_name, code: r.employee_code, net: money(r.net_salary), reason: r.hold_reason || null })) }
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

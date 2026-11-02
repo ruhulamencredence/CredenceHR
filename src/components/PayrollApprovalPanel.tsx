@@ -20,6 +20,7 @@ import { PayrollPaymentVouchers } from './PayrollPaymentVouchers';
 import { LoadingBlock } from './LoadingBlock';
 import { PayrollSalarySheet } from './PayrollSalarySheet';
 import { PayrollMonthCompare } from './PayrollMonthCompare';
+import { PayrollTopSheet } from './PayrollTopSheet';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface ApprovalState {
@@ -91,12 +92,15 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
   const [canSheet, setCanSheet] = useState(false);
   // Month comparison (Payroll layer "month_compare").
   const [canCompare, setCanCompare] = useState(false);
+  // Top Sheet by Branch / site (Payroll layer "top_sheet").
+  const [canTop, setCanTop] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/payroll/approval-access'), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         setCanSheet(!!d?.approval_sheet);
         setCanCompare(!!d?.month_compare);
+        setCanTop(!!d?.top_sheet);
       })
       .catch(() => setCanSheet(false));
   }, [token]);
@@ -261,6 +265,9 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
 
           {/* This month against last month: who is new, who left, and why each salary changed. */}
           {canCompare && s!.runs > 0 && <PayrollMonthCompare token={token} month={month} />}
+
+          {/* Accounts' top sheet: the month by Branch / site, each site's own sheet, Excel / PDF. */}
+          {canTop && s!.runs > 0 && <PayrollTopSheet token={token} month={month} />}
 
           {/* Bank / MFS wise payment vouchers for Accounts (the software doesn't send money). */}
           {(data.status === 'approved' || data.status === 'paid') && s!.runs > 0 && (
