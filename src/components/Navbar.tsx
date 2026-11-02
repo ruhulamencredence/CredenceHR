@@ -195,12 +195,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
   }, [blend]);
-  // The app's status bar: dark clock/battery on the light blended header,
-  // white on the purple one.
+  // The app's status bar: white clock/battery — every header is a coloured
+  // band now (the blended one is the #7F00FF -> #D9B3FF band, index.css).
   useEffect(() => {
     if (!isNativeApp) return;
     import('@capacitor/status-bar')
-      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: blend ? Style.Light : Style.Dark }))
+      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: Style.Dark }))
       .catch(() => {});
   }, [blend, isNativeApp]);
   // A page-title takeover (e.g. "Select a Budget") means this page owns the
@@ -327,7 +327,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <span
               className={blend ? 'text-[19px] font-extrabold tracking-tight truncate' : 'text-base font-semibold truncate'}
-              style={{ color: purple ? 'white' : 'var(--g-text)' }}
+              style={purple || blend ? { color: 'white', textShadow: blend ? '0 1px 8px rgba(60, 0, 120, 0.35)' : undefined } : { color: 'var(--g-text)' }}
             >
               {headerPageTitle}
             </span>

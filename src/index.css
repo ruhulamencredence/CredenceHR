@@ -713,39 +713,33 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
   white chips, and once the page scrolls under the header it turns to
   frosted glass so the content doesn't clash with the title.
 */
+/* The band behind the header: #7F00FF -> #8C1AFF (23%) -> #D9B3FF, left to
+   right, solid under the header and fading into the page below it. Minimal
+   Mono keeps its own dark header colours. */
+:root { --blend-hdr: linear-gradient(90deg, #7f00ff 0%, #8c1aff 23%, #d9b3ff 100%); }
+html[data-ui="mono"] { --blend-hdr: var(--g-header-gradient); }
 .page-glow {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 340px;
+  height: calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 250px);
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(120% 80% at 10% 0%, rgba(var(--glow-a), 0.75) 0%, rgba(var(--glow-a), 0) 60%),
-    radial-gradient(90% 70% at 100% 0%, rgba(var(--glow-b), 0.65) 0%, rgba(var(--glow-b), 0) 55%);
-  -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent);
-  mask-image: linear-gradient(180deg, #000 40%, transparent);
+  background: var(--blend-hdr);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 64px), rgba(0, 0, 0, 0.55) 52%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 64px), rgba(0, 0, 0, 0.55) 52%, transparent 100%);
 }
-/* Apple Glow: lavender + pink; Classic: sky blue + lavender; Mono: the
-   colour touch (grey with "None"). */
-:root { --glow-a: 214, 196, 255; --glow-b: 255, 214, 240; }
-html[data-bg="default"] { --glow-a: 186, 224, 255; --glow-b: 221, 206, 255; }
-html[data-ui="mono"] { --glow-a: 228, 228, 231; --glow-b: 238, 238, 240; }
-html[data-ui="mono"][data-accent="sky"] { --glow-a: 186, 230, 253; --glow-b: 224, 242, 254; }
-html[data-ui="mono"][data-accent="teal"] { --glow-a: 153, 246, 228; --glow-b: 204, 251, 241; }
-html[data-ui="mono"][data-accent="violet"] { --glow-a: 221, 214, 254; --glow-b: 237, 233, 254; }
-html[data-ui="mono"][data-accent="rose"] { --glow-a: 254, 205, 211; --glow-b: 255, 228, 230; }
 
 .hdr-blend {
   background: transparent;
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
+/* Scrolled: the header keeps the same band, solid, so the white title stays
+   readable over whatever scrolls beneath it. */
 .hdr-blend.hdr-blend-scrolled {
-  background: color-mix(in srgb, var(--g-surface, #ffffff) 72%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  backdrop-filter: blur(18px) saturate(160%);
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.05), 0 10px 24px -18px rgba(15, 23, 42, 0.35);
+  background: var(--blend-hdr);
+  box-shadow: 0 10px 24px -16px rgba(76, 0, 153, 0.55);
 }
 .hdr-blend .hdr-round,
 .hdr-blend .hdr-chip > button,
