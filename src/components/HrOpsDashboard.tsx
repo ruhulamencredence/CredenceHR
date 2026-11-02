@@ -15,7 +15,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, UserPlus, UserMinus, TrendingUp, ArrowLeftRight, BadgeCheck, Users, AlertTriangle } from 'lucide-react';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Notice, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
@@ -208,7 +208,7 @@ export const HrOpsDashboard: React.FC<{
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((r) => Object.fromEntries(l.cols.map(([k, label]) => [label, r[k] ?? ''])))), l.label.slice(0, 31));
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(report.trend), 'Trend');
-    XLSX.writeFile(wb, `HR_Operations_${report.month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `HR_Operations_${report.month}.xlsx`);
   };
 
   const maxTrend = Math.max(1, ...(report?.trend || []).map((t) => Math.max(t.headcount, t.joined, t.separated)));

@@ -19,7 +19,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarCheck, Car, CheckCircle2, Clock, MapPin, FileSpreadsheet, FileText, Headphones, Loader2, Mic, RotateCcw, Send, Sparkles, Square, Volume2, X } from 'lucide-react';
-import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64 } from '../lib/assistantVoice';
+import { MAX_RECORD_SECONDS, prepareVoices, speak, startRecording, stopRecording, stopSpeaking, toWavBase64, unlockAudio } from '../lib/assistantVoice';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
@@ -690,6 +690,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       setSpeakLoading(false);
       return;
     }
+    unlockAudio(); // still inside the tap (iPhone)
     setSpeakingIdx(index);
     setSpeakLoading(true);
     try {
@@ -780,6 +781,9 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     setVoiceErr('');
     stopSpeaking();
     setSpeakingIdx(null);
+    // The answer to a spoken question is read out seconds later, outside
+    // this tap — allow sound now (iPhone).
+    unlockAudio();
     try {
       await startRecording();
     } catch (e: any) {
@@ -815,7 +819,25 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       return;
     }
     setOpen(false);
-    onNavigate(nav);
+    // "admin:attendance_reports#custom": the page, opened on that tab.
+    const [page, tab] = nav.split('#');
+    if (tab) {
+      try {
+        sessionStorage.setItem('credence_attendance_report_view', tab);
+      } catch {
+        /* no storage */
+      }
+      // An already open page switches tab too (after the navigation settles).
+      for (const ms of [0, 400, 1200]) setTimeout(() => window.dispatchEvent(new CustomEvent('credence:attendance-report-view', { detail: tab })), ms);
+      setTimeout(() => {
+        try {
+          sessionStorage.removeItem('credence_attendance_report_view');
+        } catch {
+          /* no storage */
+        }
+      }, 4000);
+    }
+    onNavigate(page);
   };
 
   const firstName = (user?.name || '').split(' ')[0];

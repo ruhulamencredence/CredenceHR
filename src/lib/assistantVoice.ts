@@ -222,6 +222,38 @@ function fetchClip(text: string, token: string): Promise<Blob> {
 let currentAudio: HTMLAudioElement | null = null;
 let playId = 0;
 
+// iPhone (Safari, the Home Screen app and the iOS app) only lets a page make
+// sound from a tap: a clip that arrives from the server seconds later is
+// refused, and the first spoken sentence too. So the mic and "শুনুন" taps
+// call unlockAudio() straight away — it plays a silent sound on one shared
+// <audio> element (every later clip plays on that same, now allowed,
+// element) and an empty sentence on the device's voice. Harmless elsewhere.
+let player: HTMLAudioElement | null = null;
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+export function unlockAudio() {
+  try {
+    if (!player) {
+      player = new Audio();
+      player.setAttribute('playsinline', '');
+    }
+    if (!currentAudio) {
+      player.src = SILENT_WAV;
+      void player.play().catch(() => undefined);
+    }
+  } catch {
+    /* no audio here */
+  }
+  try {
+    if ('speechSynthesis' in window && !window.speechSynthesis.speaking) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    }
+  } catch {
+    /* no device voice */
+  }
+}
+
 export function stopSpeaking() {
   playId++;
   try {
@@ -238,17 +270,30 @@ export function stopSpeaking() {
 function playBlob(blob: Blob, id: number): Promise<void> {
   if (id !== playId) return Promise.resolve();
   const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
+  const audio = player || new Audio();
   currentAudio = audio;
   return new Promise<void>((resolve) => {
+    let started = false;
+    let finished = false;
     const done = () => {
+      if (finished) return;
+      finished = true;
+      audio.onended = audio.onerror = audio.onpause = audio.onplaying = null;
       URL.revokeObjectURL(url);
       if (currentAudio === audio) currentAudio = null;
       resolve();
     };
+    // Changing src on the shared element can still deliver the previous
+    // sound's "pause": only a pause after this clip started ends it.
+    audio.onplaying = () => {
+      started = true;
+    };
     audio.onended = done;
     audio.onerror = done;
-    audio.onpause = done;
+    audio.onpause = () => {
+      if (started || id !== playId) done();
+    };
+    audio.src = url;
     void audio.play().catch(done);
   });
 }

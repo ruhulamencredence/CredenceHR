@@ -10,6 +10,7 @@ import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { LoadingBlock } from './LoadingBlock';
 import { MultiSelectFilter } from './MultiSelectFilter';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface Dash {
   month: string;
@@ -201,7 +202,7 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
     const ws = XLSX.utils.json_to_sheet(drawer.rows.map((r) => ({ [drawer.head[0]]: r.a, [drawer.head[1]]: r.b, [drawer.head[2]]: r.c })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Details');
-    XLSX.writeFile(wb, `${drawer.title.split(' — ')[0].replace(/[^A-Za-z0-9]+/g, '-')}-${data?.month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `${drawer.title.split(' — ')[0].replace(/[^A-Za-z0-9]+/g, '-')}-${data?.month}.xlsx`);
   };
 
   if (loading && !data) return <LoadingBlock />;

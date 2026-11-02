@@ -410,7 +410,8 @@ const HELP: HelpEntry[] = [
 // menu); buttons it couldn't use are dropped.
 function canNav(c: Ctx, nav: string): boolean {
   if (isSuper(c)) return true;
-  const [kind, target] = nav.split(":");
+  // "admin:attendance_reports#custom" = that page on one tab: the page's rule.
+  const [kind, target] = nav.split("#")[0].split(":");
   const f = c.flags;
   if (kind === "self") {
     switch (target) {
@@ -1365,7 +1366,7 @@ const TOOLS: Tool[] = [
           (groups.length > 15 ? `\n…আরও ${bn(groups.length - 15)}টি (পুরোটা PDF / Excel-এ)` : "") + (groups.length ? "" : "এই শর্তে কেউ নেই।");
         return {
           ok: true, text, data: { from, to, group_by: groupBy, groups: groups.slice(0, 40) },
-          actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports" }],
+          actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports#custom" }],
           report: report("Attendance Report", `Attendance-Report-${from}-${to}`, [BY[groupBy], ...(groupBy === "employee" ? ["Department"] : []), "Employees", "Days", "Present", "Absent", "Leave", "Late", "Extreme", "No check-out", "Left early", "Overtime days", "Avg in", "Avg out", "Avg hours", "OT hours", "Attendance %"],
             groups.map((g) => [g.key, ...(groupBy === "employee" ? [g.department || ""] : []), g.employees, g.days, g.present, g.absent, g.leave, g.late, g.extreme, g.missing_out, g.early_leave, g.overtime_days, g.avg_in || "", g.avg_out || "", g.avg_hours ?? "", g.total_ot_hours, g.attendance_pct ?? ""]),
             [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
@@ -1376,7 +1377,7 @@ const TOOLS: Tool[] = [
       const text = `**হাজিরা — ${when}**${condText ? ` (${condText})` : ""}: ${bn(rows.length)}টি\n` + (rows.length ? rows.slice(0, 20).map(line).join("\n") + (rows.length > 20 ? `\n…আরও ${bn(rows.length - 20)}টি (পুরোটা PDF / Excel-এ)` : "") : "এই শর্তে কেউ নেই।");
       return {
         ok: true, text, data: { from, to, total: rows.length, rows: rows.slice(0, 50).map((x) => ({ date: x.date, name: x.employee_name, department: x.department, status: x.status, in: x.in_time, out: x.out_time, late: x.late, hours: x.work_hours })) },
-        actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports" }],
+        actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports#custom" }],
         report: report("Attendance Report", `Attendance-Report-${from}-${to}`, ["Date", "Name", "Employee ID", "Department", "Status", "In", "Out", "Hours", "Late", "Minutes late", "Left early (min)", "Overtime (min)", "No check-out"],
           rows.map((x) => [x.date, x.employee_name, x.employee_code, x.department, x.status, x.in_time || "", x.out_time || "", x.work_hours ?? "", x.late === "none" ? "" : x.late, x.late_minutes || "", x.early_leave_minutes || "", x.overtime_minutes || "", x.missing_out ? "Yes" : ""]),
           [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
@@ -1403,7 +1404,7 @@ const TOOLS: Tool[] = [
         `\nমোট: উপস্থিত ${bn(t.present || 0)}, অনুপস্থিত ${bn(t.absent || 0)}, ছুটি ${bn(t.leave || 0)}, দেরি ${bn(t.delay || 0)}, অনেক দেরি ${bn(t.extreme || 0)} — ${pct(t.attendance_pct)}`;
       return {
         ok: true, text, data: { when: month || date || c.today, departments: d, total: t },
-        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }],
+        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports#dept" }],
         report: report("Department Attendance Summary", `Department-Attendance-${month || date || c.today}`, ["Department", "Employees", "Present", "Absent", "Leave", "Delay", "Extreme Delay", "Attendance %"],
           [...d.map((x) => [x.department, x.employees, x.present, x.absent, x.leave, x.delay, x.extreme, x.attendance_pct ?? ""]), ["All departments", t.employees, t.present, t.absent, t.leave, t.delay, t.extreme, t.attendance_pct ?? ""]],
           [[month ? "Month" : "Date", month || enDate(date || c.today)]])

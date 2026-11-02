@@ -10,6 +10,7 @@ import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, FileSpreadshee
 import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
 import { PagerBar } from './PagerBar';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface Reason {
   label: string;
@@ -151,7 +152,7 @@ export const PayrollMonthCompare: React.FC<{ token: string; month: string }> = (
       ]),
       'Employees'
     );
-    XLSX.writeFile(wb, `Payroll-Comparison-${m}-vs-${pm}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Payroll-Comparison-${m}-vs-${pm}.xlsx`);
   };
 
   const s = data?.summary;

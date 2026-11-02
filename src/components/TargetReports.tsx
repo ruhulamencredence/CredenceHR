@@ -18,7 +18,7 @@ import { FileDown, FileSpreadsheet, Search, Target as TargetIcon } from 'lucide-
 import { User } from '../types';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { fmtDate, periodLabel, ProgressBar, STATUS_LABEL, StatusBadge, Target, TargetDrawer, targetApi, TASK_STATUS_LABEL, TargetStatus, todayYmd } from './TargetParts';
 import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
@@ -155,7 +155,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
         ]);
         XLSX.utils.book_append_sheet(wb, dep, 'By department');
       }
-      XLSX.writeFile(wb, `${fileBase}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `${fileBase}.xlsx`);
     } catch (e: any) {
       setError(e.message);
     } finally {

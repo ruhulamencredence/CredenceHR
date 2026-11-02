@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
@@ -134,7 +134,7 @@ function exportExcel(r: Result, filtersText: string) {
   sheet['!cols'] = r.columns.map((c) => ({ wch: Math.min(40, Math.max(c.label.length + 2, isNumeric(c.type) ? 10 : 14)) }));
   XLSX.utils.book_append_sheet(wb, sheet, 'Report');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Summary', ''], ...r.summary.map((s) => [s.label, s.value])]), 'Summary');
-  XLSX.writeFile(wb, `${fileBase(r)}.xlsx`);
+  void saveWorkbookCrossPlatform(wb, `${fileBase(r)}.xlsx`);
 }
 
 async function exportPdf(r: Result, filtersText: string, mode: 'save' | 'email' = 'save') {

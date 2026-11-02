@@ -23,7 +23,7 @@ import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import {
   fmtDate,
@@ -200,7 +200,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows.length ? sheetRows : [{ Note: 'No bills this month' }]), 'Payment Sheet');
     const over = sheetRows.filter((r) => Number(r['Excess Amount']) > 0).map((r, i) => ({ ...r, SL: i + 1 }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(over.length ? over : [{ Note: 'Nobody went over the limit' }]), 'Excess Limit Users');
-    XLSX.writeFile(wb, `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.xlsx`);
   };
 
   const pdf = async (mode: 'save' | 'email' = 'save') => {
@@ -492,7 +492,7 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
       ws['!cols'] = [6, 16, 14, 24, 10, 16, 18, 14, 14].map((wch) => ({ wch }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Bill');
-      XLSX.writeFile(wb, `Mobile-Bill-Template-${month}${operator ? `-${operator}` : ''}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Mobile-Bill-Template-${month}${operator ? `-${operator}` : ''}.xlsx`);
     } catch (e: any) {
       setError(e.message);
     }
@@ -1094,7 +1094,7 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'All Numbers');
     XLSX.utils.book_append_sheet(wb, notes, 'How to fill');
-    XLSX.writeFile(wb, 'Mobile-SIM-List-Template.xlsx');
+    void saveWorkbookCrossPlatform(wb, 'Mobile-SIM-List-Template.xlsx');
   };
 
   const longTask = useLongTask();

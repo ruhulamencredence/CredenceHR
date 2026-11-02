@@ -12,7 +12,7 @@ import { FileDown, FileSpreadsheet, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { SearchSelect } from './Combobox';
 import { Spinner } from './Spinner';
@@ -161,7 +161,7 @@ export const DepartmentAttendanceSummary: React.FC<{ token: string; projects: Pr
         return r;
       });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([pHead, ...pRows]), 'People');
-    XLSX.writeFile(wb, `${fileBase()}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `${fileBase()}.xlsx`);
   };
 
   const exportPdf = async () => {

@@ -75,3 +75,28 @@ export async function savePdfCrossPlatform(
 
   doc.save(filename);
 }
+
+/**
+ * Saves an Excel workbook (SheetJS). XLSX.writeFile() fakes an <a download>
+ * click like jsPDF does, which the Android APK's WebView drops (and the
+ * iPhone app's WKWebView too) — so on the apps the file goes to the cache
+ * directory and the Share sheet ("Save to Files / Downloads", Drive,
+ * WhatsApp…); in a browser (and an iPhone Home Screen web app) it is the
+ * normal download.
+ */
+export async function saveWorkbookCrossPlatform(wb: any, filename: string): Promise<void> {
+  const XLSX = await import("xlsx");
+  if (await isNativePlatform()) {
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const { Share } = await import("@capacitor/share");
+      const data = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
+      const written = await Filesystem.writeFile({ path: filename, data, directory: Directory.Cache });
+      await Share.share({ title: filename, url: written.uri, dialogTitle: `Save or share ${filename}` });
+      return;
+    } catch (err) {
+      console.error("Native Excel save failed, falling back to browser download:", err);
+    }
+  }
+  XLSX.writeFile(wb, filename);
+}

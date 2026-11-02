@@ -16,7 +16,7 @@ import { ClipboardList, FileDown, FileSpreadsheet, Inbox, ListChecks, Plus, Repe
 import { User } from '../types';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { api, cap, fmtDate, NewTaskForm, RecurrenceList, SOURCE_LABEL, STATUS_LABEL, Task, TaskAccess, TaskCard, TaskDrawer, takePendingTaskId } from './TaskParts';
 
@@ -349,7 +349,7 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.length ? summary : [{ Note: 'No tasks this month' }]), 'Summary');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(details.length ? details : [{ Note: 'No tasks this month' }]), 'Tasks');
-    XLSX.writeFile(wb, `Task-Report-${data.month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Task-Report-${data.month}.xlsx`);
   };
 
   return (

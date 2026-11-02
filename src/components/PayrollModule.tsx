@@ -28,7 +28,7 @@ import { PayrollAdjustmentsPanel } from './PayrollAdjustmentsPanel';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { PayrollListPanel } from './PayrollListPanel';
@@ -473,7 +473,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Payroll');
-      XLSX.writeFile(wb, `Payroll_Report_${monthYear}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Payroll_Report_${monthYear}.xlsx`);
     } finally {
       setExporting(null);
     }

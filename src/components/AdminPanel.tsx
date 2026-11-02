@@ -7,7 +7,7 @@ import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
@@ -1066,7 +1066,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // User's day-by-day Present/Absent grid for one month) and Date Wise
   // (Present vs Absent split for one specific day).
   const now = new Date();
-  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept' | 'custom'>('month');
+  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept' | 'custom'>(() => {
+    // The Assistant's "Attendance Report Builder খুলুন" opens straight on the
+    // Custom Report tab (still shown only with the custom_report layer).
+    try {
+      // Read, not removed: the panel can mount twice while it opens; the
+      // Assistant clears the key a few seconds later.
+      const v = sessionStorage.getItem('credence_attendance_report_view');
+      if (v === 'custom' || v === 'dept' || v === 'date') return v;
+    } catch {
+      /* no storage */
+    }
+    return 'month';
+  });
+  useEffect(() => {
+    const onView = (e: Event) => {
+      const v = (e as CustomEvent).detail;
+      if (v === 'custom' || v === 'dept' || v === 'date' || v === 'month') setAttendanceReportView(v);
+    };
+    window.addEventListener('credence:attendance-report-view', onView);
+    return () => window.removeEventListener('credence:attendance-report-view', onView);
+  }, []);
   // Admin Panel -> Approvals has two engines side by side: the OLD single
   // global chain (ApprovalManager — its own "Queue"/"Manage Chain" views) and
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
@@ -1474,7 +1494,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(10).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'MPR Edit Log');
-    XLSX.writeFile(workbook, `MPR_Edit_Log_${todayDateOnlyString()}.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `MPR_Edit_Log_${todayDateOnlyString()}.xlsx`);
   };
 
   // Manage-Projects modal (Admin sets which Projects a User can access)
@@ -1772,7 +1792,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const ws = XLSX.utils.json_to_sheet(sheetRows);
       ws['!cols'] = [{ wch: 35 }, { wch: 25 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, 'Missing Rate');
-      XLSX.writeFile(wb, `Missing_Rate_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Missing_Rate_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
     } else {
       const sheetRows = result.missing_category.map((name) => ({
         'Materials Name': name,
@@ -1785,7 +1805,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const ws = XLSX.utils.json_to_sheet(sheetRows);
       ws['!cols'] = [{ wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, 'Missing Category');
-      XLSX.writeFile(wb, `Missing_Category_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Missing_Category_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
     }
   };
 
@@ -3408,7 +3428,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(Object.keys(rows[0] || {}).length || 1).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'MPR Entries');
-    XLSX.writeFile(workbook, `MPR_Report_${todayDateOnlyString()}.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `MPR_Report_${todayDateOnlyString()}.xlsx`);
   };
 
   // --- Export a Budget's raw imported sheet (every column, every row) to Excel ---
@@ -3435,7 +3455,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(16).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Budget Items');
-    XLSX.writeFile(workbook, `${budget.budget_name.replace(/[^\w\- ]+/g, '')}_ImportedSheet.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `${budget.budget_name.replace(/[^\w\- ]+/g, '')}_ImportedSheet.xlsx`);
   };
 
   return (
@@ -4375,9 +4395,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </div>
           </div>
 
-          {attendanceReportView === 'dept' ? (
+          {attendanceReportView === 'dept' && attendanceReportsLayer('dept_summary') ? (
             <DepartmentAttendanceSummary token={token} projects={projects} departments={reportDepartments} />
-          ) : attendanceReportView === 'custom' ? (
+          ) : attendanceReportView === 'custom' && attendanceReportsLayer('custom_report') ? (
             <AttendanceReportBuilder token={token} departments={reportDepartments} />
           ) : attendanceReportView === 'month' ? (
             loadingMonthlyReport && !monthlyReport ? (

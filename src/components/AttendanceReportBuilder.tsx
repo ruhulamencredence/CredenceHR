@@ -15,7 +15,7 @@ import { FileDown, FileSpreadsheet, Play, Plus, Sparkles, X } from 'lucide-react
 import { apiUrl } from '../lib/api';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { SearchSelect } from './Combobox';
 import { Spinner } from './Spinner';
@@ -240,7 +240,7 @@ export const AttendanceReportBuilder: React.FC<{ token: string; departments: str
     const ws = XLSX.utils.aoa_to_sheet([[`Attendance report — ${result.description}`], [], tableHead, ...tableRows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, isSummary ? 'Summary' : 'Detail');
-    XLSX.writeFile(wb, `${fileBase}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `${fileBase}.xlsx`);
   };
   const exportPdf = async () => {
     const co = await loadPdfCompany(token);

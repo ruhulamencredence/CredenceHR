@@ -13,6 +13,7 @@ import { Eye, FileSpreadsheet, LogIn, MousePointerClick, Search } from 'lucide-r
 import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
 import { SearchSelect } from './Combobox';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface LogRow {
   id: number;
@@ -83,7 +84,7 @@ export const PayrollActivityLog: React.FC<{ token: string }> = ({ token }) => {
     ws['!cols'] = [24, 22, 14, 34, 40, 16, 18].map((wch) => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Activity');
-    XLSX.writeFile(wb, `Payroll-Activity-${from}-to-${to}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Payroll-Activity-${from}-to-${to}.xlsx`);
   };
 
   const input = 'text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg';

@@ -28,6 +28,7 @@ import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './
 import { LoadingBlock } from './LoadingBlock';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { MD_STATUS, MdDispatch, MdRow, MdStatus, MdStatusChip, MdTimelinePopup, isOverdue, mdFetch, qtyText, todayDhaka } from './MprDispatchShared';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 type View = 'open' | 'received' | 'all';
 interface Line {
@@ -328,7 +329,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Delivery Status');
     XLSX.utils.book_append_sheet(wb, info, 'How to fill');
-    XLSX.writeFile(wb, `Daily_Site_Requirement_${today}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Daily_Site_Requirement_${today}.xlsx`);
   };
 
   // Reads a filled sheet back: lines with a supplier, P.O. or Dispatch Qty are sent.

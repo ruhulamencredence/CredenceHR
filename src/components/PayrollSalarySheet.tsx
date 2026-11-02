@@ -12,6 +12,7 @@ import { apiUrl } from '../lib/api';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { PagerBar } from './PagerBar';
 import { LoadingBlock } from './LoadingBlock';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface SheetRow {
   id: number;
@@ -140,7 +141,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
     const ws = XLSX.utils.aoa_to_sheet([[`Salary Sheet — ${month}`], [], head, ...body]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Salary Sheet');
-    XLSX.writeFile(wb, `Salary-Sheet-${month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Salary-Sheet-${month}.xlsx`);
   };
 
   const th = 'px-2.5 py-2 text-right font-semibold whitespace-nowrap';

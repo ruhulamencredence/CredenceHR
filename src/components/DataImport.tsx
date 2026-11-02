@@ -39,6 +39,7 @@ import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { useHrApi } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 type FieldType = 'text' | 'date' | 'time' | 'number' | 'yesno';
 interface Field {
@@ -406,7 +407,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     ]);
     info['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 36 }, { wch: 22 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, info, 'Instructions');
-    XLSX.writeFile(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
   // Reads one sheet into import rows + the column mapping (throws a readable error).
@@ -610,7 +611,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     );
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, 'Result');
-    XLSX.writeFile(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
   if (!kinds)

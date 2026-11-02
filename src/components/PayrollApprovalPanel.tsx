@@ -20,6 +20,7 @@ import { PayrollPaymentVouchers } from './PayrollPaymentVouchers';
 import { LoadingBlock } from './LoadingBlock';
 import { PayrollSalarySheet } from './PayrollSalarySheet';
 import { PayrollMonthCompare } from './PayrollMonthCompare';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface ApprovalState {
   month_year: string;
@@ -135,7 +136,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
       ws['!cols'] = [5, 12, 24, 18, 18, 12, 10, 20, 16, 20, 12, 10].map((wch) => ({ wch }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Sheet');
-      XLSX.writeFile(wb, `Salary-Payment-Sheet-${month}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Salary-Payment-Sheet-${month}.xlsx`);
     } catch (e: any) {
       setError(e.message);
     }
