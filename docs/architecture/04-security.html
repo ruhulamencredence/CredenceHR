@@ -367,7 +367,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </table>
 <hr />
 <h2 id="secret">৯. Secret ব্যবস্থাপনা</h2>
-<p><code>.env</code> git-এ নেই (<code>.gitignore</code>: <code>.env*</code>, শুধু <code>.env.example</code> আছে); <code>.jwt-secret</code>-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (<code>GEMINI_API_KEY</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>ESIGN_CERT_*</code>, <code>ERP360_APP_SECRET</code>, Firebase, SMTP সবই <code>.env</code>/পরিবেশ থেকে)।
+<p><code>.env</code> git-এ নেই (<code>.gitignore</code>: <code>.env*</code>, শুধু <code>.env.example</code> আছে); <code>.jwt-secret</code>-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (<code>GEMINI_API_KEY</code> / <code>GEMINI_API_KEYS</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>ESIGN_CERT_*</code>, <code>ERP360_APP_SECRET</code>, Firebase, SMTP সবই <code>.env</code>/পরিবেশ থেকে)।
 <strong>মনে রাখার:</strong> <code>.env.example</code>-এ <code>ADMIN_PASSWORD="ChangeThisPassword123"</code>। লাইভে অবশ্যই বদলাবেন।</p>
 <hr />
 <h2 id="_3">১০. জানা সীমাবদ্ধতা (সৎ তালিকা)</h2>

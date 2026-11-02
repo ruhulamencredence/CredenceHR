@@ -3639,33 +3639,89 @@ const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-flash-lite-latest,gem
   .split(",").map((m) => m.trim()).filter(Boolean);
 const GEMINI_CALL_TIMEOUT_MS = 20000;
 let preferredModel = 0;
-let gemini: GoogleGenAI | null = null;
-const geminiClient = () => {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!key) return null;
-  if (!gemini) gemini = new GoogleGenAI({ apiKey: key });
-  return gemini;
+// Several API keys (each from its own Google Cloud project, so each has its
+// own quota) may be given: GEMINI_API_KEYS="key1,key2,key3" (GEMINI_API_KEY
+// may also hold a comma-separated list). One key is used at a time; when its
+// quota is used up (429 / RESOURCE_EXHAUSTED) it rests — 15 minutes at
+// first, doubling up to 6 hours while it stays used up — and the next key
+// takes over at once, inside the same question. Only when every key is used
+// up does the local engine answer on its own (no 20 s wait per question).
+// One good answer resets a key.
+interface GeminiKey { label: string; ai: GoogleGenAI; pausedUntil: number; pauseMs: number }
+let geminiKeys: GeminiKey[] | null = null;
+let currentKey = 0;
+const keyPool = (): GeminiKey[] => {
+  if (!geminiKeys) {
+    const raw = [process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY].filter(Boolean).join(",");
+    const keys = [...new Set(raw.split(/[,\s]+/).map((k) => k.trim()).filter(Boolean))];
+    geminiKeys = keys.map((key, i) => ({ label: `key ${i + 1} (…${key.slice(-4)})`, ai: new GoogleGenAI({ apiKey: key }), pausedUntil: 0, pauseMs: 0 }));
+    if (keys.length > 1) console.log(`AI Assistant: ${keys.length} Gemini API keys — the next one takes over when one's quota is used up`);
+  }
+  return geminiKeys;
 };
+// The key in use (the first one not resting); null when no key is set.
+const geminiClient = (): GoogleGenAI | null => {
+  const pool = keyPool();
+  if (!pool.length) return null;
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (currentKey + i) % pool.length;
+    if (Date.now() >= pool[idx].pausedUntil) {
+      if (idx !== currentKey) console.log(`AI Assistant: now using Gemini ${pool[idx].label}`);
+      currentKey = idx;
+      return pool[idx].ai;
+    }
+  }
+  return pool[currentKey].ai;
+};
+const keyOf = (ai?: GoogleGenAI | null) => keyPool().find((k) => k.ai === ai) || keyPool()[currentKey];
 
-// Every model said "quota used up" (429 / RESOURCE_EXHAUSTED): Gemini is not
-// asked again for a while and the local engine answers on its own (no 20 s
-// wait per question). 15 minutes at first, doubling up to 6 hours while it
-// stays used up; one good answer resets it.
+// Every key used up: Gemini is not asked again until one has rested.
 const QUOTA = /\b429\b|RESOURCE_EXHAUSTED|quota|rate limit/i;
-let geminiPausedUntil = 0;
-let geminiPauseMs = 0;
-const geminiPaused = () => Date.now() < geminiPausedUntil;
-function pauseGemini() {
-  geminiPauseMs = Math.min(6 * 60 * 60_000, geminiPauseMs ? geminiPauseMs * 2 : 15 * 60_000);
-  geminiPausedUntil = Date.now() + geminiPauseMs;
-  console.warn(`AI Assistant: Gemini quota used up — answering locally for ${Math.round(geminiPauseMs / 60_000)} min`);
+const geminiPaused = () => keyPool().length > 0 && keyPool().every((k) => Date.now() < k.pausedUntil);
+// This key's quota is used up: it rests, the next one takes over. Returns
+// true when another key is still available.
+function pauseGemini(ai?: GoogleGenAI | null): boolean {
+  const k = keyOf(ai);
+  if (!k) return false;
+  k.pauseMs = Math.min(6 * 60 * 60_000, k.pauseMs ? k.pauseMs * 2 : 15 * 60_000);
+  k.pausedUntil = Date.now() + k.pauseMs;
+  const more = !geminiPaused();
+  console.warn(`AI Assistant: Gemini ${k.label} quota used up — resting ${Math.round(k.pauseMs / 60_000)} min${more ? ", switching to the next key" : "; every key used up, answering locally"}`);
+  if (more) geminiClient();
+  return more;
 }
-function geminiWorked() {
-  geminiPauseMs = 0;
-  geminiPausedUntil = 0;
+function geminiWorked(ai?: GoogleGenAI | null) {
+  const k = keyOf(ai);
+  if (!k) return;
+  k.pauseMs = 0;
+  k.pausedUntil = 0;
 }
 
-async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
+// Tries the models with the key in use; a key whose quota is used up hands
+// over to the next key for the same request.
+async function generateWithFallback(_ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
+  for (let n = 0; n < Math.max(1, keyPool().length); n++) {
+    const ai = geminiClient();
+    if (!ai) break;
+    try {
+      const resp = await generateWithModels(ai, req);
+      geminiWorked(ai);
+      return resp;
+    } catch (err: any) {
+      if (err?.quotaExhausted) {
+        err.alreadyPaused = true;
+        if (pauseGemini(ai)) continue;
+      }
+      throw err;
+    }
+  }
+  const e: any = new Error("every Gemini key is used up");
+  e.quotaExhausted = true;
+  e.alreadyPaused = true;
+  throw e;
+}
+
+async function generateWithModels(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
   let lastErr: any = null;
   let allQuota = true;
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
@@ -3853,8 +3909,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
     if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
-    const ai = geminiClient();
-    if (!ai) return res.status(503).json({ error: "ভয়েস এখন চালু নেই — লিখে প্রশ্ন করুন।" });
+    if (!geminiClient()) return res.status(503).json({ error: "ভয়েস এখন চালু নেই — লিখে প্রশ্ন করুন।" });
     if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
     const data = typeof req.body?.audio_base64 === "string" ? req.body.audio_base64 : "";
     const mime = String(req.body?.mime_type || "audio/wav");
@@ -3877,49 +3932,58 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const models = (process.env.GEMINI_TRANSCRIBE_MODEL || "gemini-flash-lite-latest,gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
     const why: string[] = [];
     let quota = 0;
-    for (const model of models) {
-      const firstTry = thinkOffFor.get(model) ?? 0;
-      for (let ti = firstTry; ti < THINK_OFF.length; ti++) {
-        const left = deadline - Date.now();
-        if (left < 3000) break;
-        const think = THINK_OFF[ti];
-        try {
-          const resp: any = await ai.models.generateContent({
-            model,
-            contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime.split(";")[0], data } }, { text: prompt }] }],
-            config: {
-              temperature: 0,
-              maxOutputTokens: 300,
-              ...(think ? { thinkingConfig: think } : {}),
-              httpOptions: { timeout: Math.min(14000, left) }
-            } as any
-          });
-          thinkOffFor.set(model, ti);
-          let text = String(resp?.text || "").replace(/\s+/g, " ").trim();
-          // A reply that repeats one phrase over and over: keep it once.
-          const rep = /^(.{4,80}?)(?:\s*\1){2,}/.exec(text);
-          if (rep) text = rep[1].trim();
-          geminiWorked();
-          console.log(
-            `AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model}` +
-              ` (${think ? JSON.stringify(think) : "default thinking"}) in ${Date.now() - t0} ms`
-          );
-          return res.json({ text: text.slice(0, 1000) });
-        } catch (err: any) {
-          const msg = String(err?.message || err).slice(0, 160);
-          // This model doesn't take that way of turning thinking off: the next way.
-          if (ti < THINK_OFF.length - 1 && /INVALID_ARGUMENT|\b400\b/.test(msg) && !/API key/i.test(msg)) continue;
-          if (QUOTA.test(msg)) quota++;
-          why.push(`${model}${think ? ` ${JSON.stringify(think)}` : ""}: ${msg}`);
-          break;
+    let allQuota = false;
+    // A key whose quota is used up hands over to the next key (time allowing).
+    for (let kn = 0; kn < Math.max(1, keyPool().length); kn++) {
+      const ai = geminiClient()!;
+      const whyStart = why.length;
+      quota = 0;
+      for (const model of models) {
+        const firstTry = thinkOffFor.get(model) ?? 0;
+        for (let ti = firstTry; ti < THINK_OFF.length; ti++) {
+          const left = deadline - Date.now();
+          if (left < 3000) break;
+          const think = THINK_OFF[ti];
+          try {
+            const resp: any = await ai.models.generateContent({
+              model,
+              contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime.split(";")[0], data } }, { text: prompt }] }],
+              config: {
+                temperature: 0,
+                maxOutputTokens: 300,
+                ...(think ? { thinkingConfig: think } : {}),
+                httpOptions: { timeout: Math.min(14000, left) }
+              } as any
+            });
+            thinkOffFor.set(model, ti);
+            let text = String(resp?.text || "").replace(/\s+/g, " ").trim();
+            // A reply that repeats one phrase over and over: keep it once.
+            const rep = /^(.{4,80}?)(?:\s*\1){2,}/.exec(text);
+            if (rep) text = rep[1].trim();
+            geminiWorked(ai);
+            console.log(
+              `AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model}` +
+                ` (${think ? JSON.stringify(think) : "default thinking"}) in ${Date.now() - t0} ms`
+            );
+            return res.json({ text: text.slice(0, 1000) });
+          } catch (err: any) {
+            const msg = String(err?.message || err).slice(0, 160);
+            // This model doesn't take that way of turning thinking off: the next way.
+            if (ti < THINK_OFF.length - 1 && /INVALID_ARGUMENT|\b400\b/.test(msg) && !/API key/i.test(msg)) continue;
+            if (QUOTA.test(msg)) quota++;
+            why.push(`${model}${think ? ` ${JSON.stringify(think)}` : ""}: ${msg}`);
+            break;
+          }
         }
       }
+      allQuota = quota > 0 && quota === why.length - whyStart;
+      if (allQuota && pauseGemini(ai) && deadline - Date.now() > 5000) continue;
+      break;
     }
     console.warn(
       `AI Assistant: transcribe failed after ${Date.now() - t0} ms (${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? `, ${secs} s` : ""}) — ${why.join(" | ") || "no time left"}`
     );
-    if (quota && quota === why.length) {
-      pauseGemini();
+    if (allQuota) {
       return res.status(503).json({ error: "এখন ভয়েস ব্যস্ত (Gemini-র সীমা শেষ) — কিছুক্ষণ পর চেষ্টা করুন বা লিখে প্রশ্ন করুন।" });
     }
     if (Date.now() >= deadline - 3000) return res.status(504).json({ error: "উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।" });
@@ -3982,50 +4046,61 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const order = preferredTtsModel && list.includes(preferredTtsModel) ? [preferredTtsModel, ...list.filter((m) => m !== preferredTtsModel)] : list;
     const why: string[] = [];
     const t0 = Date.now();
-    for (const model of order.slice(0, 4)) {
-      if (Date.now() - t0 > 40000) break;
-      try {
-        const resp: any = await ai.models.generateContent({
-          model,
-          contents: [{ role: "user", parts: [{ text }] }],
-          config: {
-            responseModalities: ["AUDIO"],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-            httpOptions: { timeout: 30000 }
-          } as any
-        });
-        const part = resp?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
-        if (!part) throw new Error("no audio in the reply");
-        const pcm = Buffer.from(part.inlineData.data, "base64");
-        const rate = Number(/rate=(\d+)/.exec(String(part.inlineData.mimeType || ""))?.[1]) || 24000;
-        // 16-bit mono PCM -> WAV.
-        const head = Buffer.alloc(44);
-        head.write("RIFF", 0);
-        head.writeUInt32LE(36 + pcm.length, 4);
-        head.write("WAVE", 8);
-        head.write("fmt ", 12);
-        head.writeUInt32LE(16, 16);
-        head.writeUInt16LE(1, 20);
-        head.writeUInt16LE(1, 22);
-        head.writeUInt32LE(rate, 24);
-        head.writeUInt32LE(rate * 2, 28);
-        head.writeUInt16LE(2, 32);
-        head.writeUInt16LE(16, 34);
-        head.write("data", 36);
-        head.writeUInt32LE(pcm.length, 40);
-        const wav = Buffer.concat([head, pcm]);
-        if (preferredTtsModel !== model) console.log(`AI Assistant: reading aloud with ${model} (${Date.now() - t0} ms)`);
-        preferredTtsModel = model;
-        ttsCache.set(cacheKey, { at: Date.now(), wav });
-        if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
-        res.setHeader("Content-Type", "audio/wav");
-        res.setHeader("Cache-Control", "no-store");
-        return res.send(wav);
-      } catch (err: any) {
-        const msg = String(err?.message || err).slice(0, 200);
-        why.push(`${model}: ${msg}`);
-        if (/API key/i.test(msg)) break;
+    // The voice models' quota is separate from the chat's: a key whose voice
+    // quota is used up just hands this piece to the next key (no rest).
+    const pool = keyPool();
+    const keysInOrder = [...pool.slice(currentKey), ...pool.slice(0, currentKey)];
+    for (const key of keysInOrder) {
+      const ai = key.ai;
+      const whyStart = why.length;
+      let quota = 0;
+      for (const model of order.slice(0, 4)) {
+        if (Date.now() - t0 > 40000) break;
+        try {
+          const resp: any = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts: [{ text }] }],
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+              httpOptions: { timeout: 30000 }
+            } as any
+          });
+          const part = resp?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
+          if (!part) throw new Error("no audio in the reply");
+          const pcm = Buffer.from(part.inlineData.data, "base64");
+          const rate = Number(/rate=(\d+)/.exec(String(part.inlineData.mimeType || ""))?.[1]) || 24000;
+          // 16-bit mono PCM -> WAV.
+          const head = Buffer.alloc(44);
+          head.write("RIFF", 0);
+          head.writeUInt32LE(36 + pcm.length, 4);
+          head.write("WAVE", 8);
+          head.write("fmt ", 12);
+          head.writeUInt32LE(16, 16);
+          head.writeUInt16LE(1, 20);
+          head.writeUInt16LE(1, 22);
+          head.writeUInt32LE(rate, 24);
+          head.writeUInt32LE(rate * 2, 28);
+          head.writeUInt16LE(2, 32);
+          head.writeUInt16LE(16, 34);
+          head.write("data", 36);
+          head.writeUInt32LE(pcm.length, 40);
+          const wav = Buffer.concat([head, pcm]);
+          if (preferredTtsModel !== model) console.log(`AI Assistant: reading aloud with ${model} (${Date.now() - t0} ms)`);
+          preferredTtsModel = model;
+          ttsCache.set(cacheKey, { at: Date.now(), wav });
+          if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
+          res.setHeader("Content-Type", "audio/wav");
+          res.setHeader("Cache-Control", "no-store");
+          return res.send(wav);
+        } catch (err: any) {
+          const msg = String(err?.message || err).slice(0, 200);
+          why.push(`${key.label} ${model}: ${msg}`);
+          if (QUOTA.test(msg)) quota++;
+          if (/API key/i.test(msg)) break;
+        }
       }
+      if (!(quota > 0 && quota === why.length - whyStart) || Date.now() - t0 > 40000) break;
     }
     console.warn(`AI Assistant: speak failed after ${Date.now() - t0} ms (${text.length} chars) — ${why.join(" | ") || "no voice model"}`);
     // Google may have renamed the models: list them again on the next try.
@@ -4056,7 +4131,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
         out = await localAnswer(c, message, history);
       }
     } catch (err: any) {
-      if (err?.quotaExhausted) pauseGemini();
+      if (err?.quotaExhausted) { if (!err.alreadyPaused) pauseGemini(); }
       else console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
       out = await localAnswer(c, message, history);
     }

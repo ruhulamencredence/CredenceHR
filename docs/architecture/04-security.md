@@ -144,7 +144,7 @@
 
 ## ৯. Secret ব্যবস্থাপনা
 
-`.env` git-এ নেই (`.gitignore`: `.env*`, শুধু `.env.example` আছে); `.jwt-secret`-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (`GEMINI_API_KEY`, `MAIL_ENCRYPTION_KEY`, `ESIGN_CERT_*`, `ERP360_APP_SECRET`, Firebase, SMTP সবই `.env`/পরিবেশ থেকে)।
+`.env` git-এ নেই (`.gitignore`: `.env*`, শুধু `.env.example` আছে); `.jwt-secret`-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (`GEMINI_API_KEY` / `GEMINI_API_KEYS`, `MAIL_ENCRYPTION_KEY`, `ESIGN_CERT_*`, `ERP360_APP_SECRET`, Firebase, SMTP সবই `.env`/পরিবেশ থেকে)।
 **মনে রাখার:** `.env.example`-এ `ADMIN_PASSWORD="ChangeThisPassword123"`। লাইভে অবশ্যই বদলাবেন।
 
 ---

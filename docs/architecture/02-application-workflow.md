@@ -427,7 +427,7 @@ flowchart LR
   PM --> RDS[(Redis)]
 ```
 
-Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `ADMIN_EMAIL/PASSWORD`, `CORS_ORIGINS`, `MAIL_ENCRYPTION_KEY`, `REDIS_URL`, `GEMINI_API_KEY` (ঐচ্ছিক), `ESIGN_CERT_*` (ঐচ্ছিক)।
+Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `ADMIN_EMAIL/PASSWORD`, `CORS_ORIGINS`, `MAIL_ENCRYPTION_KEY`, `REDIS_URL`, `GEMINI_API_KEY` বা একাধিক key `GEMINI_API_KEYS="key1,key2"` (ঐচ্ছিক — একটার সীমা শেষ হলে সেটা বিশ্রামে যায় আর পরেরটা একই প্রশ্নেই উত্তর দেয়; chat, কথা লেখা ও পড়া সবখানে; সব শেষ হলে local bot), `ESIGN_CERT_*` (ঐচ্ছিক)।
 
 ---
 
