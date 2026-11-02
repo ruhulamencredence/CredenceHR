@@ -8,6 +8,7 @@ import { ChevronLeft, Camera, User as UserIcon, Briefcase, Building2, MapPin, Al
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { PhotoRulesSheet } from './PhotoRulesSheet';
 import { LoadingBlock } from './LoadingBlock';
 
 interface PersonalDataFormProps {
@@ -37,6 +38,8 @@ interface PersonalData {
   // A new photo waiting for the Superadmin's approval, and the last refusal.
   photo_pending?: { id: number; requested_at: string } | null;
   photo_rejected?: { reason: string | null; decided_at: string } | null;
+  // False for the Superadmin (and a joiner in onboarding): their photo goes straight in.
+  photo_needs_approval?: boolean;
 }
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
@@ -69,6 +72,8 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   // The new photo while it waits for the Superadmin (the old one stays shown).
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  // The photo rules (PhotoRulesSheet) come before picking a photo that needs approval.
+  const [rulesOpen, setRulesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlRef = useRef<string | null>(null);
 
@@ -130,12 +135,14 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handlePhotoPick = () => fileInputRef.current?.click();
+  const handlePhotoPick = () => (data.photo_needs_approval ? setRulesOpen(true) : fileInputRef.current?.click());
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (file) await handleFile(file);
+  };
+  const handleFile = async (file: File) => {
     setError(null);
 
     if (!/^image\/(jpeg|jpg|png)$/i.test(file.type)) {
@@ -307,6 +314,19 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                 <p className="text-[11px] text-center mt-0.5" style={{ color: 'var(--g-text-muted)' }}>
                   JPEG or PNG, at least 800×800px and less than 5MB
                 </p>
+                {data.photo_needs_approval && (
+                  <button type="button" onClick={() => setRulesOpen(true)} className="mt-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11.5px] bg-violet-50 text-violet-800">
+                    🛡️ নতুন ছবি Superadmin অনুমোদন দিলে বসবে · <span className="underline font-semibold">ছবির নিয়ম</span>
+                  </button>
+                )}
+                <PhotoRulesSheet
+                  open={rulesOpen}
+                  onClose={() => setRulesOpen(false)}
+                  onPick={(f) => {
+                    setRulesOpen(false);
+                    void handleFile(f);
+                  }}
+                />
                 {data.photo_pending && (
                   <div className="mt-3 w-full max-w-xs flex items-center gap-3 rounded-2xl px-3 py-2.5 bg-amber-50 border border-amber-200">
                     {pendingUrl && <img src={pendingUrl} alt="New photo waiting for approval" className="w-12 h-12 rounded-full object-cover shrink-0" />}

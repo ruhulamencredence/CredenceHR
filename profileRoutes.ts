@@ -138,6 +138,10 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
         has_photo: !!(detail && Number(detail.has_photo)),
         position: emp?.designation || null,
         department: emp?.department || null,
+        // Whether a new photo waits for the Superadmin (not for the Superadmin
+        // themself, nor a joiner during onboarding) — the page shows the photo
+        // rules first when it does.
+        photo_needs_approval: !(isSuper(req) || req.user.onb),
         ...(await ownPhotoState(userId))
       });
     } catch (err: any) {

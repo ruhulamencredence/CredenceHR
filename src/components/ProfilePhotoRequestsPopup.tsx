@@ -9,6 +9,7 @@ import { apiUrl } from '../lib/api';
 import { MailPopup as Popup, inputCls, ghostBtn } from './mail/MailPopup';
 import { LoadingBlock } from './LoadingBlock';
 import { Spinner } from './Spinner';
+import { PHOTO_REJECT_REASONS } from './PhotoRulesSheet';
 
 interface PhotoRequest {
   id: number;
@@ -124,6 +125,20 @@ export const ProfilePhotoRequestsPopup: React.FC<{ token: string; onClose: () =>
               </div>
               {rejecting === r.id ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* One tap: the same rules the person saw before picking the photo (PhotoRulesSheet). */}
+                  <div className="w-full flex flex-wrap gap-1.5">
+                    {PHOTO_REJECT_REASONS.map((x) => (
+                      <button
+                        key={x.title}
+                        type="button"
+                        onClick={() => setReason(x.why)}
+                        aria-pressed={reason === x.why}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border ${reason === x.why ? 'bg-rose-600 text-white border-rose-600' : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'}`}
+                      >
+                        {x.title}
+                      </button>
+                    ))}
+                  </div>
                   <label htmlFor={`pr-reason-${r.id}`} className="sr-only">Reason</label>
                   <input
                     id={`pr-reason-${r.id}`}
