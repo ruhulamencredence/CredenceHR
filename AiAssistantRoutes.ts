@@ -204,6 +204,22 @@ const st = (s: any) => STATUS_BN[String(s || "").toLowerCase()] || String(s || "
 
 const isSuper = (c: Ctx) => c.role === "superadmin";
 const hasMod = (c: Ctx, k: string) => isSuper(c) || c.modules.includes(k);
+
+// The asker's login has no Employee record, so there is nothing of "their
+// own" (attendance, late days, loans…). Someone who manages Employees — a
+// Superadmin above all — is told how to link it themselves; anyone else to
+// ask HR.
+const notLinked = (c: Ctx, what: string): ToolResult => {
+  const self = hasMod(c, "employees");
+  return {
+    ok: true,
+    text: self
+      ? `আপনার login কোনো Employee record-এর সাথে যুক্ত নয়, তাই আপনার নিজের ${what} নেই। আপনি নিজেই যুক্ত করতে পারেন: Admin Panel → Employees → আপনার নামের সারিতে **Link Existing** (🔗) → এই login বাছুন (আপনার Employee record না থাকলে আগে "Add Employee")।`
+      : `আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই আপনার নিজের ${what} দেখানো যাচ্ছে না। HR-কে বলুন আপনার Employee record-এ এই login যুক্ত করে দিতে।`,
+    data: { linked: false, can_link_self: self },
+    actions: self ? [{ label: "Employees খুলুন", nav: "admin:employees" }] : []
+  };
+};
 // Same people who see the Admin (HR) Dashboard — AdminDashboardRoutes.ts gate.
 const canDash = (c: Ctx) => isSuper(c) || c.role === "admin" || c.modules.includes("admin_dashboard");
 
@@ -967,7 +983,19 @@ const TOOLS: Tool[] = [
       const r = await callApi(c.req, `/api/my-attendance-summary${ym ? `?month_year=${ym}` : ""}`);
       if (!r.ok) return fail(r.status);
       const s = r.body || {};
-      if (s.linked === false) return { ok: true, text: "আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই হাজিরার হিসাব দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (s.linked === false) {
+        const note = notLinked(c, "হাজিরা");
+        // Someone who reads attendance reports most likely wants everyone's:
+        // the same (salary) month for the whole company, by Department.
+        if (!hasMod(c, "attendance_reports")) return note;
+        const sm = /^\d{4}-\d{2}$/.test(String(s.month_year || "")) ? String(s.month_year) : ym || salaryMonthOf(c, c.today);
+        const p = salaryPeriod(c, sm);
+        const all = await TOOLS.find((x) => x.name === "attendance_custom_report")!.run(c, {
+          from: p.start, to: p.end > c.today ? c.today : p.end, view: "summary", group_by: "department", salary_month: sm
+        });
+        if (!all.ok) return note;
+        return { ...all, text: `${note.text}\n\nনিচে **পুরো কোম্পানির** হাজিরা:\n${all.text}`, data: { linked: false, company: all.data }, actions: [...(note.actions || []), ...(all.actions || [])] };
+      }
       const text =
         `${salaryMonthStartsLater(c) ? "বেতনের মাস " : ""}${bnMonth(String(s.month_year || ym))}-এর হাজিরা (${bnDate(s.period_start)} – ${bnDate(s.period_end)}):\n` +
         `• উপস্থিত: **${bn(s.present_days ?? 0)} দিন**\n• ছুটি: ${bn(s.leave_days ?? 0)} দিন\n• অনুপস্থিত: ${bn(s.absent_days ?? 0)} দিন\n` +
@@ -986,7 +1014,7 @@ const TOOLS: Tool[] = [
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.to || "")) ? String(args.to) : c.today;
       const r = await callApi(c.req, `/api/my-late-days?from=${from}&to=${to}`);
       if (!r.ok) return fail(r.status);
-      if (r.body?.linked === false) return { ok: true, text: "আপনার login এখনো Employee record-এর সাথে যুক্ত নয়, তাই দেরির হিসাব দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (r.body?.linked === false) return notLinked(c, "দেরির হিসাব");
       // { days: { 'YYYY-MM-DD': 'delay' | 'extreme' } }
       const days = Object.entries((r.body?.days || {}) as Record<string, string>).sort(([a], [b]) => a.localeCompare(b));
       if (!days.length) return { ok: true, text: `${bnDate(from)} থেকে ${bnDate(to)} পর্যন্ত আপনার কোনো দেরি নেই। 👍`, data: { from, to, days: [] } };
@@ -1039,7 +1067,7 @@ const TOOLS: Tool[] = [
       const r = await callApi(c.req, "/api/my-loans");
       if (!r.ok) return fail(r.status);
       const b = r.body || {};
-      if (b.linked === false) return { ok: true, text: "আপনার login এখনো Employee record-এর সাথে যুক্ত নয়। HR-কে জানান।", data: { linked: false } };
+      if (b.linked === false) return notLinked(c, "loan / advance-এর হিসাব");
       const loans: any[] = (b.loans || []).filter((l: any) => l.status === "active");
       const reqs: any[] = (b.requests || []).filter((x: any) => x.status === "pending");
       const due = loans.reduce((s, l) => s + Math.max(0, (Number(l.total_amount) || 0) - (Number(l.paid_amount) || 0)), 0);
@@ -1833,7 +1861,7 @@ const TOOLS: Tool[] = [
       const full = isSuper(c) || c.flags.can_view_service_book;
       const sb = full ? await callApi(c.req, "/api/hr-ops/my/service-book") : null;
       const e = sb?.ok ? sb.body?.employee : null;
-      if (!me && !e) return { ok: true, text: "আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই তথ্য দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (!me && !e) return notLinked(c, "Employee তথ্য");
       const months = Number(e?.service_length_months);
       const lines = [
         `• Employee ID: **${e?.employee_code || me?.employee_id || "—"}**`,
@@ -3907,6 +3935,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `Rules:\n` +
     `- Reply in the user's language; default to Bangla. Banglish questions get Bangla answers. Be short and friendly; use bullet lines for lists.\n` +
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
+    `- When a tool says linked: false (the login has no Employee record): if can_link_self is true (a Superadmin / Employees manager) say how to link it themselves (Admin Panel → Employees → their row → "Link Existing"; add an Employee record first if there is none) — never tell them to ask HR; and if the tool also gave company figures, give those. Write only Bangla or English — no other script.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
     `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"); start / end a Movement Claim (heading out for office work, reached / finished) -> prepare_movement_claim ("Check In" / "Check Out" — the card takes the phone's location then). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
@@ -4288,6 +4317,16 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     // The full table goes only to accounts allowed to download it, and only
     // when there's something in it.
     const rep = c.canExport && out.report && out.report.rows.length ? { ...out.report, rows: out.report.rows.slice(0, 5000) } : null;
-    res.json({ reply: out.reply, actions, engine, draft: out.draft || null, report: rep });
+    res.json({ reply: cleanReply(out.reply), actions, engine, draft: out.draft || null, report: rep });
   });
+}
+
+// Gemini now and then slips a word of another script into a Bangla answer
+// ("record-의"): the Korean possessive becomes "-এর", anything else in
+// Korean / Japanese / Chinese / Cyrillic / Arabic script is dropped.
+function cleanReply(text: string): string {
+  return String(text || "")
+    .replace(/-?의/g, "-এর")
+    .replace(/[\u1100-\u11FF\u3040-\u30FF\u3130-\u318F\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF]+/g, "")
+    .replace(/[ \t]{2,}/g, " ");
 }
