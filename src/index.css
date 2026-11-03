@@ -745,6 +745,16 @@ html[data-ui="mono"][data-accent="violet"] { --glow-a: 221, 214, 254; --glow-b: 
 html[data-ui="mono"][data-accent="rose"] { --glow-a: 254, 205, 211; --glow-b: 255, 228, 230; }
 /* Picked in Profile -> Appearance -> Phone page header (backgroundTheme.ts
    HEADER_GLOWS): wins over the theme's own glow above, Mono's included. */
+/* Below the glow these pages are one flat, light colour — no theme
+   gradient or corner glow further down (html[data-blend-page], set by
+   Navbar.tsx while a blended page is open). */
+:root { --page-flat: #f6f4fb; }
+html[data-bg="default"] { --page-flat: #f5f8fc; }
+html[data-ui="mono"] { --page-flat: #f5f5f6; }
+html[data-glow="violet"] { --page-flat: #f6f4fb !important; }
+html[data-glow="orange"] { --page-flat: #fbf7f4 !important; }
+html[data-glow="sky"] { --page-flat: #f5f8fc !important; }
+html[data-blend-page] body::before { background: var(--page-flat); }
 html[data-glow="violet"] { --glow-a: 167, 139, 250 !important; --glow-b: 244, 114, 182 !important; --glow-tint: 239, 230, 255 !important; --glow-tint-a: 0.9 !important; }
 html[data-glow="orange"] { --glow-a: 253, 186, 116 !important; --glow-b: 253, 164, 175 !important; --glow-tint: 255, 241, 232 !important; --glow-tint-a: 0.9 !important; }
 html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 252 !important; --glow-tint: 230, 244, 255 !important; --glow-tint-a: 0.9 !important; }

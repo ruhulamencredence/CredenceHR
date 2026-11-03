@@ -193,6 +193,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   // page keeps the purple header (`purple`).
   const blend = transparentHeader && !!headerPageTitle && BLENDED_HEADER_TITLES.has(headerPageTitle);
   const purple = transparentHeader && !blend;
+  // Flat page colour under the glow while a blended page is open (index.css
+  // html[data-blend-page]) — the theme's own background gradient would put
+  // colour at the bottom of the page too.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!blend) return;
+    root.dataset.blendPage = '';
+    return () => {
+      delete root.dataset.blendPage;
+    };
+  }, [blend]);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     if (!blend) return;
