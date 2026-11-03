@@ -46,14 +46,14 @@ interface GlobalSidebarProps {
   // Edits) — every target here lives ONLY in the User Panel, so selecting any
   // of these also switches the account into the User Panel first.
   onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => void;
-  // The User Panel's OWN Movement Claims / Conveyance Bill Claim section
+  // The User Panel's OWN Check In/Out / Conveyance Bill Claim section
   // (submitting a claim) — gated separately from the Admin Panel's review
   // tabs below by can_view_movement_claims / can_view_conveyance_claims.
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
   onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
-  // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
+  // Admin Panel's own Check In/Out / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
   onGoToAdminClaims: (target: 'claims' | 'conveyance') => void;
@@ -253,7 +253,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   // "Self Service" — everyday employee items. Employee Directory stays
   // ungated for every account (company-wide roster); Timesheet/Leave
-  // Application/My Leave are gated the same way as Movement Claim/
+  // Application/My Leave are gated the same way as Check In/Out/
   // Conveyance Bill Claim below — OFF by default, granted per account via
   // Admin Panel -> Users -> Module Access.
   const canSeeTimesheet = isSuperAdmin || !!user.can_view_timesheet;
@@ -272,7 +272,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // active item" behavior as everything else — see the effect below.
   const hrmClaimGroup: NavItem[] = [];
   if (hasUserPanel && user.can_view_movement_claims) {
-    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
+    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Check In/Out', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
   }
   // Holding the Bill Claim ("conveyance") Admin module also brings your OWN
   // claims here (it used to be a separate "My Conveyance Bill Claim" page
@@ -442,11 +442,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
   ].filter((i) => pepmOn && canSeeModule(i.key as AdminModuleKey));
 
-  // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance
+  // "Claims" — Check In/Out, Conveyance Bill Claim, Conveyance
   // Disbursement. No longer its own collapsible group — merged as flat
   // items into "HR" below.
   const claimsItems: NavItem[] = [
-    { key: 'claims', label: 'Movement Claims', icon: Route, onClick: () => onGoToAdminClaims('claims') },
+    { key: 'claims', label: 'Check In/Out', icon: Route, onClick: () => onGoToAdminClaims('claims') },
     { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
     { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
@@ -526,7 +526,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
   // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
-  // (Movement Claims, Conveyance Bill Claim, Conveyance Disbursement, My
+  // (Check In/Out, Conveyance Bill Claim, Conveyance Disbursement, My
   // Conveyance Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
   // World-class HRM extension modules (Exit/Offboarding, Performance,

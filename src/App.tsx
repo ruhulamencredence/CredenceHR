@@ -1166,7 +1166,7 @@ export default function App() {
   };
 
   // mobileActiveSection isn't actually mobile-only for these values — per
-  // UserPanel.tsx's showingClaimsPage, Movement Claim/My Claims/Conveyance
+  // UserPanel.tsx's showingClaimsPage, Check In/Out/My Claims/Conveyance
   // Bill Claim/Leave/Timesheet/Employee Directory/Notice Board show as their
   // OWN page on desktop too, driven by this same state. desktopActiveSection
   // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on

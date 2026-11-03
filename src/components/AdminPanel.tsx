@@ -90,7 +90,7 @@ interface AdminPanelProps {
   // (role promotion, Module Access) render in the Users tab.
   user: User;
   // Navbar's web-only "Claims" header menu — jumps this panel's activeTab to
-  // 'claims' (Movement Claims) or 'conveyance' (Conveyance Bill Claim). Ignored
+  // 'claims' (Check In/Out) or 'conveyance' (Conveyance Bill Claim). Ignored
   // if this Admin hasn't been granted that module.
   claimsNavRequest?: ClaimsNavRequest | null;
   // Navbar's web-only "Budget" header menu — jumps this panel's activeTab to
@@ -7056,7 +7056,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* TAB: CONVEYANCE BILL CLAIM — Superadmin + explicitly-granted Admins only.
           Build a travel/conveyance claim bill for a User: pull items in from their
-          completed Movement Claims (computing Amount at a Rate/KM) or add items by
+          completed Check In/Out (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
         <ConveyanceBillPanel token={token} users={people} currentUserId={user.id} />

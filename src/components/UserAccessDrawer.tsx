@@ -54,7 +54,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_login_location: 'See last login location',
   can_access_user_panel: 'User Panel access',
   can_manage_leave: 'Leave balance edit',
-  can_view_movement_claims: 'Movement Claim',
+  can_view_movement_claims: 'Check In/Out',
   can_view_conveyance_claims: 'Conveyance Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
@@ -382,7 +382,7 @@ export function UserAccessDrawer({
     { label: 'My Service Book', on: !!u.can_view_service_book },
     { label: 'Loan / Advance Request', on: !!u.can_view_loan_request },
     { label: 'My Targets', on: !!u.can_view_targets },
-    { label: 'Movement Claim', on: !!u.can_view_movement_claims },
+    { label: 'Check In/Out', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];

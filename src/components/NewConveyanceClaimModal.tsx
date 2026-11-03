@@ -94,7 +94,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Completed Movement Claims (check-in/out) the User can attach to this claim,
+  // Completed Check In/Out (check-in/out) the User can attach to this claim,
   // each with its own Amount — a check-in/out can only ever be referenced once,
   // so this list (GET /api/claims/available) already excludes anything already
   // referenced or billed. claimId -> amount-string map; a key's mere presence

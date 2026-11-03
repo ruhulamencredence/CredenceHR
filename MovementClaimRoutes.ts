@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Movement Claims (GPS check-in/out) routes, moved out of server.ts unchanged.
+// Check In/Out (GPS check-in/out) routes, moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
 import type { Express } from "express";
@@ -21,11 +21,11 @@ export interface RegisterMovementClaimRoutesDeps {
 
 export function registerMovementClaimRoutes(app: Express, deps: RegisterMovementClaimRoutesDeps) {
   const { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString } = deps;
-  // 2c. Movement Claims — a free-form (no fixed Project geofence) point A -> point
+  // 2c. Check In/Out — a free-form (no fixed Project geofence) point A -> point
   // B travel check-in/check-out: a User checks in with a Purpose (why/where
   // they're heading out for office work), then later checks out once they reach
   // or finish there. Used for TA/DA-style reimbursement review in the Admin
-  // Panel's Movement Claims tab (gated per-Admin like every other module — a
+  // Panel's Check In/Out tab (gated per-Admin like every other module — a
   // Superadmin always sees it). Only ONE claim per User may be 'open' at a time.
   function parseClaimCoords(body: any): { lat: number; lng: number; remarks: string | null } | { error: string } {
     const lat = Number(body.latitude);
@@ -54,7 +54,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         "INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_lat, check_in_lng, check_in_remarks) VALUES (?, ?, 'open', NOW(), ?, ?, ?)",
         [req.user.id, purpose, lat, lng, remarks]
       );
-      // Movement Claims are never routed through the Approval Chain — a User's
+      // Check In/Out are never routed through the Approval Chain — a User's
       // Check In/Out here needs no Admin/Approver sign-off (unlike Remote
       // Attendance above, which still does). See attachApprovalStatuses: with no
       // approval_requests row ever created for source_type 'claim', it always
@@ -91,7 +91,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         "UPDATE claims SET status = 'completed', check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_remarks = ?, distance_km = ? WHERE id = ?",
         [lat, lng, remarks, distanceKm, id]
       );
-      // No Approval Chain for Movement Claims — see the matching note on check-in above.
+      // No Approval Chain for Check In/Out — see the matching note on check-in above.
       res.json({ success: true, distance_km: distanceKm });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -126,7 +126,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
     }
   });
 
-  // The calling user's own completed Movement Claims that haven't been referenced
+  // The calling user's own completed Check In/Out that haven't been referenced
   // by a Conveyance Bill Claim yet (user_claim_references) and haven't already
   // been pulled directly into an official Bill by an Admin either
   // (conveyance_bill_items.claim_id) — powers the "Reference Check In/Out" picker

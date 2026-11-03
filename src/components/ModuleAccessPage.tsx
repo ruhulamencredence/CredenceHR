@@ -40,7 +40,7 @@ const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
   { key: 'pepm', label: 'PEPM', hint: 'Budgets, MPR entries, reports and material dispatch.' },
   { key: 'hr', label: 'HR', hint: 'Dashboard, approvals, notices, departments, tasks and targets.' },
   { key: 'attendance', label: 'Attendance & Leave', hint: 'Attendance, roster, leave applications and leave balances.' },
-  { key: 'claims', label: 'Claims & Bills', hint: 'Movement and conveyance claims, disbursement and mobile bills.' },
+  { key: 'claims', label: 'Claims & Bills', hint: 'Check In/Out and conveyance claims, disbursement and mobile bills.' },
   { key: 'employees', label: 'Employees & Assets', hint: 'Employee records, tracking, assets and vehicles.' },
   { key: 'hrops', label: 'HR Operations', hint: 'Onboarding, exit, performance, recruitment and documents.' },
   { key: 'payroll', label: 'Payroll', hint: 'Salary, payslips and loans.' },
@@ -136,7 +136,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_give_feedback', label: 'Give feedback', desc: 'Rate the app and send problems or ideas (and the 7-day "How do you like the app?").', section: 'general', endpoint: 'feedback-access' },
   { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 
-  { key: 'can_view_movement_claims', label: 'Movement Claim', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
+  { key: 'can_view_movement_claims', label: 'Check In/Out', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
   { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 

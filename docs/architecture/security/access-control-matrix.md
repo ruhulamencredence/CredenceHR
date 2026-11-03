@@ -19,7 +19,7 @@
 | Monthly Leave Application | `leave_applications` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs |
 | Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow |
-| Movement Claims | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
+| Check In/Out | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Conveyance Bill Claim | `conveyance` | `read` Conveyance Bill Claim<br>🔒`on_behalf` Claim on Behalf |
 | Conveyance Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
@@ -37,7 +37,7 @@
 | Grievance & Disciplinary | `grievance_disciplinary` | শুধু মডিউলের অনুমতি (layer নেই) |
 | HR Analytics | `hr_analytics` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Management Dashboard | `management_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |
-| HR Data Import | `data_import` | 🔒`import_employees` Import Employee Details<br>🔒`import_leave` Import Leave<br>🔒`import_movement_claims` Import Movement Claims<br>🔒`import_conveyance` Import Conveyance Bill Claims<br>🔒`import_attendance` Import Remote Attendance<br>🔒`import_office_attendance` Import Office Attendance |
+| HR Data Import | `data_import` | 🔒`import_employees` Import Employee Details<br>🔒`import_leave` Import Leave<br>🔒`import_movement_claims` Import Check In/Out<br>🔒`import_conveyance` Import Conveyance Bill Claims<br>🔒`import_attendance` Import Remote Attendance<br>🔒`import_office_attendance` Import Office Attendance |
 | Document Vault | `document_vault` | `read` Documents (upload, view, own signature)<br>🔒`sign_request` Request signatures from others<br>🔒`esign_settings` E-Signature settings (OTP, read to the end) |
 | HR Operations | `hr_operations` | `read` HR Operations<br>🔒`onboarding_create` Onboarding — Create login<br>🔒`onboarding_review` Onboarding — Review / Reject<br>🔒`onboarding_approve` Onboarding — Approve<br>🔒`reminders_receive` Reminders — receive & view<br>🔒`requisitions` SIM & ID card requisitions — issue / reject |
 | Task Management | `task_management` | শুধু মডিউলের অনুমতি (layer নেই) |

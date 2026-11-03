@@ -20,7 +20,7 @@ interface MyClaimsCardProps {
   // same "Back to Menu" pattern the Jobs / Entries cards already use. Omit (or
   // pass undefined) on desktop where the card is just always visible.
   onBack?: () => void;
-  // Bump this (e.g. ++) to force a re-fetch — used by the Movement Claim page's
+  // Bump this (e.g. ++) to force a re-fetch — used by the Check In/Out page's
   // "Add Check In/Out" sheet so a fresh Check In/Out shows up here right after
   // the sheet reports success, without needing a full page reload.
   refreshKey?: number;
@@ -32,7 +32,7 @@ interface MyClaimsCardProps {
   // disables a new Check In while one is open), so this doesn't need to tell
   // the parent which claim, just that the sheet should open.
   onCheckOut?: () => void;
-  // Web (desktop) Movement Claim page: shown under the Check In/Out form as a
+  // Web (desktop) Check In/Out page: shown under the Check In/Out form as a
   // normal card with its own title, instead of the full-screen mobile page.
   desktop?: boolean;
 }
@@ -40,7 +40,7 @@ interface MyClaimsCardProps {
 type ClaimFilter = 'all' | 'open' | 'completed';
 
 // User Dashboard -> "My Claims" — a dedicated card of its own (same visual treatment
-// as the Jobs summary card next to it), listing every Movement Claim this user has
+// as the Jobs summary card next to it), listing every Check In/Out this user has
 // made. Tapping a claim's row opens ClaimLocationMap to show exactly where the Check
 // In/Check Out happened, same as from the compact history list in MyClaimsModal; a
 // still-open claim also gets its own "Check Out" button so the User can complete it
@@ -148,7 +148,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
           a redundant duplicate. The count badge stays (it's live data). */}
       <div className={desktop ? 'flex items-center gap-3 px-5 py-4 border-b shrink-0 border-slate-100' : 'shrink-0 px-1 pt-2 pb-1'}>
-        {desktop && <h3 className="text-sm font-bold text-slate-900">My Movement Claims</h3>}
+        {desktop && <h3 className="text-sm font-bold text-slate-900">My Check In/Out</h3>}
         <div
           className={
             desktop
@@ -204,7 +204,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           <Inbox className="w-5 h-5 text-slate-300" />
           <p className="text-sm">
             {claims.length === 0
-              ? 'No claims yet — check in from the Movement Claim card when you head out.'
+              ? 'No claims yet — check in from the Check In/Out card when you head out.'
               : filter === 'open'
                 ? 'No open claim.'
                 : 'No completed claims yet.'}
@@ -367,7 +367,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               )}
 
               {/* Only the still-open claim gets this — lets the User complete it
-                  right here instead of going back to the Movement Claim page's
+                  right here instead of going back to the Check In/Out page's
                   floating button. Opens the same "Add Check In/Out" sheet/form
                   the parent already uses (see onCheckOut on the props above). */}
               {c.status === 'open' && onCheckOut && (

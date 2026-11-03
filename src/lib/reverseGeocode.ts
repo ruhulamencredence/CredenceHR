@@ -5,7 +5,7 @@
 
 // Free, no-API-key reverse geocoding via OpenStreetMap's Nominatim — the same
 // service LocationMapPicker's forward place-name search already calls — used
-// to turn a Movement Claim's raw Check In/Out lat/lng into a short, readable
+// to turn a Check In/Out's raw Check In/Out lat/lng into a short, readable
 // place name for the "My Claims" list instead of a bare coordinate pair.
 //
 // Nominatim's public usage policy caps requests at ~1/second, so every call

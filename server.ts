@@ -701,7 +701,7 @@ async function getApprovalChain(): Promise<any[]> {
 }
 
 // Fires an Approval Request through the configured global chain whenever a User
-// Checks In / Checks Out (Remote Attendance OR Movement Claims). This is called
+// Checks In / Checks Out (Remote Attendance OR Check In/Out). This is called
 // AFTER the check-in/out itself is already recorded, and deliberately never throws
 // — the workflow is non-blocking, so a failure here must never undo or block the
 // User's actual check-in/out. If no chain is configured yet, this is a no-op.
@@ -728,7 +728,7 @@ async function createApprovalRequest(
 // to route a freshly-submitted Conveyance Bill Claim / Timesheet (Attendance
 // Correction) request. (Leave Application is intentionally NOT wired to this
 // yet — see the Leave Balance + migration work grouped into Part 5.) Remote
-// Attendance / Movement Claims ('attendance'/'claim' source types) are also
+// Attendance / Check In/Out ('attendance'/'claim' source types) are also
 // untouched — they keep using the OLD global chain (createApprovalRequest
 // above) exactly as before.
 //
@@ -1584,7 +1584,7 @@ async function performApprovalAction(
   // Only a 'user_claim' request actually gates something further — a
   // Conveyance Bill Claim only becomes a real Bill line item the moment its
   // request finishes 'approved' here (the LAST step), and is freed up again
-  // the moment it's 'rejected' (at any step). Attendance/Movement Claims are
+  // the moment it's 'rejected' (at any step). Attendance/Check In/Out are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
   let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
@@ -3023,7 +3023,7 @@ async function startServer() {
     }
   };
 
-  // Movement Claim (GPS Check In/Out) self-service routes: a Superadmin always
+  // Check In/Out (GPS Check In/Out) self-service routes: a Superadmin always
   // passes; an Admin/User passes only once granted can_view_movement_claims (PUT
   // /api/users/:id/movement-claim-access). Enforced here so the routes are
   // actually blocked server-side, not just hidden on the User Panel — same
@@ -3036,7 +3036,7 @@ async function startServer() {
     try {
       const rows: any = await queryDB("SELECT can_view_movement_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_movement_claims)) return next();
-      return res.status(403).json({ error: "You don't have access to Movement Claim. Ask your Superadmin to grant it." });
+      return res.status(403).json({ error: "You don't have access to Check In/Out. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3226,7 +3226,7 @@ async function startServer() {
 
   // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
   registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
-  // Movement Claims routes live in MovementClaimRoutes.ts.
+  // Check In/Out routes live in MovementClaimRoutes.ts.
   registerMovementClaimRoutes(app, { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString });
 
   // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — full

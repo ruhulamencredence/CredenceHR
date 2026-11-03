@@ -49,10 +49,10 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Nobody active is on its current Layer any more — a Superadmin decides.
   layer_stuck?: boolean;
   created_at: string;
-  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
+  // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
   // this Conveyance Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
-  // deciding. Empty/absent when the claim has no Movement Claim attached
+  // deciding. Empty/absent when the claim has no Check In/Out attached
   // (a plain hand-entered Amount).
   claim_refs?: UserClaimReference[];
   // Only on a 'user_claim' item — the claim's bills (category / date / amount).
@@ -176,7 +176,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Loan / Advance Request'
     : t === 'hr_action'
     ? 'HR Action'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar
 // like Leave Application/Timesheet, but NOT gated to Admin Panel access or any
@@ -226,7 +226,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
   // "Add approver" popup (ad-hoc approver) for one item.
   const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
-  // The referenced Movement Claim currently shown on the read-only location
+  // The referenced Check In/Out currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
   // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
   // Panel's Conveyance Bill Claim tab) already reuses for this.

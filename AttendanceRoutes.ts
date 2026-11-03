@@ -19,7 +19,7 @@
 //
 // Dependencies below are all defined elsewhere in server.ts and shared with
 // other modules (e.g. createApprovalRequest/attachApprovalStatuses also back
-// Leave/Claims, haversineMeters also backs Movement Claims), so they're
+// Leave/Claims, haversineMeters also backs Check In/Out), so they're
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";

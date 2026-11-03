@@ -227,7 +227,7 @@ useLiveRefresh(() => fetchClaims(true));
           </div>
 
           {/* Desktop — a real row table instead of the mobile card list, same
-              pattern ClaimsPanel.tsx uses for Movement Claims. */}
+              pattern ClaimsPanel.tsx uses for Check In/Out. */}
           <div className="hidden md:block max-h-72 overflow-y-auto overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0">

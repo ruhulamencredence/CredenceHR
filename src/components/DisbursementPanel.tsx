@@ -17,7 +17,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { SearchSelect } from './Combobox';
 // ---- Voucher sections ----
 // The Payment Voucher groups a Bill's lines by category, each with the
-// columns it needs: travel categories (and Movement Claim / manual items,
+// columns it needs: travel categories (and Check In/Out / manual items,
 // which are trips) show From / To / Distance; any other category shows a
 // Description. An item from a Conveyance Bill Claim is split into that
 // claim's own category lines; if it was approved for less than those lines

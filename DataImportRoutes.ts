@@ -10,7 +10,7 @@
 //                      added, existing ones updated — only the cells filled
 //                      in the sheet change)
 //   leave              leave_applications (history; no balance is touched)
-//   movement_claims    claims (Movement Claim check in / check out)
+//   movement_claims    claims (Check In/Out check in / check out)
 //   bill_claims        user_claims (Conveyance Bill Claim)
 //   remote_attendance  attendance (Remote Attendance check in / check out)
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
@@ -168,9 +168,9 @@ export const IMPORT_KINDS: Kind[] = [
   },
   {
     key: "movement_claims",
-    title: "Movement Claim History",
+    title: "Check In/Out History",
     description:
-      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
+      "Past check in/out records (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
     module: "claims",
     importLayer: "import_movement_claims",
     fields: [
@@ -768,7 +768,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       }
     },
 
-    // ---- Movement claims -----------------------------------------------
+    // ---- Check in/out -----------------------------------------------
     movement_claims: {
       prepare: async () => ({ existing: ((await queryDB("SELECT user_id, check_in_at FROM claims").catch(() => [])) || []) as any[] }),
       row: async (v, ctx, prep) => {

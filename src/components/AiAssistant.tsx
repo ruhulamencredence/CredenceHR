@@ -69,7 +69,7 @@ interface CorrectionDraft {
   options: { project_id: number; name: string; check_in: string; check_out: string }[];
   today: string;
 }
-// Movement Claim: a live Check In (purpose) or Check Out of the open claim —
+// Check In/Out: a live Check In (purpose) or Check Out of the open claim —
 // the phone's location is taken when the button is pressed.
 interface MovementDraft {
   kind: 'movement_claim';
@@ -417,8 +417,8 @@ const CorrectionDraftCard: React.FC<{ token: string; draft: CorrectionDraft; onD
   );
 };
 
-// Movement Claim Check In / Check Out from the Assistant -> the same
-// /api/claims/check-in and /api/claims/:id/check-out the Movement Claim card
+// Check In/Out Check In / Check Out from the Assistant -> the same
+// /api/claims/check-in and /api/claims/:id/check-out the Check In/Out card
 // uses, with the location taken now (getCurrentCoords, ClaimCard.tsx).
 const MovementDraftCard: React.FC<{ token: string; draft: MovementDraft; onDone: DraftDone }> = ({ token, draft, onDone }) => {
   const isIn = draft.mode === 'check_in';
@@ -442,9 +442,9 @@ const MovementDraftCard: React.FC<{ token: string; draft: MovementDraft; onDone:
       if (!r.ok) throw new Error(d?.error || 'জমা হয়নি।');
       onDone('submitted', {
         text: isIn
-          ? `✅ Movement Claim-এ Check In হয়েছে — ${purpose.trim()}। পৌঁছে বা কাজ শেষে আমাকে বলুন "movement check out" — অথবা Movement Claim পাতা থেকে Check Out করুন।`
+          ? `✅ Check In হয়েছে — ${purpose.trim()}। পৌঁছে বা কাজ শেষে আমাকে বলুন "movement check out" — অথবা Check In/Out পাতা থেকে Check Out করুন।`
           : `✅ Check Out হয়েছে — ${draft.purpose}${d?.distance_km != null ? `, সোজা দূরত্ব ${d.distance_km} km` : ''}। Claim সম্পূর্ণ।`,
-        action: { label: 'Movement Claim খুলুন', nav: 'claims:movementClaims' }
+        action: { label: 'Check In/Out খুলুন', nav: 'claims:movementClaims' }
       });
     } catch (e: any) {
       setError(e.message || 'জমা হয়নি।');
@@ -455,7 +455,7 @@ const MovementDraftCard: React.FC<{ token: string; draft: MovementDraft; onDone:
   return (
     <div className="mt-2.5 rounded-2xl bg-white/55 border border-white/80 p-3 space-y-2">
       <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-800">
-        <MapPin className="w-4 h-4" /> Movement Claim — {isIn ? 'Check In' : 'Check Out'}
+        <MapPin className="w-4 h-4" /> Check In/Out — {isIn ? 'Check In' : 'Check Out'}
       </div>
       {isIn ? (
         <label className="block text-[11px] text-slate-500">

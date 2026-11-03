@@ -38,7 +38,7 @@ interface AdminDashboardRouteDeps {
 const STUCK_SOURCES: Record<string, { label: string; module: string; tab: string }> = {
   leave_application: { label: "Leave application", module: "leave_applications", tab: "leave_applications" },
   user_claim: { label: "Conveyance bill", module: "conveyance", tab: "conveyance" },
-  claim: { label: "Movement claim", module: "claims", tab: "claims" },
+  claim: { label: "Check in/out", module: "claims", tab: "claims" },
   attendance: { label: "Attendance", module: "attendance", tab: "approvals" },
   attendance_correction: { label: "Attendance correction", module: "attendance", tab: "approvals" },
   asset_requisition: { label: "Asset requisition", module: "asset_management", tab: "asset_management" },
@@ -213,7 +213,7 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
         { key: "leave", label: "Leave applications", count: count(leaves, (r) => r.status === "pending"), tab: "leave_applications" },
         { key: "attendance", label: "Attendance approvals", count: pendingAttendance.length, tab: "approvals" },
         { key: "corrections", label: "Attendance corrections", count: pendingCorrections.length, tab: null },
-        { key: "claims", label: "Movement claims", count: count(claims, (r) => r.status === "pending"), tab: "claims" },
+        { key: "claims", label: "Check in/out", count: count(claims, (r) => r.status === "pending"), tab: "claims" },
         { key: "bills", label: "Bills to disburse", count: count(bills, (r) => !Number(r.is_disbursed || 0)), tab: "disbursement" },
         { key: "advances", label: "Advance salary", count: count(advances, (r) => r.status === "pending"), tab: null },
         { key: "assets", label: "Asset requisitions", count: count(assets, (r) => r.status === "pending" || r.status === "manager_approved"), tab: "asset_management" },

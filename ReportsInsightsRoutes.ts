@@ -5,7 +5,7 @@
 
 // Reports & Insights (Admin Panel -> Reports & Insights) — one place to run
 // the operational reports that used to be scattered (or missing): Attendance,
-// Movement Claim, Bill Claim, Conveyance Bill, Bill Disbursement, Leave,
+// Check In/Out, Bill Claim, Conveyance Bill, Bill Disbursement, Leave,
 // Asset and Vehicle. Each report is a small definition below: which Admin
 // modules may run it, which filters it takes, and a `run` that reads the
 // tables and returns { columns, rows }; SUMMARIES below adds the totals.
@@ -315,11 +315,11 @@ const REPORTS: ReportDef[] = [
     }
   },
 
-  // ---------------- Movement Claim ----------------
+  // ---------------- Check In/Out ----------------
   {
     key: "movement_claims",
     category: "Claim",
-    title: "Movement Claims",
+    title: "Check In/Out",
     description: "Field movements: purpose, check-in / check-out time and distance travelled.",
     modules: ["claims"],
     filters: ["date", "department", "employee", "status"],

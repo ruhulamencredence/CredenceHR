@@ -60,7 +60,7 @@ const safe = async <T>(p: Promise<T>, fallback: T): Promise<T> => {
 const SOURCE_LABEL: Record<string, string> = {
   leave_application: "Leave Application",
   user_claim: "Conveyance Bill Claim",
-  claim: "Movement Claim",
+  claim: "Check In/Out",
   attendance_correction: "Timesheet correction",
   attendance: "Attendance",
   asset_requisition: "Asset Requisition",

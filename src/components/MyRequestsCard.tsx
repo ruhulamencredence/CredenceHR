@@ -30,7 +30,7 @@ interface MyRequestsCardProps {
   className?: string;
 }
 
-// 'open' only ever comes from a Movement Claim — the one source here that
+// 'open' only ever comes from a Check In/Out — the one source here that
 // isn't approval-reviewed at all (see the mapping below).
 type RowStatus = 'pending' | 'approved' | 'rejected' | 'open';
 
@@ -67,7 +67,7 @@ const MAX_ROWS = 6;
 const NO_APPROVER = 'No approver set yet — tell HR';
 
 // Dashboard "My Requests" — every request this account has submitted, across
-// all four workflows that have one (Leave Application, Movement Claim,
+// all four workflows that have one (Leave Application, Check In/Out,
 // Conveyance Bill Claim, Timesheet Correction), in one list with its current
 // status. Each of those already has its own page showing its own history;
 // what none of them could answer was the question an employee actually asks
@@ -137,7 +137,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
               ? `${a.approver_name}${a.total_steps ? ` · Layer ${a.current_step} of ${a.total_steps}` : ''}`
               : null
         })),
-        // Only STILL-OPEN Movement Claims. Unlike the other three, a Movement
+        // Only STILL-OPEN Check In/Out. Unlike the other three, a Movement
         // Claim is never routed through the Approval Chain at all (no
         // approval_requests row is ever created for source_type 'claim' — see
         // POST /api/claims/check-in in server.ts), so a completed one has no
@@ -150,7 +150,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
             key: `claim-${c.id}`,
             target: 'claim' as const,
             icon: Route,
-            title: 'Movement Claim',
+            title: 'Check In/Out',
             detail: `${c.purpose} · not checked out yet`,
             date: c.check_in_at,
             status: 'open' as const,

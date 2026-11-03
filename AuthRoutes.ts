@@ -291,7 +291,7 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // Admin-only grant above.
       can_manage_leave: user.role === "superadmin" ? true : !!Number(user.can_manage_leave),
       // Superadmin-granted (or implicit for the Superadmin itself): can this
-      // account see/use the Movement Claim (GPS Check In/Out) and Conveyance
+      // account see/use the Check In/Out (GPS Check In/Out) and Conveyance
       // Bill Claim sections on its own User Panel at all? Applies to both
       // 'admin' and 'user' roles, same pattern as can_manage_leave above —
       // OFF (hidden) until the Superadmin explicitly grants it.

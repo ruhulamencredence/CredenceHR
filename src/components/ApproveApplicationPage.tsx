@@ -44,7 +44,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 // Self Service -> "Approve Application" — a dedicated, always-reachable page
 // for exactly the same personal approval queue PendingApprovalsCard.tsx shows

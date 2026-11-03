@@ -16,7 +16,7 @@ import { Spinner } from './Spinner';
 interface ClaimCardProps {
   token: string;
   // Fires after a successful Check In OR Check Out (not on error) — lets a
-  // parent showing this form inside a sheet/modal (e.g. the Movement Claim
+  // parent showing this form inside a sheet/modal (e.g. the Check In/Out
   // page's "Add Check In/Out" button) know to refresh its own list of past
   // claims. Receives which action just completed: on 'in' the sheet is left
   // open (the user may still want to Check Out right after Checking In, in
@@ -40,11 +40,11 @@ export async function getCurrentCoords(): Promise<{ latitude: number; longitude:
       try {
         status = (await Geolocation.requestPermissions()).location;
       } catch {
-        throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+        throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
       }
     }
     if (status !== 'granted') {
-      throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+      throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
@@ -63,7 +63,7 @@ export async function getCurrentCoords(): Promise<{ latitude: number; longitude:
   });
 }
 
-// "Movement Claim" — free-form point A -> point B travel record for office work
+// "Check In/Out" — free-form point A -> point B travel record for office work
 // (client visits, bank runs, site trips, etc.), separate from the fixed-site
 // Remote Attendance above it. A User types WHY/WHERE they're going, Checks In
 // from their current spot, and later Checks Out once they reach/finish — the
@@ -186,7 +186,7 @@ useLiveRefresh(() => fetchStatus(true));
     <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-sm">
       <div className="flex items-start justify-between gap-3 mb-0.5">
         <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-          <Route className="w-4 h-4 text-indigo-600" /> Movement Claim
+          <Route className="w-4 h-4 text-indigo-600" /> Check In/Out
         </h3>
       </div>
       <p className="text-xs text-slate-500 mb-2.5">

@@ -1128,7 +1128,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     window.scrollTo({ top: 0 });
     if (to) requestAnimationFrame(() => window.scrollTo({ top: to }));
   };
-  // Whether one of the Claims sections (Movement Claim, My Claims, Conveyance
+  // Whether one of the Claims sections (Check In/Out, My Claims, Conveyance
   // Bill Claim) is the active section — on desktop this now means "show that
   // section as its own page", same as mobile, instead of these three always
   // sitting inline on the regular Dashboard (see the sections below and the
@@ -1143,7 +1143,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     mobileActiveSection === 'employeeDirectory' ||
     mobileActiveSection === 'noticeBoard';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
-  // sees Movement Claim / Conveyance Bill Claim once the Superadmin has granted
+  // sees Check In/Out / Conveyance Bill Claim once the Superadmin has granted
   // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
   // -> Module Access). A Superadmin always sees both. Used to hide the mobile
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
@@ -1270,7 +1270,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule, canSeeTimesheet, canSeeLeave]);
-  // Movement Claim page: the "Add Check In/Out" floating button opens the actual
+  // Check In/Out page: the "Add Check In/Out" floating button opens the actual
   // Check In/Out form in a sheet (see below); claimListRefreshKey bumps every
   // time that form reports a successful Check In/Out, so MyClaimsCard's list
   // refetches without needing a full page reload.
@@ -1280,7 +1280,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // list is tapped, so the (now-filtered) table is brought into view automatically.
   const entriesSectionRef = useRef<HTMLDivElement>(null);
 
-  // Navbar's web-only "Claims" header menu — Movement Claims and Conveyance Bill
+  // Navbar's web-only "Claims" header menu — Check In/Out and Conveyance Bill
   // Claim are no longer part of the regular Dashboard on desktop (same as every
   // other section, they only show while they're the active mobileActiveSection);
   // this menu is what puts either one on screen there, exactly like tapping its
@@ -1288,7 +1288,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // The sidebar's nav requests (claims / leave / jobs / dashboard) stay set
   // in App.tsx after they're handled, so when this panel mounts again (e.g.
   // coming back from Timesheet) every one of them re-runs — and an old "Job
-  // Edits" request could override the Movement Claims click that just
+  // Edits" request could override the Check In/Out click that just
   // happened. Only the newest request is acted on.
   const latestNavTs = Math.max(
     claimsNavRequest?.ts || 0,
@@ -3102,7 +3102,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         ]
       : []),
     ...(user.can_job_edit ? [{ key: 'jobEdit', label: 'Job Edit', icon: Edit2, tileBg: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => goToMobileSection('jobEdit') }] : []),
-    ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Movement Claim', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
+    ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Check In/Out', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
     ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Conveyance Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
     { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, tileBg: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => goToMobileSection('employeeDirectory') },
     ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
@@ -3259,7 +3259,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         />
       </div>
 
-      {/* Movement Claim — reachable via its own tile on mobile and the Navbar's
+      {/* Check In/Out — reachable via its own tile on mobile and the Navbar's
           "Claims" header menu on desktop (see claimsNavRequest above); either way
           it now opens as its own dedicated page, taking over the whole screen
           instead of always sitting inline on the Dashboard. The page itself shows
@@ -3271,7 +3271,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {canSeeMovementClaim && (
       <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
-          {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} onBack={() => goToMobileSection(null)} />}
+          {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Check In/Out']} onBack={() => goToMobileSection(null)} />}
           <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
           {/* The claim history (Open / Completed) — on the web too, not only in the mobile app. */}
           <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
@@ -3287,11 +3287,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* My Claims — reachable via its own mobile tile / bottom-nav item, same as
-          Movement Claim above; no separate desktop entry point (Movement Claim's
+          Check In/Out above; no separate desktop entry point (Check In/Out's
           own ClaimCard/history already cover desktop), so this one stays
           mobile-only. onCheckOut/refreshKey wired the same as the 'claim'
           section's copy above, so a still-open claim can be completed straight
-          from this list too, without bouncing back to the Movement Claim page. */}
+          from this list too, without bouncing back to the Check In/Out page. */}
       {canSeeMovementClaim && (
       <div className={mobileActiveSection === 'claims' ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <MyClaimsCard
@@ -3304,7 +3304,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* Conveyance Bill Claim — direct user-submitted expense claims (separate
-          from the GPS-based Movement Claims above). Reachable via its own mobile
+          from the GPS-based Check In/Out above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
       {canSeeConveyanceClaim && (
@@ -3363,7 +3363,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* Floating "Add Check In/Out" — mobile only, shown only while the
-          Movement Claim page itself is open, sitting above BottomNav's fixed
+          Check In/Out page itself is open, sitting above BottomNav's fixed
           bar at the bottom-right corner. z-50 (BottomNav is z-40, and JSX
           order alone doesn't decide stacking at equal z-index reliably across
           browsers) so this always paints ON TOP of the nav bar instead of

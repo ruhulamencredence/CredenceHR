@@ -215,7 +215,7 @@ useLiveRefresh(() => load(true));
           UserPanel.tsx, and the native app's hardware/gesture back already
           returns to the tile menu via useBackButtonClose) and moves Submit
           Leave to a floating bottom-right button below, same design/position
-          as Movement Claim's "Add Check In/Out" and Conveyance's "New Claim". */}
+          as Check In/Out's "Add Check In/Out" and Conveyance's "New Claim". */}
       {/* Desktop: title and Submit Leave on one row (Back sits on the
           breadcrumb row above, UserPanel.tsx). Hidden on mobile — the header
           shows the title there. */}

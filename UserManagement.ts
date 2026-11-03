@@ -652,7 +652,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // The Self Service switches and Department scopes inside the Module Access
-  // popup (Movement Claim, Timesheet, Leave Application, Monthly Attendance
+  // popup (Check In/Out, Timesheet, Leave Application, Monthly Attendance
   // Report departments…) follow the same rule as the modules themselves: a
   // Superadmin can set them for anyone; an Admin with can_grant_module_access
   // (requireModuleGrantAccess, used before this) only for a role='user'
@@ -1095,7 +1095,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use the Movement Claim (GPS Check In/Out) section on their own User
+  // see/use the Check In/Out (GPS Check In/Out) section on their own User
   // Panel at all — same on/off switch pattern as leave-management-access above,
   // applying to BOTH roles. Nothing shows (and the underlying /api/claims/*
   // self-service routes are blocked server-side too — see requireMovementClaimAccess)
@@ -1110,7 +1110,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Movement Claim access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Check In/Out access only applies to Admin and User accounts." });
       }
 
       await queryDB("UPDATE users SET can_view_movement_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);

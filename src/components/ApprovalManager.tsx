@@ -56,9 +56,9 @@ const StatusPill: React.FC<{ status: ApprovalRequest['status'] }> = ({ status })
 // Panel -> Conveyance Bill Claim) ALSO routes through this same chain, but is
 // NOT non-blocking: the claim only becomes a real Conveyance Bill line item the
 // moment the LAST step here Approves it (see the optional Bill picker below),
-// and is freed up again if Rejected at any step. Movement Claims (the live
+// and is freed up again if Rejected at any step. Check In/Out (the live
 // GPS check-in/out card) do NOT go through this chain at all — no approval is
-// required for a Movement Claim Check In/Out. Any Admin/Superadmin granted the
+// required for a Check In/Out Check In/Out. Any Admin/Superadmin granted the
 // "approvals" module can see the queue and act at their own step; only a
 // Superadmin can edit the chain itself.
 export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, users }) => {
@@ -402,7 +402,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           ? 'Mobile Limit Request'
                           : r.source_type === 'advance_request'
                           ? 'Loan / Advance Request'
-                          : 'Movement Claim'}
+                          : 'Check In/Out'}
                         {' — '}
                         {r.source_type === 'attendance_correction' || r.source_type === 'leave_application' || r.source_type === 'asset_requisition' || r.source_type === 'vehicle_requisition' || r.source_type === 'mobile_limit_request' || r.source_type === 'advance_request'
                           ? 'Requested'
