@@ -1,3 +1,4 @@
+import { useMdUp } from '../lib/useMdUp';
 import React, { useEffect, useState } from 'react';
 import { User } from '../types';
 import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, Camera, Palette, Contact } from 'lucide-react';
@@ -471,21 +472,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
 };
 
 type Panel = 'book' | 'contact' | 'appearance' | 'personal' | 'password' | 'username' | 'asset';
-
-// md and up (768px): the desktop layout. Panels that load data render only
-// in the layout actually on screen.
-function useMdUp(): boolean {
-  const q = '(min-width: 768px)';
-  const [on, setOn] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(q).matches : true));
-  useEffect(() => {
-    if (!window.matchMedia) return;
-    const m = window.matchMedia(q);
-    const f = () => setOn(m.matches);
-    m.addEventListener?.('change', f);
-    return () => m.removeEventListener?.('change', f);
-  }, []);
-  return on;
-}
 
 const MenuHeading: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <p className="px-3 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: 'var(--g-text-muted)' }}>

@@ -148,7 +148,11 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
   const [assignForm, setAssignForm] = useState<Record<number, { vehicle_id: string; driver_user_id: string }>>({});
 
+  // Loaded only once a request that needs the picker is waiting here — not
+  // for everyone on every Dashboard load.
+  const needsVehiclePicker = items.some((i) => i.vehicle_maintainer_bypass);
   useEffect(() => {
+    if (!needsVehiclePicker) return;
     const authHeaders = { Authorization: `Bearer ${token}` };
     fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
       .then((r) => r.json())
@@ -159,7 +163,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, needsVehiclePicker]);
 
   const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
