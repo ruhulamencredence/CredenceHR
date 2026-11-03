@@ -580,3 +580,7 @@ App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashb
 ## Remote Attendance: Out Time আবার দেওয়া (Update Out Time)
 
 ভুল করে আগেই Out Time দিয়ে ফেললে একই দিনে আবার দেওয়া যায় — শুধু যাঁর Module Access-এ **Remote Attendance — update Out Time** টিক দেওয়া (শুরুতে বন্ধ; Superadmin সবসময়)। কার্ডের Out Time-এর নিচে **Set again** → নিশ্চিত করার popup → আগের মতো GPS ও মানচিত্রে Confirm (project-এর এলাকার মধ্যে থাকতে হয়)। নতুন সময় আগেরটার জায়গায় বসে; প্রথম Out Time `attendance.check_out_first_at`-এ আর কতবার বদলানো হলো `check_out_update_count`-এ থাকে, কার্ডে "first was …" দেখায়। আগের Out Time-এর অনুমোদন মুছে নতুন সময় আবার অনুমোদনে যায়। Office device (ZKTeco)-এর দেওয়া Out Time এভাবে বদলায় না, আর Check In আগের মতো দিনে একবার (`AttendanceRoutes.ts` check-out)।
+
+## পাশের menu: নতুন tab-এ খোলা
+
+ব্রাউজারে পাশের menu-র প্রতিটা পাতা এখন আসল link (`/self/…`, `/admin/…`, Dashboard `/`), তাই right-click → "Open link in new tab", Ctrl / Cmd + click বা মাঝের বোতামে নতুন tab-এ খোলে; সাধারণ click আগের মতো একই tab-এ খোলে (`GlobalSidebar.tsx` navLinkProps)। নতুন tab-এ পাতাটা খোলে শুধু যদি সেই account-এর অনুমতি থাকে (আগের মতো address থেকে খোলার নিয়ম)। যেসব পাতার নিজস্ব address নেই (Leave Application, Check In/Out ও Conveyance-এর নিজের পাতা, PEPM-এর Entry / Jobs) সেগুলো আগের মতো বোতাম। ফোনের app-এ কিছু বদলায়নি।
