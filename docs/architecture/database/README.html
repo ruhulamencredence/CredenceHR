@@ -26,11 +26,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>টেবিল</td>
-<td><strong>২২৮</strong></td>
+<td><strong>২৩০</strong></td>
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,৪৮২</strong></td>
+<td><strong>২,৫২৯</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
@@ -38,7 +38,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
-<td>৫৭</td>
+<td>৫৯</td>
 </tr>
 <tr>
 <td>ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম)</td>
@@ -52,7 +52,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </table>
 <!-- /AUTO:stats -->
 
-<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২২৮<!--/n--> টেবিল)</h2>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৩০<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 <a href="diagrams/full-application-er.svg">SVG (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a> · PNG/PDF: GitHub → Actions → সবশেষ <strong>Docs sync</strong> রান → Artifacts → <code>CredenceHR-documentation</code> (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)</p>
 <ul>
@@ -187,14 +187,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="e-payroll-salary-14">E. Payroll &amp; Salary (14টি টেবিল)</h3>
+<h3 id="e-payroll-salary-16">E. Payroll &amp; Salary (16টি টেবিল)</h3>
 <p>বেতন কাঠামো থেকে payslip ও final settlement পর্যন্ত। <code>payrolls</code> একজন কর্মী ও একটি মাসে একটি (UNIQUE)।</p>
 <p>মূল টেবিল: <code>salary_structures</code>, <code>payrolls</code>, <code>payroll_batches</code>, <code>final_settlements</code>, <code>employee_advances</code></p>
 <p><img alt="E. Payroll &amp; Salary" src="diagrams/e-payroll-salary.png" /></p>
 <p><a href="diagrams/e-payroll-salary.svg">বড় SVG</a> · <a href="diagrams/e-payroll-salary.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`advance_requests`, `final_settlements`, `pay_grade_components`, `pay_grades`, `payroll_batch_events`, `payroll_batches`, `payroll_line_items`, `payroll_payment_splits`, `payrolls`, `pending_bonuses`, `salary_adjustments`, `salary_components`, `salary_month_settings`, `salary_structures`
+`advance_requests`, `final_settlements`, `pay_grade_components`, `pay_grades`, `payroll_batch_events`, `payroll_batches`, `payroll_corrections`, `payroll_line_items`, `payroll_payment_splits`, `payroll_review_files`, `payrolls`, `pending_bonuses`, `salary_adjustments`, `salary_components`, `salary_month_settings`, `salary_structures`
 
 </details>
 
@@ -232,7 +232,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td><code>data-dictionary.md</code></td>
-<td><!--n:tables-->২২৮<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+<td><!--n:tables-->২৩০<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
 </tr>
 <tr>
 <td><code>diagrams/*.mmd</code></td>
@@ -256,6 +256,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <p>নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর <strong>Docs sync</strong> কাজটি সার্ভার চালিয়ে <code>information_schema</code> পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে <code>npm run docs:db</code> (বিস্তারিত <code>../README.md</code>-এর "স্বয়ংক্রিয় আপডেট")।</p>
 <h2 id="drawio">draw.io ফাইল</h2>
 <p><code>credencehr-database.drawio</code> — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২২৮<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৩০<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা <code>data-dictionary.md</code> তে।
 জেনারেটর: <code>../tools/db/drawio_*</code> (<code>npm run docs:db</code> নিজে চালায়)।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
