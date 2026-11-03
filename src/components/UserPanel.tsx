@@ -1084,6 +1084,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         ? 'Conveyance Bill Claim'
         : mobileActiveSection === 'noticeBoard'
         ? 'Notice Board'
+        : mobileActiveSection === 'employeeDirectory'
+        ? 'Employee Directory'
         : mobileActiveSection === 'leave'
         ? // Short, so it fits beside the round header buttons.
           'Leave'

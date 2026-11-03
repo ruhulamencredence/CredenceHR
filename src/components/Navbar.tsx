@@ -225,9 +225,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   // page had left one docked) and the Weather badge both get out of the way
   // on mobile, matching the reference screenshot. Desktop is unaffected.
   const showMobileSearchIconResolved = showMobileSearchIcon && !showMobilePageTitle;
+  // The blended phone header has its own search button (Employee
+  // Directory's docked search, next to the ⋮) — see the blend row below.
+  const blendSearch = blend && showMobileSearchIcon;
   useEffect(() => {
-    if (!showMobileSearchIconResolved) setMobileSearchOpen(false);
-  }, [showMobileSearchIconResolved]);
+    if (!showMobileSearchIconResolved && !blendSearch) setMobileSearchOpen(false);
+  }, [showMobileSearchIconResolved, blendSearch]);
 
   // Circular avatar shown at the top right (initial + role-tinted background) —
   // falls back to this when the account has no Personal Data photo uploaded
@@ -310,13 +313,42 @@ export const Navbar: React.FC<NavbarProps> = ({
         // page title in the middle, one round button on the right —
         // Timesheet's Alerts bell, the others a ⋮ with Alerts, Chat,
         // Profile and the menu (HeaderMoreMenu.tsx).
-        <div className="w-full px-4 h-16 grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2">
+        // A page that docks its search into the header (Employee Directory,
+        // once its own search bar has scrolled away) gets a round search
+        // button beside the ⋮; tapping it swaps the title for the box.
+        <div className={`w-full px-4 h-16 grid ${blendSearch ? 'grid-cols-[88px_minmax(0,1fr)_88px]' : 'grid-cols-[44px_minmax(0,1fr)_44px]'} items-center gap-2`}>
           <button type="button" onClick={onPageBack ?? onGoToDashboard} className="hdr-round" aria-label="Back">
             <ChevronLeft className="w-[22px] h-[22px]" strokeWidth={2.4} />
           </button>
-          <h1 className={`${(headerPageTitle?.length ?? 0) > 14 ? 'text-[19px]' : 'text-[21px]'} font-extrabold tracking-tight text-center truncate`} style={{ color: 'var(--g-text)' }}>
-            {headerPageTitle}
-          </h1>
+          {blendSearch && mobileSearchOpen ? (
+            <div className="relative min-w-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
+              <input
+                autoFocus
+                type="text"
+                value={headerSearchReg?.value || ''}
+                onChange={(e) => headerSearchReg?.onChange(e.target.value)}
+                placeholder={headerSearchReg?.placeholder || 'Search…'}
+                className="w-full pl-9 pr-8 py-2.5 rounded-full text-sm bg-white text-slate-900 shadow-[0_6px_16px_-8px_rgba(15,23,42,0.35)] focus:outline-none"
+              />
+              <button type="button" onClick={() => setMobileSearchOpen(false)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1" style={{ color: 'var(--g-text-muted)' }} aria-label="Close search">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <h1
+              className={`${(headerPageTitle?.length ?? 0) > 20 ? 'text-[16px]' : (headerPageTitle?.length ?? 0) > 14 ? 'text-[19px]' : 'text-[21px]'} font-extrabold tracking-tight text-center truncate`}
+              style={{ color: 'var(--g-text)' }}
+            >
+              {headerPageTitle}
+            </h1>
+          )}
+          <div className="flex items-center justify-end gap-2">
+          {blendSearch && !mobileSearchOpen && (
+            <button type="button" onClick={() => setMobileSearchOpen(true)} className="hdr-round" aria-label="Search">
+              <Search className="w-[18px] h-[18px]" />
+            </button>
+          )}
           {headerPageTitle === 'Timesheet' ? (
             <div className="hdr-chip hdr-solo">{alertsBell}</div>
           ) : (
@@ -329,6 +361,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onOpenMenu={onOpenMobileMenu}
             />
           )}
+          </div>
         </div>
       )}
       {!blend && (

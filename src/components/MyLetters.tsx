@@ -20,6 +20,7 @@ import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen
 import { esignFetch, openProtectedFile } from '../lib/esign';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { letterFileName } from '../lib/hrLetterPdf';
 import { useHrApi, Badge, fmtDate, letterPdfBytes, saveLetterPdf, inputCls, labelCls, btnPrimary, btnGhost, Notice } from './HrOpsShared';
@@ -99,6 +100,7 @@ interface MyData {
 }
 
 export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Letters & Service Record');
   const isNativeApp = Capacitor.isNativePlatform();
   const api = useHrApi(token);
   const [signed, setSigned] = useState<Map<number, { document_id: number; verify_code: string | null }>>(new Map());
@@ -202,8 +204,9 @@ useLiveRefresh(() => load(true));
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Letters & Service Record']} />}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Letters & Service Record']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />

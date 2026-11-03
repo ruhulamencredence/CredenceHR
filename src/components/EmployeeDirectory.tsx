@@ -14,6 +14,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { fetchPhoto } from './UserAvatar';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { registerHeaderSearch, unregisterHeaderSearch, setHeaderSearchBarHidden } from '../lib/headerSearch';
 
 interface EmployeeDirectoryProps {
@@ -149,6 +150,7 @@ const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
 );
 
 export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack, isActive }) => {
+  usePhoneHeaderTitle('Employee Directory', !!isActive);
   const isNativeApp = Capacitor.isNativePlatform();
 
   const [employees, setEmployees] = useState<EmployeeDirectoryEntry[]>([]);
@@ -339,8 +341,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Employee Directory']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Employee Directory']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">

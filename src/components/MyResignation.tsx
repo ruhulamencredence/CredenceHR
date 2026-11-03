@@ -10,6 +10,7 @@ import { ArrowLeft, LogOut, Plus, X, CheckCircle2, Clock, Ban, AlertTriangle } f
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { User } from '../types';
 import { LoadingBlock } from './LoadingBlock';
 
@@ -76,6 +77,7 @@ const STATUS_LABEL: Record<string, string> = {
 // HR/Admin's to edit (requireModule('exit_offboarding') on every PUT here),
 // an employee only ever watches their own request's progress.
 export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Resignation');
   const isNativeApp = Capacitor.isNativePlatform();
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -149,15 +151,19 @@ useLiveRefresh(() => load(true));
     iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    // Phone: no page colour of its own (the header's glow shows through)
+    // and the title sits in the header (usePhoneHeaderTitle).
+    <div className="w-full min-h-[calc(100vh-4rem)] md:bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'My Resignation']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'My Resignation']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-end md:justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
+            <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
                 <LogOut className="w-5 h-5 text-rose-600" />
               </div>

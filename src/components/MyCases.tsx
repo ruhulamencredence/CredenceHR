@@ -15,6 +15,7 @@ import { ArrowLeft, Gavel, Plus, X, MessageSquare, AlertTriangle, CheckCircle2 }
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
@@ -89,6 +90,7 @@ const fmt = (v: string) => {
 };
 
 export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('Grievance & Disciplinary');
   const isNativeApp = Capacitor.isNativePlatform();
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const [cases, setCases] = useState<Cases | null>(null);
@@ -315,9 +317,10 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Grievance & Disciplinary']} />}
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Grievance & Disciplinary']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />

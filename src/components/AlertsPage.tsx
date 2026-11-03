@@ -13,6 +13,7 @@ import { apiUrl } from '../lib/api';
 import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 import { PagerBar } from './PagerBar';
 
@@ -55,6 +56,7 @@ interface AlertsPageProps {
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
 export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+  usePhoneHeaderTitle('Alerts');
   // Every alert this account ever got, 50 (or the chosen size) per page;
   // nothing is ever removed from here.
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -327,24 +329,27 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Alerts']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Alerts']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
           <div className="p-5 sm:p-6 max-sm:px-3 max-sm:pt-2 max-sm:pb-3 sm:border-b border-slate-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               {isNativeApp && (
-                <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
+                <button type="button" onClick={onBack} className="hidden md:block p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
                   <ChevronLeft className="w-5 h-5" />
                 </button>
               )}
-              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
+              <div className="hidden md:flex w-10 h-10 rounded-full bg-rose-50 items-center justify-center shrink-0">
                 <BellRing className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-slate-800">Alerts</h1>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <h1 className="hidden md:block text-lg font-semibold text-slate-800">Alerts</h1>
+                <p className="text-xs text-slate-500 md:mt-0.5">
                   {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
                 </p>
               </div>
