@@ -1,4 +1,22 @@
 erDiagram
+  payroll_corrections {
+    int id PK
+    int payroll_id FK
+    int employee_id FK
+    int company_id
+    int batch_id
+    enum source
+    enum kind
+  }
+  payroll_review_files {
+    int id PK
+    int company_id
+    int batch_id
+    enum stage
+    varchar original_name
+    varchar mimetype
+    int size_bytes
+  }
   advance_requests {
     int id PK
     int employee_id FK
@@ -142,3 +160,5 @@ erDiagram
   all_employees ||--o{ pending_bonuses : "employee_id"
   all_employees ||--o{ salary_adjustments : "employee_id"
   all_employees ||--o{ salary_structures : "employee_id"
+  payrolls ||..o{ payroll_corrections : "payroll_id"
+  all_employees ||..o{ payroll_corrections : "employee_id"

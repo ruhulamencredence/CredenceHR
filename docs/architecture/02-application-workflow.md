@@ -245,35 +245,49 @@ flowchart TD
 
 ---
 
-## ৯. Payroll workflow (HR → Audit → Accounts)
+## ৯. Payroll workflow (HR → HR Director → MD (কাগজে) → HR correction → Accounts → Audit ঐচ্ছিক)
 
 ```mermaid
 flowchart TD
   SS["বেতন কাঠামো<br/>salary_structures<br/>(তারিখ ধরে, পুরোনো রেকর্ড বদলায় না)"] --> WZ
   ATW["উপস্থিতি, ছুটি, দেরি"] --> WZ
-  BN["bonus (pending_bonuses), ঋণ কিস্তি,<br/>pay items, overtime"] --> WZ
+  BN["bonus (pending_bonuses), ঋণ কিস্তি,<br/>pay items (Fine / Penalty সহ), overtime"] --> WZ
   WZ["Payroll wizard (HR)<br/>উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না<br/>ঋণাত্মক bonus/overtime/কর্তন নয়<br/>নিষ্ক্রিয় কর্মী: শুধু ছেড়ে যাওয়ার মাস পর্যন্ত"] --> GEN["payrolls তৈরি<br/>কর্মী × মাস = একটি"]
   GEN --> HOLD{"কারও বেতন hold?"}
   HOLD -- হ্যাঁ --> HD["মাসের বাইরে থাকে; ছাড়লে আলাদা চলে"]
   HOLD -- না --> SUB
-  GEN --> SUB["HR: Submit for Audit<br/>(মাস লক)"]
-  SUB --> AUD{"Audit (View only + audit_approve)<br/>যে submit করেছে বা কোনো বেতন<br/>চালিয়েছে/বদলেছে সে নয়"}
-  AUD -- ফেরত নোট সহ --> GEN
-  AUD -- approve --> PR["অবস্থা: Processed"]
-  PR --> PAY["Accounts (View only + accounts_pay)<br/>যে চালিয়েছে, submit বা approve করেছে সে নয়<br/>তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay"]
+  GEN --> SUB["HR: Send to HR Director<br/>(মাস লক)"]
+  SUB --> HRD{"HR Director<br/>অ্যাপে (layer hrd_review) অথবা<br/>কাগজে সই — HR সই করা কপি attach করে"}
+  HRD -- ফেরত নোট সহ --> GEN
+  HRD -- reviewed --> MD["HR sheet print করে MD-কে দেয়<br/>(version নম্বর, বিভাগ-প্রতি পাতা, Fine, ৪টি সই-ঘর)"]
+  MD --> BACK{"MD-র কপি ফিরল<br/>HR scan/photo attach করে"}
+  BACK -- কোনো বদল নেই --> PR["অবস্থা: Processed — Accounts-এ"]
+  BACK -- বদল আছে --> COR["HR প্রতিটি correction লেখে ও apply করে<br/>দেরি মাফ / Fine মাফ / যোগ / কাটা<br/>(এক মাসের pay item, বেতন আবার হিসাব)"]
+  COR --> PR
+  PR --> PAY["Accounts (View only + accounts_pay)<br/>যে চালিয়েছে, পাঠিয়েছে সে নয়<br/>তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay"]
   PAY --> PD["Paid: আর বদলানো যায় না<br/>ঋণের কিস্তি কাটা হিসেবে ধরা হয়"]
   PD --> PSLIP["কর্মীর My Payslip + PDF + 'Salary Paid' alert"]
+  PD -.-> AUD["Audit (ঐচ্ছিক, audit_approve)<br/>OK বা নোট — pay আটকায় না"]
   GEN -. প্রতিটি লেখা .-> LOG[(payroll_access_log)]
 ```
 
+**ধাপগুলো (Payroll → Approval):** `payroll_batches.status` = draft → hrd_review → md_review → (corrections) → approved → paid; ফেরত দিলে returned।
+- **HR Director:** layer `hrd_review` থাকলে অ্যাপেই "Reviewed — send to MD" (যে মাস পাঠিয়েছে বা কোনো বেতন চালিয়েছে/বদলেছে সে নয়), বা Return to HR। কাগজে দেখলে HR তাঁর সই করা কপি attach করে "HR Director signed on paper" দেয় — কপি ছাড়া হয় না।
+- **MD (অ্যাপ ব্যবহার করেন না):** HR "Print sheet (PDF)" থেকে MD-র কপি বের করে (প্রতি print-এ নতুন version, পাতায় ছাপা — পুরোনো কপি চেনা যায়; বিভাগ-প্রতি পাতা, Fine কলাম, MD-র জন্য ফাঁকা Remarks, Prepared / Checked / Approved / Received সই-ঘর)। কপি ফিরলে scan/photo attach করে "MD's copy came back": বদল না থাকলে সোজা Accounts-এ, থাকলে Corrections।
+- **Corrections:** প্রতিটি বদল আলাদা লেখা হয় (কর্মী, ধরন, টাকা, MD কী লিখেছেন, পাতা)। Apply করলে সেই মাসের জন্য একটি pay item বসে ("Late cut waived (MD)", "Fine waived (MD)", "Added (MD)", "Deducted (MD)") আর run-এর gross / কর্তন / net আবার হিসাব হয় (net ঋণাত্মক হলে হয় না; দেরি মাফ দেরি-কর্তনের বেশি নয়, Fine মাফ Fine-এর বেশি নয়)। "Not done" কারণসহ; মুছলে apply করা বদলও ফিরে যায়। সব শেষ হলে "Send to Accounts" (খোলা থাকলে হয় না)। টেবিল `payroll_corrections`।
+- **কপিগুলো:** `payroll_review_files` (stage hrd / md), ফাইল থাকে `PAYROLL_FILES_DIR` ফোল্ডারে (ডিফল্ট `uploads/payroll`), ডাটাবেসে শুধু path।
+- **Fine / Penalty:** Allowance & Adjustment-এ "Fine / Penalty" বাছলে কর্তনের pay item, `employee_pay_items.category = 'fine'`; Salary sheet ও print-এ আলাদা Fine কলাম।
+- **Audit:** টাকা দেওয়ার পরে, ঐচ্ছিক — "Checked — OK" বা নোট; HR ও Accounts জানতে পারে। কখনো pay আটকায় না।
+- **একক বেতন (hold থেকে ছাড়া):** HR Director (`hrd_review`, পুরোনো সেটআপে `audit_approve`) approve করেন, Accounts pay — মাস Accounts-এ পৌঁছানোর পরে।
+
 **হিসাব:** net = মোট আয় (বেসিক + ভাতা + overtime + bonus) − কর − PF − ঋণ কিস্তি − অনুপস্থিতি/দেরি কর্তন − অন্য কর্তন। কর ও PF **হাতে/কাঠামোতে দেওয়া** (আয়কর স্ল্যাবের স্বয়ংক্রিয় হিসাব নেই)।
-**কে কোন layer পায়:** HR = "Payroll" (`read`, বানানো ও বদলানো)। Audit = "View only" (`payroll_view`) + Audit Approve। Accounts = "View only" + Accounts Pay। View only সব পেজ ও রিপোর্ট দেখে, কিছু বদলাতে পারে না। নিয়মগুলো Superadmin-এর জন্য খাটে না।
+**কে কোন layer পায়:** HR = "Payroll" (`read`, বানানো, বদলানো, print, কপি attach ও correction)। HR Director = "HR Director review" (`hrd_review`, ডিফল্টে বন্ধ)। Accounts = "View only" (`payroll_view`) + Accounts Pay। Audit = "View only" + "Audit (after payment)" (`audit_approve`)। View only সব পেজ ও রিপোর্ট দেখে, কিছু বদলাতে পারে না। নিয়মগুলো Superadmin-এর জন্য খাটে না।
 **Payslip পাঠানো (Payroll → Payslips):** একজনকে (সারির Email/PDF), কয়েকজনকে (টিক দিয়ে বা নাম/ID/বিভাগ খুঁজে বেছে "Email Selected" / "PDF of Selected"), অথবা কাউকে না বাছলে সবাইকে। Email পাঠানোর আগে কতজনকে যাবে তা জিজ্ঞেস করে। প্রত্যেকে নিজের payslip PDF পান (`POST /api/payroll/:id/email`, Payroll module ও "Payroll" layer লাগে)।
 **Run Payroll-এ খোঁজা ও বাছা:** Attendance & Leave, Adjustments আর Preview & Calculate — তিন ধাপেই নাম / Employee ID / পদ / বিভাগ লিখে খোঁজা আর বিভাগ বাছাই (লিখে খোঁজা যায়)। Attendance & Leave-এ "Select all / Unselect all" (খোঁজা থাকলে "Select shown / Unselect shown") আর মাথার checkbox শুধু দেখানো কর্মীদের বদলায়; তাই খুঁজে খুঁজে কয়েকজনকে বাছা যায়। খোঁজা শুধু দেখানো বদলায় — হিসাব ও submit সব বাছা কর্মীর হয়, Preview-এর মোট পুরো run-এর।
 **দেরি মাফ (Late waiver):** Run Payroll → Attendance & Leave-এ Late সংখ্যায় চাপলে প্রতিটি দেরির দিন আসে; কোনো দিন **Waive** করতে **কারণ লেখা বাধ্যতামূলক** (৩ অক্ষরের কম হলে server 400), সাথে চাইলে একটা ফাইল (ছবি, PDF, Word, Excel; ৫ MB পর্যন্ত — `late_waivers.attachment_*`)। মাফ করা দিনে কারণ আর ফাইলের লিংক দেখায় (`GET /api/payroll/late-waivers/:id/attachment`, Payroll module); Un-waive করলে দিনটা আবার গোনা হয়।
 **Approval-এ Salary sheet:** Payroll → Approval-এ মাসের প্রতিটি কর্মীর বেতন স্ক্রিনেই দেখা যায় — দিন (Working / Present / Absent / Leave / LWP), Late, Gross, অনুপস্থিতি/দেরি কর্তন, অন্য কর্তন, Net, আগের মাসের Net-এর তুলনায় % বদল, কোথায় পাবে (Bank/MFS), Status। খোঁজা, বিভাগ বাছাই, "Net changed 10%+ / New this month / On hold / Absent-late cut" ফিল্টার, মোট সারি, সারিতে চাপলে পুরো ভাঙন, যা দেখাচ্ছে তার Excel। Layer `approval_sheet` (Payroll-এর ভেতরে; সাধারণ দেখা, তাই layer সেভ না থাকলে ডিফল্টে থাকে; Audit/Accounts-এর layer সেভ করা থাকলে এটা টিক দিতে হয়) — `GET /api/payroll/approval/:month/salary-sheet`।
 
-**Approval-এ Top Sheet:** Payroll → Approval-এ Accounts-এর কাগজের Top Sheet-এর মতো — মাসের বেতন **Branch / site অনুযায়ী** এক সারিতে (চাইলে Department অনুযায়ী): Actual Salary (Basic + Allowance, কাটা ছাড়া), Salary after deduction (Absent / LWP / Late কাটার পরে), Allowance (Overtime + Bonus + Allowance-এর লাইন), Arrear (Arrear adjustment), Gross Salary, Other Deduction (Other + Recovery + কাটার লাইন), Advance, TDS, Loan, Employee Contribution (PF), Net Salary, আর কীভাবে দেওয়া হলো — By EBL Card / By Cash / By Bank (কর্মীর Payment ভাগ থেকে; যে Bank account-এর নাম বা ব্যাংকের নামে "Card" আছে সেটা Card; ভাগ না থাকলে run-এর Payment method; MFS থাকলে আলাদা column)। Head Office প্রথমে, তারপর A–Z; নিচে TOTAL আর **Prepared / Authorized / Approved By** — মাসটা যিনি Submit (HR), Approve (Audit) আর Pay (Accounts) করেছেন, নাম ও তারিখসহ। সাইটের নামে চাপলে সেই সাইটের নিজের sheet: প্রতি কর্মী (নাম, পদ, ID, যোগদানের তারিখ, Working Day, Present…Net Payable, Bank / Card / Cash, Remarks) আর নিচে "Salary Payable / Less: Advance & Deduction / Total withdraw / From Bank / From EBL Card / From Cash / Total Withdraw From Cash and Bank" (কাগজের sheet-এর মতো শেষেরটা Cash + Bank)। Hold-এ থাকা বেতন এ মাসে দেওয়া হয় না, তাই sheet-এ নেই (আলাদা লেখা থাকে)। Excel: প্রথম sheet Top Sheet, তারপর প্রতি সাইটের আলাদা sheet; PDF একইভাবে (প্রতি সাইট নতুন পাতায়); Email-এ PDF। Layer `top_sheet` (সাধারণ দেখা, তাই layer সেভ না থাকলে ডিফল্টে; সেভ করা থাকলে টিক দিতে হয়) — `GET /api/payroll/approval/:month/top-sheet?by=branch|department`।
+**Approval-এ Top Sheet:** Payroll → Approval-এ Accounts-এর কাগজের Top Sheet-এর মতো — মাসের বেতন **Branch / site অনুযায়ী** এক সারিতে (চাইলে Department অনুযায়ী): Actual Salary (Basic + Allowance, কাটা ছাড়া), Salary after deduction (Absent / LWP / Late কাটার পরে), Allowance (Overtime + Bonus + Allowance-এর লাইন), Arrear (Arrear adjustment), Gross Salary, Other Deduction (Other + Recovery + কাটার লাইন), Advance, TDS, Loan, Employee Contribution (PF), Net Salary, আর কীভাবে দেওয়া হলো — By EBL Card / By Cash / By Bank (কর্মীর Payment ভাগ থেকে; যে Bank account-এর নাম বা ব্যাংকের নামে "Card" আছে সেটা Card; ভাগ না থাকলে run-এর Payment method; MFS থাকলে আলাদা column)। Head Office প্রথমে, তারপর A–Z; নিচে TOTAL আর **Prepared / Authorized / Approved By** — মাসটা যিনি পাঠিয়েছেন (HR), review করেছেন (HR Director; আগের মাসে Audit) আর Pay (Accounts) করেছেন, নাম ও তারিখসহ। সাইটের নামে চাপলে সেই সাইটের নিজের sheet: প্রতি কর্মী (নাম, পদ, ID, যোগদানের তারিখ, Working Day, Present…Net Payable, Bank / Card / Cash, Remarks) আর নিচে "Salary Payable / Less: Advance & Deduction / Total withdraw / From Bank / From EBL Card / From Cash / Total Withdraw From Cash and Bank" (কাগজের sheet-এর মতো শেষেরটা Cash + Bank)। Hold-এ থাকা বেতন এ মাসে দেওয়া হয় না, তাই sheet-এ নেই (আলাদা লেখা থাকে)। Excel: প্রথম sheet Top Sheet, তারপর প্রতি সাইটের আলাদা sheet; PDF একইভাবে (প্রতি সাইট নতুন পাতায়); Email-এ PDF। Layer `top_sheet` (সাধারণ দেখা, তাই layer সেভ না থাকলে ডিফল্টে; সেভ করা থাকলে টিক দিতে হয়) — `GET /api/payroll/approval/:month/top-sheet?by=branch|department`।
 
 **Advance আর Loan আলাদা:** `employee_advances.kind` (`advance` / `loan`) — কর্মীর Loan / Salary Advance request থেকে আসা সারি তার ধরন নেয়, HR-এর "New Loan / Advance"-এ Type বাছা যায় (আগের হাতে লেখা সারি Advance)। প্রতি payroll run-এ কিস্তির মোট আগের মতো `advance_deduction`-এ, তার Loan অংশ `payrolls.loan_deduction`-এ (Generate, Run Payroll ও Edit-এর সময় লেখা হয়); Top Sheet-এ Advance = মোট − Loan, তাই এই পরিবর্তনের আগের মাসগুলোতে সবটা Advance-এ দেখায়।
 **Approval-এ Month comparison:** এই মাস বনাম আগের মাস (বা বাছা যেকোনো মাস) — মোট Net ও কর্মীর সংখ্যা, পার্থক্য ও %; **কেন মোট বদলাল** (আগের মাসের Net → নতুন কর্মী + → চলে যাওয়া/বেতন হয়নি − → বাকিদের Basic, Allowances, Overtime, Bonus, Extra pay, অনুপস্থিতি/LWP/দেরি কর্তন, Tax, PF, Loan, অন্য কর্তনের বদল → এই মাসের Net; যোগফল সবসময় মেলে); department পাশাপাশি (দুই মাসের Net, পার্থক্য, New/Left/Changed); প্রতি কর্মী — নতুন হলে যোগদানের তারিখ, চলে গেলে Exit request-এর ধরন, শেষ কর্মদিবস ও কারণ (না থাকলে Inactive / এই মাসে বেতন হয়নি), বদলালে প্রতিটি অংশ আগে → পরে ও তার কারণ (কত দিন absent, কত ঘণ্টা OT, কতবার late)। Excel-এ তিন শিট। Layer `month_compare` (সাধারণ দেখা, ডিফল্টে থাকে) — `GET /api/payroll/approval/:month/compare?vs=`।

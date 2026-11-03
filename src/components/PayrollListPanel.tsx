@@ -104,10 +104,10 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token, canEd
       .then((d) => setCanHold(!!d?.can_hold))
       .catch(() => {});
     // One salary outside the month's approval (e.g. released from hold):
-    // Audit approves it, Accounts pays it (Payroll -> Approval).
+    // the HR Director approves it, Accounts pays it (Payroll -> Approval).
     fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setRunAccess({ audit: !!d?.audit_approve, pay: !!d?.accounts_pay }))
+      .then((d) => setRunAccess({ audit: !!d?.hrd_review || !!d?.audit_approve, pay: !!d?.accounts_pay }))
       .catch(() => {});
   }, [authHeaders]);
 

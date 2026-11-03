@@ -139,6 +139,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Payroll-এ MD অ্যাপ ব্যবহার না করলে তাঁর অনুমোদনের প্রমাণ কী?</td>
+<td>HR তাঁর সই/দাগ দেওয়া কাগজের scan/photo attach না করলে মাস এগোয় না; প্রতিটি print-এর version নম্বর পাতায় ছাপা; MD-র প্রতিটি বদল আলাদা correction হিসেবে (কে লিখল, কে apply করল, আগে-পরে net) থাকে আর history-তে সব ধাপ। ফাইল public ফোল্ডারে নয়, শুধু অনুমোদনের পথের layer দিয়ে খোলা যায়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Payroll-এ HR Director, Accounts, Audit কি নিজের বানানো বেতন পাস করতে পারেন?</td>
+<td>না। যে বেতন চালিয়েছে/বদলেছে বা মাস পাঠিয়েছে সে HR Director review দিতে পারে না; যে পাঠিয়েছে বা Accounts-এ পাঠিয়েছে সে pay করতে পারে না; যে বানিয়েছে, পাঠিয়েছে বা pay করেছে সে audit করতে পারে না (Superadmin ছাড়া)। Audit এখন টাকা দেওয়ার পরে, ঐচ্ছিক।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Payroll-এর Top Sheet (সাইট-ভিত্তিক বেতন) কে দেখে?</td>
 <td>যাঁর Payroll module-এ "Approval — Top Sheet (view)" layer আছে (layer সেভ না থাকা Payroll ব্যবহারকারী ডিফল্টে পান; Audit / Accounts-এর "View only" থাকলে আলাদা টিক লাগে), আর Superadmin। API আর পাতার অংশ দুটোই এই layer দেখে; টেস্টে layer ছাড়া 403। এটা শুধু দেখা — approve / pay আগের নিয়মেই।</td>
 <td>✅</td>

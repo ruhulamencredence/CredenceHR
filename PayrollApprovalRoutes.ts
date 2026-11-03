@@ -3,16 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Payroll -> Approval: a salary month goes HR -> Audit -> Accounts.
+// Payroll -> Approval: a salary month goes HR -> HR Director -> MD (on
+// paper) -> HR (corrections) -> Accounts, and Audit may look at it after.
 //
-//   draft      HR generates and checks the month's runs (nothing new here)
-//   submitted  HR "Submit for Audit" — the month's runs are locked
-//   approved   Audit approved it (Payroll layer "audit_approve"); every
-//              unpaid run that isn't on hold becomes Processed
-//   returned   Audit sent it back with a note — unlocked for HR again
-//   paid       Accounts paid it (Payroll layer "accounts_pay") with the
-//              payment date, method and reference — every Processed run
-//              becomes Paid (advance installments are recovered then)
+//   draft        HR generates and checks the month's runs
+//   hrd_review   HR "Send to HR Director" — runs locked. The HR Director
+//                reviews it in the app (layer "hrd_review"), or on paper and
+//                HR attaches the returned copy (payroll_review_files)
+//   md_review    printed for the MD, who reviews on paper — runs locked
+//   corrections  the MD's copy came back with changes: HR attaches its scan
+//                and enters each correction (payroll_corrections) — "Apply"
+//                makes the change on the run itself
+//   approved     ready for Accounts (MD signed with no changes, or HR sent
+//                it on after the corrections); unpaid runs become Processed
+//   returned     sent back to HR (HR Director / Accounts / HR's own recall)
+//   paid         Accounts paid it (layer "accounts_pay") — every Processed
+//                run becomes Paid (advance installments are recovered then)
+//   + audit      optional, after payment (layer "audit_approve"): "Audited
+//                — OK" or an audit note (post_audit_*). Never blocks paying.
 //
 // Duties stay apart (a Superadmin excepted): whoever ran any of the month's
 // salaries or submitted it can't approve it, and whoever ran, submitted or
@@ -26,15 +34,18 @@
 // (payroll_access_log). Actions are logged on the server for every write to
 // /api/payroll/*; the page reports the pages / tabs it opens.
 
-import type { Express } from "express";
+import express, { type Express } from "express";
+import fs from "fs";
 import type { AlertType } from "./Alerts";
+import { refreshRunItems, finesByRun } from "./PayrollItemsRoutes";
+import { PAYROLL_FILE_MAX_BYTES, looksLikeType, payrollFileExtension, removePayrollFile, resolvePayrollPath, savePayrollFile } from "./payrollFiles";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare" | "top_sheet";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare" | "top_sheet" | "hrd_review";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -48,7 +59,7 @@ interface PayrollApprovalDeps {
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-export const LOCKED_BATCH = new Set(["submitted", "approved", "paid"]);
+export const LOCKED_BATCH = new Set(["submitted", "hrd_review", "md_review", "approved", "paid"]);
 const money = (v: any) => Math.round((Number(v) || 0) * 100) / 100;
 const tk = (v: any) => `৳${money(v).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const monthText = (m: string) => {
@@ -107,6 +118,76 @@ export async function ensurePayrollApprovalSchema(dbPool: any) {
       INDEX idx_pal_user (user_id)
     )
   `);
+  // The review steps (HR Director, MD on paper, corrections) and the
+  // optional audit after payment.
+  await dbPool
+    .query("ALTER TABLE payroll_batches MODIFY COLUMN status ENUM('draft','submitted','hrd_review','md_review','corrections','approved','returned','paid') NOT NULL DEFAULT 'draft'")
+    .catch((e: any) => console.warn("⚠️ payroll_batches.status: " + e.message));
+  for (const [col, def] of [
+    ["hrd_by", "INT NULL"],
+    ["hrd_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["hrd_note", "VARCHAR(1000) NULL"],
+    ["hrd_mode", "VARCHAR(10) NULL"],
+    ["md_sent_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["md_sent_by", "INT NULL"],
+    ["md_back_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["md_back_by", "INT NULL"],
+    ["md_received_date", "DATE NULL"],
+    ["md_signed", "TINYINT(1) NULL"],
+    ["print_version", "INT NOT NULL DEFAULT 0"],
+    ["sent_accounts_by", "INT NULL"],
+    ["sent_accounts_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["post_audit_status", "VARCHAR(10) NULL"],
+    ["post_audit_by", "INT NULL"],
+    ["post_audit_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["post_audit_note", "VARCHAR(1000) NULL"]
+  ]) {
+    await dbPool.query(`ALTER TABLE payroll_batches ADD COLUMN ${col} ${def}`).catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ payroll_batches.${col}: ${err.message}`);
+    });
+  }
+  // A month that was "with Audit" before Audit moved after payment is now
+  // with the HR Director.
+  await dbPool.query("UPDATE payroll_batches SET status = 'hrd_review' WHERE status = 'submitted'").catch(() => {});
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_review_files (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL DEFAULT 1,
+      batch_id INT NOT NULL,
+      stage ENUM('hrd','md') NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      mimetype VARCHAR(100) NOT NULL,
+      size_bytes INT NOT NULL,
+      file_path VARCHAR(500) NOT NULL,
+      uploaded_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_prf_batch (batch_id)
+    )
+  `);
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS payroll_corrections (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL DEFAULT 1,
+      batch_id INT NOT NULL,
+      payroll_id INT NOT NULL,
+      employee_id INT NOT NULL,
+      source ENUM('md','hrd') NOT NULL DEFAULT 'md',
+      kind ENUM('waive_late','waive_fine','add','cut','other') NOT NULL,
+      amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+      note VARCHAR(500) NOT NULL,
+      page VARCHAR(20) NULL,
+      status ENUM('open','applied','not_done') NOT NULL DEFAULT 'open',
+      result_note VARCHAR(500) NULL,
+      pay_item_id INT NULL,
+      net_before DECIMAL(10, 2) NULL,
+      net_after DECIMAL(10, 2) NULL,
+      created_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      done_by INT NULL,
+      done_at TIMESTAMP NULL DEFAULT NULL,
+      INDEX idx_pc_batch (batch_id)
+    )
+  `);
   // payrolls: what Accounts recorded when it was paid.
   // last_edited_by: who last changed a run by hand (PUT /api/payroll/:id) —
   // like generated_by, that person can't approve or pay it.
@@ -136,8 +217,10 @@ export const lockedMessage = (status: string) =>
   status === "paid"
     ? "This month's salary is already paid — it can't be changed."
     : status === "approved"
-    ? "Audit has approved this month's salary — ask Audit to return it before changing anything."
-    : "This month's salary is with Audit — ask Audit to return it before changing anything.";
+    ? "This month's salary is with Accounts — ask Accounts to return it before changing anything."
+    : status === "md_review"
+    ? "This month's salary sheet is with the MD — wait for his copy (or recall it) before changing anything."
+    : "This month's salary is with the HR Director — ask for it back before changing anything.";
 
 // Marks one run Paid and recovers its advance installment — the same thing
 // the per-run "Mark Paid" always did, shared with Accounts' month payment.
@@ -201,9 +284,15 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
     ]).catch(() => {});
   }
   const ACTION_NAMES: [RegExp, string][] = [
-    [/^\/approval\/[^/]+\/submit$/, "Submit for Audit"],
-    [/^\/approval\/[^/]+\/approve$/, "Audit Approve"],
-    [/^\/approval\/[^/]+\/return$/, "Audit Return"],
+    [/^\/approval\/[^/]+\/submit$/, "Send to HR Director"],
+    [/^\/approval\/[^/]+\/hrd-done$/, "HR Director reviewed"],
+    [/^\/approval\/[^/]+\/md-back$/, "MD's copy back"],
+    [/^\/approval\/[^/]+\/corrections/, "MD correction"],
+    [/^\/approval\/[^/]+\/to-accounts$/, "Send to Accounts"],
+    [/^\/approval\/[^/]+\/files/, "Attach reviewed copy"],
+    [/^\/approval\/[^/]+\/printed$/, "Print salary sheet"],
+    [/^\/approval\/[^/]+\/audit$/, "Audit (after payment)"],
+    [/^\/approval\/[^/]+\/return$/, "Return to HR"],
     [/^\/approval\/[^/]+\/pay$/, "Accounts Pay"],
     [/^\/generate-bulk$/, "Run Payroll (bulk)"],
     [/^\/generate$/, "Run Payroll"],
@@ -297,18 +386,19 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log, edit, sheet, compare, top] = await Promise.all([
+    const [audit, pay, log, edit, sheet, compare, top, hrd] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
       hasModuleLayer(req.user, "payroll", "access_log"),
       hasModuleLayer(req.user, "payroll", "read"),
       hasModuleLayer(req.user, "payroll", "approval_sheet"),
       hasModuleLayer(req.user, "payroll", "month_compare"),
-      hasModuleLayer(req.user, "payroll", "top_sheet")
+      hasModuleLayer(req.user, "payroll", "top_sheet"),
+      hasModuleLayer(req.user, "payroll", "hrd_review")
     ]);
     // edit = HR's "Payroll" layer; without it the account only views.
     // approval_sheet = the Salary sheet table in Approval.
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare, top_sheet: top });
+    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare, top_sheet: top, hrd_review: hrd });
   });
 
   // ---- one month's approval state ---------------------------------------
@@ -329,16 +419,24 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
   }
   // Why this account may not approve / pay the month (null = it may).
   // A Superadmin is never stopped.
-  function approveConflict(user: any, b: any, runs: any[]): string | null {
+  // The HR Director reviewing in the app can't be the one who sent it.
+  function hrdConflict(user: any, b: any, runs: any[]): string | null {
     if (user.role === "superadmin") return null;
-    if (Number(b?.submitted_by) === Number(user.id)) return "You submitted this salary sheet — someone else from Audit has to approve it.";
-    if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — someone else from Audit has to approve it.";
+    if (Number(b?.submitted_by) === Number(user.id)) return "You sent this salary sheet — another HR Director has to review it.";
+    if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — another HR Director has to review it.";
+    return null;
+  }
+  // Audit after payment: not someone who prepared, sent on or paid it.
+  function auditConflict(user: any, b: any, runs: any[]): string | null {
+    if (user.role === "superadmin") return null;
+    if ([b?.submitted_by, b?.sent_accounts_by, b?.paid_by].some((id) => Number(id) === Number(user.id))) return "You prepared, sent on or paid this salary — someone else has to audit it.";
+    if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — someone else has to audit it.";
     return null;
   }
   function payConflict(user: any, b: any, runs: any[]): string | null {
     if (user.role === "superadmin") return null;
     if (Number(b?.submitted_by) === Number(user.id)) return "You submitted this salary sheet — someone else from Accounts has to pay it.";
-    if (Number(b?.audited_by) === Number(user.id)) return "You approved this salary sheet for Audit — someone else from Accounts has to pay it.";
+    if (Number(b?.sent_accounts_by) === Number(user.id)) return "You sent this salary sheet to Accounts — someone else from Accounts has to pay it.";
     if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — someone else from Accounts has to pay it.";
     return null;
   }
@@ -367,14 +465,29 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       if (!MONTH_RE.test(month)) return bad(res, "Choose a month.");
       const [b, runs] = await Promise.all([batchFor(queryDB, month), monthRuns(month)]);
       const events: any[] = b ? await queryDB("SELECT * FROM payroll_batch_events WHERE batch_id = ? ORDER BY id ASC", [b.id]) : [];
-      const names = await userNames([b?.submitted_by, b?.audited_by, b?.paid_by, ...events.map((e) => e.user_id)]);
+      const [files, corrs]: any[] = b
+        ? await Promise.all([
+            queryDB("SELECT id, stage, original_name, mimetype, size_bytes, uploaded_by, created_at FROM payroll_review_files WHERE batch_id = ? ORDER BY id", [b.id]),
+            queryDB("SELECT * FROM payroll_corrections WHERE batch_id = ? ORDER BY id", [b.id])
+          ])
+        : [[], []];
+      const names = await userNames([
+        b?.submitted_by, b?.audited_by, b?.paid_by, b?.hrd_by, b?.md_sent_by, b?.md_back_by, b?.sent_accounts_by, b?.post_audit_by,
+        ...events.map((e) => e.user_id), ...(files || []).map((f: any) => f.uploaded_by), ...(corrs || []).flatMap((c: any) => [c.created_by, c.done_by])
+      ]);
       const count = (s: string) => runs.filter((r) => r.payment_status === s).length;
-      const [audit, pay, edit] = await Promise.all([
+      const [audit, pay, edit, hrd] = await Promise.all([
         hasModuleLayer(req.user, "payroll", "audit_approve"),
         hasModuleLayer(req.user, "payroll", "accounts_pay"),
-        hasModuleLayer(req.user, "payroll", "read")
+        hasModuleLayer(req.user, "payroll", "read"),
+        hasModuleLayer(req.user, "payroll", "hrd_review")
       ]);
       const status = b?.status || "draft";
+      const runById = new Map(runs.map((r) => [Number(r.id), r]));
+      const fines = await finesByRun(queryDB, runs.map((r) => Number(r.id)));
+      const openCorr = (corrs || []).filter((c: any) => c.status === "open").length;
+      const mdFiles = (files || []).filter((f: any) => f.stage === "md").length;
+      const hrdFiles = (files || []).filter((f: any) => f.stage === "hrd").length;
       res.json({
         month_year: month,
         status,
@@ -389,9 +502,36 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
               paid_at: b.paid_at,
               payment_date: b.payment_date,
               payment_method: b.payment_method,
-              payment_reference: b.payment_reference
+              payment_reference: b.payment_reference,
+              hrd_by: names.get(Number(b.hrd_by)) || null,
+              hrd_at: b.hrd_at,
+              hrd_note: b.hrd_note,
+              hrd_mode: b.hrd_mode,
+              md_sent_at: b.md_sent_at,
+              md_back_at: b.md_back_at,
+              md_received_date: b.md_received_date,
+              md_signed: b.md_signed == null ? null : !!Number(b.md_signed),
+              print_version: Number(b.print_version) || 0,
+              sent_accounts_by: names.get(Number(b.sent_accounts_by)) || null,
+              sent_accounts_at: b.sent_accounts_at,
+              post_audit_status: b.post_audit_status || null,
+              post_audit_by: names.get(Number(b.post_audit_by)) || null,
+              post_audit_at: b.post_audit_at,
+              post_audit_note: b.post_audit_note
             }
           : null,
+        files: (files || []).map((f: any) => ({ id: Number(f.id), stage: f.stage, name: f.original_name, mimetype: f.mimetype, size: Number(f.size_bytes), by: names.get(Number(f.uploaded_by)) || null, at: f.created_at })),
+        corrections: (corrs || []).map((c: any) => {
+          const r: any = runById.get(Number(c.payroll_id));
+          return {
+            id: Number(c.id), payroll_id: Number(c.payroll_id), employee_name: r?.employee_name || "", employee_code: r?.employee_code || "", department: r?.department || "",
+            source: c.source, kind: c.kind, amount: money(c.amount), note: c.note, page: c.page, status: c.status, result_note: c.result_note,
+            net_before: c.net_before == null ? null : money(c.net_before), net_after: c.net_after == null ? null : money(c.net_after),
+            by: names.get(Number(c.created_by)) || null, at: c.created_at, done_by: names.get(Number(c.done_by)) || null, done_at: c.done_at
+          };
+        }),
+        // Who a correction can be for: the month's runs, with what they are known by.
+        people: runs.map((r) => ({ payroll_id: Number(r.id), name: r.employee_name, code: r.employee_code || "", designation: r.designation || "", department: r.department || "", net: money(r.net_salary), fine: fines.get(Number(r.id)) || 0 })),
         summary: {
           runs: runs.length,
           total_net: money(runs.reduce((s, r) => s + Number(r.net_salary || 0), 0)),
@@ -403,14 +543,27 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         },
         held: runs.filter((r) => Number(r.is_held)).map((r) => ({ name: r.employee_name, code: r.employee_code, reason: r.hold_reason })),
         events: events.map((e) => ({ action: e.action, by: names.get(Number(e.user_id)) || null, note: e.note, at: e.created_at })),
+        open_corrections: openCorr,
         can: {
           submit: edit && (status === "draft" || status === "returned") && runs.length > 0,
-          approve: audit && status === "submitted" && !approveConflict(req.user, b, runs),
-          return_: audit && (status === "submitted" || status === "approved"),
-          pay: pay && status === "approved" && !payConflict(req.user, b, runs)
+          // HR Director in the app, or HR recording the HR Director's signed copy.
+          hrd_review: hrd && status === "hrd_review" && !hrdConflict(req.user, b, runs),
+          hrd_paper: edit && status === "hrd_review",
+          md_back: edit && status === "md_review",
+          corrections: edit && status === "corrections",
+          to_accounts: edit && status === "corrections" && openCorr === 0,
+          attach: edit && (status === "hrd_review" || status === "md_review" || status === "corrections"),
+          print: edit || hrd,
+          recall: edit && (status === "hrd_review" || status === "md_review" || status === "corrections"),
+          return_: (hrd && status === "hrd_review") || (pay && status === "approved"),
+          pay: pay && status === "approved" && !payConflict(req.user, b, runs),
+          audit: audit && status === "paid" && !b?.post_audit_status && !auditConflict(req.user, b, runs)
         },
         // Shown next to a button this account can't use, so it knows why.
-        conflict: status === "submitted" && audit ? approveConflict(req.user, b, runs) : status === "approved" && pay ? payConflict(req.user, b, runs) : null,
+        conflict:
+          status === "hrd_review" && hrd ? hrdConflict(req.user, b, runs) : status === "approved" && pay ? payConflict(req.user, b, runs) : status === "paid" && audit && !b?.post_audit_status ? auditConflict(req.user, b, runs) : null,
+        md_files: mdFiles,
+        hrd_files: hrdFiles,
         is_submitter: Number(b?.submitted_by) === Number(req.user.id)
       });
     } catch (err: any) {
@@ -428,74 +581,373 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       if (b.status !== "draft" && b.status !== "returned") return bad(res, `This month is already ${b.status}.`);
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
       const sub: any = await queryDB(
-        "UPDATE payroll_batches SET status = 'submitted', submitted_by = ?, submitted_at = CURRENT_TIMESTAMP, audit_note = NULL WHERE id = ? AND status IN ('draft', 'returned')",
+        "UPDATE payroll_batches SET status = 'hrd_review', submitted_by = ?, submitted_at = CURRENT_TIMESTAMP, audit_note = NULL, hrd_by = NULL, hrd_at = NULL, hrd_note = NULL, hrd_mode = NULL, md_sent_at = NULL, md_back_at = NULL, md_signed = NULL, sent_accounts_by = NULL, sent_accounts_at = NULL WHERE id = ? AND status IN ('draft', 'returned')",
         [req.user.id, b.id]
       );
       if (sub && sub.affectedRows === 0) return bad(res, "This month was just submitted by someone else.", 409);
       await event(b.id, "submitted", req.user.id, note);
       const total = runs.filter((r) => !Number(r.is_held)).reduce((s, r) => s + Number(r.net_salary || 0), 0);
       await notify(
-        await layerHolders(queryDB, "audit_approve"),
-        "Salary Sheet Waiting for Audit",
-        `${req.user.name || "HR"} submitted the ${monthText(month)} salary (${runs.length} employees, ${tk(total)}) for audit. Open Payroll → Approval.`,
+        await layerHolders(queryDB, "hrd_review"),
+        "Salary Sheet for HR Director Review",
+        `${req.user.name || "HR"} sent the ${monthText(month)} salary (${runs.length} employees, ${tk(total)}) for review. Open Payroll → Approval.`,
         req.user.id
       );
-      res.json({ success: true, status: "submitted" });
+      res.json({ success: true, status: "hrd_review" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post("/api/payroll/approval/:month/approve", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res: any) => {
+  // Back to HR with a note: the HR Director (in the app), Accounts, or HR
+  // itself recalling the sheet (e.g. the paper was lost / needs reprinting).
+  app.post("/api/payroll/approval/:month/return", ...gate, async (req: any, res: any) => {
     try {
       const month = String(req.params.month);
       const b = await batchFor(queryDB, month);
-      if (!b || b.status !== "submitted") return bad(res, "Only a salary sheet submitted for audit can be approved.");
-      const monthList = await monthRuns(month);
-      const conflict = approveConflict(req.user, b, monthList);
-      if (conflict) return bad(res, conflict, 403);
+      if (!b) return bad(res, "Nothing to return.");
+      const [hrd, pay, edit] = await Promise.all([
+        hasModuleLayer(req.user, "payroll", "hrd_review"),
+        hasModuleLayer(req.user, "payroll", "accounts_pay"),
+        hasModuleLayer(req.user, "payroll", "read")
+      ]);
+      const allowed =
+        (b.status === "hrd_review" && (hrd || edit)) || (b.status === "approved" && pay) || ((b.status === "md_review" || b.status === "corrections") && edit);
+      if (!allowed) return bad(res, "You can't return this salary sheet now.", 403);
+      const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : "";
+      if (!note) return bad(res, "Write why it goes back to HR.");
+      const got: any = await queryDB("UPDATE payroll_batches SET status = 'returned', audit_note = ? WHERE id = ? AND status = ?", [note, b.id, b.status]);
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
+      const ids = (await monthRuns(month)).filter((r) => r.payment_status === "processed").map((r) => Number(r.id));
+      if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'unpaid' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+      await event(b.id, "returned", req.user.id, note);
+      await notify([Number(b.submitted_by)], "Salary Sheet Returned to HR", `${req.user.name || "Someone"} returned the ${monthText(month)} salary: ${note}`, req.user.id);
+      res.json({ success: true, status: "returned" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // HR Director: reviewed in the app (layer hrd_review), or — on paper — HR
+  // records it with the signed copy attached. It then goes to the MD.
+  app.post("/api/payroll/approval/:month/hrd-done", ...gate, async (req: any, res: any) => {
+    try {
+      const month = String(req.params.month);
+      const b = await batchFor(queryDB, month);
+      if (!b || b.status !== "hrd_review") return bad(res, "This salary sheet isn't with the HR Director.");
+      const runs = await monthRuns(month);
+      const [hrd, edit] = await Promise.all([hasModuleLayer(req.user, "payroll", "hrd_review"), hasModuleLayer(req.user, "payroll", "read")]);
+      const paper = req.body?.mode === "paper";
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
-      // Ids from the (company-scoped) month list — an UPDATE isn't scoped.
-      // The month changes hands once, even if Approve is pressed twice at once.
+      if (paper) {
+        if (!edit) return bad(res, "Only HR records the HR Director's paper copy.", 403);
+        const f: any[] = await queryDB("SELECT id FROM payroll_review_files WHERE batch_id = ? AND stage = 'hrd'", [b.id]);
+        if (!f.length) return bad(res, "Attach the HR Director's signed copy first.");
+      } else {
+        if (!hrd) return bad(res, "You don't have the HR Director review permission.", 403);
+        const c = hrdConflict(req.user, b, runs);
+        if (c) return bad(res, c, 403);
+      }
       const got: any = await queryDB(
-        "UPDATE payroll_batches SET status = 'approved', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ? AND status = 'submitted'",
-        [req.user.id, note, b.id]
+        "UPDATE payroll_batches SET status = 'md_review', hrd_by = ?, hrd_at = CURRENT_TIMESTAMP, hrd_note = ?, hrd_mode = ?, md_sent_at = CURRENT_TIMESTAMP, md_sent_by = ? WHERE id = ? AND status = 'hrd_review'",
+        [req.user.id, note, paper ? "paper" : "app", req.user.id, b.id]
       );
-      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just approved or returned by someone else.", 409);
-      const ids = monthList.filter((r) => r.payment_status === "unpaid" && !Number(r.is_held)).map((r) => Number(r.id));
-      if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'processed' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
-      await event(b.id, "approved", req.user.id, note);
-      await notify(
-        [...(await layerHolders(queryDB, "accounts_pay")), Number(b.submitted_by)],
-        "Salary Approved by Audit — Ready to Pay",
-        `${req.user.name || "Audit"} approved the ${monthText(month)} salary${note ? `: ${note}` : ""}. Accounts can pay it from Payroll → Approval.`,
-        req.user.id
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
+      await event(b.id, paper ? "hrd_paper" : "hrd_reviewed", req.user.id, note);
+      await notify([Number(b.submitted_by)], "Salary Sheet Reviewed by HR Director", `The ${monthText(month)} salary was reviewed${note ? `: ${note}` : ""}. Print it for the MD from Payroll → Approval.`, req.user.id);
+      res.json({ success: true, status: "md_review" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The MD's copy came back (HR records it, with its scan attached): signed
+  // with no changes -> to Accounts; with changes -> HR enters the corrections.
+  app.post("/api/payroll/approval/:month/md-back", ...gate, async (req: any, res: any) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "payroll", "read"))) return bad(res, "Only HR records the MD's copy.", 403);
+      const month = String(req.params.month);
+      const b = await batchFor(queryDB, month);
+      if (!b || b.status !== "md_review") return bad(res, "This salary sheet isn't with the MD.");
+      const f: any[] = await queryDB("SELECT id FROM payroll_review_files WHERE batch_id = ? AND stage = 'md'", [b.id]);
+      if (!f.length) return bad(res, "Attach the scan / photo of the MD's copy first.");
+      const changes = !!req.body?.changes;
+      const received = DATE_RE.test(String(req.body?.received_date || "")) ? String(req.body.received_date) : null;
+      const signed = req.body?.signed === false ? 0 : 1;
+      const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
+      const next = changes ? "corrections" : "approved";
+      const got: any = await queryDB(
+        `UPDATE payroll_batches SET status = ?, md_back_at = CURRENT_TIMESTAMP, md_back_by = ?, md_received_date = ?, md_signed = ?${changes ? "" : ", sent_accounts_by = ?, sent_accounts_at = CURRENT_TIMESTAMP"} WHERE id = ? AND status = 'md_review'`,
+        changes ? [next, req.user.id, received, signed, b.id] : [next, req.user.id, received, signed, req.user.id, b.id]
       );
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
+      if (!changes) await processMonth(month);
+      await event(b.id, changes ? "md_corrections" : "md_ok", req.user.id, note);
+      if (!changes) await notifyAccounts(month, req.user);
+      res.json({ success: true, status: next });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  async function processMonth(month: string) {
+    const ids = (await monthRuns(month)).filter((r) => r.payment_status === "unpaid" && !Number(r.is_held)).map((r) => Number(r.id));
+    if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'processed' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  }
+  async function notifyAccounts(month: string, user: any) {
+    const runs = await monthRuns(month);
+    const total = runs.filter((r) => !Number(r.is_held)).reduce((s, r) => s + Number(r.net_salary || 0), 0);
+    await notify(await layerHolders(queryDB, "accounts_pay"), "Salary Ready to Pay", `The ${monthText(month)} salary (MD reviewed, ${tk(total)}) is ready for Accounts in Payroll → Approval.`, user.id);
+  }
+
+  // ---- the MD's corrections, entered by HR from his copy ------------------
+  const CORR_KINDS = ["waive_late", "waive_fine", "add", "cut", "other"];
+  const CORR_NAME: Record<string, string> = { waive_late: "Late cut waived (MD)", waive_fine: "Fine waived (MD)", add: "Added (MD)", cut: "Deducted (MD)" };
+  const CORR_CATEGORY: Record<string, string> = { waive_late: "late_waiver", waive_fine: "fine_waiver", add: "md_correction", cut: "md_correction" };
+  const editableCorrections = async (req: any, res: any) => {
+    if (!(await hasModuleLayer(req.user, "payroll", "read"))) return void bad(res, "Only HR enters the MD's corrections.", 403);
+    const month = String(req.params.month);
+    const b = await batchFor(queryDB, month);
+    if (!b || b.status !== "corrections") return void bad(res, "Corrections are entered after the MD's copy came back with changes.");
+    return b;
+  };
+
+  app.post("/api/payroll/approval/:month/corrections", ...gate, async (req: any, res: any) => {
+    try {
+      const b = await editableCorrections(req, res);
+      if (!b) return;
+      const month = String(req.params.month);
+      const kind = String(req.body?.kind || "");
+      if (!CORR_KINDS.includes(kind)) return bad(res, "Choose what changes.");
+      const run: any = (await monthRuns(month)).find((r) => Number(r.id) === Number(req.body?.payroll_id));
+      if (!run) return bad(res, "Choose an employee from this month's sheet.");
+      const amount = money(req.body?.amount);
+      if (kind !== "other" && !(amount > 0)) return bad(res, "Enter the amount.");
+      const note = String(req.body?.note || "").trim().slice(0, 500);
+      if (!note) return bad(res, "Write what the MD wrote.");
+      const page = String(req.body?.page || "").trim().slice(0, 20) || null;
+      const source = req.body?.source === "hrd" ? "hrd" : "md";
+      const r: any = await queryDB(
+        "INSERT INTO payroll_corrections (batch_id, payroll_id, employee_id, source, kind, amount, note, page, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [b.id, run.id, run.employee_id, source, kind, amount, note, page, req.user.id]
+      );
+      res.status(201).json({ id: r.insertId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Apply: the change is made on the run itself — a one-month pay line
+  // named after it (so the payslip shows it), the run's totals recalculated.
+  // "Other" is done by hand elsewhere and only marked here.
+  app.post("/api/payroll/approval/:month/corrections/:id(\\d+)/apply", ...gate, async (req: any, res: any) => {
+    try {
+      const b = await editableCorrections(req, res);
+      if (!b) return;
+      const month = String(req.params.month);
+      const c: any = ((await queryDB("SELECT * FROM payroll_corrections WHERE id = ? AND batch_id = ?", [Number(req.params.id), b.id])) || [])[0];
+      if (!c) return bad(res, "Correction not found.", 404);
+      if (c.status !== "open") return bad(res, "This correction is already done.");
+      const run: any = ((await queryDB("SELECT * FROM payrolls WHERE id = ?", [c.payroll_id])) || [])[0];
+      if (!run || run.payment_status === "paid") return bad(res, "That salary can't be changed any more.");
+      const amount = money(c.amount);
+      const resultNote = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 500) || null : null;
+      if (c.kind === "waive_late" && amount > money(run.late_deduction_amount) + 0.009) {
+        return bad(res, `The late cut on this salary is ${tk(run.late_deduction_amount)} — the waiver can't be more.`);
+      }
+      if (c.kind === "waive_fine") {
+        const fine = (await finesByRun(queryDB, [Number(run.id)])).get(Number(run.id)) || 0;
+        if (amount > fine + 0.009) return bad(res, `The fines on this salary come to ${tk(fine)} — the waiver can't be more.`);
+      }
+      let payItemId: number | null = null;
+      let before = money(run.net_salary);
+      let after = before;
+      if (c.kind !== "other") {
+        const it: any = await queryDB(
+          `INSERT INTO employee_pay_items (employee_id, component_id, name, kind, amount, start_month, end_month, remarks, is_active, created_by, category)
+           VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          [run.employee_id, CORR_NAME[c.kind], c.kind === "cut" ? "deduction" : "earning", amount, month, month, String(c.note).slice(0, 255), req.user.id, CORR_CATEGORY[c.kind]]
+        );
+        payItemId = Number(it.insertId);
+        try {
+          const r = await refreshRunItems(queryDB, Number(run.id));
+          before = r.before;
+          after = r.after;
+        } catch (e: any) {
+          await queryDB("DELETE FROM employee_pay_items WHERE id = ?", [payItemId]);
+          return bad(res, e.message);
+        }
+      }
+      await queryDB(
+        "UPDATE payroll_corrections SET status = 'applied', pay_item_id = ?, net_before = ?, net_after = ?, result_note = ?, done_by = ?, done_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [payItemId, before, after, resultNote, req.user.id, c.id]
+      );
+      await queryDB("UPDATE payrolls SET last_edited_by = ? WHERE id = ?", [req.user.id, run.id]);
+      res.json({ success: true, net_before: before, net_after: after });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Not done (with the reason), e.g. the MD changed his mind.
+  app.post("/api/payroll/approval/:month/corrections/:id(\\d+)/skip", ...gate, async (req: any, res: any) => {
+    try {
+      const b = await editableCorrections(req, res);
+      if (!b) return;
+      const reason = String(req.body?.note || "").trim().slice(0, 500);
+      if (!reason) return bad(res, "Write why it isn't done.");
+      const got: any = await queryDB("UPDATE payroll_corrections SET status = 'not_done', result_note = ?, done_by = ?, done_at = CURRENT_TIMESTAMP WHERE id = ? AND batch_id = ? AND status = 'open'", [
+        reason, req.user.id, Number(req.params.id), b.id
+      ]);
+      if (!got?.affectedRows) return bad(res, "Correction not found or already done.");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Remove a correction (entered by mistake); an applied one is undone.
+  app.delete("/api/payroll/approval/:month/corrections/:id(\\d+)", ...gate, async (req: any, res: any) => {
+    try {
+      const b = await editableCorrections(req, res);
+      if (!b) return;
+      const c: any = ((await queryDB("SELECT * FROM payroll_corrections WHERE id = ? AND batch_id = ?", [Number(req.params.id), b.id])) || [])[0];
+      if (!c) return bad(res, "Correction not found.", 404);
+      if (c.pay_item_id) {
+        await queryDB("DELETE FROM employee_pay_items WHERE id = ?", [c.pay_item_id]);
+        await refreshRunItems(queryDB, Number(c.payroll_id)).catch(() => {});
+      }
+      await queryDB("DELETE FROM payroll_corrections WHERE id = ?", [c.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Every correction done -> to Accounts.
+  app.post("/api/payroll/approval/:month/to-accounts", ...gate, async (req: any, res: any) => {
+    try {
+      const b = await editableCorrections(req, res);
+      if (!b) return;
+      const month = String(req.params.month);
+      const open: any[] = await queryDB("SELECT id FROM payroll_corrections WHERE batch_id = ? AND status = 'open'", [b.id]);
+      if (open.length) return bad(res, `${open.length} correction${open.length === 1 ? " is" : "s are"} still open — apply or mark ${open.length === 1 ? "it" : "them"} first.`);
+      const got: any = await queryDB("UPDATE payroll_batches SET status = 'approved', sent_accounts_by = ?, sent_accounts_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'corrections'", [req.user.id, b.id]);
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
+      await processMonth(month);
+      const done: any[] = await queryDB("SELECT status FROM payroll_corrections WHERE batch_id = ?", [b.id]);
+      await event(b.id, "to_accounts", req.user.id, `${done.filter((d) => d.status === "applied").length} corrections applied${done.some((d) => d.status === "not_done") ? `, ${done.filter((d) => d.status === "not_done").length} not done` : ""}`);
+      await notifyAccounts(month, req.user);
       res.json({ success: true, status: "approved" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post("/api/payroll/approval/:month/return", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res: any) => {
+  // ---- the returned paper copies (scan / photo) -------------------------
+  const rawFile = express.raw({ type: () => true, limit: PAYROLL_FILE_MAX_BYTES });
+  app.post("/api/payroll/approval/:month/files", ...gate, rawFile, async (req: any, res: any) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "payroll", "read"))) return bad(res, "Only HR attaches the reviewed copy.", 403);
+      const month = String(req.params.month);
+      const b = await batchFor(queryDB, month);
+      const stage = req.query.stage === "hrd" ? "hrd" : "md";
+      const okStatus = stage === "hrd" ? ["hrd_review"] : ["md_review", "corrections"];
+      if (!b || !okStatus.includes(b.status)) return bad(res, stage === "hrd" ? "Attach the HR Director's copy while the sheet is with the HR Director." : "Attach the MD's copy while the sheet is with the MD or in corrections.");
+      const mimetype = String(req.query.type || req.headers["content-type"] || "").toLowerCase().split(";")[0].trim();
+      const ext = payrollFileExtension(mimetype);
+      if (!ext) return bad(res, "Attach a PDF, JPG, PNG or WebP.");
+      const buf: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (!buf.length) return bad(res, "The file is empty.");
+      if (!looksLikeType(buf, mimetype)) return bad(res, "That file isn't really a PDF / picture of that type.");
+      const name = String(req.query.name || `copy.${ext}`).replace(/[\r\n"\\/]/g, " ").trim().slice(0, 200) || `copy.${ext}`;
+      const stored = await savePayrollFile(buf, ext);
+      const r: any = await queryDB(
+        "INSERT INTO payroll_review_files (batch_id, stage, original_name, mimetype, size_bytes, file_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [b.id, stage, name, mimetype, buf.length, stored, req.user.id]
+      );
+      await event(b.id, "file", req.user.id, `${stage === "hrd" ? "HR Director's" : "MD's"} copy: ${name}`);
+      res.status(201).json({ id: r.insertId, name, size: buf.length, mimetype, stage });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/payroll/approval/files/:id(\\d+)", ...gate, async (req: any, res: any) => {
+    try {
+      // Only the people in this approval chain see the signed copies.
+      const may = await Promise.all(["read", "hrd_review", "accounts_pay", "audit_approve", "payroll_view"].map((l) => hasModuleLayer(req.user, "payroll", l as any)));
+      if (!may.some(Boolean)) return bad(res, "You can't open this copy.", 403);
+      const f: any = ((await queryDB("SELECT * FROM payroll_review_files WHERE id = ?", [Number(req.params.id)])) || [])[0];
+      if (!f) return bad(res, "File not found.", 404);
+      const full = resolvePayrollPath(f.file_path);
+      if (!full || !fs.existsSync(full)) return bad(res, "The file is missing on the server.", 404);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Type", f.mimetype);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(f.original_name)}`);
+      res.sendFile(full, { dotfiles: "deny", cacheControl: false, lastModified: false });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/payroll/approval/files/:id(\\d+)", ...gate, async (req: any, res: any) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "payroll", "read"))) return bad(res, "Only HR removes a copy.", 403);
+      const f: any = ((await queryDB("SELECT f.*, b.status FROM payroll_review_files f JOIN payroll_batches b ON b.id = f.batch_id WHERE f.id = ?", [Number(req.params.id)])) || [])[0];
+      if (!f) return bad(res, "File not found.", 404);
+      const okNow = f.stage === "hrd" ? ["hrd_review"] : ["md_review", "corrections"];
+      if (!okNow.includes(f.status)) return bad(res, "This month has moved on — that copy stays as it is.");
+      await queryDB("DELETE FROM payroll_review_files WHERE id = ?", [f.id]);
+      await removePayrollFile(f.file_path);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Printed (for the HR Director / MD / final): each print is a new version
+  // number, printed on the paper so an old copy is told apart.
+  app.post("/api/payroll/approval/:month/printed", ...gate, async (req: any, res: any) => {
+    try {
+      const month = String(req.params.month);
+      const b = await ensureBatch(month);
+      const forWho = ["hrd", "md", "final"].includes(req.body?.for) ? req.body.for : "final";
+      await queryDB("UPDATE payroll_batches SET print_version = print_version + 1 WHERE id = ?", [b.id]);
+      const v = Number(((await queryDB("SELECT print_version FROM payroll_batches WHERE id = ?", [b.id])) || [])[0]?.print_version) || 1;
+      await event(b.id, "printed", req.user.id, `v${v} for ${forWho === "hrd" ? "HR Director" : forWho === "md" ? "MD" : "file / Accounts"}`);
+      res.json({ success: true, version: v });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Optional audit after payment: OK, or a note HR and Accounts hear about.
+  app.post("/api/payroll/approval/:month/audit", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res: any) => {
     try {
       const month = String(req.params.month);
       const b = await batchFor(queryDB, month);
-      if (!b || (b.status !== "submitted" && b.status !== "approved")) return bad(res, "Only a salary sheet with Audit can be returned.");
+      if (!b || b.status !== "paid") return bad(res, "Audit looks at a month after it is paid.");
+      if (b.post_audit_status) return bad(res, "This month is already audited.");
+      const c = auditConflict(req.user, b, await monthRuns(month));
+      if (c) return bad(res, c, 403);
+      const result = req.body?.result === "note" ? "note" : "ok";
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : "";
-      if (!note) return bad(res, "Write what HR needs to correct.");
-      // What Audit had approved goes back to unpaid; anything already paid
-      // individually stays paid.
+      if (result === "note" && !note) return bad(res, "Write the audit note.");
       const got: any = await queryDB(
-        "UPDATE payroll_batches SET status = 'returned', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ? AND status = ?",
-        [req.user.id, note, b.id, b.status]
+        "UPDATE payroll_batches SET post_audit_status = ?, post_audit_by = ?, post_audit_at = CURRENT_TIMESTAMP, post_audit_note = ? WHERE id = ? AND post_audit_status IS NULL",
+        [result, req.user.id, note || null, b.id]
       );
-      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
-      const ids = (await monthRuns(month)).filter((r) => r.payment_status === "processed").map((r) => Number(r.id));
-      if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'unpaid' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
-      await event(b.id, "returned", req.user.id, note);
-      await notify([Number(b.submitted_by)], "Salary Sheet Returned by Audit", `${req.user.name || "Audit"} returned the ${monthText(month)} salary: ${note}`, req.user.id);
-      res.json({ success: true, status: "returned" });
+      if (got && got.affectedRows === 0) return bad(res, "Someone else just audited it.", 409);
+      await event(b.id, result === "ok" ? "audited_ok" : "audit_note", req.user.id, note || null);
+      await notify(
+        [Number(b.submitted_by), Number(b.paid_by), Number(b.sent_accounts_by)],
+        result === "ok" ? "Salary Audited — OK" : "Audit Note on Salary",
+        `${req.user.name || "Audit"} ${result === "ok" ? "audited" : "left a note on"} the ${monthText(month)} salary${note ? `: ${note}` : ""}.`,
+        req.user.id
+      );
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -505,7 +957,7 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
     try {
       const month = String(req.params.month);
       const b = await batchFor(queryDB, month);
-      if (!b || b.status !== "approved") return bad(res, "Audit has to approve this salary sheet before it can be paid.");
+      if (!b || b.status !== "approved") return bad(res, "The salary sheet comes to Accounts after the MD's review.");
       const monthList = await monthRuns(month);
       const conflict = payConflict(req.user, b, monthList);
       if (conflict) return bad(res, conflict, 403);
@@ -542,7 +994,7 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
           }).catch(() => {});
         }
       }
-      await notify([Number(b.submitted_by), Number(b.audited_by)], "Salary Paid by Accounts", `${req.user.name || "Accounts"} paid the ${monthText(month)} salary — ${runs.length} employees, ${tk(total)}, on ${date}.`, req.user.id);
+      await notify([Number(b.submitted_by), Number(b.sent_accounts_by), ...(await layerHolders(queryDB, "audit_approve"))], "Salary Paid by Accounts", `${req.user.name || "Accounts"} paid the ${monthText(month)} salary — ${runs.length} employees, ${tk(total)}, on ${date}.`, req.user.id);
       res.json({ success: true, status: "paid", paid: runs.length, total: money(total) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -582,8 +1034,10 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
             return `${where}${s.account_number ? ` ${s.account_number}` : ""}`;
           })
           .join(" + ");
+      const fines = await finesByRun(queryDB, runs.map((r: any) => Number(r.id)), true);
       const rows = runs.map((r: any) => {
         const last = prevNet.get(Number(r.employee_id));
+        const fine = fines.get(Number(r.id)) || 0;
         return {
           id: Number(r.id),
           employee_id: Number(r.employee_id),
@@ -611,7 +1065,8 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
           pf: money(r.pf_deduction),
           advance: money(r.advance_deduction),
           other_deduction: money(r.other_deduction),
-          extra_deduction: money(r.item_deductions),
+          fine,
+          extra_deduction: money(money(r.item_deductions) - fine),
           total_deduction: money(r.total_deduction),
           net: money(r.net_salary),
           last_net: last ?? null,
@@ -731,7 +1186,7 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const names = [...groups.keys()].sort((a, b) => (/^head office$/i.test(a) ? -1 : /^head office$/i.test(b) ? 1 : a.localeCompare(b)));
       const out = names.map((name) => ({ name, employees: groups.get(name)!.length, totals: sum(groups.get(name)!), rows: groups.get(name)! }));
       const b = await batchFor(queryDB, month);
-      const who = await userNames([b?.submitted_by, b?.audited_by, b?.paid_by, ...runs.map((r) => r.generated_by)]);
+      const who = await userNames([b?.submitted_by, b?.hrd_by, b?.audited_by, b?.paid_by, ...runs.map((r) => r.generated_by)]);
       const company = ((await queryDB("/*unscoped*/ SELECT name FROM companies WHERE id = ?", [req.companyId ?? 1]).catch(() => [])) || [])[0];
       res.json({
         month_year: month,
@@ -743,7 +1198,8 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         payment_reference: b?.payment_reference || null,
         signatures: {
           prepared: { name: (b?.submitted_by && who.get(Number(b.submitted_by))) || who.get(Number(runs[0]?.generated_by)) || null, at: b?.submitted_at || null },
-          authorized: { name: (b?.audited_by && who.get(Number(b.audited_by))) || null, at: b?.audited_at || null },
+          // The HR Director now (a month from before the HR Director step: Audit).
+          authorized: b?.hrd_by ? { name: who.get(Number(b.hrd_by)) || null, at: b.hrd_at || null } : { name: (b?.audited_by && who.get(Number(b.audited_by))) || null, at: b?.audited_at || null },
           approved: { name: (b?.paid_by && who.get(Number(b.paid_by))) || null, at: b?.paid_at || null }
         },
         totals: { employees: out.reduce((t, g) => t + g.employees, 0), ...sum(out.flatMap((g) => g.rows)) },

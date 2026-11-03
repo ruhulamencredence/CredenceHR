@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২২৮টি টেবিল, ২৪৮২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩০টি টেবিল, ২৪৮২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -3330,6 +3330,31 @@ Unique: `ucompany_unique_grade_name`(company_id,grade_name)
 
 Unique: `uq_payroll_batch`(company_id,month_year)
 
+### `payroll_corrections`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `company_id` | int | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `batch_id` | int | না |  | |
+| `payroll_id` | int | না |  | logical → `payrolls` |
+| `employee_id` | int | না |  | logical → `all_employees` |
+| `source` | enum('md','hrd') | না | default md | |
+| `kind` | enum('waive_late','waive_fine','add','cut','other') | না |  | |
+| `amount` | decimal(10,2) | না | default 0.00 | |
+| `note` | varchar(500) | না |  | |
+| `page` | varchar(20) | হ্যাঁ |  | |
+| `status` | enum('open','applied','not_done') | না | default open | |
+| `result_note` | varchar(500) | হ্যাঁ |  | |
+| `pay_item_id` | int | হ্যাঁ |  | |
+| `net_before` | decimal(10,2) | হ্যাঁ |  | |
+| `net_after` | decimal(10,2) | হ্যাঁ |  | |
+| `created_by` | int | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+| `done_by` | int | হ্যাঁ |  | |
+| `done_at` | timestamp | হ্যাঁ |  | |
+
+
 ### `payroll_line_items`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -3360,6 +3385,22 @@ Unique: `uq_payroll_batch`(company_id,month_year)
 | `percentage` | decimal(5,2) | না | default 0.00 | |
 | `amount` | decimal(10,2) | না | default 0.00 | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `payroll_review_files`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `company_id` | int | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `batch_id` | int | না |  | |
+| `stage` | enum('hrd','md') | না |  | |
+| `original_name` | varchar(255) | না |  | |
+| `mimetype` | varchar(100) | না |  | |
+| `size_bytes` | int | না |  | |
+| `file_path` | varchar(500) | না |  | |
+| `uploaded_by` | int | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+
 
 ### `payrolls`
 

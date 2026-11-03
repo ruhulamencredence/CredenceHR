@@ -396,8 +396,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // an account it is ticked for (and the Superadmin) can change it.
 // "salary_hold" = holding / releasing one employee's salary for a month
 // (kept out of disbursement until released) — also explicit-only.
-// "audit_approve" = Audit approves / returns a month's salary sheet;
-// "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
+// "hrd_review" = the HR Director checks a submitted month in the app (or HR
+// records the signed paper copy) before it goes to the MD on paper;
+// "audit_approve" = Audit checks a month after it is paid (optional, never
+// blocks pay); "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
 // Activity Log (who opened Payroll, what they looked at and did). All
 // explicit-only (PayrollApprovalRoutes.ts).
 // "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
@@ -415,7 +417,7 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "top_sheet" = Payroll -> Approval -> Top Sheet: the month's salary by
 // Branch / site (Accounts' top sheet, with each site's own sheet), Excel /
 // PDF. Plain reading too, so also in that default.
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet"] as const;
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -2918,7 +2920,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email" | "hrd_review") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
