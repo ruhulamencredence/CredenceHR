@@ -21,6 +21,8 @@ import { esignFetch, openProtectedFile } from '../lib/esign';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard } from './SelfCard';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { letterFileName } from '../lib/hrLetterPdf';
 import { useHrApi, Badge, fmtDate, letterPdfBytes, saveLetterPdf, inputCls, labelCls, btnPrimary, btnGhost, Notice } from './HrOpsShared';
@@ -101,6 +103,7 @@ interface MyData {
 
 export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
   usePhoneHeaderTitle('My Letters & Service Record');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const api = useHrApi(token);
   const [signed, setSigned] = useState<Map<number, { document_id: number; verify_code: string | null }>>(new Map());
@@ -239,15 +242,79 @@ useLiveRefresh(() => load(true));
             <MyInfoRequests token={token} onCountChange={setOpenCount} />
           ) : tab === 'letters' ? (
             <>
-              <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
+              <div className={isPhone ? 'space-y-2.5' : 'rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100'}>
                 {data.letters.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-slate-400">
+                  <div className={`p-8 text-center text-sm text-slate-400 ${isPhone ? 'rounded-[28px] bg-white/70' : ''}`}>
                     <Inbox className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     No letters yet.
                   </div>
                 ) : (
                   data.letters.map((l) => {
                     const needsAck = Number(l.requires_ack) && !l.acknowledged_at;
+                    // Phone: the shared Directory-style card — amber while it
+                    // waits on you or a signer, rose if a signer declined,
+                    // green once acknowledged, blue otherwise.
+                    if (isPhone) {
+                      const tone =
+                        l.signing?.status === 'declined' ? 'rose' : needsAck || l.signing?.status === 'pending' ? 'amber' : l.acknowledged_at ? 'green' : 'blue';
+                      return (
+                        <SelfCard
+                          key={l.id}
+                          tone={tone}
+                          lead={<FileText className="w-[18px] h-[18px]" />}
+                          dot={needsAck ? 'amber' : undefined}
+                          title={l.letter_label}
+                          sub={l.subject}
+                          chips={[
+                            { label: l.ref_no, mono: true },
+                            { label: fmtDate(l.letter_date) },
+                            ...(l.acknowledged_at ? [{ label: 'Acknowledged', tone: 'green' as const }] : needsAck ? [{ label: 'Please acknowledge', tone: 'amber' as const }] : [])
+                          ]}
+                          actions={
+                            <>
+                              <CardButton label="View" onClick={async () => setPdf({ bytes: await letterPdfBytes(company, asPdf(l)), letter: l })}>
+                                <Eye className="w-3.5 h-3.5" />
+                              </CardButton>
+                              <CardButton label="Download" tone="accent" onClick={() => saveLetterPdf(company, asPdf(l))}>
+                                <Download className="w-3.5 h-3.5" />
+                              </CardButton>
+                            </>
+                          }
+                        >
+                          {l.signing && l.signing.status === 'pending' && (
+                            <div className="text-[11px] text-amber-700">
+                              Waiting for {l.signing.waiting_on?.name || 'a signature'}
+                              {l.signing.waiting_on?.label ? ` (${l.signing.waiting_on.label})` : ''} to sign
+                              {daysSince(l.signing.sent_at) ? ` — sent ${daysSince(l.signing.sent_at)} ago` : ''}
+                              <SignSteps s={l.signing} />
+                            </div>
+                          )}
+                          {l.signing && l.signing.status === 'declined' && (
+                            <div className="text-[11px] text-rose-600">
+                              {l.signing.declined?.name || 'A signer'} declined to sign{l.signing.declined?.reason ? `: ${l.signing.declined.reason}` : ''} — HR has to send it again.
+                            </div>
+                          )}
+                          {(signed.has(l.id) || needsAck) && (
+                            <div className="flex flex-wrap gap-2">
+                              {signed.has(l.id) && (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/70 text-[11px] font-semibold text-emerald-700"
+                                  onClick={() => void openProtectedFile(token, `/api/esign/documents/${signed.get(l.id)!.document_id}/signed`).catch((e) => setMsg({ type: 'error', text: e.message }))}
+                                >
+                                  <BadgeCheck className="w-3.5 h-3.5" /> Signed copy (PDF)
+                                </button>
+                              )}
+                              {needsAck ? (
+                                <button type="button" disabled={acking === l.id} onClick={() => acknowledge(l)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold text-white disabled:opacity-50" style={{ background: 'var(--g-accent)' }}>
+                                  {acking === l.id ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />} I have received this letter
+                                </button>
+                              ) : null}
+                            </div>
+                          )}
+                        </SelfCard>
+                      );
+                    }
                     return (
                       <div key={l.id} className={`p-4 ${needsAck ? 'bg-amber-50/40' : ''}`}>
                         <div className="flex items-start justify-between gap-2 flex-wrap">

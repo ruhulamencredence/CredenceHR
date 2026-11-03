@@ -11,7 +11,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Copy, Download, Lock, Paperclip, Plus, Send, Trash2, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Copy, Download, Lock, Paperclip, Plus, Send, Target as TargetIcon, Trash2, X, XCircle } from 'lucide-react';
+import { CardChip, CardTone, SelfCard } from './SelfCard';
+import { useIsPhone } from '../lib/useScrolling';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
@@ -183,7 +185,32 @@ export const StatusBadge: React.FC<{ t: Pick<Target, 'status' | 'overdue'> }> = 
   </span>
 );
 
-export const TargetCard: React.FC<{ t: Target; onOpen: () => void; showOwner?: boolean }> = ({ t, onOpen, showOwner }) => (
+export const TargetCard: React.FC<{ t: Target; onOpen: () => void; showOwner?: boolean }> = (props) => {
+  // Phone: the shared Directory-style card, tinted by the target's state.
+  if (useIsPhone()) return <TargetPhoneCard {...props} />;
+  return <TargetDeskCard {...props} />;
+};
+
+const TARGET_TONE: Record<TargetStatus, CardTone> = { draft: 'slate', pending: 'amber', active: 'blue', rejected: 'rose', cancelled: 'slate', closed: 'green' };
+const TargetPhoneCard: React.FC<{ t: Target; onOpen: () => void; showOwner?: boolean }> = ({ t, onOpen, showOwner }) => {
+  const tone: CardTone = t.overdue ? 'rose' : t.progress >= 100 ? 'green' : TARGET_TONE[t.status];
+  const chips: CardChip[] = [];
+  if (t.overdue) chips.push({ label: 'Overdue', tone: 'rose' });
+  chips.push({ label: STATUS_LABEL[t.status], tone: TARGET_TONE[t.status] === 'slate' ? undefined : TARGET_TONE[t.status] });
+  chips.push({ label: `${t.completed_count}/${t.task_count} done`, tone: 'green' });
+  if (t.blocked_count > 0) chips.push({ label: `${t.blocked_count} blocked`, tone: 'rose' });
+  const sub = [showOwner ? t.owner_name : '', periodLabel(t.period_type, t.period), `deadline ${fmtDate(t.deadline)}`].filter(Boolean).join(' · ');
+  return (
+    <SelfCard tone={tone} lead={<TargetIcon className="w-[18px] h-[18px]" />} dot={t.overdue ? 'rose' : undefined} title={t.title} sub={sub} chips={chips} onClick={onOpen}>
+      <div className="flex items-center gap-2">
+        <ProgressBar value={t.progress} thin />
+        <span className="text-[11px] font-bold text-slate-800 w-9 text-right">{t.progress}%</span>
+      </div>
+    </SelfCard>
+  );
+};
+
+const TargetDeskCard: React.FC<{ t: Target; onOpen: () => void; showOwner?: boolean }> = ({ t, onOpen, showOwner }) => (
   <button
     type="button"
     onClick={onOpen}

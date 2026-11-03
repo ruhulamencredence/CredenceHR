@@ -16,6 +16,8 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { SelfCard, type CardTone } from './SelfCard';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
@@ -91,6 +93,7 @@ const fmt = (v: string) => {
 
 export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
   usePhoneHeaderTitle('Grievance & Disciplinary');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const [cases, setCases] = useState<Cases | null>(null);
@@ -238,6 +241,34 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   const grievanceCard = (g: Grievance, mode: 'raised' | 'named' | 'assigned') => {
     const closed = g.status === 'resolved' || g.status === 'dismissed';
     const pending = mode === 'named' ? g.feedback_pending.named : mode === 'assigned' ? g.feedback_pending.assignee : false;
+    // Phone: the shared Directory-style card — amber while open or waiting
+    // on your feedback, green resolved, quiet when dismissed.
+    if (isPhone) {
+      const tone: CardTone = pending ? 'amber' : g.status === 'resolved' ? 'green' : g.status === 'dismissed' ? 'slate' : 'amber';
+      return (
+        <SelfCard
+          key={`${mode}-${g.id}`}
+          tone={tone}
+          lead={<MessageSquare className="w-[18px] h-[18px]" />}
+          dot={pending ? 'amber' : undefined}
+          title={`Grievance #${g.id}${g.category ? ` · ${g.category}` : ''}`}
+          sub={[fmt(g.created_at), mode !== 'raised' ? `Raised by ${g.raised_by_name || '—'}` : '', g.against_user_name && mode !== 'named' ? `About ${g.against_user_name}` : '', g.assigned_to_name && mode !== 'assigned' ? `Investigator: ${g.assigned_to_name}` : ''].filter(Boolean).join(' · ')}
+          chips={[
+            ...(pending ? [{ label: 'Your feedback required', tone: 'amber' as const }] : []),
+            { label: g.status.charAt(0).toUpperCase() + g.status.slice(1), tone: g.status === 'resolved' ? ('green' as const) : g.status === 'dismissed' ? undefined : ('amber' as const) }
+          ]}
+        >
+          <p className="text-xs text-slate-700 whitespace-pre-wrap">{g.description}</p>
+          {g.resolution_notes && closed && (
+            <p className="text-xs text-emerald-700">
+              <span className="font-semibold">Outcome:</span> {g.resolution_notes}
+            </p>
+          )}
+          {feedbackList(g.feedback)}
+          {mode !== 'raised' && !closed && feedbackBox(`g-${g.id}`, `/api/grievances/${g.id}/feedback`, mode === 'named' ? 'Your side / explanation…' : 'Your investigation feedback…')}
+        </SelfCard>
+      );
+    }
     return (
       <div key={`${mode}-${g.id}`} className={`rounded-xl border p-4 bg-white ${pending ? 'border-amber-300' : 'border-slate-200'}`}>
         <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -270,7 +301,39 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
     );
   };
 
-  const actionCard = (a: Action) => (
+  const actionCard = (a: Action) =>
+    isPhone ? (
+      // Phone: Directory-style card — rose while the action is active, amber
+      // while it waits on you, green acknowledged, quiet once closed.
+      <SelfCard
+        key={`d-${a.id}`}
+        tone={a.status === 'closed' ? 'slate' : a.feedback_pending || !a.acknowledged ? 'amber' : a.status === 'active' ? 'rose' : 'green'}
+        lead={<Gavel className="w-[18px] h-[18px]" />}
+        dot={a.status !== 'closed' && (a.feedback_pending || !a.acknowledged) ? 'amber' : undefined}
+        title={ACTION_LABEL[a.action_type] || a.action_type}
+        sub={`Issued by ${a.issued_by_name || '—'} · ${fmt(a.issued_at)}`}
+        chips={[
+          ...(a.status !== 'closed' && a.feedback_pending ? [{ label: 'Your feedback required', tone: 'amber' as const }] : []),
+          { label: a.status.charAt(0).toUpperCase() + a.status.slice(1), tone: a.status === 'active' ? ('rose' as const) : a.status === 'acknowledged' ? ('green' as const) : undefined }
+        ]}
+      >
+        <p className="text-xs text-slate-700 whitespace-pre-wrap">{a.reason}</p>
+        {a.document_text && <p className="text-xs text-slate-600 whitespace-pre-wrap">{a.document_text}</p>}
+        {feedbackList(a.feedback)}
+        {a.status !== 'closed' && feedbackBox(`d-${a.id}`, `/api/disciplinary-actions/${a.id}/feedback`, 'Your feedback / explanation…')}
+        {a.status === 'active' && !a.acknowledged && (
+          <button
+            type="button"
+            disabled={a.feedback_pending || busy === `ack-${a.id}`}
+            onClick={() => acknowledge(a.id)}
+            title={a.feedback_pending ? 'Give your feedback first' : undefined}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-full bg-emerald-600 text-white disabled:opacity-50"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" /> Acknowledge
+          </button>
+        )}
+      </SelfCard>
+    ) : (
     <div key={`d-${a.id}`} className={`rounded-xl border p-4 bg-white ${a.status !== 'closed' && (a.feedback_pending || !a.acknowledged) ? 'border-amber-300' : 'border-slate-200'}`}>
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div className="text-xs font-semibold text-rose-700">{ACTION_LABEL[a.action_type] || a.action_type}</div>
@@ -302,7 +365,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
         </button>
       )}
     </div>
-  );
+    );
 
   const tabs: { key: Tab; label: string; count: number }[] = cases
     ? [

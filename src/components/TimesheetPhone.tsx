@@ -12,6 +12,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, X, XCircle } from 'lucide-react';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { CardChip, CardTone, SelfCard } from './SelfCard';
 
 export type TimesheetMode = 'month' | 'day' | 'range';
 export type DayStatus = 'ontime' | 'delay' | 'extreme' | 'absent' | 'leave' | 'weekend' | 'holiday';
@@ -501,6 +502,17 @@ export const AttendanceGauge: React.FC<{
 // One day of the list on a phone: date tile tinted by status, In → Out,
 // hours and project, status chip. Tapping it opens the correction / status
 // modal. Weekends and holidays sit quieter (no shadow, see-through).
+// One day in the phone list — the shared Directory-style card (SelfCard),
+// tinted by the day's state.
+const DAY_TONE: Record<DayStatus, CardTone> = {
+  ontime: 'green',
+  delay: 'amber',
+  extreme: 'amber',
+  absent: 'rose',
+  leave: 'violet',
+  weekend: 'slate',
+  holiday: 'slate'
+};
 export const PhoneDayCard: React.FC<{
   dateStr: string;
   status: DayStatus;
@@ -513,44 +525,32 @@ export const PhoneDayCard: React.FC<{
   onClick: () => void;
 }> = ({ dateStr, status, inAt, outAt, times, where, statusLabel, correction, onClick }) => {
   const s = STATUS_STYLE[status];
+  const tone = DAY_TONE[status];
   const quiet = status === 'weekend' || status === 'holiday';
+  const chips: CardChip[] = [];
+  chips.push({ label: statusLabel || (status === 'ontime' ? 'On time' : s.label), tone: quiet ? undefined : tone });
+  if (correction) chips.push({ label: correction === 'pending' ? 'Correction pending' : 'Correction rejected', tone: correction === 'pending' ? 'amber' : 'rose' });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left rounded-[24px] p-3 pr-3.5 flex items-center gap-3.5 active:scale-[0.99] transition-transform ${
-        quiet ? 'bg-white/60' : 'bg-white shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.28),0_2px_6px_-2px_rgba(15,23,42,.06)]'
-      }`}
-    >
-      <div className="w-14 h-[60px] rounded-[18px] flex flex-col items-center justify-center shrink-0" style={{ background: s.soft, color: s.fg }}>
-        <span className="text-xl font-extrabold leading-none">{Number(dateStr.slice(8, 10))}</span>
-        <span className="text-[11px] font-semibold mt-1">{weekdayShort(dateStr)}</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className={`text-sm font-bold truncate flex items-center gap-1.5 ${quiet ? 'text-zinc-500' : 'text-slate-900'}`}>
-          {inAt ? (
-            <>
-              {inAt} <ArrowRight className="w-3.5 h-3.5 text-zinc-300 shrink-0" strokeWidth={2.4} /> {outAt}
-            </>
-          ) : (
-            times
-          )}
-        </div>
-        <div className="text-xs text-zinc-500 mt-1 truncate">{where}</div>
-        {correction && (
-          <span
-            className={`mt-1 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              correction === 'pending' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
-            }`}
-          >
-            {correction === 'pending' ? <Clock className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
-            {correction === 'pending' ? 'Correction pending' : 'Correction rejected'}
+    <SelfCard
+      tone={tone}
+      quiet={quiet}
+      lead={<span className="text-[15px]">{Number(dateStr.slice(8, 10))}</span>}
+      dot={quiet ? undefined : tone}
+      title={
+        inAt ? (
+          <span className="inline-flex items-center gap-1.5">
+            {inAt} <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" strokeWidth={2.4} /> {outAt}
           </span>
-        )}
-      </div>
-      <div className="text-[11px] font-bold px-2.5 py-[5px] rounded-full whitespace-nowrap" style={{ background: s.soft, color: s.fg }}>
-        {statusLabel || (status === 'ontime' ? 'On time' : s.label)}
-      </div>
-    </button>
+        ) : times && times !== '—' ? (
+          times
+        ) : (
+          // No check-in: the row says why (No check-in, Leave, the holiday…).
+          where || '—'
+        )
+      }
+      sub={`${weekdayShort(dateStr)}, ${Number(dateStr.slice(8, 10))} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}${inAt && where && where !== '—' ? ` · ${where}` : ''}`}
+      chips={chips}
+      onClick={onClick}
+    />
   );
 };

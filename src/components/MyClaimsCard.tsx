@@ -5,7 +5,8 @@
 
 import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, LogIn, LogOut, Inbox } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, Inbox, MapPin, Map as MapIcon } from 'lucide-react';
+import { CardButton, SelfCard } from './SelfCard';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -210,7 +211,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           </p>
         </div>
       ) : (
-        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 px-1 pt-3 space-y-3'}>
+        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 px-1 pt-3 space-y-2.5'}>
           {shown.map((c) => {
             // undefined = lookup not resolved yet, null = it resolved to nothing
             // (falls back to plain coordinates below), string = the place name.
@@ -224,6 +225,56 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               checkOutAddr !== undefined
                 ? checkOutAddr ?? `${Number(c.check_out_lat).toFixed(5)}, ${Number(c.check_out_lng).toFixed(5)}`
                 : 'Locating…';
+            // Phone: the shared Directory-style card (SelfCard) — amber while
+            // open, green once checked out; the route and Check Out under it.
+            if (!desktop) {
+              const time = new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+              return (
+                <SelfCard
+                  key={c.id}
+                  tone={c.status === 'open' ? 'amber' : 'green'}
+                  lead={<MapPin className="w-[18px] h-[18px]" />}
+                  dot={c.status === 'open' ? 'amber' : undefined}
+                  title={c.purpose}
+                  sub={`${formatDate(c.check_in_at)} · ${time}`}
+                  chips={[
+                    ...(c.distance_km != null ? [{ label: `${Number(c.distance_km).toFixed(1)} km`, mono: true }] : []),
+                    { label: c.status === 'open' ? 'Open' : 'Completed', tone: c.status === 'open' ? ('amber' as const) : ('green' as const) }
+                  ]}
+                  actions={
+                    <CardButton label="Movement on the map" onClick={() => setViewingLocation(c)}>
+                      <MapIcon className="w-3.5 h-3.5" />
+                    </CardButton>
+                  }
+                >
+                  <div className="rounded-2xl bg-white/55 border border-white/60 px-3 py-2 flex items-start gap-2.5">
+                    <div className="flex flex-col items-center pt-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                      {c.check_out_at && (
+                        <>
+                          <span className="w-px flex-1 min-h-[8px] border-l border-dashed border-slate-300" />
+                          <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0" />
+                        </>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1 text-[11px] text-slate-600">
+                      <p className="truncate">{checkInLabel}</p>
+                      <p className="truncate">{c.check_out_at ? checkOutLabel : <span className="text-slate-400">Not checked out yet.</span>}</p>
+                    </div>
+                  </div>
+                  {c.status === 'open' && onCheckOut && (
+                    <button
+                      type="button"
+                      onClick={onCheckOut}
+                      className="w-full min-h-[40px] flex items-center justify-center gap-1.5 text-[13px] font-bold text-white rounded-full active:scale-[0.99] transition-transform"
+                      style={{ background: 'var(--g-accent, #7f00ff)' }}
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Check Out
+                    </button>
+                  )}
+                </SelfCard>
+              );
+            }
             return (
             // Was a single <button> covering the whole row (tap -> location map).
             // Now a plain <div> instead, since an open claim needs its own nested

@@ -14,6 +14,7 @@ import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
@@ -143,6 +144,13 @@ interface AvailableVehicle {
 }
 
 
+// Two letters for the requester's round tile on a phone card.
+const initialsOf = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
     ? 'Conveyance Bill Claim'
@@ -189,6 +197,9 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
   usePhoneHeaderTitle('Approve Application');
+  // Phone: each request is a Directory-style card (tinted by how it stands)
+  // on the page instead of a row inside one big white panel.
+  const isPhone = useIsPhone();
   // Same isNativeApp split as LeaveManage.tsx / Timesheet.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this
@@ -432,7 +443,7 @@ useLiveRefresh(() => load(true));
         )}
 
         <ApproverSignatureCard token={token} />
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className={isPhone ? '' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
           <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
             <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
@@ -512,7 +523,7 @@ useLiveRefresh(() => load(true));
               <p className="text-sm">Nothing waiting on you right now.</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className={isPhone ? 'space-y-2.5 pt-1' : 'divide-y divide-slate-100'}>
               {items.map((item) => {
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
@@ -536,10 +547,27 @@ useLiveRefresh(() => load(true));
                 return (
                   <div
                     key={key}
-                    className={`px-6 py-4 ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
+                    className={`${
+                      isPhone
+                        ? `rounded-[28px] border border-white/70 p-3 bg-gradient-to-br shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] [&_input]:bg-white/70 ${
+                            item.no_approver || item.layer_stuck ? 'from-rose-100/70 via-white/50 to-pink-50/40' : 'from-amber-100/70 via-white/50 to-orange-50/40'
+                          }`
+                        : 'px-6 py-4'
+                    } ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
                     onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
                   >
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'justify-between flex-wrap'}`}>
+                      {isPhone && (
+                        <div className="relative shrink-0">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold ring-2 ring-white/80 shadow-sm ${
+                              item.no_approver || item.layer_stuck ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {initialsOf(item.requested_by_name || '?')}
+                          </div>
+                        </div>
+                      )}
                       <div className="min-w-0 max-w-full">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-slate-800">

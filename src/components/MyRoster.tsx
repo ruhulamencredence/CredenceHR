@@ -12,6 +12,8 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CalendarRange, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { SelfCard } from './SelfCard';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { shiftTime, type Shift } from '../lib/roster';
@@ -52,6 +54,7 @@ const dayLabel = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en
 
 export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
   usePhoneHeaderTitle('My Duty Roster');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const now = new Date();
   const [month, setMonth] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
@@ -182,6 +185,37 @@ export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ tok
                 </div>
               </div>
 
+              {/* Phone: each duty / Off day is a Directory-style card with the
+                  shift's own colour on the tile. */}
+              {isPhone ? (
+                <div className="space-y-2.5">
+                  {data.days
+                    .filter((d) => d.shift || d.is_off)
+                    .map((d) => {
+                      const when = `${WD[d.weekday]}, ${Number(d.date.slice(8))} ${new Date(`${d.date}T00:00:00`).toLocaleDateString('en-GB', { month: 'short' })}`;
+                      return d.shift ? (
+                        <SelfCard
+                          key={d.date}
+                          tone={d.date === data.today ? 'amber' : 'violet'}
+                          lead={<span className="text-[11px]">{d.shift.code}</span>}
+                          leadStyle={{ background: d.shift.color, color: '#fff' }}
+                          title={d.shift.name}
+                          sub={`${when} · ${shiftTime(d.shift)}`}
+                          chips={[
+                            ...(d.date === data.today ? [{ label: 'Today', tone: 'amber' as const }] : []),
+                            ...(d.shift.crosses_midnight ? [{ label: 'Night shift', tone: 'violet' as const, icon: <Moon className="w-2.5 h-2.5" /> }] : []),
+                            ...(d.holiday ? [{ label: `on ${d.holiday.title}`, tone: 'amber' as const }] : [])
+                          ]}
+                        />
+                      ) : (
+                        <SelfCard key={d.date} tone="slate" quiet lead="OFF" title="Off day" sub={when} />
+                      );
+                    })}
+                  {!data.days.some((d) => d.shift || d.is_off) && (
+                    <div className="rounded-[28px] bg-white/70 px-4 py-6 text-center text-sm text-slate-500">Nothing set for this month — regular office hours apply.</div>
+                  )}
+                </div>
+              ) : (
               <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
                 {data.days
                   .filter((d) => d.shift || d.is_off)
@@ -209,6 +243,7 @@ export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ tok
                   ))}
                 {!data.days.some((d) => d.shift || d.is_off) && <div className="px-4 py-6 text-center text-sm text-slate-500">Nothing set for this month — regular office hours apply.</div>}
               </div>
+              )}
             </div>
           )
         )}

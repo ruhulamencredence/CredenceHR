@@ -14,6 +14,8 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, HandCoins, Plus, X } from 'lucide-react';
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { SelfCard, toneOfStatus } from './SelfCard';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -77,6 +79,7 @@ async function call<T>(token: string, path: string, init?: RequestInit): Promise
 
 export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
   usePhoneHeaderTitle('My Loan / Advance');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<MyLoansData | null>(null);
   const [error, setError] = useState('');
@@ -155,10 +158,36 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
               {data.loans.length === 0 ? (
                 <div className="rounded-2xl bg-white border border-slate-200 p-6 text-center text-sm text-slate-400">No loan or advance yet.</div>
               ) : (
-                <div className="grid sm:grid-cols-2 gap-3">
+                <div className={isPhone ? 'space-y-2.5' : 'grid sm:grid-cols-2 gap-3'}>
                   {data.loans.map((l) => {
                     const pct = l.total_amount > 0 ? Math.min(100, Math.round((l.paid_amount / l.total_amount) * 100)) : 0;
                     const left = l.monthly_installment > 0 ? Math.ceil(l.remaining / l.monthly_installment) : 0;
+                    const repaid = l.status === 'completed' || l.remaining <= 0;
+                    // Phone: the shared Directory-style card — green once
+                    // repaid, amber while it is being paid back.
+                    if (isPhone)
+                      return (
+                        <SelfCard
+                          key={l.id}
+                          tone={repaid ? 'green' : 'amber'}
+                          lead="৳"
+                          title={tk(l.total_amount)}
+                          sub={`${day(l.created_at)}${l.reason ? ` · ${l.reason}` : ''}`}
+                          chips={[
+                            { label: repaid ? 'Repaid' : 'Repaying', tone: repaid ? 'green' : 'amber' },
+                            { label: `${tk(l.monthly_installment)}/month`, mono: true },
+                            ...(l.remaining > 0 ? [{ label: `${left} left` }] : [])
+                          ]}
+                        >
+                          <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
+                            <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="flex justify-between text-[11px] text-slate-600">
+                            <span>Repaid {tk(l.paid_amount)}</span>
+                            <span>Left {tk(l.remaining)}</span>
+                          </div>
+                        </SelfCard>
+                      );
                     return (
                       <div key={l.id} className="rounded-2xl bg-white border border-slate-200 p-4">
                         <div className="flex items-start justify-between gap-2">
@@ -205,9 +234,37 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
               {data.requests.length === 0 ? (
                 <div className="rounded-2xl bg-white border border-slate-200 p-6 text-center text-sm text-slate-400">You haven't applied yet.</div>
               ) : (
-                <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
+                <div className={isPhone ? 'space-y-2.5' : 'rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100'}>
                   {data.requests.map((r) => {
                     const st = STATUS[r.status] || STATUS.pending;
+                    if (isPhone) {
+                      const tone = toneOfStatus(r.status);
+                      return (
+                        <SelfCard
+                          key={r.id}
+                          tone={tone}
+                          lead="৳"
+                          dot={r.status === 'pending' ? 'amber' : undefined}
+                          title={`${r.kind === 'advance' ? 'Salary Advance' : 'Loan'} · ${tk(r.total_amount)}`}
+                          sub={`${r.installments ? `${r.installments} × ${tk(r.monthly_installment)}` : `${tk(r.monthly_installment)} a month`} · applied ${day(r.created_at)}`}
+                          chips={[{ label: st.label, tone }]}
+                        >
+                          {r.reason && <p className="text-xs text-slate-700">{r.reason}</p>}
+                          {r.status === 'pending' && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-600 min-w-0">
+                                {r.step ? `Step ${r.step.current} of ${r.step.total}` : 'Final decision'}
+                                {r.waiting_on.length ? ` · waiting on ${r.waiting_on.join(', ')}` : ''}
+                              </span>
+                              <button type="button" onClick={() => cancel(r)} className="shrink-0 px-3 py-1.5 rounded-full bg-white/70 text-[11px] font-semibold text-rose-600">
+                                Cancel request
+                              </button>
+                            </div>
+                          )}
+                          {r.decision_remarks && r.status !== 'pending' && <p className="text-[11px] text-slate-600">Remarks: {r.decision_remarks}</p>}
+                        </SelfCard>
+                      );
+                    }
                     return (
                       <div key={r.id} className="p-4">
                         <div className="flex items-start justify-between gap-2 flex-wrap">

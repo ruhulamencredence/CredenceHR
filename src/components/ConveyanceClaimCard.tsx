@@ -11,6 +11,7 @@ import { UserClaim, UserClaimStatus } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { SelfCard, toneOfStatus } from './SelfCard';
 import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
 import { ConveyanceClaimDetailModal } from './ConveyanceClaimDetailModal';
 import { Spinner } from './Spinner';
@@ -192,42 +193,37 @@ useLiveRefresh(() => fetchClaims(true));
         </div>
       ) : (
         <>
-          {/* Mobile — stacked cards. */}
-          <div className="md:hidden max-h-72 overflow-y-auto divide-y divide-white/40">
-            {filtered.map((c) => (
-              <button
-                type="button"
-                key={c.id}
-                onClick={() => setViewingClaim(c)}
-                className="w-full text-left px-4 py-2.5 hover:bg-white/40 active:bg-white/60 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
-                      {formatDate(c.claim_date)}
-                      {c.has_file && <Paperclip className="w-3 h-3 text-slate-400 shrink-0" />}
+          {/* Mobile — the shared Directory-style cards (SelfCard), tinted by
+              the claim's state. */}
+          <div className="md:hidden px-2.5 pb-3 space-y-2.5">
+            {filtered.map((c) => {
+              const tone = toneOfStatus(c.status);
+              return (
+                <SelfCard
+                  key={c.id}
+                  tone={tone}
+                  lead={<Wallet className="w-[18px] h-[18px]" />}
+                  title={`৳${Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  sub={`${formatDate(c.claim_date)} · ${c.category}`}
+                  chips={[
+                    { label: c.status === 'approved' ? 'Approved' : c.status === 'rejected' ? 'Rejected' : 'Pending', tone },
+                    ...(c.has_file ? [{ label: 'File', icon: <Paperclip className="w-2.5 h-2.5" /> }] : [])
+                  ]}
+                  onClick={() => setViewingClaim(c)}
+                >
+                  <ClaimEditNote claim={c} />
+                  {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
+                    <div className="text-[11px] text-amber-700">No approver set yet — tell HR</div>
+                  )}
+                  {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
+                    <div className="text-[11px] text-amber-700">
+                      Waiting on {c.approval.current_approver_name}
+                      {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      {c.category} &middot; ৳{Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                    <ClaimEditNote claim={c} />
-                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
-                      <div className="text-[11px] text-amber-700 mt-0.5">No approver set yet — tell HR</div>
-                    )}
-                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
-                      <div className="text-[11px] text-amber-600 mt-0.5">
-                        Waiting on {c.approval.current_approver_name}
-                        {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <UserClaimStatusBadge status={c.status} />
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                  </div>
-                </div>
-              </button>
-            ))}
+                  )}
+                </SelfCard>
+              );
+            })}
           </div>
 
           {/* Desktop — a real row table instead of the mobile card list, same
