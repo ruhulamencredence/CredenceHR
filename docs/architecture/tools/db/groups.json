@@ -82,8 +82,10 @@
   "tracking_device_state",
   "tracking_employee_access",
   "tracking_notice_recipients",
+  "user_attendance_projects",
   "vehicle_ride_settings",
   "zk_attendance_logs",
+  "zk_device_pins",
   "zk_devices"
  ],
  "A. Accounts, Access & Security": [

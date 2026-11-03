@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
 import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
@@ -60,6 +61,7 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
+import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
@@ -320,6 +322,11 @@ async function initDB() {
     // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
     await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
+    // Several ZKTeco machines: office, LAN / internet push, own PIN numbers (zkMachines.ts).
+    await ensureZkMachinesSchema(dbPool);
+    // Remote Attendance: the Projects each account may check in at, with
+    // From/To dates (AttendanceProjects.ts) — after users and projects.
+    await ensureAttendanceProjectsSchema(dbPool);
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
@@ -328,7 +335,19 @@ async function initDB() {
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
-    if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
+    if (runsBackgroundJobs()) {
+      startZkSyncSchedule(dbPool);
+      // An attendance machine not heard from for an hour (07:00–21:00):
+      // the Office Attendance people and the Superadmin hear it once.
+      setInterval(() => {
+        void checkZkMachinesOffline(dbPool, async (title, message) => {
+          const to: any[] = await queryDB(
+            "/*unscoped*/ SELECT id FROM users WHERE role = 'superadmin' OR id IN (SELECT user_id FROM admin_module_permissions WHERE module_key = 'office_attendance')"
+          ).catch(() => []);
+          for (const u of to) await createAlert(queryDB, { userId: Number(u.id), type: "site_attendance", title, message }).catch(() => {});
+        }).catch(() => {});
+      }, 10 * 60 * 1000);
+    }
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");
     isMySQLConnected = false;
@@ -2685,6 +2704,10 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   // No database error text in API answers (ApiErrors.ts).
   maskDatabaseErrors(app);
+  // ZKTeco machines on the internet send their punches here (ADMS "Cloud
+  // server", /iclock/...) — only registered push machines are answered
+  // (zkMachines.ts).
+  registerZkPushRoutes(app, () => dbPool);
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -2969,7 +2992,12 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
+  // Module Access -> Remote Attendance: the check-in Projects of an account,
+  // one or many with From/To dates (AttendanceProjects.ts). Registered
+  // before the Users routes so /api/users/attendance-projects/bulk is
+  // never read as a user id.
+  const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same

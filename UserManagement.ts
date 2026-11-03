@@ -41,6 +41,9 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // AttendanceProjects.ts: replaces an account's check-in Project list — an
+  // older screen sending the single attendance_project_id lands there too.
+  replaceAttendanceProjects?: (queryDB: any, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) => Promise<void>;
   // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
   // Permanent Delete) — "users" is wired up to it below: create/reset-
   // password/change-email/feature-permissions/project-assignment need
@@ -68,7 +71,7 @@ interface UserManagementRouteDeps {
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets, replaceAttendanceProjects } = deps;
 
   // ---------------------------------------------------------------------
   // Access audit log + Access Templates (Admin Panel -> Users, Phase 3).
@@ -1794,6 +1797,12 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
         [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
       );
+      // The single "Allowed project for check-in" is now a list
+      // (user_attendance_projects): sending it replaces the list with that one
+      // Project, or clears it (any project) with null.
+      if (existingRows[0].role !== "superadmin" && req.body.attendance_project_id !== undefined && replaceAttendanceProjects) {
+        await replaceAttendanceProjects(queryDB, Number(id), attendance_project_id ? [{ project_id: attendance_project_id, valid_from: null, valid_to: null }] : [], Number(req.user.id));
+      }
       res.json({
         success: true,
         can_edit_delivery_date: !!can_edit_delivery_date,

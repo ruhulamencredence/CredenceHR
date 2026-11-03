@@ -29,6 +29,7 @@ import type { Express } from "express";
 // has no dependency back on this file.
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
 import { loadRoster } from "./RosterRoutes";
+import { restrictedAttendanceProjects } from "./AttendanceProjects";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -80,20 +81,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // measure the distance against). One row per (user, project, calendar day):
   // Check In fills check_in_*, a later Check Out the same day fills check_out_*.
 
-  // Which project IDs the calling user may act on for Remote Attendance —
-  // every project for an Admin/Superadmin, only the ones explicitly granted
-  // for a plain User (mirrors GET /api/projects's own visibility rule) —
-  // UNLESS a Superadmin/Admin has pinned this account (role 'user' OR
-  // 'admin') to exactly one Project for Attendance (users.attendance_project_id,
-  // set via Admin Panel -> Users -> "Attend. Project"), in which case that one
-  // Project overrides everything else below, even an otherwise-unrestricted
-  // Admin. Never applies to 'superadmin' — it has no such column value.
-  async function getAllowedProjectIds(userId: number, role: string): Promise<Set<number> | null> {
-    if (role !== "superadmin") {
-      const pinnedRows = await queryDB("SELECT attendance_project_id FROM users WHERE id = ?", [userId]);
-      const pinned = pinnedRows.length > 0 ? pinnedRows[0].attendance_project_id : null;
-      if (pinned != null) return new Set([Number(pinned)]);
-    }
+  // Which project IDs the calling user may act on for Remote Attendance on
+  // `ymd` (today unless given): the account's own check-in list when an Admin
+  // set one (Module Access -> Remote Attendance, user_attendance_projects —
+  // only the Projects whose From/To dates cover the day; see
+  // AttendanceProjects.ts), otherwise every project for an Admin/Superadmin
+  // and only the ones explicitly granted for a plain User (mirrors GET
+  // /api/projects's own visibility rule). A Superadmin is never limited.
+  async function getAllowedProjectIds(userId: number, role: string, ymd: string = todayInDhaka()): Promise<Set<number> | null> {
+    const listed = await restrictedAttendanceProjects(queryDB, userId, role, ymd);
+    if (listed) return listed;
     if (role === "admin" || role === "superadmin") return null; // null = no restriction
     const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [userId]);
     return new Set(perms.map((p: any) => Number(p.project_id)));
@@ -521,20 +518,20 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const { project_id, attendance_date, check_in_at, check_out_at, remarks, file_base64, file_name, file_mimetype } = req.body || {};
 
       let projectId = Number(project_id);
-      // A Superadmin/Admin-pinned Attendance Project (users.attendance_project_id)
-      // overrides whatever the client sent — Timesheet's Correct Attendance modal
-      // already drops its own Project picker and only ever sends the pinned
-      // Project once one is set (see AttendanceCorrectionModal.tsx), but this is
-      // enforced here too so a direct API call can't file a correction against a
-      // different Project, same defense-in-depth as resolveAttendanceLocation's
-      // Check In/Out gate above. Never applies to 'superadmin'.
-      if (req.user.role !== "superadmin") {
-        const pinnedRows = await queryDB("SELECT attendance_project_id FROM users WHERE id = ?", [req.user.id]);
-        const pinned = pinnedRows.length > 0 ? pinnedRows[0].attendance_project_id : null;
-        if (pinned != null) projectId = Number(pinned);
+      if (!attendance_date) return res.status(400).json({ error: "Date is required." });
+      // An account with its own check-in list (Module Access -> Remote
+      // Attendance) can only correct a day at a Project on that list for that
+      // date; with exactly one, that one is used whatever the client sent
+      // (Timesheet's Correct Attendance drops its picker then). Never applies
+      // to a Superadmin.
+      const listed = await restrictedAttendanceProjects(queryDB, Number(req.user.id), req.user.role, String(attendance_date).slice(0, 10));
+      if (listed) {
+        if (listed.size === 1 && !listed.has(projectId)) projectId = [...listed][0];
+        if (!listed.has(projectId)) {
+          return res.status(403).json({ error: listed.size ? "You can only correct attendance at your own check-in projects for that day." : "You had no check-in project on that day." });
+        }
       }
       if (!projectId) return res.status(400).json({ error: "Project is required." });
-      if (!attendance_date) return res.status(400).json({ error: "Date is required." });
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       if (!check_in_at && !check_out_at) return res.status(400).json({ error: "Enter an In Time or Out Time to correct." });

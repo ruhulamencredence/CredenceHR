@@ -540,3 +540,24 @@ Leave, Conveyance, Mobile Limit, Loan / Advance, Timesheet, Asset ও Vehicle �
 - **Ad-hoc approver** inactive হলে আবেদন Layer-এ ফিরে আসে।
 - **নতুন আবেদন** কখনো block / inactive Supervisor-এর কাছে যায় না।
 
+## Remote Attendance: একাধিক check-in project, তারিখসহ
+
+Admin Panel → Users → Module Access → **Allowed projects for check-in**-এ একজনের জন্য এখন একাধিক project দেওয়া যায়, প্রতিটার নিজের From / To তারিখ (ফাঁকা = সীমা নেই) — `AttendanceProjects.ts`, টেবিল `user_attendance_projects`।
+
+- **Any project** (তালিকা খালি) = আগের মতো যেকোনো project-এ check-in। **Only these projects** = শুধু তালিকার যেসব project-এর তারিখের মধ্যে আজকের দিন পড়ে। তালিকা আছে কিন্তু আজ কোনোটা চালু নেই → check-in হয় না।
+- Chip-এ চাপলে From / To popup খোলে; মেয়াদ শেষ হওয়া project ধূসর, শীঘ্রই শেষ হবে এমনটা হলুদ দেখায়। একসাথে অনেকজনকে: Users → বাছাই → **Check-in projects…** (Add / Remove / Make it the list)।
+- **ফোনে check-in:** একটাই চালু project থাকলে আগের মতো সেটাই। একাধিক থাকলে Set Now চাপলে GPS দিয়ে যে project-এর radius-এর ভেতরে আছেন সেটা নিজে বাছা হয়; কোনোটার ভেতরে না থাকলে "সবচেয়ে কাছের" project ও দূরত্ব দেখায়।
+- **Correct Attendance:** সেই দিনে যে project চালু ছিল শুধু সেগুলো বাছা যায়; একটাই থাকলে সেটা বসে যায়। server-ও একই যাচাই করে (অন্য project দিলে 403)। Data Import-এ project ফাঁকা থাকলে সেই দিনের একমাত্র চালু project ধরা হয়।
+- পুরনো একক `users.attendance_project_id` প্রথম চালুতে একবার তালিকায় কপি হয়; এরপর তালিকায় ঠিক একটা project থাকলে সেটাই ওই ঘরে থাকে (পুরনো রিপোর্টের জন্য)।
+- বদলাতে লাগে Users module + `edit_add` layer; সব বদল আগের মতো `user_access_audit`-এ।
+
+## Office Attendance: একাধিক ZKTeco মেশিন
+
+Office Attendance → **Machines** popup-এ প্রতিটা মেশিন: নাম, office / branch / site, সংযোগ, PIN-এর ধরন, অবস্থা (Online / Quiet / Offline / Not heard from yet), শেষ কবে শোনা গেছে আর আজকের punch সংখ্যা (`zkMachines.ts`, `ZkMachinesModal.tsx`)।
+
+- **Same network (LAN / VPN):** আগের মতো server নিজে মেশিন থেকে punch টেনে আনে (IP:port, `zkSync.ts`)।
+- **Over the internet (Cloud push / ADMS):** দূরের সাইটের মেশিন নিজে punch পাঠায় — মেশিনে Menu → Comm. → Cloud Server Setting-এ server-এর ঠিকানা দিলে `/iclock/cdata`-তে আসে। VPN লাগে না। শুধু register করা, চালু, মিলে যাওয়া Serial number-এর মেশিনের punch নেওয়া হয় (আর "Only from this internet address" দেওয়া থাকলে শুধু সেই IP থেকে)।
+- **PIN numbers:** *Same as the office* = punch যায় Employee-এর Device PIN-এর মালিকের কাছে (আগের মতো)। *Its own numbers* = এই মেশিনের PIN 15 অন্য কেউ হতে পারে; প্রতিটা PIN Unlinked PINs-এ আলাদা করে link করতে হয় (`zk_device_pins`)। link না হওয়া পর্যন্ত punch `M<machine>-<pin>` নামে জমা থাকে, link করলেই সেই কর্মীর হাজিরায় চলে যায়; মেশিন-ভিত্তিক PIN তালিকা আর unlink Machines popup-এ।
+- **Offline alert:** সকাল ৭টা–রাত ৯টার মধ্যে কোনো চালু মেশিন এক ঘণ্টা কিছু না পাঠালে Superadmin ও Office Attendance module-এর লোকেরা একবার alert পান; মেশিন আবার শোনা গেলে alert আবার চালু হয়।
+- মেশিন যোগ / বদল / মোছা Office Attendance module-এর (আগের মতো); PIN link / unlink "Link Device PINs" layer-এর।
+

@@ -502,4 +502,23 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li><strong>Template Layer-এ অপেক্ষায়:</strong> Layer-এর লোক প্রতিবার Template থেকে পড়া হয়, block / inactive কাউকে approver ধরা হয় না। Layer-এ একজনও active না থাকলে Superadmin একবার alert পান ("Approval stuck — nobody active on the Layer"), Approve Application-এ "Layer N has nobody active — you decide as Superadmin" দেখে সিদ্ধান্ত দিতে পারেন। Layer-এ কাউকে যোগ করলে (বা কেউ আবার active হলে) তিনি alert পান আর আবেদন তাঁর Approve Application-এ আসে। চালু Layer-এ নতুন কাউকে যোগ করলেও তিনি জানতে পারেন কোন আবেদন সেখানে অপেক্ষা করছে।</li>
 <li><strong>Ad-hoc approver</strong> inactive হলে আবেদন Layer-এ ফিরে আসে।</li>
 <li><strong>নতুন আবেদন</strong> কখনো block / inactive Supervisor-এর কাছে যায় না।</li>
+</ul>
+<h2 id="remote-attendance-check-in-project">Remote Attendance: একাধিক check-in project, তারিখসহ</h2>
+<p>Admin Panel → Users → Module Access → <strong>Allowed projects for check-in</strong>-এ একজনের জন্য এখন একাধিক project দেওয়া যায়, প্রতিটার নিজের From / To তারিখ (ফাঁকা = সীমা নেই) — <code>AttendanceProjects.ts</code>, টেবিল <code>user_attendance_projects</code>।</p>
+<ul>
+<li><strong>Any project</strong> (তালিকা খালি) = আগের মতো যেকোনো project-এ check-in। <strong>Only these projects</strong> = শুধু তালিকার যেসব project-এর তারিখের মধ্যে আজকের দিন পড়ে। তালিকা আছে কিন্তু আজ কোনোটা চালু নেই → check-in হয় না।</li>
+<li>Chip-এ চাপলে From / To popup খোলে; মেয়াদ শেষ হওয়া project ধূসর, শীঘ্রই শেষ হবে এমনটা হলুদ দেখায়। একসাথে অনেকজনকে: Users → বাছাই → <strong>Check-in projects…</strong> (Add / Remove / Make it the list)।</li>
+<li><strong>ফোনে check-in:</strong> একটাই চালু project থাকলে আগের মতো সেটাই। একাধিক থাকলে Set Now চাপলে GPS দিয়ে যে project-এর radius-এর ভেতরে আছেন সেটা নিজে বাছা হয়; কোনোটার ভেতরে না থাকলে "সবচেয়ে কাছের" project ও দূরত্ব দেখায়।</li>
+<li><strong>Correct Attendance:</strong> সেই দিনে যে project চালু ছিল শুধু সেগুলো বাছা যায়; একটাই থাকলে সেটা বসে যায়। server-ও একই যাচাই করে (অন্য project দিলে 403)। Data Import-এ project ফাঁকা থাকলে সেই দিনের একমাত্র চালু project ধরা হয়।</li>
+<li>পুরনো একক <code>users.attendance_project_id</code> প্রথম চালুতে একবার তালিকায় কপি হয়; এরপর তালিকায় ঠিক একটা project থাকলে সেটাই ওই ঘরে থাকে (পুরনো রিপোর্টের জন্য)।</li>
+<li>বদলাতে লাগে Users module + <code>edit_add</code> layer; সব বদল আগের মতো <code>user_access_audit</code>-এ।</li>
+</ul>
+<h2 id="office-attendance-zkteco">Office Attendance: একাধিক ZKTeco মেশিন</h2>
+<p>Office Attendance → <strong>Machines</strong> popup-এ প্রতিটা মেশিন: নাম, office / branch / site, সংযোগ, PIN-এর ধরন, অবস্থা (Online / Quiet / Offline / Not heard from yet), শেষ কবে শোনা গেছে আর আজকের punch সংখ্যা (<code>zkMachines.ts</code>, <code>ZkMachinesModal.tsx</code>)।</p>
+<ul>
+<li><strong>Same network (LAN / VPN):</strong> আগের মতো server নিজে মেশিন থেকে punch টেনে আনে (IP:port, <code>zkSync.ts</code>)।</li>
+<li><strong>Over the internet (Cloud push / ADMS):</strong> দূরের সাইটের মেশিন নিজে punch পাঠায় — মেশিনে Menu → Comm. → Cloud Server Setting-এ server-এর ঠিকানা দিলে <code>/iclock/cdata</code>-তে আসে। VPN লাগে না। শুধু register করা, চালু, মিলে যাওয়া Serial number-এর মেশিনের punch নেওয়া হয় (আর "Only from this internet address" দেওয়া থাকলে শুধু সেই IP থেকে)।</li>
+<li><strong>PIN numbers:</strong> <em>Same as the office</em> = punch যায় Employee-এর Device PIN-এর মালিকের কাছে (আগের মতো)। <em>Its own numbers</em> = এই মেশিনের PIN 15 অন্য কেউ হতে পারে; প্রতিটা PIN Unlinked PINs-এ আলাদা করে link করতে হয় (<code>zk_device_pins</code>)। link না হওয়া পর্যন্ত punch <code>M&lt;machine&gt;-&lt;pin&gt;</code> নামে জমা থাকে, link করলেই সেই কর্মীর হাজিরায় চলে যায়; মেশিন-ভিত্তিক PIN তালিকা আর unlink Machines popup-এ।</li>
+<li><strong>Offline alert:</strong> সকাল ৭টা–রাত ৯টার মধ্যে কোনো চালু মেশিন এক ঘণ্টা কিছু না পাঠালে Superadmin ও Office Attendance module-এর লোকেরা একবার alert পান; মেশিন আবার শোনা গেলে alert আবার চালু হয়।</li>
+<li>মেশিন যোগ / বদল / মোছা Office Attendance module-এর (আগের মতো); PIN link / unlink "Link Device PINs" layer-এর।</li>
 </ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

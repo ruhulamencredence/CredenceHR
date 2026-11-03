@@ -23,6 +23,7 @@ import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { AttendanceProjectsEditor } from './AttendanceProjectsEditor';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
   | 'can_job_edit'
@@ -665,22 +666,9 @@ export function UserAccessDrawer({
                     onToggle={() => toggle('can_use_attendance', !!u.can_use_attendance)}
                   >
                     {u.can_use_attendance && (
-                      <label className="block">
-                        <span className="text-[11px] text-slate-500">Allowed project for check-in</span>
-                        <SearchSelect
-                          value={u.attendance_project_id ?? ''}
-                          disabled={busy === 'attendance_project'}
-                          onChange={(e) => run('attendance_project', () => onAttendanceProject(e.target.value ? Number(e.target.value) : null))}
-                          className="mt-0.5 w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          <option value="">Any project (no restriction)</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.project_name}
-                            </option>
-                          ))}
-                        </SearchSelect>
-                      </label>
+                      // One or many check-in Projects, each with optional
+                      // From / To dates (AttendanceProjectsEditor.tsx).
+                      <AttendanceProjectsEditor token={token} userId={u.id} projects={projects} />
                     )}
                   </FeatureRow>
                   <FeatureRow

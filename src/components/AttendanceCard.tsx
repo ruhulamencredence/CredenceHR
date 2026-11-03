@@ -97,6 +97,16 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
   }
 }
 
+// Straight-line distance in metres (same formula as the server's check).
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (v: number) => (v * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 // A User checks in/out for one of their assigned Projects — the server only
 // accepts it if the device's reported coordinates fall inside that Project's
 // location_radius circle. Shown near the top of the User Panel, always
@@ -186,7 +196,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
   const handleMark = async (kind: 'in' | 'out') => {
-    if (!projectId) {
+    // Several check-in Projects: for a Check In the one whose area you're
+    // standing in is picked from your position, so no Project needs picking
+    // first.
+    const canAutoPick = kind === 'in' && projects.length > 1;
+    if (!projectId && !canAutoPick) {
       setMessage({ type: 'error', text: 'Pick a project first.' });
       return;
     }
@@ -194,6 +208,30 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     try {
       const coords = await getCurrentCoords();
+      if (canAutoPick) {
+        const placed = projects
+          .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
+          .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
+          .sort((a, b) => a.d - b.d);
+        const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
+        const current = inside.find((x) => String(x.p.id) === projectId);
+        if (!current && inside.length) {
+          setProjectId(String(inside[0].p.id));
+          setMessage({ type: 'success', text: `You're at ${inside[0].p.project_name} (${Math.round(inside[0].d)} m from its centre) — picked it for you.` });
+        } else if (!inside.length && placed.length) {
+          setMessage({
+            type: 'error',
+            text: `You're not inside any of your projects' areas. Nearest: ${placed
+              .slice(0, 3)
+              .map((x) => `${x.p.project_name} ${x.d >= 1000 ? `${(x.d / 1000).toFixed(1)} km` : `${Math.round(x.d)} m`}`)
+              .join(' · ')}.`
+          });
+          return;
+        } else if (!projectId) {
+          setMessage({ type: 'error', text: 'Pick a project first.' });
+          return;
+        }
+      }
       setPending({ kind, coords });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || `Failed to check ${kind}` });
@@ -330,7 +368,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             onChange={(e) => setProjectId(e.target.value)}
             className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
           >
-            <option value="">Select a project…</option>
+            <option value="">Where I am now (picked when I tap Set Now)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.project_name}</option>
             ))}
@@ -365,7 +403,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             <button
               type="button"
               onClick={() => handleMark('in')}
-              disabled={!projectId || busy}
+              disabled={(!projectId && projects.length <= 1) || busy}
               className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'in' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}

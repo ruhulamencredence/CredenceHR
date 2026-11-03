@@ -24,7 +24,13 @@ export interface UnlinkedPin {
   last_punch: string;
   devices: string[];
   suggestion: { id: number; name: string; employee_code: string | null } | null;
+  // Set for a machine with its own PIN numbers: the PIN is who it is on that
+  // machine only, and anyone can be linked (their office-wide PIN stays).
+  device_id?: number | null;
+  own_machine?: string | null;
 }
+// One row's key — the same PIN can be unlinked on two own-PIN machines.
+const keyOf = (u: UnlinkedPin) => `${u.device_id || ''}:${u.pin}`;
 export interface PinlessEmployee {
   id: number;
   name: string;
@@ -41,7 +47,7 @@ const when = (v: string) => {
 
 export const UnlinkedPinsModal: React.FC<{
   token: string;
-  data: { unlinked: UnlinkedPin[]; employees_without_pin: PinlessEmployee[]; days: number };
+  data: { unlinked: UnlinkedPin[]; employees_without_pin: PinlessEmployee[]; employees?: PinlessEmployee[]; days: number };
   onClose: () => void;
   onLinked: () => void;
 }> = ({ token, data, onClose, onLinked }) => {
@@ -51,25 +57,27 @@ export const UnlinkedPinsModal: React.FC<{
 
   useEffect(() => {
     const init: Record<string, string> = {};
-    for (const u of data.unlinked) if (u.suggestion) init[u.pin] = String(u.suggestion.id);
+    for (const u of data.unlinked) if (u.suggestion) init[keyOf(u)] = String(u.suggestion.id);
     setChoice(init);
   }, [data]);
 
-  const link = async (pin: string) => {
-    const employeeId = Number(choice[pin]);
+  const link = async (u: UnlinkedPin) => {
+    const key = keyOf(u);
+    const pin = u.pin;
+    const employeeId = Number(choice[key]);
     if (!employeeId) return;
-    setBusy(pin);
+    setBusy(key);
     setMsg(null);
     try {
       const res = await fetch(apiUrl('/api/office-attendance/link-pin'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ pin, employee_id: employeeId })
+        body: JSON.stringify({ pin, employee_id: employeeId, device_id: u.device_id || undefined })
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'Could not link the PIN.');
-      const name = data.employees_without_pin.find((e) => e.id === employeeId)?.name || 'the employee';
-      setMsg({ ok: true, text: `PIN ${pin} linked to ${name} — their punches now count.` });
+      const name = (data.employees || data.employees_without_pin).find((e) => e.id === employeeId)?.name || 'the employee';
+      setMsg({ ok: true, text: `PIN ${pin}${u.own_machine ? ` on ${u.own_machine}` : ''} linked to ${name} — their punches now count.` });
       onLinked();
     } catch (e: any) {
       setMsg({ ok: false, text: e.message });
@@ -115,24 +123,27 @@ export const UnlinkedPinsModal: React.FC<{
                 </thead>
                 <tbody>
                   {data.unlinked.map((u) => (
-                    <tr key={u.pin} className="border-t border-white/60 align-middle">
+                    <tr key={keyOf(u)} className="border-t border-white/60 align-middle">
                       <td className="px-3 py-2 font-mono font-semibold text-slate-800">{u.pin}</td>
                       <td className="px-3 py-2 text-slate-600">
                         {u.punches} on {u.days} day{u.days === 1 ? '' : 's'}
-                        {u.devices.length > 0 && <div className="text-[10px] text-slate-400">{u.devices.join(', ')}</div>}
+                        {u.own_machine ? (
+                          <div className="text-[10px] text-violet-600 font-semibold">{u.own_machine} · its own PIN numbers</div>
+                        ) : (
+                          u.devices.length > 0 && <div className="text-[10px] text-slate-400">{u.devices.join(', ')}</div>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{when(u.last_punch)}</td>
                       <td className="px-3 py-2 min-w-[220px]">
                         <SearchSelect
-                          value={choice[u.pin] || ''}
-                          onChange={(e) => setChoice((c) => ({ ...c, [u.pin]: e.target.value }))}
+                          value={choice[keyOf(u)] || ''}
+                          onChange={(e) => setChoice((c) => ({ ...c, [keyOf(u)]: e.target.value }))}
                           className="w-full px-2 py-1.5 bg-white/80 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-200 focus:outline-none"
                         >
-                          <option value="">Pick employee…</option>
-                          {data.employees_without_pin.map((e) => (
+                          <option value="">— Pick employee —</option>
+                          {(u.own_machine ? data.employees || data.employees_without_pin : data.employees_without_pin).map((e) => (
                             <option key={e.id} value={e.id}>
-                              {e.name}
-                              {e.employee_code ? ` (${e.employee_code})` : ''}
+                              {[e.name, e.employee_code, e.designation, e.department].filter(Boolean).join(' · ')}
                               {u.suggestion?.id === e.id ? ' — matches Employee ID' : ''}
                             </option>
                           ))}
@@ -141,11 +152,11 @@ export const UnlinkedPinsModal: React.FC<{
                       <td className="px-3 py-2 text-right">
                         <button
                           type="button"
-                          disabled={!choice[u.pin] || busy === u.pin}
-                          onClick={() => link(u.pin)}
+                          disabled={!choice[keyOf(u)] || busy === keyOf(u)}
+                          onClick={() => link(u)}
                           className="liquid-glass-button rounded-full px-3.5 py-1.5 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50"
                         >
-                          {busy === u.pin ? <Spinner size={12} /> : <Link2 className="w-3 h-3" />} Link
+                          {busy === keyOf(u) ? <Spinner size={12} /> : <Link2 className="w-3 h-3" />} Link
                         </button>
                       </td>
                     </tr>

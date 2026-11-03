@@ -6667,6 +6667,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               onDone={() => fetchAllData()}
               onOpenTemplates={() => setShowAccessTemplates(true)}
               onOpenModuleAccess={canGrantModuleAccess ? (list) => openManageModules(list) : undefined}
+              projects={projects}
             />
           )}
 

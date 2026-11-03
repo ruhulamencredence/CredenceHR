@@ -1244,9 +1244,15 @@ const TOOLS: Tool[] = [
       const day = (Array.isArray(mine.body) ? mine.body : []).filter((r: any) => String(r.attendance_date).slice(0, 10) === date);
       const all = Array.isArray(projects.body) ? projects.body : [];
       const pinned = Number(me.body?.user?.attendance_project_id ?? me.body?.attendance_project_id) || 0;
+      // The account's own check-in Projects (Module Access -> Remote
+      // Attendance) when it has a list; the server checks the day again.
+      const listedProjects: any[] = Array.isArray(me.body?.attendance_projects) && me.body?.attendance_projects_limited ? me.body.attendance_projects : [];
       const nameOf = (id: number) => all.find((p: any) => Number(p.id) === id)?.project_name || `Project #${id}`;
+      const rowOf = (id: number) => day.find((r: any) => Number(r.project_id) === id);
       const options = pinned
         ? [{ project_id: pinned, name: nameOf(pinned), check_in: hhmm(day[0]?.check_in_at), check_out: hhmm(day[0]?.check_out_at) }]
+        : listedProjects.length
+          ? listedProjects.map((p: any) => ({ project_id: Number(p.id), name: String(p.name), check_in: hhmm(rowOf(Number(p.id))?.check_in_at), check_out: hhmm(rowOf(Number(p.id))?.check_out_at) }))
         : day.length
           ? day.filter((r: any) => Number(r.project_id) > 0).map((r: any) => ({ project_id: Number(r.project_id), name: r.project_name || nameOf(Number(r.project_id)), check_in: hhmm(r.check_in_at), check_out: hhmm(r.check_out_at) }))
           : [];

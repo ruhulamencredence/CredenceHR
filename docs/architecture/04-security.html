@@ -193,6 +193,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>Attendance Report Builder (Custom Report):</strong> শর্ত দিয়ে হাজিরা খোঁজা Attendance Reports-এর layer <code>custom_report</code>-এর পেছনে — সার্ভারে <code>POST /api/attendance/report/custom</code> ও <code>GET …/custom/people</code> দুটোই <code>requireAdmin</code> + <code>hasModuleLayer("attendance_reports","custom_report")</code> (না থাকলে 403), UI-তে ট্যাবও লুকায়। ডাটা আসে <code>computeMonthlyReport</code> থেকে, তাই Department সীমা ও কোম্পানি ফিল্টার একই — সীমার বাইরের department চাইলে খালি ফেরে। একবারে সর্বোচ্চ ৯২ দিন, ১২টা শর্ত। AI Assistant-এর <code>attendance_custom_report</code> একই API প্রশ্নকারীর token দিয়ে ডাকে, তাই layer বা module না থাকলে Assistant-ও "অনুমতি নেই" বলে (টেস্ট: module নেই → 403, layer বাছা কিন্তু <code>custom_report</code> নেই → 403, HR-সীমিত Admin → শুধু HR)।</li>
 <li><strong>Assistant-এর Email নিজের mailbox থেকে:</strong> Assistant থেকে রিপোর্ট mail করলে Credence Mail-এর New message window খোলে আর mail যায় প্রেরকের নিজের mailbox দিয়ে, Mail module-এর নিজের সব নিয়মে (<code>users.can_use_mail</code>, শুধু নিজের mailbox, group-এ লেখার অনুমতি, encrypted password; অন্যের mailbox "view-as" খোলা থাকলে window খোলে না, আর server-ও view-as-এ পাঠানো আটকায়) — server-এর SMTP account দিয়ে নয়, তাই কেউ কোম্পানির সাধারণ ঠিকানা থেকে নিজের নামে mail পাঠাতে পারেন না, প্রাপক আসল প্রেরককে দেখেন। Email বোতাম দেখায় শুধু "Email reports" (<code>can_email_reports</code>) থাকলে; Mail না থাকলে বা mailbox না থাকলে পাঠানো যায় না। <code>/api/reports/email</code>-এর <code>via: "own"</code> একই নিয়মে (Mail না থাকলে 403, mailbox না থাকলে 409, ব্যর্থ চেষ্টাও <code>report_email_log</code>-এ)।</li>
 <li><strong>Profile ছবি Superadmin-এর অনুমোদনে:</strong> কেউ নিজের profile ছবি বদলালে নতুন ছবি সরাসরি বসে না, Superadmin Approve করলে তবেই (অনুপযুক্ত বা অন্যের ছবি দিয়ে পরিচয় গোলমাল ঠেকাতে)। অনুমোদনের তালিকা, ছবি আর Approve / Reject-এর API শুধু Superadmin-এর (অন্য admin 403, টেস্ট করা); একবারের বেশি সিদ্ধান্ত হয় না (409); Reject-এ কারণ বাধ্যতামূলক; সিদ্ধান্তের পর অনুরোধের ছবির কপি মুছে ফেলা হয়। Superadmin-এর নিজের ছবি আর onboarding-এর joiner-এর ছবি সরাসরি বসে।</li>
+<li><strong>Check-in project ও তারিখ:</strong> কে কোন project-এ কোন তারিখে check-in করবেন তা server ঠিক করে (<code>AttendanceProjects.ts</code> restrictedAttendanceProjects) — check-in, Correct Attendance ও Data Import তিন জায়গাতেই; ফোন থেকে অন্য project id পাঠালে 403। তালিকা বদলাতে লাগে Users module + <code>edit_add</code> layer, Superadmin-এর তালিকা কেউ বদলায় না, Admin-এর তালিকা শুধু Superadmin।</li>
+<li><strong>ZKTeco Cloud push (<code>/iclock/*</code>):</strong> ADMS protocol-এ কোনো password / token নেই, তাই এই route login ছাড়া খোলা। রক্ষা: (ক) শুধু Machines-এ register করা, চালু, "Cloud push" ধরনের মেশিনের Serial number মানা হয়, অচেনা SN কিছুই লিখতে পারে না; (খ) "Only from this internet address" দিলে শুধু সেই public IP; (গ) শুধু ATTLOG punch লেখা হয়, অন্য কোনো টেবিল ছোঁয় না, মেশিনকে কোনো command পাঠানো হয় না; (ঘ) একই punch দুবার লেখা হয় না (unique key)। SN জেনে কেউ ভুয়া punch পাঠাতে পারে — তাই সাইটের fixed IP থাকলে অবশ্যই দিন (সীমাবদ্ধতা ১৩)।</li>
 </ol>
 <hr />
 <h2 id="_2">৫. ডাটা সুরক্ষা</h2>
@@ -454,6 +456,12 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>e-sign-এর <code>node-forge</code>-এ একটি high দুর্বলতা (RSA স্বাক্ষর <em>যাচাই</em>), এখনো কোনো সংস্করণে ঠিক নেই</td>
 <td>নিম্ন</td>
 <td>অ্যাপ forge দিয়ে শুধু সার্টিফিকেট খোলে ও স্বাক্ষর দেয়, যাচাই করে না; নতুন সংস্করণ এলে আপডেট</td>
+</tr>
+<tr>
+<td>১৩</td>
+<td>ZKTeco Cloud push-এ (ADMS) মেশিনের কোনো গোপন চাবি নেই — শুধু Serial number ও (দিলে) IP দিয়ে চেনা হয়</td>
+<td>নিম্ন–মাঝারি (ভুয়া punch)</td>
+<td>সাইটের fixed IP "Only from this internet address"-এ দিন; HTTPS চালু রাখুন; Machines-এ আজকের punch সংখ্যা নজরে রাখুন</td>
 </tr>
 </tbody>
 </table>
