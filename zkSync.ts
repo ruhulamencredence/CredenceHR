@@ -198,6 +198,44 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+// Opens the connection to a machine. node-zklib tries TCP and falls back to
+// UDP only when TCP is *refused*; when TCP gets no answer at all (a router
+// or VPN that drops it — "connect ETIMEDOUT") it gives up without trying
+// UDP, though many machines (and older firmware) answer only on UDP. So a
+// TCP failure of any kind is followed by one UDP try here.
+async function openZkSocket(zk: any, ms: number, label: string): Promise<void> {
+  try {
+    await withTimeout(zk.createSocket(), ms, label);
+    return;
+  } catch (tcpErr) {
+    try {
+      await zk.zklibTcp?.disconnect?.();
+    } catch {}
+    if (zk.zklibTcp) zk.zklibTcp.socket = null;
+    try {
+      await withTimeout(
+        (async () => {
+          if (!zk.zklibUdp.socket) await zk.zklibUdp.createSocket();
+          await zk.zklibUdp.connect();
+        })(),
+        Math.min(ms, 20_000),
+        `${label} (UDP)`
+      );
+      zk.connectionType = "udp";
+    } catch (udpErr) {
+      try {
+        await zk.zklibUdp?.disconnect?.();
+      } catch {}
+      throw new Error(`${describeError(tcpErr)}; UDP: ${describeError(udpErr)}`);
+    }
+  }
+}
+
+// A free local UDP port for each connection (0 = the system picks one):
+// a fixed one (4000) clashed when two machines, or a machine's sync and its
+// real-time listener, used UDP at the same moment (EADDRINUSE).
+const newZk = (device: ZkDeviceRow) => new ZKLib(device.ip_address, device.port, 30000, 0);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -248,7 +286,7 @@ export async function syncZkDevice(
 ): Promise<{ ok: boolean; count: number; error?: string }> {
   // Bumped connection timeout from 10000 -> 30000 to match the more
   // generous DEVICE_SYNC_TIMEOUT_MS ceiling above.
-  const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+  const zk = newZk(device);
 
   // How many records the device itself reports holding, if we can get it
   // cheaply. Purely informational — lets last_sync_status distinguish "this
@@ -256,7 +294,7 @@ export async function syncZkDevice(
   let deviceLogCount: number | null = null;
 
   try {
-    await withTimeout(zk.createSocket(), DEVICE_SYNC_TIMEOUT_MS, "createSocket");
+    await openZkSocket(zk, DEVICE_SYNC_TIMEOUT_MS, "createSocket");
 
     try {
       const info: any = await withTimeout(zk.getInfo(), INFO_TIMEOUT_MS, "getInfo");
@@ -332,9 +370,9 @@ export async function syncAllZkDevices(dbPool: Pool): Promise<{ device: string; 
 // Left in only as a standalone, manually-callable option in case that
 // changes for you down the line; nothing wires it up automatically.
 export async function clearZkDeviceLog(dbPool: Pool, device: ZkDeviceRow): Promise<{ ok: boolean; error?: string }> {
-  const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+  const zk = newZk(device);
   try {
-    await withTimeout(zk.createSocket(), DEVICE_SYNC_TIMEOUT_MS, "createSocket");
+    await openZkSocket(zk, DEVICE_SYNC_TIMEOUT_MS, "createSocket");
     await withTimeout(zk.clearAttendanceLog(), DEVICE_SYNC_TIMEOUT_MS, "clearAttendanceLog");
     try { await zk.disconnect(); } catch {}
     return { ok: true };
@@ -465,13 +503,15 @@ async function listenRealtimeForDevice(dbPool: Pool, device: ZkDeviceRow): Promi
 
   try {
     while (realtimeEnabled) {
-      const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+      const zk = newZk(device);
       try {
-        await withTimeout(zk.createSocket(), REALTIME_CONNECT_TIMEOUT_MS, "createSocket (real-time)");
+        await openZkSocket(zk, REALTIME_CONNECT_TIMEOUT_MS, "createSocket (real-time)");
+        // Own-PIN machines: the same PIN translation as a pull (zkMachines.ts).
+        const mapPin = await pinMapperFor(dbPool, device);
         activeZkSockets.set(device.id, zk);
         await zk.getRealTimeLogs(async (log: any) => {
           try {
-            await insertPunchRow(dbPool, device.id, log);
+            await insertPunchRow(dbPool, device.id, log, mapPin);
           } catch (err) {
             console.warn(`⚠️ Failed to save a real-time punch from ${device.name}: ${describeError(err)}`);
           }
