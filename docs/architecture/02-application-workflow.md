@@ -571,7 +571,8 @@ App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashb
 ## Chat attachment: ফাইল folder-এ, ডাটাবেসে শুধু path
 
 - **পাঠানো:** voice, ছবি, video বা document পাঠালে server ফাইলটা chat folder-এ লেখে (`chatFiles.ts`) — `voice/2026/11/<এলোমেলো নাম>.webm`-এর মতো; `chat_messages.attachment_path`-এ শুধু এই path থাকে। ফাইলের নাম কখনো পাঠানো নামে হয় না (পাঠানো নাম শুধু দেখানোর জন্য `attachment_filename`-এ)।
-- **খোলা:** আগের মতো `/api/chat/messages/:id/attachment` — শুধু সেই chat-এর সদস্য পান; folder-টা ওয়েবে খোলা নয়।
+- **আকার:** একটা ফাইল সর্বোচ্চ ৫০ MB। app ফাইলটা সরাসরি পাঠায় (base64 নয়), তাই বড় video-ও ফোনের memory-তে দ্বিগুণ হয় না; পুরনো app-এর base64 পাঠানোও চলে (২৫ MB JSON সীমার মধ্যে)। Nginx-এ `client_max_body_size 55m` লাগবে (`deploy/nginx.conf.example`), না হলে বড় ফাইল server-এ পৌঁছায় না।
+- **খোলা:** আগের মতো `/api/chat/messages/:id/attachment` — শুধু সেই chat-এর সদস্য পান; folder-টা ওয়েবে খোলা নয়। ফাইল পুরোটা memory-তে না তুলে সরাসরি পাঠানো হয়, video টেনে দেখার জন্য Range-ও চলে।
 - **Forward:** কপি একই ফাইল দেখায়, নতুন কপি হয় না। **Delete for everyone:** ফাইলটা মুছে যায়, যদি না কোনো forward করা কপি তখনো সেটা দেখায়।
 - **পুরনো attachment:** আগে ডাটাবেসে রাখা ফাইল server চালুর সময় পেছনে নিজে থেকে folder-এ চলে যায় আর ডাটাবেস থেকে মুছে যায় (একাধিক worker থাকলেও একজনই করে)। folder-এ লেখা না গেলে সেটা ডাটাবেসেই থাকে আর আগের মতো খোলে।
 

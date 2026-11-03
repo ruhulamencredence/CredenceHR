@@ -82,16 +82,6 @@ export async function saveChatFile(buffer: Buffer, mimetype: string | null | und
   return [kind, ...rel].join("/");
 }
 
-export async function readChatFile(stored: string): Promise<Buffer | null> {
-  const full = resolveChatPath(stored);
-  if (!full) return null;
-  try {
-    return await fs.promises.readFile(full);
-  } catch {
-    return null;
-  }
-}
-
 // Removes a file once no message points at it any more (a forwarded copy
 // shares the same file).
 export async function removeChatFileIfUnused(queryDB: (sql: string, params?: any[]) => Promise<any>, stored: string | null | undefined): Promise<void> {

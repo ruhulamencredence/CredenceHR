@@ -45,13 +45,14 @@
 // broadcasting the same 'receive_message' event to every socket in
 // `room:<id>`, via the one shared insertChatMessage() helper below.
 
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { checkSession } from "./SessionSecurity";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
 import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
-import { saveChatFile, readChatFile, removeChatFileIfUnused, moveOldChatAttachments } from "./chatFiles";
+import { saveChatFile, resolveChatPath, removeChatFileIfUnused, moveOldChatAttachments } from "./chatFiles";
+import fs from "fs";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -98,7 +99,16 @@ interface ChatSocketDeps {
   jwtSecret: string;
 }
 
-const MAX_CHAT_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5MB, same ceiling AssetManagementRoutes uses
+// One chat attachment (voice, image, video, document) can be up to 50 MB.
+// The app sends the file itself as the request body (not base64 JSON, which
+// would make it a third bigger and hold it in memory twice); Nginx's
+// client_max_body_size has to allow it too (deploy/nginx.conf.example).
+const MAX_CHAT_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+// Read only for this route, after the login and chat checks passed.
+const rawChatBody = express.raw({
+  type: (req: any) => !String(req.headers["content-type"] || "").includes("json"),
+  limit: MAX_CHAT_ATTACHMENT_BYTES
+});
 
 // Self-healing migration — same pattern as ensureAssetManagementSchema in
 // AssetManagementRoutes.ts: CREATE TABLE IF NOT EXISTS means a normal server
@@ -713,20 +723,24 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // messages (base64 body) and as a fallback when the socket isn't connected.
   // Body: { content?, messageType, attachment_base64?, attachment_mimetype?,
   //          attachment_filename?, replyToId? }
-  app.post("/api/chat/rooms/:id/messages", authenticateToken, requireChat, async (req: any, res) => {
+  // or the file itself as the body (any non-JSON Content-Type), with
+  // ?messageType=&filename=&mimetype=&replyToId= in the query string.
+  app.post("/api/chat/rooms/:id/messages", authenticateToken, requireChat, rawChatBody, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
         return res.status(403).json({ error: "Not a member of this room." });
       }
-      const { content, messageType, attachment_base64, attachment_mimetype, attachment_filename, replyToId } = req.body || {};
+      const raw = Buffer.isBuffer(req.body);
+      const q = req.query || {};
+      const { content, messageType, attachment_base64, attachment_mimetype, attachment_filename, replyToId } = raw
+        ? { content: null, messageType: q.messageType, attachment_base64: null, attachment_mimetype: q.mimetype || req.headers["content-type"], attachment_filename: q.filename, replyToId: q.replyToId }
+        : req.body || {};
       const type = ["text", "image", "file", "audio"].includes(messageType) ? messageType : "text";
-      let attachmentBuffer: Buffer | null = null;
-      if (attachment_base64) {
-        attachmentBuffer = Buffer.from(attachment_base64, "base64");
-        if (attachmentBuffer.length > MAX_CHAT_ATTACHMENT_BYTES) {
-          return res.status(400).json({ error: "Attachment must be less than 5MB." });
-        }
+      let attachmentBuffer: Buffer | null = raw && req.body.length ? req.body : null;
+      if (attachment_base64) attachmentBuffer = Buffer.from(attachment_base64, "base64");
+      if (attachmentBuffer && attachmentBuffer.length > MAX_CHAT_ATTACHMENT_BYTES) {
+        return res.status(413).json({ error: "Attachment must be 50 MB or less." });
       }
       if (!content && !attachmentBuffer) return res.status(400).json({ error: "Empty message." });
 
@@ -762,18 +776,18 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (!(await isMember(queryDB, row.room_id, req.user.id))) {
         return res.status(403).json({ error: "Not a member of this room." });
       }
-      // From the chat folder; a file saved before that is still in the row.
-      const buffer: Buffer | null = row.attachment_path
-        ? await readChatFile(row.attachment_path)
-        : Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data);
-      if (!buffer) return res.status(404).json({ error: "The file is missing on the server." });
+      // From the chat folder (streamed, with Range for video); a file saved
+      // before that is still in the row.
+      const full = row.attachment_path ? resolveChatPath(row.attachment_path) : null;
+      if (row.attachment_path && (!full || !fs.existsSync(full))) return res.status(404).json({ error: "The file is missing on the server." });
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Type", row.attachment_mimetype || "application/octet-stream");
       res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
       if (row.attachment_filename) {
         res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.attachment_filename)}"`);
       }
-      res.send(buffer);
+      if (full) return res.sendFile(full, { dotfiles: "deny", cacheControl: false, lastModified: false });
+      res.send(Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

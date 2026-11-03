@@ -528,7 +528,8 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <h2 id="chat-attachment-folder-path">Chat attachment: ফাইল folder-এ, ডাটাবেসে শুধু path</h2>
 <ul>
 <li><strong>পাঠানো:</strong> voice, ছবি, video বা document পাঠালে server ফাইলটা chat folder-এ লেখে (<code>chatFiles.ts</code>) — <code>voice/2026/11/&lt;এলোমেলো নাম&gt;.webm</code>-এর মতো; <code>chat_messages.attachment_path</code>-এ শুধু এই path থাকে। ফাইলের নাম কখনো পাঠানো নামে হয় না (পাঠানো নাম শুধু দেখানোর জন্য <code>attachment_filename</code>-এ)।</li>
-<li><strong>খোলা:</strong> আগের মতো <code>/api/chat/messages/:id/attachment</code> — শুধু সেই chat-এর সদস্য পান; folder-টা ওয়েবে খোলা নয়।</li>
+<li><strong>আকার:</strong> একটা ফাইল সর্বোচ্চ ৫০ MB। app ফাইলটা সরাসরি পাঠায় (base64 নয়), তাই বড় video-ও ফোনের memory-তে দ্বিগুণ হয় না; পুরনো app-এর base64 পাঠানোও চলে (২৫ MB JSON সীমার মধ্যে)। Nginx-এ <code>client_max_body_size 55m</code> লাগবে (<code>deploy/nginx.conf.example</code>), না হলে বড় ফাইল server-এ পৌঁছায় না।</li>
+<li><strong>খোলা:</strong> আগের মতো <code>/api/chat/messages/:id/attachment</code> — শুধু সেই chat-এর সদস্য পান; folder-টা ওয়েবে খোলা নয়। ফাইল পুরোটা memory-তে না তুলে সরাসরি পাঠানো হয়, video টেনে দেখার জন্য Range-ও চলে।</li>
 <li><strong>Forward:</strong> কপি একই ফাইল দেখায়, নতুন কপি হয় না। <strong>Delete for everyone:</strong> ফাইলটা মুছে যায়, যদি না কোনো forward করা কপি তখনো সেটা দেখায়।</li>
 <li><strong>পুরনো attachment:</strong> আগে ডাটাবেসে রাখা ফাইল server চালুর সময় পেছনে নিজে থেকে folder-এ চলে যায় আর ডাটাবেস থেকে মুছে যায় (একাধিক worker থাকলেও একজনই করে)। folder-এ লেখা না গেলে সেটা ডাটাবেসেই থাকে আর আগের মতো খোলে।</li>
 </ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

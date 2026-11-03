@@ -45,10 +45,10 @@ server {
     listen 80;
     server_name your-domain.example.com;
 
-    # Matches server.ts's express.json({ limit: "25mb" }) with a little
-    # headroom for multipart overhead — raise both together if ever needed
-    # (e.g. larger Conveyance Bill Claim attachments).
-    client_max_body_size 30m;
+    # Chat attachments go up to 50 MB (sent as the file itself, ChatRoutes.ts
+    # MAX_CHAT_ATTACHMENT_BYTES); JSON requests are capped at 25 MB by
+    # server.ts's express.json. A little headroom on top of the larger one.
+    client_max_body_size 55m;
 
     # gzip text-ish responses (HTML/CSS/JS/JSON) — Vite's own build output
     # under dist/assets is already content-hashed and cacheable; this just
