@@ -344,7 +344,7 @@ async function initDB() {
           const to: any[] = await queryDB(
             "/*unscoped*/ SELECT id FROM users WHERE role = 'superadmin' OR id IN (SELECT user_id FROM admin_module_permissions WHERE module_key = 'office_attendance')"
           ).catch(() => []);
-          for (const u of to) await createAlert(queryDB, { userId: Number(u.id), type: "site_attendance", title, message }).catch(() => {});
+          for (const u of to) await createAlert(queryDB, { userId: Number(u.id), type: "zk_machine", title, message }).catch(() => {});
         }).catch(() => {});
       }, 10 * 60 * 1000);
     }

@@ -299,6 +299,17 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             }
             window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
           }
+        : alert.type === 'zk_machine' || (alert.type === 'site_attendance' && alert.title === 'Attendance machine offline')
+        ? // Admin Panel -> Office Attendance, with the Machines popup open.
+          () => {
+            try {
+              sessionStorage.setItem('open_zk_machines', '1');
+            } catch {
+              // storage unavailable — Office Attendance opens without the popup
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'office_attendance' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:open-zk-machines')), 400);
+          }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'document_sign'

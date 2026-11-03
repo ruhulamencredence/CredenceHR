@@ -560,7 +560,7 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 - **Same network (LAN / VPN):** আগের মতো server নিজে মেশিন থেকে punch টেনে আনে (IP:port, `zkSync.ts`)।
 - **Over the internet (Cloud push / ADMS):** দূরের সাইটের মেশিন নিজে punch পাঠায় — মেশিনে Menu → Comm. → Cloud Server Setting-এ server-এর ঠিকানা দিলে `/iclock/cdata`-তে আসে। VPN লাগে না। শুধু register করা, চালু, মিলে যাওয়া Serial number-এর মেশিনের punch নেওয়া হয় (আর "Only from this internet address" দেওয়া থাকলে শুধু সেই IP থেকে)।
 - **PIN numbers:** *Same as the office* = punch যায় Employee-এর Device PIN-এর মালিকের কাছে (আগের মতো)। *Its own numbers* = এই মেশিনের PIN 15 অন্য কেউ হতে পারে; প্রতিটা PIN Unlinked PINs-এ আলাদা করে link করতে হয় (`zk_device_pins`)। link না হওয়া পর্যন্ত punch `M<machine>-<pin>` নামে জমা থাকে, link করলেই সেই কর্মীর হাজিরায় চলে যায়; মেশিন-ভিত্তিক PIN তালিকা আর unlink Machines popup-এ।
-- **Offline alert:** সকাল ৭টা–রাত ৯টার মধ্যে কোনো চালু মেশিন এক ঘণ্টা কিছু না পাঠালে Superadmin ও Office Attendance module-এর লোকেরা একবার alert পান; মেশিন আবার শোনা গেলে alert আবার চালু হয়।
+- **Offline alert:** সকাল ৭টা–রাত ৯টার মধ্যে কোনো চালু মেশিন এক ঘণ্টা কিছু না পাঠালে Superadmin ও Office Attendance module-এর লোকেরা একবার alert পান; মেশিন আবার শোনা গেলে alert আবার চালু হয়। Alert-এ চাপলে Admin Panel → Office Attendance খোলে, Machines popup খোলা অবস্থায় (alert type `zk_machine`; আগে Team Attendance-এ নিয়ে যেত)।
 - মেশিন যোগ / বদল / মোছা Office Attendance module-এর (আগের মতো); PIN link / unlink "Link Device PINs" layer-এর।
 
 

@@ -1862,6 +1862,9 @@ export type AlertType =
   // Site Attendance (supervisor muster roll): a reminder / review outcome
   // for the supervisor — opens Self Service -> Team Attendance.
   | 'site_attendance'
+  // Office Attendance: a ZKTeco machine went quiet — opens Admin Panel ->
+  // Office Attendance -> Machines.
+  | 'zk_machine'
   // Superadmin: a new phone is waiting for approval (Admin Panel -> Device Access).
   | 'device_request'
   // Tasks (TaskRoutes.ts): a task given / started / done / overdue, or a new

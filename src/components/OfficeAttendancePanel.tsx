@@ -98,6 +98,24 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   // new terminal's IP no longer needs a manual SQL INSERT against
   // zk_devices.
   const [showDeviceModal, setShowDeviceModal] = useState(false);
+  // An "Attendance machine offline" alert opens this page with Machines open.
+  useEffect(() => {
+    const open = () => {
+      try {
+        sessionStorage.removeItem('open_zk_machines');
+      } catch {
+        // storage unavailable
+      }
+      setShowDeviceModal(true);
+    };
+    try {
+      if (sessionStorage.getItem('open_zk_machines')) open();
+    } catch {
+      // storage unavailable
+    }
+    window.addEventListener('credence:open-zk-machines', open);
+    return () => window.removeEventListener('credence:open-zk-machines', open);
+  }, []);
 
   const fetchDevices = useCallback(async () => {
     try {

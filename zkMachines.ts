@@ -44,6 +44,9 @@ export const parsePlaceholderPin = (stored: string): { deviceId: number; pin: st
 
 export async function ensureZkMachinesSchema(dbPool: Pool | null): Promise<void> {
   if (!dbPool) return;
+  // Offline alerts sent before they had their own type pointed at Team
+  // Attendance; they belong to Office Attendance -> Machines.
+  await dbPool.query("UPDATE alerts SET type = 'zk_machine' WHERE type = 'site_attendance' AND title = 'Attendance machine offline'").catch(() => {});
   const add = async (sql: string) => {
     try {
       await dbPool.query(sql);
