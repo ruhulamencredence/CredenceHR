@@ -56,7 +56,11 @@ export const BLENDED_HEADER_TITLES = new Set([
   'Break Time',
   'Conveyance Bill Claim',
   'My Loan / Advance',
-  'My Payslip'
+  'My Payslip',
+  'My Asset',
+  'My Mobile SIM',
+  'SIM & ID Card',
+  'Book a Ride'
 ]);
 
 // A page that puts its own title in the phone header while it's open (the

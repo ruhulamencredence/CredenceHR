@@ -11,6 +11,7 @@ import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
+import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent, HEADER_GLOWS, HeaderGlowId, applyHeaderGlow, effectiveHeaderGlow } from '../lib/backgroundTheme';
@@ -61,6 +62,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   // Desktop: the left menu picks what the right side shows (My Service Book
   // first). Phone: two tabs, Service Book and Settings.
   const wide = useMdUp();
+  // Phone: Back (the header's or the phone's) closes My Asset, not the whole Profile.
+  useBackButtonClose(showAssetManagement && !wide, () => setShowAssetManagement(false));
   const defaultPanel: Panel = canServiceBook ? 'book' : 'contact';
   const [panel, setPanel] = useState<Panel>(defaultPanel);
   const [mobileTab, setMobileTab] = useState<'book' | 'settings'>(canServiceBook ? 'book' : 'settings');

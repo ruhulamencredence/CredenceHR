@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
@@ -173,6 +174,7 @@ interface AssetManagementProps {
 }
 
 export function AssetManagement({ onBack }: AssetManagementProps) {
+  usePhoneHeaderTitle('My Asset');
   // Web gets Book a Ride's page design; the Android APK keeps the card
   // design so it reads as one native screen.
   const isNativeApp = Capacitor.isNativePlatform();
@@ -427,9 +429,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     // design below.
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className={isNativeApp ? 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8' : 'w-full px-4 lg:px-8 pt-3 pb-28 md:pb-8'}>
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Asset']} />}
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Asset']} /></div>}
         {!isNativeApp && (
-          <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="hidden md:flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -466,7 +469,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
           }
         >
           {isNativeApp && (
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
+          <div className="hidden md:flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
                 <Package className="w-5 h-5 text-blue-600" />

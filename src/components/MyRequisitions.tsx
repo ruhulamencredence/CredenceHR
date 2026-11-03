@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CreditCard, Smartphone, X } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 import { MailPopup as Popup, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -280,12 +281,14 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
 
 /** Self Service -> SIM & ID Card (users.can_request_items). */
 export const MyRequisitions: React.FC<{ token: string; userName?: string; onBack?: () => void }> = ({ token, userName, onBack }) => {
+  usePhoneHeaderTitle('SIM & ID Card');
   const isNativeApp = Capacitor.isNativePlatform();
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'SIM & ID Card']} />}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'SIM & ID Card']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />
