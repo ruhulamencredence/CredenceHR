@@ -832,6 +832,8 @@ export interface User {
   can_take_break?: boolean;
   // Book a Ride -> save places (Home / Work…) with a note for the driver — off by default.
   can_save_ride_places?: boolean;
+  // Remote Attendance -> give the Out Time again the same day — off by default.
+  can_update_check_out?: boolean;
   // Approve Application -> "Add approver": ask one more person to approve a
   // request waiting on them first (ApprovalRoutes.ts) — off by default.
   can_add_adhoc_approver?: boolean;
@@ -1570,6 +1572,11 @@ export interface AttendanceRecord {
   check_out_lng?: number | null;
   check_out_distance_m?: number | null;
   check_out_remarks?: string | null;
+  // Out Time given again the same day (users.can_update_check_out): the
+  // first one, how often it was replaced, and whether this account may now.
+  check_out_first_at?: string | null;
+  check_out_update_count?: number;
+  can_update_check_out?: boolean;
   created_at?: string;
   // Only present on rows returned to a User's own history / an Admin's system-wide
   // list (joined server-side) — never trusted as something the client can set.

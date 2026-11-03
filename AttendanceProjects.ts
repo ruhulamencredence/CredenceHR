@@ -56,6 +56,17 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
     CONSTRAINT fk_uap_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_uap_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   )`);
+  // "Update Out Time": a per-account switch (off by default), and on the
+  // attendance row the first Out Time given plus how often it was replaced.
+  for (const sql of [
+    "ALTER TABLE users ADD COLUMN can_update_check_out TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE attendance ADD COLUMN check_out_first_at TIMESTAMP NULL DEFAULT NULL",
+    "ALTER TABLE attendance ADD COLUMN check_out_update_count INT NOT NULL DEFAULT 0"
+  ]) {
+    await dbPool.query(sql).catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Attendance: " + err.message);
+    });
+  }
   // Once: the old single "Allowed project for check-in" becomes a one-row list.
   if (!(await getStartupMarker(dbPool, "attendance_projects_from_pin"))) {
     await dbPool.query(

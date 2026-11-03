@@ -261,6 +261,12 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   });
 
+  const canUpdateCheckOut = async (user: any): Promise<boolean> => {
+    if (user?.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_update_check_out FROM users WHERE id = ?", [user.id])) || [];
+    return Number(rows[0]?.can_update_check_out) === 1;
+  };
+
   app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const parsed = parseAttendanceCoords(req.body);
@@ -313,8 +319,25 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!hasRemoteCheckIn && !officeCheckInAt) {
         return res.status(400).json({ error: "You need to Check In for this project before you can Check Out." });
       }
-      if (hasRemoteCheckOut || (!hasRemoteCheckIn && officeCheckOutAt)) {
+      if (!hasRemoteCheckIn && officeCheckOutAt) {
         return res.status(400).json({ error: "You've already checked out for this project today." });
+      }
+      if (hasRemoteCheckOut) {
+        // "Update Out Time" (users.can_update_check_out, off by default): the
+        // same day, the Out Time can be given again — e.g. after tapping it
+        // too early. The first one is kept (check_out_first_at), and the new
+        // time goes for approval again: the old Out Time's request goes.
+        if (!(await canUpdateCheckOut(req.user))) {
+          return res.status(400).json({ error: "You've already checked out for this project today." });
+        }
+        await queryDB(
+          `UPDATE attendance SET check_out_first_at = COALESCE(check_out_first_at, check_out_at), check_out_update_count = check_out_update_count + 1,
+                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ? WHERE id = ?`,
+          [lat, lng, distance, remarks, existing[0].id]
+        );
+        await queryDB("DELETE FROM approval_requests WHERE source_type = 'attendance' AND event_type = 'check_out' AND source_id = ?", [existing[0].id]);
+        await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
+        return res.json({ success: true, updated: true, distance_m: distance, radius_m: Number(project.location_radius), project_name: project.project_name });
       }
 
       if (existing.length > 0) {
@@ -428,6 +451,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         check_out_lng: remoteRow?.check_out_lng ?? null,
         check_out_distance_m: remoteRow?.check_out_distance_m ?? null,
         check_out_remarks: remoteRow?.check_out_remarks ?? null,
+        check_out_first_at: remoteRow?.check_out_first_at ?? null,
+        check_out_update_count: Number(remoteRow?.check_out_update_count || 0),
+        // An Out Time given here (not by the office device) can be given again today.
+        can_update_check_out: !!remoteRow?.check_out_at && (await canUpdateCheckOut(req.user)),
         check_in_approval: remoteRow?.check_in_approval ?? null,
         check_out_approval: remoteRow?.check_out_approval ?? null,
         check_in_source: remoteRow?.check_in_at ? "remote" : office?.check_in_at ? "office" : null,

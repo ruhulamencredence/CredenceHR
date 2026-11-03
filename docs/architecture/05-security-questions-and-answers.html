@@ -154,6 +154,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>কর্মী কি নিজের Out Time পরে বদলে বাড়িয়ে নিতে পারে?</td>
+<td>শুধু একই দিনে, শুধু Module Access-এ "Remote Attendance — update Out Time" টিক দেওয়া থাকলে (শুরুতে বন্ধ; কর্মী নিজে চালু করতে পারেন না, API 403), আর সেই সময়টাতেই project-এর এলাকায় থেকে — পরে বসে আগের সময় লেখা যায় না, সময় server-এর। প্রথম Out Time রাখা থাকে, নতুনটা আবার অনুমোদনে যায় (<code>AttendanceRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Remote check-in-এ কেউ কি অন্য project-এ বা মেয়াদ শেষের পর check-in করতে পারে?</td>
 <td>না। Module Access-এ দেওয়া project-এর তালিকা আর প্রতিটার From / To তারিখ server যাচাই করে — check-in, Correct Attendance ও Data Import-এ; অন্য project বা তারিখের বাইরে হলে 403। তালিকা বদলাতে Users module-এর <code>edit_add</code> layer লাগে, বদল <code>user_access_audit</code>-এ (<code>AttendanceProjects.ts</code>)।</td>
 <td>✅</td>

@@ -12,6 +12,7 @@ import { apiUrl, dedupedFetchJson } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
 interface AttendanceCardProps {
@@ -265,7 +266,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         type: 'success',
         text: kind === 'in'
           ? `Checked in — ${data.distance_m}m from ${data.project_name}.`
-          : `Checked out — ${data.distance_m}m from ${data.project_name}.`
+          : data.updated
+            ? `Out Time updated — ${data.distance_m}m from ${data.project_name}. It goes for approval again.`
+            : `Checked out — ${data.distance_m}m from ${data.project_name}.`
       });
       setPending(null);
       // Refresh today's status.
@@ -417,10 +420,28 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
-            <div className="mt-0.5 font-bold text-blue-700">
-              <span className="text-base">{outParts.time}</span>{' '}
-              <span className="text-[11px] align-middle">{outParts.meridiem}</span>
-            </div>
+            <>
+              <div className="mt-0.5 font-bold text-blue-700">
+                <span className="text-base">{outParts.time}</span>{' '}
+                <span className="text-[11px] align-middle">{outParts.meridiem}</span>
+              </div>
+              {/* Gave it too early? The same day it can be given again
+                  (users.can_update_check_out — off unless ticked). */}
+              {status?.can_update_check_out && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!(await confirmDialog(`Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`))) return;
+                    void handleMark('out');
+                  }}
+                  disabled={!projectId || busy}
+                  className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {working === 'out' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
+                  Set again
+                </button>
+              )}
+            </>
           ) : (
             <button
               type="button"
@@ -457,6 +478,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           {status?.check_out_remarks && (
             <div className="pl-5 text-slate-500">
               <span className="font-medium text-slate-600">Out remarks:</span> {status.check_out_remarks}
+            </div>
+          )}
+          {!!status?.check_out_update_count && status.check_out_first_at && (
+            <div className="pl-5 text-slate-500">
+              Out Time given again{status.check_out_update_count > 1 ? ` (${status.check_out_update_count} times)` : ''} — first was{' '}
+              {formatTimeParts(status.check_out_first_at as string).time} {formatTimeParts(status.check_out_first_at as string).meridiem}
             </div>
           )}
         </div>

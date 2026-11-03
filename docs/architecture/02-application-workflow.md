@@ -576,3 +576,7 @@ App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashb
 - **Forward:** কপি একই ফাইল দেখায়, নতুন কপি হয় না। **Delete for everyone:** ফাইলটা মুছে যায়, যদি না কোনো forward করা কপি তখনো সেটা দেখায়।
 - **পুরনো attachment:** আগে ডাটাবেসে রাখা ফাইল server চালুর সময় পেছনে নিজে থেকে folder-এ চলে যায় আর ডাটাবেস থেকে মুছে যায় (একাধিক worker থাকলেও একজনই করে)। folder-এ লেখা না গেলে সেটা ডাটাবেসেই থাকে আর আগের মতো খোলে।
 
+
+## Remote Attendance: Out Time আবার দেওয়া (Update Out Time)
+
+ভুল করে আগেই Out Time দিয়ে ফেললে একই দিনে আবার দেওয়া যায় — শুধু যাঁর Module Access-এ **Remote Attendance — update Out Time** টিক দেওয়া (শুরুতে বন্ধ; Superadmin সবসময়)। কার্ডের Out Time-এর নিচে **Set again** → নিশ্চিত করার popup → আগের মতো GPS ও মানচিত্রে Confirm (project-এর এলাকার মধ্যে থাকতে হয়)। নতুন সময় আগেরটার জায়গায় বসে; প্রথম Out Time `attendance.check_out_first_at`-এ আর কতবার বদলানো হলো `check_out_update_count`-এ থাকে, কার্ডে "first was …" দেখায়। আগের Out Time-এর অনুমোদন মুছে নতুন সময় আবার অনুমোদনে যায়। Office device (ZKTeco)-এর দেওয়া Out Time এভাবে বদলায় না, আর Check In আগের মতো দিনে একবার (`AttendanceRoutes.ts` check-out)।
