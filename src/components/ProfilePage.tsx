@@ -58,7 +58,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showAssetManagement, setShowAssetManagement] = useState(false);
   // My Service Book (own Employee 360, read only) — only with
   // users.can_view_service_book (the server checks it too, /api/hr-ops/my/p360).
-  const canServiceBook = user.role === 'superadmin' || !!user.can_view_service_book;
+  // A Superadmin whose login has no Employee record of its own has no book
+  // to show — the tab stays hidden instead of a "contact HR" error.
+  const canServiceBook = user.role === 'superadmin' ? user.has_employee !== false : !!user.can_view_service_book;
   // Desktop: the left menu picks what the right side shows (My Service Book
   // first). Phone: two tabs, Service Book and Settings.
   const wide = useMdUp();
@@ -67,6 +69,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const defaultPanel: Panel = canServiceBook ? 'book' : 'contact';
   const [panel, setPanel] = useState<Panel>(defaultPanel);
   const [mobileTab, setMobileTab] = useState<'book' | 'settings'>(canServiceBook ? 'book' : 'settings');
+  // The link check arrives with the /api/auth/me refresh, after this page may
+  // already be on the Service Book — move over to Settings then.
+  useEffect(() => {
+    if (canServiceBook) return;
+    setMobileTab('settings');
+    setPanel((p) => (p === 'book' ? 'contact' : p));
+  }, [canServiceBook]);
   const showServiceBook = () => {
     if (!canServiceBook) return;
     setPanel('book');

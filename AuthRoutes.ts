@@ -103,8 +103,13 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
       const u = users[0];
+      // Whether this login has its own Employee record — the Profile page
+      // hides My Service Book for a Superadmin without one (nothing to show,
+      // and "contact HR" makes no sense to them).
+      const ownEmployee: any[] = await queryDB("SELECT id FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]).catch(() => []);
       res.json({
         ...u,
+        has_employee: ownEmployee.length > 0,
         active_company_id: activeCompanyId(),
         pepm_enabled: pepmEnabled(activeGroupId()),
         is_onboarding: !!Number(u.is_onboarding || 0),

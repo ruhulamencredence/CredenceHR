@@ -859,6 +859,8 @@ export interface User {
   can_view_mobile_bill?: boolean;
   // Profile -> My Service Book (own Employee 360).
   can_view_service_book?: boolean;
+  // Whether this login has its own Employee record (GET /api/auth/me).
+  has_employee?: boolean;
   // Self Service -> My Loan / Advance (LoanRequestRoutes.ts).
   can_view_loan_request?: boolean;
   // Self Service -> My Targets (MyTargets.tsx, TargetRoutes.ts). Off by default.
