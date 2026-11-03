@@ -51,6 +51,7 @@ import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
 import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
+import { saveChatFile, readChatFile, removeChatFileIfUnused, moveOldChatAttachments } from "./chatFiles";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -208,12 +209,19 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
       ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
       // "Forward": a copy sent on to other chats shows "Forwarded".
       ["ALTER TABLE chat_messages ADD COLUMN is_forwarded TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
-      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"]
+      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"],
+      // Attachments are files in the chat folder (chatFiles.ts, .env
+      // CHAT_ATTACHMENT_DIR); this is where the file is. attachment_data is
+      // only read for a file saved before that and not yet moved.
+      ["ALTER TABLE chat_messages ADD COLUMN attachment_path VARCHAR(500) NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD INDEX idx_chat_messages_attachment_path (attachment_path(191))", "ER_DUP_KEYNAME"]
     ] as [string, string][]) {
       await dbPool.query(sql).catch((err: any) => {
         if (err?.code !== ignore) console.warn("⚠️ Chat: " + err.message);
       });
     }
+    // Old attachments still in the database go to the folder, in the background.
+    void moveOldChatAttachments(dbPool);
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS chat_message_hidden (
         message_id INT NOT NULL,
@@ -311,13 +319,19 @@ export async function insertChatMessage(
     attachmentBuffer?: Buffer | null;
     attachmentMimetype?: string | null;
     attachmentFilename?: string | null;
+    // An already-saved file (a forwarded copy points at the same file).
+    attachmentPath?: string | null;
     replyToId?: number | null;
     forwarded?: boolean;
   }
 ): Promise<any> {
+  // The file goes to the chat folder; the row keeps only where it is.
+  const attachmentPath =
+    params.attachmentPath ||
+    (params.attachmentBuffer ? await saveChatFile(params.attachmentBuffer, params.attachmentMimetype, params.attachmentFilename, params.messageType) : null);
   const result = await queryDB(
     `INSERT INTO chat_messages
-      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, reply_to_id, is_forwarded)
+      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_path, reply_to_id, is_forwarded)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       params.roomId,
@@ -326,7 +340,7 @@ export async function insertChatMessage(
       params.content ?? null,
       params.attachmentFilename ?? null,
       params.attachmentMimetype ?? null,
-      params.attachmentBuffer ?? null,
+      attachmentPath,
       params.replyToId ?? null,
       params.forwarded ? 1 : 0
     ]
@@ -339,7 +353,7 @@ export async function insertChatMessage(
 // every message carries its reactions: [{ emoji, user_id, name }].
 const MESSAGE_SELECT = `
   SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
-         cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
+         cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_path IS NOT NULL OR cm.attachment_data IS NOT NULL) AS has_attachment,
          cm.reply_to_id, cm.created_at, cm.unsent_at, cm.edited_at, cm.is_forwarded,
          CASE WHEN rt.unsent_at IS NOT NULL THEN 'This message was deleted'
               WHEN rt.content IS NOT NULL AND rt.content <> '' THEN rt.content
@@ -740,15 +754,20 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
     try {
       const messageId = Number(req.params.id);
       const rows = await queryDB(
-        "SELECT room_id, attachment_mimetype, attachment_data, attachment_filename FROM chat_messages WHERE id = ? AND unsent_at IS NULL",
+        "SELECT room_id, attachment_mimetype, attachment_path, attachment_data, attachment_filename FROM chat_messages WHERE id = ? AND unsent_at IS NULL",
         [messageId]
       );
       const row = rows[0];
-      if (!row || !row.attachment_data) return res.status(404).json({ error: "No attachment on this message." });
+      if (!row || (!row.attachment_path && !row.attachment_data)) return res.status(404).json({ error: "No attachment on this message." });
       if (!(await isMember(queryDB, row.room_id, req.user.id))) {
         return res.status(403).json({ error: "Not a member of this room." });
       }
-      const buffer: Buffer = Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data);
+      // From the chat folder; a file saved before that is still in the row.
+      const buffer: Buffer | null = row.attachment_path
+        ? await readChatFile(row.attachment_path)
+        : Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data);
+      if (!buffer) return res.status(404).json({ error: "The file is missing on the server." });
+      res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Type", row.attachment_mimetype || "application/octet-stream");
       res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
       if (row.attachment_filename) {
@@ -840,7 +859,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   app.post("/api/chat/messages/:id/forward", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const src: any = ((await queryDB(
-        "SELECT id, room_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, unsent_at FROM chat_messages WHERE id = ? AND deleted_at IS NULL",
+        "SELECT id, room_id, message_type, content, attachment_filename, attachment_mimetype, attachment_path, attachment_data, unsent_at FROM chat_messages WHERE id = ? AND deleted_at IS NULL",
         [Number(req.params.id)]
       )) || [])[0];
       if (!src) return res.status(404).json({ error: "Message not found." });
@@ -860,7 +879,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
           senderId: req.user.id,
           messageType: src.message_type,
           content: src.content,
-          attachmentBuffer: src.attachment_data ? (Buffer.isBuffer(src.attachment_data) ? src.attachment_data : Buffer.from(src.attachment_data)) : null,
+          attachmentPath: src.attachment_path || null,
+          attachmentBuffer: !src.attachment_path && src.attachment_data ? (Buffer.isBuffer(src.attachment_data) ? src.attachment_data : Buffer.from(src.attachment_data)) : null,
           attachmentMimetype: src.attachment_mimetype,
           attachmentFilename: src.attachment_filename,
           forwarded: true
@@ -986,10 +1006,13 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (own && !asAdmin && Date.now() - new Date(msg.created_at).getTime() > UNSEND_WINDOW_MS) {
         return res.status(400).json({ error: "Too late to delete for everyone (48 hours) — you can still delete it for yourself." });
       }
+      const filePath: any = ((await queryDB("SELECT attachment_path FROM chat_messages WHERE id = ?", [msg.id])) || [])[0]?.attachment_path;
       await queryDB(
-        "UPDATE chat_messages SET unsent_at = NOW(), unsent_by = ?, content = NULL, attachment_data = NULL, attachment_filename = NULL, attachment_mimetype = NULL WHERE id = ?",
+        "UPDATE chat_messages SET unsent_at = NOW(), unsent_by = ?, content = NULL, attachment_data = NULL, attachment_path = NULL, attachment_filename = NULL, attachment_mimetype = NULL WHERE id = ?",
         [req.user.id, msg.id]
       );
+      // The file goes too, unless a forwarded copy still shows it.
+      await removeChatFileIfUnused(queryDB, filePath);
       await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ?", [msg.id]);
       const unpinned: any = await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [msg.id]);
       io.to(`room:${msg.room_id}`).emit("message_unsent", { roomId: msg.room_id, messageId: msg.id });
@@ -1109,7 +1132,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         (await queryDB(
           `SELECT cm.id, cm.message_type, cm.attachment_filename, cm.created_at, u.name AS sender_name
              FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
-            WHERE cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND cm.attachment_data IS NOT NULL
+            WHERE cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND (cm.attachment_path IS NOT NULL OR cm.attachment_data IS NOT NULL)
               AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)
             ORDER BY cm.id DESC LIMIT 60`,
           [roomId, req.user.id]

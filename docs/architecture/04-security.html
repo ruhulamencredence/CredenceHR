@@ -241,6 +241,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>টেস্ট <code>qa-concurrency.mjs</code> C1–C9</td>
 </tr>
 <tr>
+<td>Chat-এর ফাইল (folder-এ)</td>
+<td>ফাইলের নাম এলোমেলো (পাঠানো নাম নয়), path ঠিক folder-এর ভেতরে কিনা প্রতিবার যাচাই হয় (<code>..</code> বা অন্য folder দিলে 404); folder ওয়েবে খোলা নয়, শুধু chat-এর সদস্য API দিয়ে পান (অন্যরা 403); <code>X-Content-Type-Options: nosniff</code>। folder-এর অনুমতি (শুধু server account) আর ব্যাকআপ আপনাদের হাতে</td>
+<td><code>chatFiles.ts</code>, <code>ChatRoutes.ts</code></td>
+</tr>
+<tr>
 <td>সময়ের সঠিকতা</td>
 <td>Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল</td>
 <td>টেস্ট <code>qa-dates.mjs</code> DT-11..13b</td>

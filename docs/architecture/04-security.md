@@ -94,6 +94,7 @@
 | পরিশোধিত বেতন | বদলানো যায় না ("A Paid payroll run can't be edited"); একই কর্মী-মাস দুবার হয় না (UNIQUE) | `PayrollRoutes.ts`, টেস্ট |
 | ছুটি দ্বৈত আবেদন | একই দিনে দ্বিতীয় আবেদন 409; ব্যালেন্স শূন্যের নিচে যায় না | টেস্ট `LEAVE-04..06` |
 | একসাথে দুবার চাপ (double-click, দুই ট্যাব, দুই server worker) | approve, payroll submit/approve/return/pay, বেতন "paid", বিল disburse, ঋণ approve — প্রতিটা ডাটাবেসে শর্তসহ `UPDATE ... WHERE status = <আগের অবস্থা>`; যে দ্বিতীয় আসে সে 409 পায়। ফলে ঋণের কিস্তি দুবার কাটে না, বিল দুবার দেওয়া হয় না। দিনে একটা claim ও একটা চলমান ঋণ-আবেদনের নিয়ম একসাথে পাঠালেও ভাঙে না | টেস্ট `qa-concurrency.mjs` C1–C9 |
+| Chat-এর ফাইল (folder-এ) | ফাইলের নাম এলোমেলো (পাঠানো নাম নয়), path ঠিক folder-এর ভেতরে কিনা প্রতিবার যাচাই হয় (`..` বা অন্য folder দিলে 404); folder ওয়েবে খোলা নয়, শুধু chat-এর সদস্য API দিয়ে পান (অন্যরা 403); `X-Content-Type-Options: nosniff`। folder-এর অনুমতি (শুধু server account) আর ব্যাকআপ আপনাদের হাতে | `chatFiles.ts`, `ChatRoutes.ts` |
 | সময়ের সঠিকতা | Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল | টেস্ট `qa-dates.mjs` DT-11..13b |
 | ডাটাবেস ত্রুটি গোপন | ব্যবহারকারী ডাটাবেসের বার্তা (কলামের নাম ইত্যাদি) দেখে না, লগে যায় | `ApiErrors.ts` |
 | তথ্য প্রকাশ কমানো | পাসওয়ার্ড hash কোনো API-তে ফেরে না (টেস্ট `SEC-08`); কর্মী অন্যের payroll/payslip পায় না (`PAY-06/07`) | টেস্ট |

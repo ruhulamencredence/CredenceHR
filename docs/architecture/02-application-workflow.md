@@ -433,6 +433,8 @@ flowchart LR
 
 Node ≥ ২২। `.env`-এর মূল চাবি: `DB_*`, `JWT_SECRET`, `ADMIN_EMAIL/PASSWORD`, `CORS_ORIGINS`, `MAIL_ENCRYPTION_KEY`, `REDIS_URL`, `GEMINI_API_KEY` বা একাধিক key `GEMINI_API_KEYS="key1,key2"` (ঐচ্ছিক — একটার সীমা শেষ হলে সেটা বিশ্রামে যায় আর পরেরটা একই প্রশ্নেই উত্তর দেয়; chat, কথা লেখা ও পড়া সবখানে; সব শেষ হলে local bot), `ESIGN_CERT_*` (ঐচ্ছিক)।
 
+Chat-এর attachment (voice, ছবি, video, document) ডাটাবেসে নয়, `.env`-এর `CHAT_ATTACHMENT_DIR` folder-এ ফাইল হিসেবে থাকে (না দিলে app folder-এর `uploads/chat`); ভেতরে `voice/`, `image/`, `video/`, `document/`, বছর ও মাস অনুযায়ী। কোনো এক ধরন অন্য জায়গায় রাখতে `CHAT_VOICE_DIR` / `CHAT_IMAGE_DIR` / `CHAT_VIDEO_DIR` / `CHAT_DOCUMENT_DIR`। server-কে folder-এ লিখতে দিতে হবে, আর **ব্যাকআপে ডাটাবেসের সাথে এই folder-ও** নিতে হবে। PM2-এর সব worker একই folder দেখবে (একই মেশিন বা shared disk)।
+
 ---
 
 ## Book a Ride: ফোনের প্রথম পাতা
@@ -565,3 +567,11 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 ## App খুললে কী লোড হয়
 
 App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashboard-এর কার্ডের ডাটা আসে। Check In/Out, My Claims, Conveyance Bill Claim, Leave Application, Timesheet, Employee Directory, Notice Board-এর code আর ডাটা আসে সেই পাতা প্রথমবার খুললে; এরপর পাতাটা রেখে দেওয়া হয়, ফিরে এলে সঙ্গে সঙ্গে দেখায় (`UserPanel.tsx` seen)। PEPM-এর Budget / MPR No / entries আসে Budget, Jobs, Entries বা Job Edit খুললে। ফোনে শুধু ফোনের Dashboard আর ডেস্কটপে শুধু ডেস্কটপেরটা বসে (`src/lib/useMdUp.ts`) — আগে দুটোই বসে দুবার ডাটা আনত। Pending Approvals-এ গাড়ি ও driver-এর তালিকা আসে শুধু গাড়ি বসানোর মতো আবেদন থাকলে।
+
+## Chat attachment: ফাইল folder-এ, ডাটাবেসে শুধু path
+
+- **পাঠানো:** voice, ছবি, video বা document পাঠালে server ফাইলটা chat folder-এ লেখে (`chatFiles.ts`) — `voice/2026/11/<এলোমেলো নাম>.webm`-এর মতো; `chat_messages.attachment_path`-এ শুধু এই path থাকে। ফাইলের নাম কখনো পাঠানো নামে হয় না (পাঠানো নাম শুধু দেখানোর জন্য `attachment_filename`-এ)।
+- **খোলা:** আগের মতো `/api/chat/messages/:id/attachment` — শুধু সেই chat-এর সদস্য পান; folder-টা ওয়েবে খোলা নয়।
+- **Forward:** কপি একই ফাইল দেখায়, নতুন কপি হয় না। **Delete for everyone:** ফাইলটা মুছে যায়, যদি না কোনো forward করা কপি তখনো সেটা দেখায়।
+- **পুরনো attachment:** আগে ডাটাবেসে রাখা ফাইল server চালুর সময় পেছনে নিজে থেকে folder-এ চলে যায় আর ডাটাবেস থেকে মুছে যায় (একাধিক worker থাকলেও একজনই করে)। folder-এ লেখা না গেলে সেটা ডাটাবেসেই থাকে আর আগের মতো খোলে।
+

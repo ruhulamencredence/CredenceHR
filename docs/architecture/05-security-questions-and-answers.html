@@ -186,6 +186,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>🏢</td>
 </tr>
 <tr>
+<td>Chat-এর voice / ছবি / video / document কোথায় থাকে, অন্য কেউ খুলতে পারে?</td>
+<td>server-এর একটা folder-এ (<code>.env</code>-এর <code>CHAT_ATTACHMENT_DIR</code>), ডাটাবেসে শুধু path। folder ওয়েবে খোলা নয় — ফাইল যায় শুধু সেই chat-এর সদস্যের কাছে, অন্যরা 403। ফাইলের নাম এলোমেলো, আর path folder-এর বাইরে গেলে server খোলে না। Delete for everyone করলে ফাইলও মুছে যায়। folder-এর অনুমতি, disk এনক্রিপশন আর ব্যাকআপ হোস্টিংয়ের দায়িত্ব (<code>chatFiles.ts</code>)।</td>
+<td>✅ 🏢</td>
+</tr>
+<tr>
 <td>রেস্টে (ডাটাবেস/ডিস্কে) এনক্রিপশন?</td>
 <td>অ্যাপ নিজে পুরো ডাটাবেস এনক্রিপ্ট করে না। নির্দিষ্ট সিক্রেট এনক্রিপ্ট/hash: মেইল পাসওয়ার্ড (AES-256-GCM), সব পাসওয়ার্ড (bcrypt), token/কোড (hash)। ডিস্ক এনক্রিপশন হোস্টিংয়ে।</td>
 <td>⚠️ 🏢</td>
