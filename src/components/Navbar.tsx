@@ -359,6 +359,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onOpenChat={onOpenChat}
               onOpenProfile={onOpenProfile}
               onOpenMenu={onOpenMobileMenu}
+              onGoHome={onGoToDashboard}
             />
           )}
           </div>

@@ -5,14 +5,15 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, LayoutGrid, MessageCircle, UserRound, X } from 'lucide-react';
+import { Bell, House, LayoutGrid, MessageCircle, UserRound, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 
 // The ⋮ button on the right of the blended phone header (Navbar.tsx `blend`
 // — My Claims, Leave, My Tasks…): the header there only has room for Back,
 // the title and one round button, so Alerts, Chat, Profile and the app menu
-// sit in this small liquid-glass card instead. A red dot on the button while
+// sit in this small liquid-glass card instead, with Home (straight back to
+// the dashboard, however deep the page is) on top. A red dot on the button while
 // there is an unread alert or chat message.
 export const HeaderMoreMenu: React.FC<{
   token: string;
@@ -21,7 +22,8 @@ export const HeaderMoreMenu: React.FC<{
   onOpenChat: () => void;
   onOpenProfile: () => void;
   onOpenMenu: () => void;
-}> = ({ token, showChat, onOpenAlerts, onOpenChat, onOpenProfile, onOpenMenu }) => {
+  onGoHome: () => void;
+}> = ({ token, showChat, onOpenAlerts, onOpenChat, onOpenProfile, onOpenMenu, onGoHome }) => {
   const [open, setOpen] = useState(false);
   const [alerts, setAlerts] = useState(0);
   const [chats, setChats] = useState(0);
@@ -94,6 +96,7 @@ export const HeaderMoreMenu: React.FC<{
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+                {row(<House className="w-[18px] h-[18px]" />, 'Home', onGoHome)}
                 {row(<Bell className="w-[18px] h-[18px]" />, 'Alerts', onOpenAlerts, alerts)}
                 {showChat && row(<MessageCircle className="w-[18px] h-[18px]" />, 'Chat', onOpenChat, chats)}
                 {row(<UserRound className="w-[18px] h-[18px]" />, 'Profile', onOpenProfile)}
