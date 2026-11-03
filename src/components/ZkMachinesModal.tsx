@@ -307,6 +307,11 @@ export const ZkMachinesModal: React.FC<{ token: string; canLinkPins: boolean; on
                     <div className="min-w-[180px] flex-1">
                       <div className="text-sm font-bold text-slate-900">{m.name}</div>
                       <div className="text-[11px] text-slate-500">{m.branch || 'No office set'}</div>
+                      {/* Why the last pull failed, straight from the machine's
+                          answer (timed out, refused…) — not only on hover. */}
+                      {m.connection !== 'push' && m.status !== 'online' && /^error/i.test(m.last_sync_status || '') && (
+                        <div className="text-[11px] text-rose-600 mt-0.5 break-words">Last try: {(m.last_sync_status || '').replace(/^error:?\s*/i, '')}</div>
+                      )}
                     </div>
                     <div className="text-[11px] text-slate-600 min-w-[150px] flex items-center gap-1.5">
                       {m.connection === 'push' ? <Globe className="w-3.5 h-3.5 text-violet-600" /> : <Wifi className="w-3.5 h-3.5 text-blue-600" />}
