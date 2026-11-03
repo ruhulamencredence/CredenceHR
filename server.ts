@@ -64,6 +64,7 @@ import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
+import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
@@ -303,6 +304,8 @@ async function initDB() {
     }
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
+    // Notices: pictures / attachments, audience groups, schedule, reads.
+    await ensureNoticeV2Schema(dbPool);
     // Measurement Sheet was taken out of the software: drop its table and the
     // module's saved permissions (no-ops once they are gone).
     for (const sql of [
@@ -378,7 +381,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -421,6 +424,9 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
 const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
+// Notices: who has read a notice (report, send again) and sending it by
+// email — both only when ticked (EXPLICIT_ONLY_LAYERS in src/types.ts).
+const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email"] as const;
 // Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Conveyance Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
@@ -532,6 +538,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
+  notices: NOTICE_LAYER_KEYS,
   conveyance: CONVEYANCE_LAYER_KEYS,
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
@@ -2911,7 +2918,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3199,7 +3206,7 @@ async function startServer() {
   // push notification reaches phones/browsers where the app isn't open —
   // tapping it opens the app on the popup. "all" pings every open app (the
   // fetch decides who actually sees it) and pushes to this company's users.
-  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number) {
+  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number, opts: { push?: boolean } = {}) {
     try {
       if (liveIo) {
         if (audience === "all") liveIo.emit("notices:changed");
@@ -3207,7 +3214,7 @@ async function startServer() {
       }
       const ids =
         audience === "all" ? ((await queryDB("SELECT id FROM users", [])) || []).map((u: any) => Number(u.id)) : audience.map(Number);
-      if (ids.length === 0) return;
+      if (ids.length === 0 || opts.push === false) return;
       await sendPushToUserIds(
         queryDB,
         ids,
@@ -3504,7 +3511,7 @@ async function startServer() {
   registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
   // Notices routes live in NoticeRoutes.ts.
-  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });
+  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, runJobs: runsBackgroundJobs() });
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
   registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });

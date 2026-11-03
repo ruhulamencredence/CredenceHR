@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { sanitizeNoticeHtml } from '../lib/noticeHtml';
+import { NoticeContent, NoticeCover, NoticeAttachments, NoticeBadges } from './notice/NoticeParts';
 import { Bell, ChevronLeft } from 'lucide-react';
 import { ActiveNotice } from '../types';
 import { apiUrl } from '../lib/api';
@@ -39,7 +39,10 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
         // this page unable to do the one thing it exists for (below).
         const res = await fetch(apiUrl('/api/notices/board'), { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to load Notice Board');
-        setNotices(await res.json());
+        const list: ActiveNotice[] = await res.json();
+        setNotices(list);
+        // Read on the board = opened (for "Who has read it").
+        for (const n of list) if (!n.opened_at) fetch(apiUrl(`/api/notices/${n.id}/seen`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
       } catch (err: any) {
         setError(err.message || 'Failed to load Notice Board');
       } finally {
@@ -47,6 +50,17 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
       }
     })();
   }, [token]);
+
+  const [acking, setAcking] = useState<number | null>(null);
+  const acknowledge = async (id: number) => {
+    setAcking(id);
+    try {
+      const r = await fetch(apiUrl(`/api/notices/${id}/ack`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) setNotices((prev) => prev.map((n) => (n.id === id ? { ...n, acknowledged_at: new Date().toISOString() } : n)));
+    } finally {
+      setAcking(null);
+    }
+  };
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
@@ -100,16 +114,28 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
                 key={n.id}
                 className="bg-gradient-to-br from-violet-100/90 via-white/85 to-indigo-50/80 rounded-[28px] border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-5 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:rounded-2xl md:border-slate-200 md:shadow-sm"
               >
+                {n.cover && <NoticeCover file={n.cover} token={token} className="aspect-[16/7] rounded-2xl mb-3" />}
+                {(n.pinned || (n.priority && n.priority !== 'important')) && (
+                  <div className="mb-1.5">
+                    <NoticeBadges priority={n.priority} pinned={n.pinned} />
+                  </div>
+                )}
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-sm font-bold text-slate-900">{n.title}</h2>
                   {n.created_at && (
                     <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap">{formatDate(n.created_at)}</span>
                   )}
                 </div>
-                <div
-                  className="text-sm text-slate-700 leading-relaxed mt-2 [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-                  dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(n.content_html) }}
-                />
+                <NoticeContent html={n.content_html} token={token} className="mt-2" />
+                <NoticeAttachments files={n.attachments || []} token={token} />
+                {n.require_ack &&
+                  (n.acknowledged_at ? (
+                    <p className="mt-3 text-xs font-semibold text-emerald-700">✓ You have read this</p>
+                  ) : (
+                    <button type="button" disabled={acking === n.id} onClick={() => void acknowledge(n.id)} className="liquid-glass-button rounded-full px-4 py-2 mt-3 text-xs font-semibold disabled:opacity-60">
+                      I have read this
+                    </button>
+                  ))}
               </div>
             ))}
           </div>

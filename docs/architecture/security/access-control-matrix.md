@@ -23,7 +23,7 @@
 | Conveyance Bill Claim | `conveyance` | `read` Conveyance Bill Claim<br>🔒`on_behalf` Claim on Behalf |
 | Conveyance Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
-| Notices | `notices` | শুধু মডিউলের অনুমতি (layer নেই) |
+| Notices | `notices` | `read` Write & publish notices<br>🔒`notice_read_report` Who has read it (report & send again)<br>🔒`notice_email` Send notices by email |
 | Holidays (Global Calendar) | `holidays` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Payroll | `payroll` | `read` Payroll<br>`payroll_view` View only (Audit / Accounts)<br>`approval_sheet` Approval — Salary sheet (view)<br>`month_compare` Approval — Month comparison (view)<br>`top_sheet` Approval — Top Sheet (view)<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`audit_approve` Audit Approve<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
 | Asset Management | `asset_management` | শুধু মডিউলের অনুমতি (layer নেই) |

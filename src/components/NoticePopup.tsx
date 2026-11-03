@@ -1,11 +1,11 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { LottieLight } from './LazyLottie';
-import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { NOTICES_CHANGED_EVENT } from '../lib/noticesLive';
+import { NoticeContent, NoticeCover, NoticeAttachments, NoticeBadges } from './notice/NoticeParts';
 // Loaded only when a tracking notice is shown (it carries the tracking
 // animation), so it stays out of the main bundle.
 const TrackingNoticeCard = lazy(() => import('./TrackingNoticeCard').then((m) => ({ default: m.TrackingNoticeCard })));
@@ -76,8 +76,37 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
     return () => clearTimeout(t);
   }, [current?.id]);
   useBackButtonClose(!!current, () => {
-    if (current) handleDismiss(current.id);
+    if (current) (current.require_ack ? remindLater(current.id) : handleDismiss(current.id));
   });
+
+  // Shown = opened (for "Who has read it").
+  const seenSent = useRef(new Set<number>());
+  useEffect(() => {
+    if (!current || seenSent.current.has(current.id) || current.source === 'tracking') return;
+    seenSent.current.add(current.id);
+    fetch(apiUrl(`/api/notices/${current.id}/seen`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+
+  // "I have read this": the notice stops coming back.
+  const acknowledge = async (noticeId: number) => {
+    if (dismissing) return;
+    setDismissing(true);
+    closedIds.current.add(noticeId);
+    setQueue((prev) => prev.slice(1));
+    try {
+      await fetch(apiUrl(`/api/notices/${noticeId}/ack`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // Not recorded: it simply shows again next time.
+    } finally {
+      setDismissing(false);
+    }
+  };
+  // "Remind me later": gone for now; it comes back next time the app opens.
+  const remindLater = (noticeId: number) => {
+    closedIds.current.add(noticeId);
+    setQueue((prev) => prev.slice(1));
+  };
 
   const handleDismiss = async (noticeId: number) => {
     if (dismissing) return;
@@ -141,7 +170,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
       >
         <button
           type="button"
-          onClick={() => handleDismiss(current.id)}
+          onClick={() => (current.require_ack ? remindLater(current.id) : handleDismiss(current.id))}
           className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 text-slate-600 hover:text-slate-900 rounded-full transition-colors"
           aria-label="Close notice"
         >
@@ -158,28 +187,48 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
             </div>
           )}
 
-          <div className={`px-2 ${lottieSrc ? 'pt-4' : 'pt-3'}`}>
-            {!lottieSrc && (
+          {current.cover && !lottieSrc && <NoticeCover file={current.cover} token={token} className="max-h-[34vh] aspect-[16/9] rounded-[20px]" />}
+
+          <div className={`px-2 ${lottieSrc || current.cover ? 'pt-4' : 'pt-3'}`}>
+            {!lottieSrc && !current.cover && (
               <div className="liquid-glass-inset w-14 h-14 mb-3 rounded-[20px] text-[color:var(--g-accent,#7F00FF)] flex items-center justify-center">
                 <Bell className="w-6 h-6" />
               </div>
             )}
+            {current.priority && current.priority !== 'important' && (
+              <div className="mb-1.5">
+                <NoticeBadges priority={current.priority} />
+              </div>
+            )}
             <h3 className="text-xl font-bold text-slate-900 text-left">{current.title}</h3>
-
-            <div
-              className="mt-1.5 text-sm text-slate-700 leading-relaxed text-left [&_a]:text-blue-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-              dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(current.content_html) }}
-            />
+            <NoticeContent html={current.content_html} token={token} className="mt-1.5 text-left" />
+            <NoticeAttachments files={current.attachments || []} token={token} />
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleDismiss(current.id)}
-            disabled={dismissing}
-            className="liquid-glass-button w-full mt-5 py-3 font-semibold rounded-full disabled:opacity-50"
-          >
-            Got it
-          </button>
+          {current.require_ack ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void acknowledge(current.id)}
+                disabled={dismissing}
+                className="liquid-glass-button w-full mt-5 py-3 font-semibold rounded-full disabled:opacity-50"
+              >
+                I have read this
+              </button>
+              <button type="button" onClick={() => remindLater(current.id)} className="w-full mt-1.5 py-2 text-sm text-slate-500">
+                Remind me later
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleDismiss(current.id)}
+              disabled={dismissing}
+              className="liquid-glass-button w-full mt-5 py-3 font-semibold rounded-full disabled:opacity-50"
+            >
+              Got it
+            </button>
+          )}
 
           {queue.length > 1 && (
             <p className="mt-2.5 text-center text-[11px] text-slate-500">

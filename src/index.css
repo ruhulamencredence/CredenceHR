@@ -785,3 +785,24 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
 }
 /* Timesheet's lone Alerts bell sits at the right edge of the header row. */
 .hdr-blend .hdr-solo { justify-self: end; }
+
+/* Notice text (popup, Notice Board, composer) — NoticeParts.tsx / NoticeEditor.tsx */
+.notice-content { font-size: 14px; line-height: 1.6; color: #1e293b; overflow-wrap: anywhere; }
+.notice-content h1, .notice-content h2 { font-size: 1.25em; font-weight: 700; margin: .5em 0 .3em; }
+.notice-content h3 { font-size: 1.1em; font-weight: 700; margin: .5em 0 .25em; }
+.notice-content p, .notice-content div { margin: 0 0 .45em; }
+.notice-content ul { list-style: disc; padding-left: 1.4em; margin: .3em 0 .6em; }
+.notice-content ol { list-style: decimal; padding-left: 1.4em; margin: .3em 0 .6em; }
+.notice-content ul.nb-checklist { list-style: none; padding-left: .2em; }
+.notice-content ul.nb-checklist > li { position: relative; padding-left: 1.7em; }
+.notice-content ul.nb-checklist > li::before { content: ""; position: absolute; left: 0; top: .28em; width: 1.05em; height: 1.05em; border-radius: .3em; border: 2px solid #a78bfa; background: #fff; }
+.notice-content ul.nb-checklist > li[data-checked="true"]::before { background: #7f00ff; border-color: #7f00ff; box-shadow: inset 0 0 0 2px #fff; }
+.notice-content a { color: #7c3aed; text-decoration: underline; }
+.notice-content img { max-width: 100%; height: auto; border-radius: 14px; margin: .4em 0; display: inline-block; }
+.notice-content blockquote { border-left: 3px solid #c4b5fd; padding: .2em .8em; color: #475569; margin: .4em 0; background: #faf5ff; border-radius: 0 10px 10px 0; }
+.notice-content table { border-collapse: collapse; width: 100%; margin: .5em 0; font-size: .95em; }
+.notice-content td, .notice-content th { border: 1px solid #e2e8f0; padding: 6px 8px; vertical-align: top; }
+.notice-content th { background: #f5f3ff; font-weight: 600; }
+.notice-editor:empty::before { content: attr(data-placeholder); color: #94a3b8; pointer-events: none; }
+.notice-editor:focus { outline: none; }
+.notice-editor img.nb-selected { outline: 3px solid #a78bfa; }

@@ -28,3 +28,15 @@ export function sanitizeNoticeHtml(html: string | null | undefined): string {
     ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|data:image\/(?:png|jpe?g|gif|webp);base64,|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i
   }) as unknown as string;
 }
+
+// Old notices were often typed as plain text in a box: their line breaks
+// mean something. Text without any block markup keeps them.
+export function withLineBreaks(html: string): string {
+  return /<(p|div|br|ul|ol|li|h[1-6]|table|blockquote|pre)\b/i.test(html) ? html : html.replace(/\r?\n/g, '<br>');
+}
+
+// A notice's pictures are behind the sign-in: drawn from data-nsrc by
+// NoticeContent (fetched with the token), never requested without it.
+export function deferNoticeImages(html: string): string {
+  return html.replace(/(<img\b[^>]*?)\ssrc="(\/api\/notices\/files\/\d+)"/gi, '$1 data-nsrc="$2"');
+}

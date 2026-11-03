@@ -584,3 +584,19 @@ App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashb
 ## পাশের menu: নতুন tab-এ খোলা
 
 ব্রাউজারে পাশের menu-র প্রতিটা পাতা এখন আসল link (`/self/…`, `/admin/…`, Dashboard `/`), তাই right-click → "Open link in new tab", Ctrl / Cmd + click বা মাঝের বোতামে নতুন tab-এ খোলে; সাধারণ click আগের মতো একই tab-এ খোলে (`GlobalSidebar.tsx` navLinkProps)। নতুন tab-এ পাতাটা খোলে শুধু যদি সেই account-এর অনুমতি থাকে (আগের মতো address থেকে খোলার নিয়ম)। যেসব পাতার নিজস্ব address নেই (Leave Application, Check In/Out ও Conveyance-এর নিজের পাতা, PEPM-এর Entry / Jobs) সেগুলো আগের মতো বোতাম। ফোনের app-এ কিছু বদলায়নি।
+
+## Notice: লেখা, কাকে, কখন, কে পড়েছে
+
+Admin Panel → **Notices** → **New notice** — চার ধাপের একটা পাতা, ডান পাশে সাথে সাথে দেখায় ফোনের popup / desktop / Notice Board-এ কেমন দেখাবে (`notice/NoticeComposer.tsx`)।
+
+1. **Write:** template (Holiday, Meeting, Policy update, Urgent, Congratulations, Maintenance), Title, আর Word-এর মতো editor — Bold, Heading, list, checklist, রং, highlight, link, table, emoji; Enter-এ নতুন লাইন, বাংলা / English; Word, Google Docs বা WhatsApp থেকে paste করলে format থাকে (`notice/NoticeEditor.tsx`, browser-এর নিজের editing, আলাদা library নেই)। ছবি টেনে আনা, paste বা বাছা যায় (PNG, JPG, WebP, GIF; বড় ছবি নিজে ছোট হয়, ৫ MB পর্যন্ত), cover ছবি, আর PDF / Word / Excel / PowerPoint / text সংযুক্তি (২০ MB পর্যন্ত)। ঐচ্ছিক Lottie animation আগের মতো। নতুন notice শেষ না করে বন্ধ করলে এই browser-এ থাকে, পরে "Continue it"।
+2. **Who gets it:** Everyone, Choose groups (Department ও / বা Branch, সাথে কাউকে যোগ), বা Specific people (Admin-সহ যে কাউকে, নাম · Employee ID · পদ · Department লিখে খোঁজা); যেকোনোটায় কাউকে "Leave out"। কতজন পাবেন সাথে সাথে দেখায়। Group-এর notice প্রতিবার Employee-র বর্তমান Department / Branch দেখে — নতুন কেউ যোগ হলে তিনিও পান।
+3. **When & how:** Normal (শুধু Notice Board ও Dashboard), Important (login-এর পর popup — আগের সব notice এটাই), Urgent ("I have read this" না চাপা পর্যন্ত popup আসে)। Publish now / later আর Take down after (Dhaka সময়) — server প্রতি মিনিটে দেখে নিজে প্রকাশ করে ও সরায়। Pin on top, "I have read this", push (চালু থাকে), email (শুধু `notice_email` layer থাকলে দেখায়), আর পরদিন যাঁরা পড়েননি তাঁদের মনে করিয়ে দেওয়া (একবার)।
+4. **Review & publish:** কোথায় কী যাবে তার সারাংশ, "See it as a popup", তারপর Publish now / Schedule / Save as draft।
+
+তালিকায় প্রতিটা notice-এর অবস্থা (Live, Scheduled, Taken down, Paused, Draft), কাকে গেছে, কতজন খুলেছেন / পড়েছেন; Make a copy, Edit, Pause, Delete (ছবি ও ফাইলও মোছে)। **Who read it** (শুধু `notice_read_report` layer): কে খুলেছেন, কে "I have read this" দিয়েছেন, কে এখনো না — নাম ও Department অনুযায়ী, খোঁজা, Excel, আর "Send again to unread" (push)।
+
+কর্মীর দিকে: popup-এ cover, লেখা, ছবি, সংযুক্তি (চাপলে download / ফোনে share); "I have read this" না হয় "Got it"; Urgent-এ "Remind me later" শুধু এবারের মতো সরায়। Notice Board-এ pin করা আগে, সেখানেও "I have read this" দেওয়া যায়। Popup দেখা বা Board-এ আসা "opened" হিসেবে ধরা হয় (`notice_reads`)। আগের সাধারণ লেখায় দেওয়া line break এখন ঠিক দেখায়।
+
+ছবি ও ফাইল থাকে `.env`-এর `NOTICE_FILES_DIR` folder-এ (না দিলে `uploads/notices`), database-এ শুধু path (`notice_files`); notice মুছলে বা ফাইল সরালে ফাইলও মোছে, ২ দিনের বেশি পুরনো ব্যবহার-না-হওয়া upload নিজে মোছে (`noticeFiles.ts`, `NoticeRoutes.ts`)।
+
