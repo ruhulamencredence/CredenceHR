@@ -592,5 +592,10 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li>সার্ভার "live" বললে (Live Follow, ride) <code>LiveTrackingService</code> চালু হয়, আগের মতোই।</li>
 <li>থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা <code>clearTrackingSession</code> ডাকে), বা সার্ভার sign-in না মানলে (401/403)।</li>
 <li>প্রথমবার একবার জিজ্ঞেস করা হয় CredenceHR-কে battery optimisation থেকে বাদ দিতে। অনেক ফোন (Xiaomi, Oppo, Vivo, Samsung) নইলে background অ্যাপ বন্ধ করে দেয়।</li>
+<li><strong>Battery optimisation চালু থাকলেও</strong> তিনভাবে চলতে থাকে:</li>
+<li>ফোন ঘুমিয়ে (Doze) থাকলে service-এর timer থেমে যায়, কিন্তু GPS fix এলে ফোন জাগে। তাই fix আসার সঙ্গে সঙ্গেই পাঠানো হয়, আর পাঠানোর সময়টুকু CPU জাগিয়ে রাখা হয় (৩০ সেকেন্ডের wake lock)।</li>
+<li>প্রতি ১০ মিনিটে একটা alarm (<code>setAndAllowWhileIdle</code>, <code>DutyAlarmReceiver</code>) বাজে, যা Doze-এও আসে। এটা তখনই একবার পাঠায়, আর Android service বন্ধ করে দিয়ে থাকলে আবার চালু করার চেষ্টা করে।</li>
+<li><strong>সার্ভারের পাহারা</strong> (<code>TrackingWake.ts</code>, প্রতি ৫ মিনিটে): শেষ ২৪ ঘণ্টায় tracking করেছে কিন্তু ১২ মিনিট ধরে কোনো খবর নেই, এমন ফোনে একটা silent high-priority push (<code>tracking_wake</code>) যায়, প্রতি ফোনে ১৫ মিনিটে সর্বোচ্চ একবার। Android এমন push থেকে অ্যাপ বন্ধ থাকলেও tracking service আবার চালু করতে দেয়। যে ফোনে tracking চালু ছিল না (logout, অনুমতি নেই), সেটা push পেয়েও কিছু করে না।</li>
+<li>সীমা: ফোনের Settings থেকে অ্যাপ <strong>Force stop</strong> করলে, বা কিছু Xiaomi / Oppo ফোনে "Autostart" বন্ধ থাকলে, Android নিজেই অ্যাপের কাছে alarm বা push কিছুই পৌঁছাতে দেয় না। পরের বার অ্যাপ খুললে tracking আবার শুরু হয়।</li>
 <li>পুরনো APK-তে এই service নেই; সেখানে পাতা আগের মতোই পাঠায়।</li>
 </ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
