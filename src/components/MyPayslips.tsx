@@ -12,6 +12,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ChevronDown, Eye, FileDown, ReceiptText } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard } from './SelfCard';
 import { LoadingBlock } from './LoadingBlock';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
@@ -39,6 +42,8 @@ interface ListData {
 const dateText = (d: string | null) => (d ? new Date(String(d).length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dhaka' }) : '');
 
 export const MyPayslips: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Payslip');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<ListData | null>(null);
   const [error, setError] = useState('');
@@ -109,65 +114,10 @@ export const MyPayslips: React.FC<{ token: string; onBack?: () => void }> = ({ t
     }
   };
 
-  return (
-    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
-      <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-3xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Payslip']} />}
-        <div className="flex items-center gap-2 mb-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
-              <ArrowLeft className="w-5 h-5 text-slate-500" />
-            </button>
-          )}
-          <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
-            <ReceiptText className="w-5 h-5 text-sky-600 shrink-0" /> My Payslip
-          </h1>
-        </div>
-
-        {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700 mb-3">{error}</div>}
-        {!data && !error ? (
-          <LoadingBlock />
-        ) : data && !data.linked ? (
-          <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an employee record yet, so there are no payslips to show.</div>
-        ) : data && data.payslips.length === 0 ? (
-          <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">No payslips yet. A month shows here once Payroll has approved it.</div>
-        ) : (
-          data && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                {years.map((y) => (
-                  <button
-                    key={y}
-                    type="button"
-                    onClick={() => setYear(y)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${y === year ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                  >
-                    {y}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-slate-600">
-                {shown.length} payslip{shown.length === 1 ? '' : 's'} in {year} · net {money(yearNet)}
-              </p>
-              <ul className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-                {shown.map((p) => {
-                  const open = openId === p.id;
-                  const d = details[p.id];
-                  return (
-                    <li key={p.id}>
-                      <button type="button" onClick={() => setOpenId(open ? null : p.id)} className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50" aria-expanded={open}>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold text-slate-800">{monthLabel(p.month_year)}</span>
-                          <span className="block text-[11px] text-slate-500">
-                            {p.payment_status === 'paid' ? `Paid${p.payment_date || p.paid_at ? ` on ${dateText(p.payment_date || p.paid_at)}` : ''}` : 'Approved, payment pending'}
-                          </span>
-                        </span>
-                        <span className="text-sm font-bold text-slate-900 whitespace-nowrap">{money(p.net_salary)}</span>
-                        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                      </button>
-                      {open && (
-                        <div className="px-4 pb-4">
-                          {!d ? (
+  // A month's break-up (earnings, deductions, net, days, View / PDF).
+  const detailOf = (p: (typeof shown)[number], d: (typeof details)[number] | undefined) => (
+    <>
+      {!d ? (
                             <LoadingBlock rows={3} />
                           ) : (
                             <>
@@ -213,6 +163,101 @@ export const MyPayslips: React.FC<{ token: string; onBack?: () => void }> = ({ t
                               </div>
                             </>
                           )}
+    </>
+  );
+
+  return (
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
+      <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-3xl">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Payslip']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
+          {onBack && (
+            <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
+              <ArrowLeft className="w-5 h-5 text-slate-500" />
+            </button>
+          )}
+          <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
+            <ReceiptText className="w-5 h-5 text-sky-600 shrink-0" /> My Payslip
+          </h1>
+        </div>
+
+        {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700 mb-3">{error}</div>}
+        {!data && !error ? (
+          <LoadingBlock />
+        ) : data && !data.linked ? (
+          <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an employee record yet, so there are no payslips to show.</div>
+        ) : data && data.payslips.length === 0 ? (
+          <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">No payslips yet. A month shows here once Payroll has approved it.</div>
+        ) : (
+          data && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                {years.map((y) => (
+                  <button
+                    key={y}
+                    type="button"
+                    onClick={() => setYear(y)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${y === year ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                  >
+                    {y}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-600">
+                {shown.length} payslip{shown.length === 1 ? '' : 's'} in {year} · net {money(yearNet)}
+              </p>
+              {/* Phone: each month is a Directory-style card (green once paid,
+                  amber while payment is pending); tap it for the break-up. */}
+              <ul className={isPhone ? 'space-y-2.5' : 'rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100 overflow-hidden'}>
+                {shown.map((p) => {
+                  const open = openId === p.id;
+                  const d = details[p.id];
+                  if (isPhone) {
+                    const paid = p.payment_status === 'paid';
+                    return (
+                      <li key={p.id}>
+                        <SelfCard
+                          tone={paid ? 'green' : 'amber'}
+                          lead={<ReceiptText className="w-[18px] h-[18px]" />}
+                          title={monthLabel(p.month_year)}
+                          sub={paid ? `Paid${p.payment_date || p.paid_at ? ` on ${dateText(p.payment_date || p.paid_at)}` : ''}` : 'Approved, payment pending'}
+                          chips={[
+                            { label: `Net ${money(p.net_salary)}`, tone: 'violet' },
+                            { label: paid ? 'Paid' : 'Payment pending', tone: paid ? 'green' : 'amber' }
+                          ]}
+                          actions={
+                            <>
+                              <CardButton label="View payslip" disabled={busy === p.id} onClick={() => pdf(p.id, 'view')}>
+                                {busy === p.id ? <Spinner size={14} /> : <Eye className="w-3.5 h-3.5" />}
+                              </CardButton>
+                              <CardButton label="Download PDF" tone="accent" disabled={busy === p.id} onClick={() => pdf(p.id, 'download')}>
+                                <FileDown className="w-3.5 h-3.5" />
+                              </CardButton>
+                            </>
+                          }
+                          onClick={() => setOpenId(open ? null : p.id)}
+                        >
+                          {open && <div className="rounded-2xl bg-white/70 p-2.5">{detailOf(p, d)}</div>}
+                        </SelfCard>
+                      </li>
+                    );
+                  }
+                  return (
+                    <li key={p.id}>
+                      <button type="button" onClick={() => setOpenId(open ? null : p.id)} className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50" aria-expanded={open}>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold text-slate-800">{monthLabel(p.month_year)}</span>
+                          <span className="block text-[11px] text-slate-500">
+                            {p.payment_status === 'paid' ? `Paid${p.payment_date || p.paid_at ? ` on ${dateText(p.payment_date || p.paid_at)}` : ''}` : 'Approved, payment pending'}
+                          </span>
+                        </span>
+                        <span className="text-sm font-bold text-slate-900 whitespace-nowrap">{money(p.net_salary)}</span>
+                        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                      </button>
+                      {open && (
+                        <div className="px-4 pb-4">
+                          {detailOf(p, d)}
                         </div>
                       )}
                     </li>

@@ -766,26 +766,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const uploadAttachmentMessage = useCallback(
     async (params: { blob: Blob; messageType: 'image' | 'file' | 'audio'; filename: string; mimetype: string }) => {
       if (!activeRoomId) return;
-      if (params.blob.size > 5 * 1024 * 1024) {
-        alert('Attachment must be less than 5MB.');
+      if (params.blob.size > 50 * 1024 * 1024) {
+        alert('Attachment must be 50 MB or less.');
         return;
       }
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = reject;
-        reader.readAsDataURL(params.blob);
-      });
       try {
-        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages`), {
+        // The file itself is the body (no base64) — up to 50 MB.
+        const qs = new URLSearchParams({ messageType: params.messageType, filename: params.filename, mimetype: params.mimetype || 'application/octet-stream' });
+        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?${qs}`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            messageType: params.messageType,
-            attachment_base64: base64,
-            attachment_mimetype: params.mimetype,
-            attachment_filename: params.filename
-          })
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+          body: params.blob
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
@@ -794,6 +785,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           // every room member, sender included — whichever of the two
           // arrives second needs to no-op instead of adding a duplicate.
           setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+        } else {
+          const d = await res.json().catch(() => ({}));
+          alert(d.error || (res.status === 413 ? 'Attachment must be 50 MB or less.' : 'Could not send the attachment.'));
         }
       } catch {
         alert('Could not send — check your connection and try again.');

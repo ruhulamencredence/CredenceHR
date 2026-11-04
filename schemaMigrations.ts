@@ -639,7 +639,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   }
   try {
     // Superadmin-only grants: whether this Admin or User account can see/use the
-    // Movement Claim (GPS Check In/Out) and Conveyance Bill Claim sections on their
+    // Check In/Out (GPS Check In/Out) and Conveyance Bill Claim sections on their
     // own User Panel at all — same on/off pattern as can_manage_leave above, gated
     // for BOTH 'admin' and 'user' roles. OFF by default; a Superadmin always has
     // both implicitly.
@@ -1475,10 +1475,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add branches.project_id column: " + err.message);
     }
   }
-  // "Movement Claims" — a free-form (not tied to a fixed Project geofence) point A
+  // "Check In/Out" — a free-form (not tied to a fixed Project geofence) point A
   // -> point B travel record: a User checks in with a Purpose (why/where they're
   // heading out for office work) then later checks out once they get there/finish.
-  // Used for TA/DA-style reimbursement review in the Admin Panel -> Movement Claims
+  // Used for TA/DA-style reimbursement review in the Admin Panel -> Check In/Out
   // tab. Only one row per User may have status = 'open' at a time (enforced in
   // POST /api/claims/check-in) — distance_km is computed server-side on check-out.
   try {
@@ -1508,9 +1508,9 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // Admin the Superadmin explicitly grants the "conveyance" module to (see
   // ADMIN_MODULE_KEYS). One BILL groups several conveyance/travel line ITEMS for a
   // single User into one claim document. Each item is either pulled in from that
-  // User's own completed "Movement Claim" (the `claims` table above — its
+  // User's own completed "Check In/Out" (the `claims` table above — its
   // distance_km carries straight over so an Amount can be computed at a Rate/KM)
-  // or entered fully by hand for a trip that was never logged as a Movement Claim
+  // or entered fully by hand for a trip that was never logged as a Check In/Out
   // check-in/out at all (e.g. a one-off fare, or a trip from before this feature
   // existed). Item fields are copied from the source Claim at insert time rather
   // than just referencing it, so a bill's line items stay intact and printable
@@ -1545,7 +1545,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         id INT AUTO_INCREMENT PRIMARY KEY,
         bill_id INT NOT NULL,
         source ENUM('movement_claim','manual') NOT NULL DEFAULT 'manual',
-        -- Which Movement Claim this item came from, if any. UNIQUE so the same
+        -- Which Check In/Out this item came from, if any. UNIQUE so the same
         -- Claim can never end up billed twice across any Bill.
         claim_id INT NULL UNIQUE,
         entry_date DATE NOT NULL,
@@ -1705,7 +1705,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     console.warn("⚠️ Could not ensure user_claim_history table: " + err.message);
   }
   // Lets a Conveyance Bill Claim reference one or more of the User's own completed
-  // Movement Claims (check-in/out), each with its own Amount — see the long
+  // Check In/Out (check-in/out), each with its own Amount — see the long
   // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
   // out can only ever be referenced by ONE Conveyance Bill Claim.
   try {

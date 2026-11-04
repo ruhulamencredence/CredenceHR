@@ -29,8 +29,9 @@
 // TURN when the server is given one in .env —
 //   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN  (Cloudflare Calls TURN), or
 //   TURN_URLS (comma-separated) + TURN_USERNAME + TURN_CREDENTIAL  (any TURN, e.g. coturn).
-// Without TURN most calls still connect; ones behind strict mobile / office
-// networks may not.
+// Without TURN, calls on the same Wi-Fi usually connect, but phones on mobile
+// data (carrier-grade NAT) or behind strict office firewalls can't reach each
+// other and the call stays on "Connecting…" until it gives up — set TURN.
 
 import type { Express } from "express";
 import type { Server as SocketIOServer, Socket } from "socket.io";
@@ -94,6 +95,11 @@ async function turnServers(): Promise<any[]> {
 
 export function registerCallRoutes(app: Express, deps: { authenticateToken: any; queryDB: QueryDB }) {
   const { authenticateToken, queryDB } = deps;
+  if (!(process.env.CLOUDFLARE_TURN_KEY_ID && process.env.CLOUDFLARE_TURN_API_TOKEN) && !String(process.env.TURN_URLS || "").trim()) {
+    console.warn(
+      "⚠️ Calls: no TURN relay set (CLOUDFLARE_TURN_KEY_ID / CLOUDFLARE_TURN_API_TOKEN or TURN_URLS in .env) — calls between phones on mobile data or strict networks will stay on \"Connecting…\" and fail."
+    );
+  }
   app.get("/api/calls/ice-servers", authenticateToken, async (req: any, res) => {
     try {
       if (!(await callAccess(queryDB, Number(req.user.id))).ok) return res.status(403).json({ error: "Calls aren't turned on for your account." });

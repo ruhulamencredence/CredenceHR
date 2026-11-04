@@ -42,6 +42,9 @@ interface PayItem {
   department: string | null;
   name: string;
   kind: 'earning' | 'deduction';
+  // 'fine' = Fine / Penalty (its own column on the salary sheet; the MD can
+  // waive it); 'fine_waiver' / 'late_waiver' / 'md_correction' = the MD's.
+  category?: string | null;
   amount: number;
   start_month: string;
   end_month: string | null;
@@ -291,6 +294,7 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
                             <div className="font-semibold text-slate-800">{it.name}</div>
                             <div className="mt-0.5">
                               <KindBadge kind={it.kind} />
+                              {it.category === 'fine' && <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800">Fine</span>}
                             </div>
                             {it.remarks && <div className="text-[10px] text-slate-400 mt-0.5">{it.remarks}</div>}
                           </td>
@@ -516,6 +520,7 @@ const PayItemForm: React.FC<{
       (!search.trim() || [e.name, e.employee_code].some((v) => String(v || '').toLowerCase().includes(search.trim().toLowerCase())))
   );
   const comp = components.find((c) => String(c.id) === componentId);
+  const isFine = componentId === 'fine';
   const allShownPicked = shown.length > 0 && shown.every((e) => picked.has(e.id));
 
   const submit = () => {
@@ -526,8 +531,9 @@ const PayItemForm: React.FC<{
     onSave({
       employee_ids: Array.from(picked),
       component_id: comp ? comp.id : null,
-      name: comp ? undefined : name,
-      kind: comp ? undefined : kind,
+      name: comp ? undefined : isFine ? name.trim() || 'Fine / Penalty' : name,
+      kind: comp ? undefined : isFine ? 'deduction' : kind,
+      category: isFine ? 'fine' : undefined,
       amount: Number(amount),
       start_month: start,
       end_month: end || null,
@@ -568,11 +574,19 @@ const PayItemForm: React.FC<{
                   {c.name} — {c.component_type === 'earning' ? 'paid with salary' : 'taken from salary'}
                 </option>
               ))}
+              <option value="fine">Fine / Penalty — taken from salary (own column, can be waived)</option>
               <option value="other">Other — type a name</option>
             </SearchSelect>
             <p className="text-[10px] text-slate-400 mt-1">The list comes from Salary Setup → Salary Components.</p>
           </div>
-          {!comp && (
+          {isFine && (
+            <div>
+              <label className={labelCls}>Name on payslip</label>
+              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Fine / Penalty" />
+              <p className="text-[10px] text-slate-400 mt-1">Write the reason in the note (e.g. "Lost ID card"). It shows in the Fine column of the salary sheet.</p>
+            </div>
+          )}
+          {!comp && !isFine && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Name on payslip</label>

@@ -150,7 +150,7 @@ function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
   return out;
 }
 
-// Movement Claim History can also come as the "Multiple Check In/Out Details
+// Check In/Out History can also come as the "Multiple Check In/Out Details
 // Report": a few title lines, then "SL | Employee Code | Employee Name | Type |
 // Check In/Out Time | Visited Company | Address | Remarks", one line per Check
 // In or Check Out ("01-10-2026 08:44 AM"). Each person's lines are put in time

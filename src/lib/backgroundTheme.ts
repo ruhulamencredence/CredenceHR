@@ -160,3 +160,42 @@ export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): v
     // Offline/private-mode localStorage — the choice just won't survive a reload.
   }
 }
+
+// Phone page header colour (Profile -> Appearance, phone only): the soft
+// light behind the header of the blended phone pages (Timesheet, My Claims,
+// Leave… — headerPageTitle.ts BLENDED_HEADER_TITLES, index.css .page-glow). Three
+// choices; until one is picked the glow follows the background theme as
+// before. Per device, like the background (<html data-glow="...">).
+export type HeaderGlowId = 'violet' | 'orange' | 'sky';
+export const HEADER_GLOWS: { id: HeaderGlowId; label: string; swatch: string }[] = [
+  { id: 'violet', label: 'Violet & pink', swatch: 'radial-gradient(120% 90% at 0% 0%, #a78bfa 0%, transparent 60%), radial-gradient(90% 80% at 100% 0%, #f472b6 0%, transparent 60%), #efe6ff' },
+  { id: 'orange', label: 'Warm orange', swatch: 'radial-gradient(120% 90% at 0% 0%, #fdba74 0%, transparent 60%), radial-gradient(90% 80% at 100% 0%, #fda4af 0%, transparent 60%), #fff1e8' },
+  { id: 'sky', label: 'Sky blue', swatch: 'radial-gradient(120% 90% at 0% 0%, #7dd3fc 0%, transparent 60%), radial-gradient(90% 80% at 100% 0%, #a5b4fc 0%, transparent 60%), #e6f4ff' }
+];
+const GLOW_KEY = 'mpr_header_glow';
+const isGlow = (v: string | null): v is HeaderGlowId => HEADER_GLOWS.some((g) => g.id === v);
+export function getSavedHeaderGlow(): HeaderGlowId | null {
+  try {
+    const v = localStorage.getItem(GLOW_KEY);
+    if (isGlow(v)) return v;
+  } catch {
+    // localStorage unavailable — follow the theme.
+  }
+  return null;
+}
+// The colour the header shows right now: the one picked, else the theme's
+// own (Classic -> sky blue, Apple Glow -> violet; Minimal Mono's grey has no
+// match here).
+export function effectiveHeaderGlow(theme: BackgroundThemeId): HeaderGlowId | null {
+  return getSavedHeaderGlow() ?? (theme === 'default' ? 'sky' : theme === 'apple-glow' ? 'violet' : null);
+}
+export function applyHeaderGlow(id: HeaderGlowId | null, remember = false): void {
+  if (id) document.documentElement.dataset.glow = id;
+  else delete document.documentElement.dataset.glow;
+  if (!remember || !id) return;
+  try {
+    localStorage.setItem(GLOW_KEY, id);
+  } catch {
+    // The choice just won't survive a reload.
+  }
+}

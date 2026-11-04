@@ -19,7 +19,7 @@
 //
 // Dependencies below are all defined elsewhere in server.ts and shared with
 // other modules (e.g. createApprovalRequest/attachApprovalStatuses also back
-// Leave/Claims, haversineMeters also backs Movement Claims), so they're
+// Leave/Claims, haversineMeters also backs Check In/Out), so they're
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
@@ -29,6 +29,7 @@ import type { Express } from "express";
 // has no dependency back on this file.
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
 import { loadRoster } from "./RosterRoutes";
+import { restrictedAttendanceProjects } from "./AttendanceProjects";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -80,20 +81,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // measure the distance against). One row per (user, project, calendar day):
   // Check In fills check_in_*, a later Check Out the same day fills check_out_*.
 
-  // Which project IDs the calling user may act on for Remote Attendance —
-  // every project for an Admin/Superadmin, only the ones explicitly granted
-  // for a plain User (mirrors GET /api/projects's own visibility rule) —
-  // UNLESS a Superadmin/Admin has pinned this account (role 'user' OR
-  // 'admin') to exactly one Project for Attendance (users.attendance_project_id,
-  // set via Admin Panel -> Users -> "Attend. Project"), in which case that one
-  // Project overrides everything else below, even an otherwise-unrestricted
-  // Admin. Never applies to 'superadmin' — it has no such column value.
-  async function getAllowedProjectIds(userId: number, role: string): Promise<Set<number> | null> {
-    if (role !== "superadmin") {
-      const pinnedRows = await queryDB("SELECT attendance_project_id FROM users WHERE id = ?", [userId]);
-      const pinned = pinnedRows.length > 0 ? pinnedRows[0].attendance_project_id : null;
-      if (pinned != null) return new Set([Number(pinned)]);
-    }
+  // Which project IDs the calling user may act on for Remote Attendance on
+  // `ymd` (today unless given): the account's own check-in list when an Admin
+  // set one (Module Access -> Remote Attendance, user_attendance_projects —
+  // only the Projects whose From/To dates cover the day; see
+  // AttendanceProjects.ts), otherwise every project for an Admin/Superadmin
+  // and only the ones explicitly granted for a plain User (mirrors GET
+  // /api/projects's own visibility rule). A Superadmin is never limited.
+  async function getAllowedProjectIds(userId: number, role: string, ymd: string = todayInDhaka()): Promise<Set<number> | null> {
+    const listed = await restrictedAttendanceProjects(queryDB, userId, role, ymd);
+    if (listed) return listed;
     if (role === "admin" || role === "superadmin") return null; // null = no restriction
     const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [userId]);
     return new Set(perms.map((p: any) => Number(p.project_id)));
@@ -264,6 +261,12 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   });
 
+  const canUpdateCheckOut = async (user: any): Promise<boolean> => {
+    if (user?.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_update_check_out FROM users WHERE id = ?", [user.id])) || [];
+    return Number(rows[0]?.can_update_check_out) === 1;
+  };
+
   app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const parsed = parseAttendanceCoords(req.body);
@@ -316,8 +319,25 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!hasRemoteCheckIn && !officeCheckInAt) {
         return res.status(400).json({ error: "You need to Check In for this project before you can Check Out." });
       }
-      if (hasRemoteCheckOut || (!hasRemoteCheckIn && officeCheckOutAt)) {
+      if (!hasRemoteCheckIn && officeCheckOutAt) {
         return res.status(400).json({ error: "You've already checked out for this project today." });
+      }
+      if (hasRemoteCheckOut) {
+        // "Update Out Time" (users.can_update_check_out, off by default): the
+        // same day, the Out Time can be given again — e.g. after tapping it
+        // too early. The first one is kept (check_out_first_at), and the new
+        // time goes for approval again: the old Out Time's request goes.
+        if (!(await canUpdateCheckOut(req.user))) {
+          return res.status(400).json({ error: "You've already checked out for this project today." });
+        }
+        await queryDB(
+          `UPDATE attendance SET check_out_first_at = COALESCE(check_out_first_at, check_out_at), check_out_update_count = check_out_update_count + 1,
+                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ? WHERE id = ?`,
+          [lat, lng, distance, remarks, existing[0].id]
+        );
+        await queryDB("DELETE FROM approval_requests WHERE source_type = 'attendance' AND event_type = 'check_out' AND source_id = ?", [existing[0].id]);
+        await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
+        return res.json({ success: true, updated: true, distance_m: distance, radius_m: Number(project.location_radius), project_name: project.project_name });
       }
 
       if (existing.length > 0) {
@@ -431,6 +451,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         check_out_lng: remoteRow?.check_out_lng ?? null,
         check_out_distance_m: remoteRow?.check_out_distance_m ?? null,
         check_out_remarks: remoteRow?.check_out_remarks ?? null,
+        check_out_first_at: remoteRow?.check_out_first_at ?? null,
+        check_out_update_count: Number(remoteRow?.check_out_update_count || 0),
+        // An Out Time given here (not by the office device) can be given again today.
+        can_update_check_out: !!remoteRow?.check_out_at && (await canUpdateCheckOut(req.user)),
         check_in_approval: remoteRow?.check_in_approval ?? null,
         check_out_approval: remoteRow?.check_out_approval ?? null,
         check_in_source: remoteRow?.check_in_at ? "remote" : office?.check_in_at ? "office" : null,
@@ -521,20 +545,20 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const { project_id, attendance_date, check_in_at, check_out_at, remarks, file_base64, file_name, file_mimetype } = req.body || {};
 
       let projectId = Number(project_id);
-      // A Superadmin/Admin-pinned Attendance Project (users.attendance_project_id)
-      // overrides whatever the client sent — Timesheet's Correct Attendance modal
-      // already drops its own Project picker and only ever sends the pinned
-      // Project once one is set (see AttendanceCorrectionModal.tsx), but this is
-      // enforced here too so a direct API call can't file a correction against a
-      // different Project, same defense-in-depth as resolveAttendanceLocation's
-      // Check In/Out gate above. Never applies to 'superadmin'.
-      if (req.user.role !== "superadmin") {
-        const pinnedRows = await queryDB("SELECT attendance_project_id FROM users WHERE id = ?", [req.user.id]);
-        const pinned = pinnedRows.length > 0 ? pinnedRows[0].attendance_project_id : null;
-        if (pinned != null) projectId = Number(pinned);
+      if (!attendance_date) return res.status(400).json({ error: "Date is required." });
+      // An account with its own check-in list (Module Access -> Remote
+      // Attendance) can only correct a day at a Project on that list for that
+      // date; with exactly one, that one is used whatever the client sent
+      // (Timesheet's Correct Attendance drops its picker then). Never applies
+      // to a Superadmin.
+      const listed = await restrictedAttendanceProjects(queryDB, Number(req.user.id), req.user.role, String(attendance_date).slice(0, 10));
+      if (listed) {
+        if (listed.size === 1 && !listed.has(projectId)) projectId = [...listed][0];
+        if (!listed.has(projectId)) {
+          return res.status(403).json({ error: listed.size ? "You can only correct attendance at your own check-in projects for that day." : "You had no check-in project on that day." });
+        }
       }
       if (!projectId) return res.status(400).json({ error: "Project is required." });
-      if (!attendance_date) return res.status(400).json({ error: "Date is required." });
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       if (!check_in_at && !check_out_at) return res.status(400).json({ error: "Enter an In Time or Out Time to correct." });

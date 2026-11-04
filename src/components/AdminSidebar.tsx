@@ -79,7 +79,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     { tab: 'employees', label: 'Employees', icon: Contact },
     { tab: 'departments', label: 'Departments', icon: Users2 },
     { tab: 'notices', label: 'Notices', icon: Bell },
-    { tab: 'claims', label: 'Movement Claims', icon: Route },
+    { tab: 'claims', label: 'Check In/Out', icon: Route },
     { tab: 'conveyance', label: 'Conveyance Bill', icon: Wallet },
     { tab: 'approvals', label: 'Approvals', icon: ShieldCheck },
     { tab: 'attendance', label: 'Remote Attendance', icon: Navigation },

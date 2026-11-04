@@ -15,7 +15,7 @@ interface Person { id: number; name: string; employee_id?: string | null; design
 interface Waiting { id: number; source_type: string; source_label?: string; requested_by_name?: string | null }
 
 const SOURCE: Record<string, string> = {
-  leave_application: 'Leave', leave_reliever: 'Reliever', leave_direct: 'Leave', user_claim: 'Conveyance claim', claim: 'Movement claim',
+  leave_application: 'Leave', leave_reliever: 'Reliever', leave_direct: 'Leave', user_claim: 'Conveyance claim', claim: 'Check in/out',
   attendance_correction: 'Timesheet correction', asset_requisition: 'Asset requisition', vehicle_requisition: 'Ride', mobile_limit_request: 'Mobile limit',
   advance_request: 'Loan / advance', exit_clearance: 'Exit clearance', hr_action: 'HR action', attendance: 'Attendance'
 };

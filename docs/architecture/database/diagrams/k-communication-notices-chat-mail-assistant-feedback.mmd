@@ -229,11 +229,33 @@ erDiagram
     varchar sender PK
     datetime sent_at
   }
+  notice_animations {
+    int id PK
+    varchar name
+    mediumtext lottie_json
+    int size_bytes
+  }
   notice_dismissals {
     int id PK
     int notice_id FK
     int user_id FK
     timestamp dismissed_at
+  }
+  notice_files {
+    int id PK
+    int notice_id FK
+    enum kind
+    enum role
+    varchar original_name
+    varchar mimetype
+    int size_bytes
+  }
+  notice_reads {
+    int id PK
+    int notice_id FK
+    int user_id FK
+    timestamp opened_at
+    timestamp acknowledged_at
   }
   notice_targets {
     int id PK
@@ -305,6 +327,9 @@ erDiagram
   users ||..o{ mail_templates : "user_id"
   notices ||--o{ notice_dismissals : "notice_id"
   users ||--o{ notice_dismissals : "user_id"
+  notices ||--o{ notice_files : "notice_id"
+  notices ||--o{ notice_reads : "notice_id"
+  users ||--o{ notice_reads : "user_id"
   notices ||--o{ notice_targets : "notice_id"
   users ||--o{ notice_targets : "user_id"
   users ||--o{ ride_saved_places : "user_id"

@@ -13,6 +13,8 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
@@ -47,10 +49,10 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Nobody active is on its current Layer any more — a Superadmin decides.
   layer_stuck?: boolean;
   created_at: string;
-  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
+  // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
   // this Conveyance Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
-  // deciding. Empty/absent when the claim has no Movement Claim attached
+  // deciding. Empty/absent when the claim has no Check In/Out attached
   // (a plain hand-entered Amount).
   claim_refs?: UserClaimReference[];
   // Only on a 'user_claim' item — the claim's bills (category / date / amount).
@@ -142,6 +144,13 @@ interface AvailableVehicle {
 }
 
 
+// Two letters for the requester's round tile on a phone card.
+const initialsOf = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
     ? 'Conveyance Bill Claim'
@@ -167,7 +176,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Loan / Advance Request'
     : t === 'hr_action'
     ? 'HR Action'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar
 // like Leave Application/Timesheet, but NOT gated to Admin Panel access or any
@@ -187,6 +196,10 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // neither is an approval_requests row — see the design note on GET
 // /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('Approve Application');
+  // Phone: each request is a Directory-style card (tinted by how it stands)
+  // on the page instead of a row inside one big white panel.
+  const isPhone = useIsPhone();
   // Same isNativeApp split as LeaveManage.tsx / Timesheet.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this
@@ -213,7 +226,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
   // "Add approver" popup (ad-hoc approver) for one item.
   const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
-  // The referenced Movement Claim currently shown on the read-only location
+  // The referenced Check In/Out currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
   // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
   // Panel's Conveyance Bill Claim tab) already reuses for this.
@@ -419,16 +432,20 @@ useLiveRefresh(() => load(true));
   };
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    // Phone: no page colour of its own (the header's glow shows through)
+    // and the title sits in the header (usePhoneHeaderTitle).
+    <div className="w-full min-h-[calc(100vh-4rem)] md:bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Approve Application']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Approve Application']} onBack={onBack} />
+          </div>
         )}
 
         <ApproverSignatureCard token={token} />
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
-            <div className="flex items-center gap-3">
+        <div className={isPhone ? '' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
+            <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5 text-blue-600" />
               </div>
@@ -463,6 +480,10 @@ useLiveRefresh(() => load(true));
                     }`}
                   >
                     {label}
+                    {/* Phone: the count sits here, the title row is hidden. */}
+                    {key === 'pending' && items.length > 0 && (
+                      <span className={`md:hidden ml-1.5 px-1.5 rounded-full text-[11px] ${view === key ? 'bg-white/25' : 'bg-blue-100 text-blue-700'}`}>{items.length}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -502,7 +523,7 @@ useLiveRefresh(() => load(true));
               <p className="text-sm">Nothing waiting on you right now.</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className={isPhone ? 'space-y-2.5 pt-1' : 'divide-y divide-slate-100'}>
               {items.map((item) => {
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
@@ -526,10 +547,27 @@ useLiveRefresh(() => load(true));
                 return (
                   <div
                     key={key}
-                    className={`px-6 py-4 ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
+                    className={`${
+                      isPhone
+                        ? `rounded-[28px] border border-white/70 p-3 bg-gradient-to-br shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] [&_input]:bg-white/70 ${
+                            item.no_approver || item.layer_stuck ? 'from-rose-100/70 via-white/50 to-pink-50/40' : 'from-amber-100/70 via-white/50 to-orange-50/40'
+                          }`
+                        : 'px-6 py-4'
+                    } ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
                     onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
                   >
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'justify-between flex-wrap'}`}>
+                      {isPhone && (
+                        <div className="relative shrink-0">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold ring-2 ring-white/80 shadow-sm ${
+                              item.no_approver || item.layer_stuck ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {initialsOf(item.requested_by_name || '?')}
+                          </div>
+                        </div>
+                      )}
                       <div className="min-w-0 max-w-full">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-slate-800">

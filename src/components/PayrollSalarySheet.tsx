@@ -41,6 +41,8 @@ interface SheetRow {
   pf: number;
   advance: number;
   other_deduction: number;
+  // Fine / Penalty (pay items of that category); a waiver is in extra_pay.
+  fine: number;
   extra_deduction: number;
   total_deduction: number;
   net: number;
@@ -127,7 +129,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
   const exportExcel = () => {
     const head = [
       'SL', 'Employee ID', 'Name', 'Department', 'Designation', 'Working days', 'Present', 'Absent', 'Leave', 'LWP', 'Late', 'Late cut (days)', 'OT hours',
-      'Basic', 'Allowances', 'Overtime', 'Bonus', 'Extra pay', 'Gross', 'Absent cut', 'Late cut', 'Tax', 'PF', 'Advance / Loan', 'Other ded.', 'Extra ded.',
+      'Basic', 'Allowances', 'Overtime', 'Bonus', 'Extra pay', 'Gross', 'Absent cut', 'Late cut', 'Tax', 'PF', 'Advance / Loan', 'Other ded.', 'Fine', 'Extra ded.',
       'Total deduction', 'Net', `Net ${prevMonth}`, 'Change %', 'Status', 'Paid to'
     ];
     const body = shownRows.map((r, i) => {
@@ -135,7 +137,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
       return [
         i + 1, r.employee_code, r.employee_name, r.department, r.designation, r.working_days, r.present_days, r.absent_days, r.leave_days, r.lwp_days, r.late_count,
         r.late_deduction_days, r.overtime_hours, r.basic, r.allowances, r.overtime, r.bonus, r.extra_pay, r.gross, r.absent_deduction, r.late_deduction, r.tax, r.pf,
-        r.advance, r.other_deduction, r.extra_deduction, r.total_deduction, r.net, r.last_net ?? '', c == null ? '' : Math.round(c * 10) / 10, r.status, r.paid_to
+        r.advance, r.other_deduction, r.fine || 0, r.extra_deduction, r.total_deduction, r.net, r.last_net ?? '', c == null ? '' : Math.round(c * 10) / 10, r.status, r.paid_to
       ];
     });
     const ws = XLSX.utils.aoa_to_sheet([[`Salary Sheet — ${month}`], [], head, ...body]);
@@ -201,6 +203,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                       <th className={th}>Late</th>
                       <th className={th}>Gross</th>
                       <th className={th} title="Absent + late deduction">Absent / late cut</th>
+                      <th className={th}>Fine</th>
                       <th className={th} title="Tax + PF + advance / loan + other + extra deductions">Other deductions</th>
                       <th className={th}>Total ded.</th>
                       <th className={th}>Net</th>
@@ -212,7 +215,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                   <tbody className="divide-y divide-slate-100">
                     {pageRows.length === 0 && (
                       <tr>
-                        <td colSpan={12} className="px-4 py-8 text-center text-slate-400">Nobody matches these filters.</td>
+                        <td colSpan={13} className="px-4 py-8 text-center text-slate-400">Nobody matches these filters.</td>
                       </tr>
                     )}
                     {pageRows.map((r) => {
@@ -237,6 +240,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                             <td className={`${td} ${r.late_count ? 'text-amber-700 font-semibold' : 'text-slate-400'}`}>{r.late_count}</td>
                             <td className={`${td} text-slate-800`}>{n2(r.gross)}</td>
                             <td className={`${td} ${r.absent_deduction + r.late_deduction ? 'text-rose-700' : 'text-slate-400'}`}>{n2(r.absent_deduction + r.late_deduction)}</td>
+                            <td className={`${td} ${r.fine ? 'text-rose-700' : 'text-slate-400'}`}>{n2(r.fine || 0)}</td>
                             <td className={`${td} text-slate-600`}>{n2(others)}</td>
                             <td className={`${td} text-rose-700`}>{n2(r.total_deduction)}</td>
                             <td className={`${td} font-bold text-slate-900`}>{n2(r.net)}</td>
@@ -256,7 +260,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                           </tr>
                           {isOpen && (
                             <tr className="bg-slate-50/70">
-                              <td colSpan={12} className="px-4 py-3">
+                              <td colSpan={13} className="px-4 py-3">
                                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-1.5 text-[11px]">
                                   {(
                                     [
@@ -272,6 +276,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                                       ['PF', n2(r.pf)],
                                       ['Advance / Loan', n2(r.advance)],
                                       ['Other ded.', n2(r.other_deduction)],
+                                      ['Fine', n2(r.fine || 0)],
                                       ['Extra ded.', n2(r.extra_deduction)],
                                       ['Total deduction', n2(r.total_deduction)],
                                       ['Net', n2(r.net)],
@@ -306,6 +311,7 @@ export const PayrollSalarySheet: React.FC<{ token: string; month: string }> = ({
                         <td className={td}>{sum('late_count')}</td>
                         <td className={td}>{n2(sum('gross'))}</td>
                         <td className={td}>{n2(sum('absent_deduction') + sum('late_deduction'))}</td>
+                        <td className={td}>{n2(sum('fine'))}</td>
                         <td className={td}>{n2(sum('tax') + sum('pf') + sum('advance') + sum('other_deduction') + sum('extra_deduction'))}</td>
                         <td className={td}>{n2(sum('total_deduction'))}</td>
                         <td className={td}>{n2(sum('net'))}</td>

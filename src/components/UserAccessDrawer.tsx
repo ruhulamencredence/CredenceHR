@@ -23,6 +23,7 @@ import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { AttendanceProjectsEditor } from './AttendanceProjectsEditor';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
   | 'can_job_edit'
@@ -53,7 +54,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_login_location: 'See last login location',
   can_access_user_panel: 'User Panel access',
   can_manage_leave: 'Leave balance edit',
-  can_view_movement_claims: 'Movement Claim',
+  can_view_movement_claims: 'Check In/Out',
   can_view_conveyance_claims: 'Conveyance Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
@@ -69,6 +70,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_roster: 'My Duty Roster',
   can_take_break: 'Break Time',
   can_save_ride_places: 'Book a Ride — saved places',
+  can_update_check_out: 'Remote Attendance — update Out Time',
   can_add_adhoc_approver: 'Approvals — add an ad-hoc approver',
   can_use_assistant_voice: 'AI Assistant — voice',
   can_sign_documents: 'Documents to Sign',
@@ -369,6 +371,7 @@ export function UserAccessDrawer({
     { label: 'My Duty Roster', on: !!u.can_view_roster },
     { label: 'Break Time', on: !!u.can_take_break },
     { label: 'Book a Ride — saved places', on: !!u.can_save_ride_places },
+    { label: 'Remote Attendance — update Out Time', on: !!u.can_update_check_out },
     { label: 'Approvals — add an ad-hoc approver', on: !!u.can_add_adhoc_approver },
     { label: 'AI Assistant — voice', on: !!u.can_use_assistant_voice },
     { label: 'Documents to Sign', on: !!u.can_sign_documents },
@@ -381,7 +384,7 @@ export function UserAccessDrawer({
     { label: 'My Service Book', on: !!u.can_view_service_book },
     { label: 'Loan / Advance Request', on: !!u.can_view_loan_request },
     { label: 'My Targets', on: !!u.can_view_targets },
-    { label: 'Movement Claim', on: !!u.can_view_movement_claims },
+    { label: 'Check In/Out', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
@@ -665,22 +668,9 @@ export function UserAccessDrawer({
                     onToggle={() => toggle('can_use_attendance', !!u.can_use_attendance)}
                   >
                     {u.can_use_attendance && (
-                      <label className="block">
-                        <span className="text-[11px] text-slate-500">Allowed project for check-in</span>
-                        <SearchSelect
-                          value={u.attendance_project_id ?? ''}
-                          disabled={busy === 'attendance_project'}
-                          onChange={(e) => run('attendance_project', () => onAttendanceProject(e.target.value ? Number(e.target.value) : null))}
-                          className="mt-0.5 w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          <option value="">Any project (no restriction)</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.project_name}
-                            </option>
-                          ))}
-                        </SearchSelect>
-                      </label>
+                      // One or many check-in Projects, each with optional
+                      // From / To dates (AttendanceProjectsEditor.tsx).
+                      <AttendanceProjectsEditor token={token} userId={u.id} projects={projects} />
                     )}
                   </FeatureRow>
                   <FeatureRow

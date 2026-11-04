@@ -14,6 +14,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { fetchPhoto } from './UserAvatar';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { registerHeaderSearch, unregisterHeaderSearch, setHeaderSearchBarHidden } from '../lib/headerSearch';
 
 interface EmployeeDirectoryProps {
@@ -149,6 +150,7 @@ const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
 );
 
 export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack, isActive }) => {
+  usePhoneHeaderTitle('Employee Directory', !!isActive);
   const isNativeApp = Capacitor.isNativePlatform();
 
   const [employees, setEmployees] = useState<EmployeeDirectoryEntry[]>([]);
@@ -285,6 +287,15 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
     });
   }, [employees, search, departmentFilter, designationFilter, companyFilter]);
 
+  // People per department, for the phone's department chips.
+  const deptCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of employees) {
+      const k = String(e.department_id || '');
+      if (k) m.set(k, (m.get(k) || 0) + 1);
+    }
+    return m;
+  }, [employees]);
   const filteredDepartments = useMemo(() => {
     const q = deptSearchQuery.trim().toLowerCase();
     if (!q) return departments;
@@ -339,8 +350,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Employee Directory']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Employee Directory']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
@@ -382,15 +396,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
           )}
 
           {/* Search & Control Bar */}
-          <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
+          {/* Phone: a white pill search box and a row of department chips,
+              in the same white-card look as the employee cards below. */}
+          <div className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
             <div className="relative flex-1" ref={searchBarRef}>
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-4 sm:left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or Employee ID…"
-                className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                className="w-full pl-10 sm:pl-9 pr-9 py-3 sm:py-2.5 bg-white sm:bg-slate-50 border-0 sm:border sm:border-slate-200 rounded-full sm:rounded-xl text-sm text-slate-900 shadow-[0_8px_24px_-10px_rgba(15,23,42,0.25)] sm:shadow-none focus:ring-2 focus:ring-[color:var(--g-accent)] sm:focus:ring-blue-600 focus:outline-none"
               />
               {search && (
                 <button
@@ -410,7 +426,28 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 to narrow a long roster down to one team while on mobile. A
                 searchable dropdown (instead of a plain <select>) so a long
                 department list doesn't force a blind scroll. */}
-            <div className="relative w-full lg:w-56" ref={deptDropdownRef}>
+            {/* Phone: departments as a sideways-scrolling row of chips, with
+                how many people each has. */}
+            <div className="sm:hidden -mx-1 px-1 flex gap-2 overflow-x-auto gsidebar-no-scrollbar pb-1" role="tablist" aria-label="Department">
+              {[{ id: '', name: 'All', count: employees.length }, ...departments.map((d) => ({ id: String(d.id), name: d.name, count: deptCounts.get(String(d.id)) || 0 }))].map((d) => {
+                const on = departmentFilter === d.id;
+                return (
+                  <button
+                    key={d.id || 'all'}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setDepartmentFilter(d.id)}
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${on ? 'text-white' : 'bg-white text-slate-600 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.3)]'}`}
+                    style={on ? { background: 'var(--g-accent)' } : undefined}
+                  >
+                    {d.name}
+                    <span className={`px-1.5 rounded-full text-[10px] ${on ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{d.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block relative w-full lg:w-56" ref={deptDropdownRef}>
               <button
                 type="button"
                 onClick={() => setDeptDropdownOpen((o) => !o)}

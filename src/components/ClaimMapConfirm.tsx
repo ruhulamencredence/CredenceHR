@@ -90,11 +90,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
       try {
         status = (await Geolocation.requestPermissions()).location;
       } catch {
-        throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+        throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
       }
     }
     if (status !== 'granted') {
-      throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+      throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
@@ -117,7 +117,7 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // check-in/check-out API call fires — lets the user see the point(s) on a map
 // before committing. On check-out, draws BOTH the original Check In point and
 // the current (Check Out) point with a line + distance between them, since a
-// Movement Claim is a point A -> point B travel record, not a fixed-site visit.
+// Check In/Out is a point A -> point B travel record, not a fixed-site visit.
 export default function ClaimMapConfirm({
   kind,
   purpose,

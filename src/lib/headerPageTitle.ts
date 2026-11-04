@@ -41,6 +41,41 @@ export function useHeaderPageTitle(): string | null {
 }
 
 // Phone pages whose header blends into the page: no coloured bar, round
-// white buttons, dark title, and the theme's soft glow behind it (Navbar.tsx,
-// index.css .hdr-blend / .page-glow).
-export const BLENDED_HEADER_TITLES = new Set(['Timesheet', 'My Claims', 'Leave']);
+// white buttons, dark title, and a soft glow behind it — the colour picked in
+// Profile -> Appearance, else the theme's (Navbar.tsx, index.css .hdr-blend /
+// .page-glow, backgroundTheme.ts HEADER_GLOWS).
+export const BLENDED_HEADER_TITLES = new Set([
+  'Timesheet',
+  'My Claims',
+  'Leave',
+  'My Tasks',
+  'My Targets',
+  'Approve Application',
+  'Documents to Sign',
+  'My Duty Roster',
+  'Break Time',
+  'Conveyance Bill Claim',
+  'My Loan / Advance',
+  'My Payslip',
+  'My Asset',
+  'My Mobile SIM',
+  'SIM & ID Card',
+  'Book a Ride',
+  'My Letters & Service Record',
+  'Credence Mail',
+  'Alerts',
+  'Employee Directory',
+  'Grievance & Disciplinary',
+  'My Resignation'
+]);
+
+// A page that puts its own title in the phone header while it's open (the
+// title row on the page itself is then hidden on a phone). Desktop shows the
+// logo either way — the header's title slot is phone-only.
+export function usePhoneHeaderTitle(next: string, active = true) {
+  useEffect(() => {
+    if (!active) return;
+    setHeaderPageTitle(next);
+    return () => setHeaderPageTitle(null);
+  }, [next, active]);
+}

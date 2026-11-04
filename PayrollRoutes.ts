@@ -59,7 +59,7 @@ interface PayrollRouteDeps {
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
   requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary" | "custom_report") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary" | "custom_report" | "hrd_review") => Promise<boolean>;
   // The Monthly Attendance Report's per-person month (AttendanceRoutes.ts) —
   // the Department Summary adds it up so both always agree.
   computeMonthlyReport: (user: any, query: any) => Promise<any>;
@@ -3899,23 +3899,27 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // One employee's salary, outside the month's own approval (e.g. a salary
-  // released from hold after Audit approved the month): Audit processes it
-  // (Payroll layer "audit_approve"), Accounts pays it ("accounts_pay").
-  // The month's batch has to be with Audit already (PayrollApprovalRoutes.ts).
-  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res) => {
+  // released from hold after the month went to Accounts): the HR Director
+  // approves it (Payroll layer "hrd_review"; "audit_approve" still works for
+  // an account set up before the HR Director step), Accounts pays it.
+  // The month has to be past HR already (PayrollApprovalRoutes.ts).
+  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
+      if (!(await hasModuleLayer(req.user, "payroll", "hrd_review")) && !(await hasModuleLayer(req.user, "payroll", "audit_approve"))) {
+        return res.status(403).json({ error: "You don't have the HR Director review permission." });
+      }
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       if (rows[0].payment_status !== "unpaid") return res.status(400).json({ error: "Only an Unpaid payroll run can be marked Processed." });
       if (Number(rows[0].is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
       const b = await batchFor(queryDB, String(rows[0].month_year));
-      if (!b || !["submitted", "approved", "paid"].includes(b.status)) {
-        return res.status(400).json({ error: "Submit this month's salary for Audit first (Payroll → Approval)." });
+      if (!b || !["approved", "paid"].includes(b.status)) {
+        return res.status(400).json({ error: "This month's salary has to reach Accounts first (Payroll → Approval)." });
       }
       // Same duty split as approving the month (PayrollApprovalRoutes.ts).
       const me = Number(req.user.id);
       if (req.user.role !== "superadmin" && [rows[0].generated_by, rows[0].last_edited_by, b.submitted_by].some((u) => Number(u) === me)) {
-        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else from Audit has to approve it." });
+        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else has to approve it." });
       }
       const pr: any = await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ? AND payment_status = 'unpaid' AND COALESCE(is_held, 0) = 0", [req.params.id]);
       if (pr && pr.affectedRows === 0) return res.status(409).json({ error: "This payroll run was just changed by someone else — reload it." });

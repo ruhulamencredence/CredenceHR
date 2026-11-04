@@ -15,6 +15,9 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, PenLine, FileText, Download, Eye, CheckCircle2, Clock, XCircle, ShieldCheck, Loader2, Copy, Check, KeyRound, BookOpenCheck } from 'lucide-react';
 import type { User } from '../types';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard, type CardTone } from './SelfCard';
 import { SignaturePad } from './SignaturePad';
 import { DocReader } from './DocReader';
 import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
@@ -251,6 +254,8 @@ const CopyCode: React.FC<{ code: string }> = ({ code }) => {
 };
 
 export const MySignatures: React.FC<{ token: string; user: User; onBack?: () => void }> = ({ token, user, onBack }) => {
+  usePhoneHeaderTitle('Documents to Sign');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const [docs, setDocs] = useState<ESignDoc[] | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -287,9 +292,10 @@ export const MySignatures: React.FC<{ token: string; user: User; onBack?: () => 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-4xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Documents to Sign']} />}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Documents to Sign']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />
@@ -333,7 +339,52 @@ export const MySignatures: React.FC<{ token: string; user: User; onBack?: () => 
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{tab === 'todo' ? 'Nothing is waiting for your signature.' : 'No documents yet.'}</div>
         ) : (
           <div className="space-y-3">
-            {shown.map((d) => (
+            {shown.map((d) =>
+              isPhone ? (
+                // Phone: the shared Directory-style card, tinted by where the
+                // signing stands (amber while it is your turn or out for
+                // signing, green signed, rose declined).
+                <SelfCard
+                  key={d.id}
+                  tone={(d.my_turn ? 'amber' : ({ none: 'slate', pending: 'amber', completed: 'green', declined: 'rose', cancelled: 'slate' } as Record<string, CardTone>)[d.sign_status]) || 'blue'}
+                  lead={<FileText className="w-[18px] h-[18px]" />}
+                  dot={d.my_turn ? 'amber' : undefined}
+                  title={d.doc_type}
+                  sub={`${d.file_name} · ${d.owner_id === user.id ? 'your document' : d.owner_name}`}
+                  chips={[
+                    {
+                      label: d.my_turn ? 'Your turn' : STATUS_LABEL[d.sign_status],
+                      tone: d.my_turn || d.sign_status === 'pending' ? 'amber' : d.sign_status === 'completed' ? 'green' : d.sign_status === 'declined' ? 'rose' : undefined
+                    }
+                  ]}
+                  actions={
+                    <>
+                      <CardButton label="Read" onClick={() => void openProtectedFile(token, `/api/employee-documents/${d.id}/file`).catch((e) => setError(e.message))}>
+                        <Eye className="w-3.5 h-3.5" />
+                      </CardButton>
+                      {d.has_signed_file && (
+                        <CardButton label="Signed PDF" tone="green" onClick={() => void openProtectedFile(token, `/api/esign/documents/${d.id}/signed`).catch((e) => setError(e.message))}>
+                          <Download className="w-3.5 h-3.5" />
+                        </CardButton>
+                      )}
+                    </>
+                  }
+                >
+                  {d.requested_by && <p className="text-[11px] text-slate-600 truncate">Sent by {d.requested_by}, {dhakaTime(d.requested_at)}</p>}
+                  <SignerSteps d={d} me={user.id} />
+                  {d.verify_code && d.sign_status === 'completed' && <CopyCode code={d.verify_code} />}
+                  {d.my_turn && (
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setDeclining(d)} className="flex-1 py-2 rounded-full text-xs font-semibold text-rose-700 bg-white/70">
+                        Decline
+                      </button>
+                      <button type="button" onClick={() => setSigning(d)} className="flex-[2] inline-flex items-center justify-center gap-1.5 py-2 rounded-full text-xs font-bold text-white" style={{ background: 'var(--g-accent)' }}>
+                        <PenLine className="w-3.5 h-3.5" /> Sign
+                      </button>
+                    </div>
+                  )}
+                </SelfCard>
+              ) : (
               <div key={d.id} className={`rounded-2xl bg-white border p-4 ${d.my_turn ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'}`}>
                 <div className="flex items-start gap-3">
                   <FileText className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
@@ -372,7 +423,8 @@ export const MySignatures: React.FC<{ token: string; user: User; onBack?: () => 
                   )}
                 </div>
               </div>
-            ))}
+              )
+            )}
           </div>
         )}
       </div>

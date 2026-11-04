@@ -53,7 +53,7 @@ interface ApprovalRouteDeps {
   toDateOnlyString: (value: any) => string | null;
   // Same helper ConveyanceBillClaimRoutes.ts uses to attach each Movement
   // Claim's Approval Workflow status — reused here (GET /api/my-approvals)
-  // to attach lat/lng + status onto every Movement Claim referenced by a
+  // to attach lat/lng + status onto every Check In/Out referenced by a
   // 'user_claim' item, so an approver can open its location on a map without
   // a second permission-gated lookup.
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
@@ -181,7 +181,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // ConveyanceBillClaimRoutes.ts's own attachUserClaimRefs, duplicated here
   // rather than imported since that one is private to that module's route
   // factory. Lets the Approve Application page show a "View Location" button
-  // for any Movement Claim a Conveyance Bill Claim was built from, same as
+  // for any Check In/Out a Conveyance Bill Claim was built from, same as
   // the Admin Panel's own Conveyance Bill Claim review already does.
   async function attachClaimRefsToMyApprovals(rows: any[]): Promise<any[]> {
     const userClaimIds = rows.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
@@ -243,7 +243,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
 
   // 2c-2. Approval Workflow — a single global, ORDERED chain of Admin/Superadmin
   // approvers (Superadmin-only to configure). Every Check In / Check Out (Remote
-  // Attendance OR Movement Claims) already recorded immediately (non-blocking) also
+  // Attendance OR Check In/Out) already recorded immediately (non-blocking) also
   // routes an Approval Request through this chain layer by layer — see
   // createApprovalRequest above. Gated behind the "approvals" Admin Panel module.
 
@@ -1092,7 +1092,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         (await queryDB("SELECT * FROM approval_requests WHERE actions_json LIKE ?", [`%"approver_id":${myId}%`]).catch(() => [])) || [];
       const TYPE_TITLE: Record<string, string> = {
         attendance: "Remote Attendance",
-        claim: "Movement Claim",
+        claim: "Check In/Out",
         user_claim: "Conveyance Bill Claim",
         attendance_correction: "Timesheet Correction",
         leave_application: "Leave Application",

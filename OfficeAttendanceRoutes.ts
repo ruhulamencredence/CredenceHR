@@ -21,6 +21,8 @@ export interface RegisterOfficeAttendanceRoutesDeps {
   todayInDhaka: any;
 }
 
+import { parsePlaceholderPin, placeholderPin, repointEmployeePunches } from "./zkMachines";
+
 export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOfficeAttendanceRoutesDeps) {
   const { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka } = deps;
   // 2b-2. Office Attendance (ZKTeco) — raw biometric punches pulled automatically
@@ -37,31 +39,156 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
     }
   });
 
+  // A machine's form (Office Attendance -> Machines): where it is, how it
+  // connects (LAN: IP + port; Cloud push: serial number, optionally the one
+  // address it may call from) and whether its PIN numbers are the office-wide
+  // ones or its own (zkMachines.ts). Returns the row to store, or an error.
+  async function machineFields(body: any, id: number | null): Promise<{ row: any } | { error: string }> {
+    const name = String(body?.name || "").trim().slice(0, 100);
+    const connection = body?.connection === "push" ? "push" : "lan";
+    const pin_mode = body?.pin_mode === "own" ? "own" : "shared";
+    const branch = String(body?.branch || "").trim().slice(0, 100) || null;
+    const serial = String(body?.serial_number || "").trim().slice(0, 100) || null;
+    const allowed_ip = connection === "push" ? String(body?.allowed_ip || "").trim().slice(0, 64) || null : null;
+    if (!name) return { error: "Give the machine a name." };
+    let ip = String(body?.ip_address || "").trim().slice(0, 45);
+    let port = Number(body?.port) || 4370;
+    if (connection === "lan") {
+      if (!ip || ip.startsWith("push:")) return { error: "Enter the machine's IP address." };
+      if (port < 1 || port > 65535) return { error: "Port must be 1–65535." };
+    } else {
+      if (!serial) return { error: "Enter the machine's serial number (Menu -> System Info) — it is how the machine is recognised over the internet." };
+      const dup: any[] = await queryDB("SELECT id, name FROM zk_devices WHERE serial_number = ? AND connection = 'push'" + (id ? " AND id <> ?" : ""), id ? [serial, id] : [serial]);
+      if (dup.length) return { error: `Serial ${serial} is already used by ${dup[0].name}.` };
+      ip = `push:${serial}`.slice(0, 45);
+      port = 4370;
+    }
+    return { row: { name, branch, connection, pin_mode, ip_address: ip, port, serial_number: serial, allowed_ip } };
+  }
+
   app.post("/api/zk-devices", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
     try {
-      const { name, ip_address, port, serial_number } = req.body;
-      if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
+      const f = await machineFields(req.body, null);
+      if ("error" in f) return res.status(400).json({ error: f.error });
+      const r = f.row;
       const result: any = await queryDB(
-        "INSERT INTO zk_devices (name, ip_address, port, serial_number) VALUES (?, ?, ?, ?)",
-        [name, ip_address, port || 4370, serial_number || null]
+        "INSERT INTO zk_devices (name, branch, connection, pin_mode, ip_address, port, serial_number, allowed_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [r.name, r.branch, r.connection, r.pin_mode, r.ip_address, r.port, r.serial_number, r.allowed_ip]
       );
       res.json({ id: result.insertId });
+    } catch (err: any) {
+      if (err?.code === "ER_DUP_ENTRY") return res.status(400).json({ error: "Another machine already uses this IP address and port." });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Edit a device's registry row (and is_active — a device can be paused
+  // without deleting its punch history, since deleting it would
+  // CASCADE-delete every zk_attendance_logs row tied to it). Switching a
+  // machine between shared and own PINs re-points its stored punches.
+  app.put("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const cur: any[] = await queryDB("SELECT id, pin_mode FROM zk_devices WHERE id = ?", [id]);
+      if (!cur.length) return res.status(404).json({ error: "Machine not found." });
+      const f = await machineFields(req.body, id);
+      if ("error" in f) return res.status(400).json({ error: f.error });
+      const r = f.row;
+      await queryDB(
+        "UPDATE zk_devices SET name = ?, branch = ?, connection = ?, pin_mode = ?, ip_address = ?, port = ?, serial_number = ?, allowed_ip = ?, is_active = ? WHERE id = ?",
+        [r.name, r.branch, r.connection, r.pin_mode, r.ip_address, r.port, r.serial_number, r.allowed_ip, req.body?.is_active === false || req.body?.is_active === 0 ? 0 : 1, id]
+      );
+      if ((cur[0].pin_mode || "shared") !== r.pin_mode) {
+        if (r.pin_mode === "shared") {
+          // Back to office-wide PINs: what the machine sent is the PIN again.
+          await queryDB("UPDATE IGNORE zk_attendance_logs SET device_user_pin = raw_pin WHERE device_id = ? AND raw_pin IS NOT NULL", [id]);
+        } else {
+          // Its own numbers from now on: every punch is a placeholder until linked.
+          const logs: any[] = await queryDB("SELECT DISTINCT COALESCE(raw_pin, device_user_pin) AS pin FROM zk_attendance_logs WHERE device_id = ?", [id]);
+          for (const l of logs) {
+            await queryDB("UPDATE IGNORE zk_attendance_logs SET device_user_pin = ?, raw_pin = ? WHERE device_id = ? AND COALESCE(raw_pin, device_user_pin) = ?", [
+              placeholderPin(id, String(l.pin)),
+              String(l.pin),
+              id,
+              String(l.pin)
+            ]);
+          }
+          const linked: any[] = await queryDB("SELECT DISTINCT employee_id FROM zk_device_pins WHERE device_id = ?", [id]);
+          for (const e of linked) await repointEmployeePunches(queryDB, Number(e.employee_id));
+        }
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err?.code === "ER_DUP_ENTRY") return res.status(400).json({ error: "Another machine already uses this IP address and port." });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Office Attendance -> Machines: each machine with where it is, how it
+  // connects, when it was last heard from and how many punches came in today.
+  app.get("/api/zk-devices/overview", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
+    try {
+      const today = todayInDhaka();
+      const [rows, counts, pins]: any[] = await Promise.all([
+        queryDB("SELECT * FROM zk_devices ORDER BY name"),
+        queryDB("SELECT device_id, COUNT(*) AS n FROM zk_attendance_logs WHERE punch_time >= ? AND punch_time < ? + INTERVAL 1 DAY GROUP BY device_id", [today, today]),
+        queryDB("SELECT device_id, COUNT(*) AS n FROM zk_device_pins GROUP BY device_id")
+      ]);
+      const todayBy = new Map<number, number>(counts.map((c: any) => [Number(c.device_id), Number(c.n)]));
+      const pinsBy = new Map<number, number>(pins.map((c: any) => [Number(c.device_id), Number(c.n)]));
+      const now = Date.now();
+      res.json(
+        rows.map((d: any) => {
+          const seen = d.last_seen_at || d.last_synced_at || null;
+          const ago = seen ? Math.round((now - new Date(seen).getTime()) / 60000) : null;
+          return {
+            id: Number(d.id),
+            name: d.name,
+            branch: d.branch || null,
+            connection: d.connection || "lan",
+            pin_mode: d.pin_mode || "shared",
+            ip_address: String(d.ip_address || "").startsWith("push:") ? null : d.ip_address,
+            port: Number(d.port) || 4370,
+            serial_number: d.serial_number || null,
+            allowed_ip: d.allowed_ip || null,
+            is_active: !!Number(d.is_active),
+            last_seen_at: seen,
+            last_sync_status: d.last_sync_status || null,
+            status: !Number(d.is_active) ? "off" : ago == null ? "never" : ago <= 30 ? "online" : ago <= 180 ? "quiet" : "offline",
+            minutes_ago: ago,
+            today_punches: todayBy.get(Number(d.id)) || 0,
+            linked_pins: pinsBy.get(Number(d.id)) || 0
+          };
+        })
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Edit a device's registry row (name/IP/port/serial, and is_active — a
-  // device can be paused without deleting its punch history, since deleting
-  // it would CASCADE-delete every zk_attendance_logs row tied to it).
-  app.put("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
+  // An 'own PIN' machine's links: who each of its PINs is (Link Device PINs).
+  app.get("/api/zk-devices/:id(\\d+)/pins", authenticateToken, requireAdmin, requireModuleLayer("office_attendance", "link_pins"), async (req: any, res) => {
     try {
-      const { name, ip_address, port, serial_number, is_active } = req.body;
-      if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
-      await queryDB(
-        "UPDATE zk_devices SET name = ?, ip_address = ?, port = ?, serial_number = ?, is_active = ? WHERE id = ?",
-        [name, ip_address, port || 4370, serial_number || null, is_active ? 1 : 0, req.params.id]
+      const rows: any[] = await queryDB(
+        `SELECT m.pin, m.employee_id, e.name, e.employee_id AS employee_code, e.designation, e.department, e.zk_device_pin
+         FROM zk_device_pins m JOIN all_employees e ON e.id = m.employee_id WHERE m.device_id = ? ORDER BY m.pin + 0, m.pin`,
+        [Number(req.params.id)]
       );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Unlink one PIN of an 'own PIN' machine — its punches go back to unlinked.
+  app.delete("/api/zk-devices/:id(\\d+)/pins/:pin", authenticateToken, requireAdmin, requireModuleLayer("office_attendance", "link_pins"), async (req: any, res) => {
+    try {
+      const deviceId = Number(req.params.id);
+      const pin = String(req.params.pin).slice(0, 20);
+      const link: any[] = await queryDB("SELECT employee_id FROM zk_device_pins WHERE device_id = ? AND pin = ?", [deviceId, pin]);
+      if (!link.length) return res.status(404).json({ error: "That PIN isn't linked." });
+      await queryDB("DELETE FROM zk_device_pins WHERE device_id = ? AND pin = ?", [deviceId, pin]);
+      await queryDB("UPDATE IGNORE zk_attendance_logs SET device_user_pin = ? WHERE device_id = ? AND raw_pin = ?", [placeholderPin(deviceId, pin), deviceId, pin]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -97,6 +224,7 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
       const rows: any = await queryDB("SELECT * FROM zk_devices WHERE id = ?", [req.params.id]);
       const device = rows[0];
       if (!device) return res.status(404).json({ error: "Device not found" });
+      if (device.connection === "push") return res.json({ device: device.name, ok: true, count: 0, note: "This machine sends its punches itself over the internet — nothing to pull." });
       const result = await syncZkDevice(dbPool, device);
       res.json({ device: device.name, ...result });
     } catch (err: any) {
@@ -109,6 +237,8 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
     try {
       const { zk_device_pin } = req.body;
       await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zk_device_pin || null, req.params.id]);
+      // Punches from machines with their own PINs follow the new office-wide PIN.
+      await repointEmployeePunches(queryDB, Number(req.params.id)).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -140,16 +270,20 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
       const deviceName = new Map<number, string>(devices.map((d: any) => [Number(d.id), d.name]));
       const byPin = new Map<string, any>();
       for (const p of pins) {
-        const pin = String(p.pin);
-        if (linked.has(pin)) continue;
-        const cur = byPin.get(pin) || { pin, punches: 0, days: 0, first_punch: p.first_punch, last_punch: p.last_punch, devices: [] as string[] };
+        // A machine with its own PIN numbers: "M<machine>-<pin>" = that
+        // machine's PIN nobody is linked to yet — listed per machine.
+        const own = parsePlaceholderPin(String(p.pin));
+        const pin = own ? own.pin : String(p.pin);
+        const key = own ? String(p.pin) : pin;
+        if (linked.has(String(p.pin))) continue;
+        const cur = byPin.get(key) || { pin, device_id: own ? own.deviceId : null, own_machine: own ? deviceName.get(own.deviceId) || `Machine #${own.deviceId}` : null, punches: 0, days: 0, first_punch: p.first_punch, last_punch: p.last_punch, devices: [] as string[] };
         cur.punches += Number(p.punches);
         cur.days = Math.max(cur.days, Number(p.days));
         if (String(p.first_punch) < String(cur.first_punch)) cur.first_punch = p.first_punch;
         if (String(p.last_punch) > String(cur.last_punch)) cur.last_punch = p.last_punch;
         const dn = deviceName.get(Number(p.device_id));
         if (dn && !cur.devices.includes(dn)) cur.devices.push(dn);
-        byPin.set(pin, cur);
+        byPin.set(key, cur);
       }
       // A likely match: an Employee with no PIN whose Employee ID is the PIN
       // (or ends with it, e.g. PIN 14 for 241221014).
@@ -165,6 +299,11 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
       res.json({
         days,
         unlinked,
+        // A machine with its own PIN numbers can link anyone (their office PIN stays).
+        employees: employees
+          .filter((e: any) => Number(e.is_active ?? 1) === 1)
+          .map((e: any) => ({ id: Number(e.id), name: e.name, employee_code: e.employee_id, designation: e.designation, department: e.department, has_login: !!e.user_id }))
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name))),
         employees_without_pin: noPin
           .map((e: any) => ({ id: Number(e.id), name: e.name, employee_code: e.employee_id, designation: e.designation, department: e.department, has_login: !!e.user_id }))
           .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
@@ -183,6 +322,26 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
       if (!pin || !employeeId) return res.status(400).json({ error: "Pick the employee for this PIN." });
       const emp: any[] = await queryDB("SELECT id, name, zk_device_pin FROM all_employees WHERE id = ?", [employeeId]);
       if (!emp.length) return res.status(404).json({ error: "Employee not found." });
+      // A machine with its own PIN numbers: this PIN is who it is on that
+      // machine only (zk_device_pins); the Employee's office-wide PIN stays.
+      const deviceId = Number(req.body?.device_id) || 0;
+      if (deviceId) {
+        const dev: any[] = await queryDB("SELECT id, name, pin_mode FROM zk_devices WHERE id = ?", [deviceId]);
+        if (!dev.length) return res.status(404).json({ error: "Machine not found." });
+        if ((dev[0].pin_mode || "shared") === "own") {
+          const taken: any[] = await queryDB(
+            "SELECT m.pin, m.employee_id, e.name FROM zk_device_pins m JOIN all_employees e ON e.id = m.employee_id WHERE m.device_id = ? AND (m.pin = ? OR m.employee_id = ?)",
+            [deviceId, pin, employeeId]
+          );
+          const pinOther = taken.find((t: any) => String(t.pin) === pin && Number(t.employee_id) !== employeeId);
+          if (pinOther) return res.status(400).json({ error: `PIN ${pin} on ${dev[0].name} already belongs to ${pinOther.name}.` });
+          const empOther = taken.find((t: any) => Number(t.employee_id) === employeeId && String(t.pin) !== pin);
+          if (empOther) return res.status(400).json({ error: `${emp[0].name} already has PIN ${empOther.pin} on ${dev[0].name}.` });
+          await queryDB("INSERT IGNORE INTO zk_device_pins (device_id, pin, employee_id, linked_by) VALUES (?, ?, ?, ?)", [deviceId, pin, employeeId, req.user.id]);
+          await repointEmployeePunches(queryDB, employeeId);
+          return res.json({ success: true, own_machine: true });
+        }
+      }
       if (emp[0].zk_device_pin && String(emp[0].zk_device_pin) !== pin) {
         return res.status(400).json({ error: `${emp[0].name} already has PIN ${emp[0].zk_device_pin}. Change it in Employees first.` });
       }

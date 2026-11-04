@@ -21,11 +21,11 @@ interface UserClaimsReviewPanelProps {
 
 // Admin Panel -> Conveyance Bill Claim -> "User Claims" (source: user_claim) —
 // direct User-submitted claims (ConveyanceClaimCard on the User Panel), separate
-// from the Bills table below it which is built from completed Movement Claims /
+// from the Bills table below it which is built from completed Check In/Out /
 // manual entries. This panel is READ-ONLY on status: it only shows where each
 // claim stands (Pending/Approved/Rejected, and which step of the Approval Chain
 // it's waiting on). The actual Approve/Reject action happens from the Admin
-// Panel -> Approvals tab, same as Remote Attendance/Movement Claims — a Pending
+// Panel -> Approvals tab, same as Remote Attendance/Check In/Out — a Pending
 // claim only shows Approve/Reject buttons HERE when it has no Approval Request
 // tracking it at all (a claim submitted back when no Chain was configured yet).
 export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ token }) => {
@@ -52,7 +52,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
   } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  // The referenced Movement Claim currently shown on the read-only location map
+  // The referenced Check In/Out currently shown on the read-only location map
   // (opened by tapping a claim_refs row) — reuses the same ClaimLocationMap the
   // User's own My Claims history uses, shaped from the reference's own fields
   // (which already carry lat/lng + approval status, see attachUserClaimRefs).

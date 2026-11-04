@@ -12,6 +12,7 @@ import { apiUrl, dedupedFetchJson } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
 interface AttendanceCardProps {
@@ -95,6 +96,16 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
     }
     throw new Error('Getting your location took too long. Please try again.');
   }
+}
+
+// Straight-line distance in metres (same formula as the server's check).
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (v: number) => (v * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // A User checks in/out for one of their assigned Projects — the server only
@@ -186,7 +197,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
   const handleMark = async (kind: 'in' | 'out') => {
-    if (!projectId) {
+    // Several check-in Projects: for a Check In the one whose area you're
+    // standing in is picked from your position, so no Project needs picking
+    // first.
+    const canAutoPick = kind === 'in' && projects.length > 1;
+    if (!projectId && !canAutoPick) {
       setMessage({ type: 'error', text: 'Pick a project first.' });
       return;
     }
@@ -194,6 +209,30 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     try {
       const coords = await getCurrentCoords();
+      if (canAutoPick) {
+        const placed = projects
+          .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
+          .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
+          .sort((a, b) => a.d - b.d);
+        const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
+        const current = inside.find((x) => String(x.p.id) === projectId);
+        if (!current && inside.length) {
+          setProjectId(String(inside[0].p.id));
+          setMessage({ type: 'success', text: `You're at ${inside[0].p.project_name} (${Math.round(inside[0].d)} m from its centre) — picked it for you.` });
+        } else if (!inside.length && placed.length) {
+          setMessage({
+            type: 'error',
+            text: `You're not inside any of your projects' areas. Nearest: ${placed
+              .slice(0, 3)
+              .map((x) => `${x.p.project_name} ${x.d >= 1000 ? `${(x.d / 1000).toFixed(1)} km` : `${Math.round(x.d)} m`}`)
+              .join(' · ')}.`
+          });
+          return;
+        } else if (!projectId) {
+          setMessage({ type: 'error', text: 'Pick a project first.' });
+          return;
+        }
+      }
       setPending({ kind, coords });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || `Failed to check ${kind}` });
@@ -227,7 +266,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         type: 'success',
         text: kind === 'in'
           ? `Checked in — ${data.distance_m}m from ${data.project_name}.`
-          : `Checked out — ${data.distance_m}m from ${data.project_name}.`
+          : data.updated
+            ? `Out Time updated — ${data.distance_m}m from ${data.project_name}. It goes for approval again.`
+            : `Checked out — ${data.distance_m}m from ${data.project_name}.`
       });
       setPending(null);
       // Refresh today's status.
@@ -330,7 +371,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             onChange={(e) => setProjectId(e.target.value)}
             className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
           >
-            <option value="">Select a project…</option>
+            <option value="">Where I am now (picked when I tap Set Now)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.project_name}</option>
             ))}
@@ -365,7 +406,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             <button
               type="button"
               onClick={() => handleMark('in')}
-              disabled={!projectId || busy}
+              disabled={(!projectId && projects.length <= 1) || busy}
               className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'in' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}
@@ -379,10 +420,28 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
-            <div className="mt-0.5 font-bold text-blue-700">
-              <span className="text-base">{outParts.time}</span>{' '}
-              <span className="text-[11px] align-middle">{outParts.meridiem}</span>
-            </div>
+            <>
+              <div className="mt-0.5 font-bold text-blue-700">
+                <span className="text-base">{outParts.time}</span>{' '}
+                <span className="text-[11px] align-middle">{outParts.meridiem}</span>
+              </div>
+              {/* Gave it too early? The same day it can be given again
+                  (users.can_update_check_out — off unless ticked). */}
+              {status?.can_update_check_out && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!(await confirmDialog(`Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`))) return;
+                    void handleMark('out');
+                  }}
+                  disabled={!projectId || busy}
+                  className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {working === 'out' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
+                  Set again
+                </button>
+              )}
+            </>
           ) : (
             <button
               type="button"
@@ -419,6 +478,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           {status?.check_out_remarks && (
             <div className="pl-5 text-slate-500">
               <span className="font-medium text-slate-600">Out remarks:</span> {status.check_out_remarks}
+            </div>
+          )}
+          {!!status?.check_out_update_count && status.check_out_first_at && (
+            <div className="pl-5 text-slate-500">
+              Out Time given again{status.check_out_update_count > 1 ? ` (${status.check_out_update_count} times)` : ''} — first was{' '}
+              {formatTimeParts(status.check_out_first_at as string).time} {formatTimeParts(status.check_out_first_at as string).meridiem}
             </div>
           )}
         </div>

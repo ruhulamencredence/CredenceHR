@@ -8,22 +8,22 @@
 <!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২২৪** |
-| কলাম | **২,৪৩১** |
-| ঘোষিত Foreign Key | **২৫৮** (ON DELETE: CASCADE ১৫১, SET NULL ৯৩, RESTRICT ১৪) |
-| `company_id` আছে এমন টেবিল (multi-company) | ৫৭ |
+| টেবিল | **২৩১** |
+| কলাম | **২,৫৩৬** |
+| ঘোষিত Foreign Key | **২৬৭** (ON DELETE: CASCADE ১৫৮, SET NULL ৯৫, RESTRICT ১৪) |
+| `company_id` আছে এমন টেবিল (multi-company) | ৫৯ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ৩০টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
-| সবচেয়ে বেশি কলামের টেবিল | `users` (৬৭), `all_employees` (৪৯), `payrolls` (৪৩) |
+| সবচেয়ে বেশি কলামের টেবিল | `users` (৬৮), `all_employees` (৪৯), `payrolls` (৪৩) |
 <!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২২৪<!--/n--> টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৩১<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 [SVG (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.svg) · [Graphviz সোর্স](diagrams/full-application-er.dot) · PNG/PDF: GitHub → Actions → সবশেষ **Docs sync** রান → Artifacts → `CredenceHR-documentation` (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)
 
 - ১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে **`users`** (সব মডিউল এর সাথে জোড়া)।
 - প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা `data-dictionary.md`-তে।
-- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৫৮<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
+- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৬৭<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
 
 ![পুরো ডাটাবেস](diagrams/full-application-er.svg)
 
@@ -48,7 +48,7 @@
 প্রতিটি diagram-এ: **PK**, **FK** আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু `id` সহ দেখানো। পুরো কলাম তালিকা `data-dictionary.md`-তে।
 
 <!-- AUTO:modules -->
-### K. Communication: Notices, Chat, Mail, Assistant, Feedback (37টি টেবিল)
+### K. Communication: Notices, Chat, Mail, Assistant, Feedback (40টি টেবিল)
 
 নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।
 
@@ -60,7 +60,7 @@
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`app_feedback`, `assistant_learned`, `assistant_support_messages`, `assistant_support_sessions`, `chat_message_hidden`, `chat_message_reactions`, `chat_messages`, `chat_pinned_messages`, `chat_push_tokens`, `chat_room_members`, `chat_room_reads`, `chat_rooms`, `chat_wallpapers`, `feedback_prompts`, `feedback_settings`, `mail_accounts`, `mail_admin_log`, `mail_blobs`, `mail_contacts`, `mail_events`, `mail_files`, `mail_filters`, `mail_folder_state`, `mail_groups`, `mail_messages`, `mail_personal_groups`, `mail_settings`, `mail_signature_images`, `mail_system_settings`, `mail_tasks`, `mail_templates`, `mail_vacation_log`, `notice_dismissals`, `notice_targets`, `notices`, `report_email_log`, `ride_saved_places`
+`app_feedback`, `assistant_learned`, `assistant_support_messages`, `assistant_support_sessions`, `chat_message_hidden`, `chat_message_reactions`, `chat_messages`, `chat_pinned_messages`, `chat_push_tokens`, `chat_room_members`, `chat_room_reads`, `chat_rooms`, `chat_wallpapers`, `feedback_prompts`, `feedback_settings`, `mail_accounts`, `mail_admin_log`, `mail_blobs`, `mail_contacts`, `mail_events`, `mail_files`, `mail_filters`, `mail_folder_state`, `mail_groups`, `mail_messages`, `mail_personal_groups`, `mail_settings`, `mail_signature_images`, `mail_system_settings`, `mail_tasks`, `mail_templates`, `mail_vacation_log`, `notice_animations`, `notice_dismissals`, `notice_files`, `notice_reads`, `notice_targets`, `notices`, `report_email_log`, `ride_saved_places`
 
 </details>
 
@@ -80,7 +80,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 </details>
 
-### D. Attendance, Roster, Breaks & Tracking (23টি টেবিল)
+### D. Attendance, Roster, Breaks & Tracking (25টি টেবিল)
 
 তিন ধরনের উপস্থিতি (রিমোট GPS, অফিস ZKTeco, সাইট muster roll), রোস্টার, বিরতি, লাইভ লোকেশন।
 
@@ -92,7 +92,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`attendance`, `attendance_corrections`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_devices`
+`attendance`, `attendance_corrections`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
 
 </details>
 
@@ -208,7 +208,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 </details>
 
-### E. Payroll & Salary (14টি টেবিল)
+### E. Payroll & Salary (16টি টেবিল)
 
 বেতন কাঠামো থেকে payslip ও final settlement পর্যন্ত। `payrolls` একজন কর্মী ও একটি মাসে একটি (UNIQUE)।
 
@@ -220,7 +220,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`advance_requests`, `final_settlements`, `pay_grade_components`, `pay_grades`, `payroll_batch_events`, `payroll_batches`, `payroll_line_items`, `payroll_payment_splits`, `payrolls`, `pending_bonuses`, `salary_adjustments`, `salary_components`, `salary_month_settings`, `salary_structures`
+`advance_requests`, `final_settlements`, `pay_grade_components`, `pay_grades`, `payroll_batch_events`, `payroll_batches`, `payroll_corrections`, `payroll_line_items`, `payroll_payment_splits`, `payroll_review_files`, `payrolls`, `pending_bonuses`, `salary_adjustments`, `salary_components`, `salary_month_settings`, `salary_structures`
 
 </details>
 
@@ -261,7 +261,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | <!--n:tables-->২২৪<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২৩১<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -274,6 +274,6 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২২৪<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৩১<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
 জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

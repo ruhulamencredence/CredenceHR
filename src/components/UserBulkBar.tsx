@@ -26,6 +26,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { BulkAttendanceProjectsPopup } from './AttendanceProjectsEditor';
 interface UserBulkBarProps {
   token: string;
   selected: User[];
@@ -36,9 +37,13 @@ interface UserBulkBarProps {
   onOpenTemplates: () => void;
   // Opens Module Access for the ticked accounts it may change, together.
   onOpenModuleAccess?: (users: User[]) => void;
+  // Projects for the "Check-in projects…" popup (Remote Attendance).
+  projects?: { id: number; project_name: string }[];
 }
 
-export function UserBulkBar({ token, selected, templates, viewer, onClear, onDone, onOpenTemplates, onOpenModuleAccess }: UserBulkBarProps) {
+export function UserBulkBar({ token, selected, templates, viewer, onClear, onDone, onOpenTemplates, onOpenModuleAccess, projects }: UserBulkBarProps) {
+  const [checkInProjects, setCheckInProjects] = useState(false);
+  const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<{ title: string; r: BulkResult } | null>(null);
 
@@ -110,6 +115,15 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
               ))}
               <option value="__manage">{templates.length === 0 ? '+ Create a template…' : 'Manage templates…'}</option>
             </SearchSelect>
+            {projects && selected.some((u) => canEditUserFeatures(u, viewer)) && (
+              <button
+                type="button"
+                onClick={() => setCheckInProjects(true)}
+                className="text-xs font-semibold px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-slate-700 hover:bg-blue-50"
+              >
+                Check-in projects…
+              </button>
+            )}
             {onOpenModuleAccess && selected.some((u) => canEditUserModules(u, viewer)) && (
               <button
                 type="button"
@@ -131,6 +145,27 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
         </button>
       </div>
 
+      {checkInProjects && projects && (
+        <BulkAttendanceProjectsPopup
+          token={token}
+          userIds={selected.filter((u) => canEditUserFeatures(u, viewer)).map((u) => u.id)}
+          projects={projects}
+          onClose={() => setCheckInProjects(false)}
+          onDone={(msg) => {
+            setCheckInProjects(false);
+            setNotice(msg);
+            onDone();
+          }}
+        />
+      )}
+      {notice && (
+        <div className="px-6 pb-2.5 text-xs flex items-center gap-2 text-slate-700">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> {notice}
+          <button type="button" onClick={() => setNotice('')} className="ml-auto text-slate-400 hover:text-slate-600" aria-label="Dismiss">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       {result && (
         <div className="px-6 pb-2.5 text-xs">
           <div className="flex items-start gap-2 text-slate-700">

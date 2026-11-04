@@ -33,6 +33,7 @@ export const TEMPLATE_FEATURE_COLUMNS: Record<string, string[]> = {
   can_view_roster: ["can_view_roster"],
   can_take_break: ["can_take_break"],
   can_save_ride_places: ["can_save_ride_places"],
+  can_update_check_out: ["can_update_check_out"],
   can_add_adhoc_approver: ["can_add_adhoc_approver"],
   can_use_assistant_voice: ["can_use_assistant_voice"],
   can_sign_documents: ["can_sign_documents"],

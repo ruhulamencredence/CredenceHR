@@ -139,6 +139,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Payroll-এ MD অ্যাপ ব্যবহার না করলে তাঁর অনুমোদনের প্রমাণ কী?</td>
+<td>HR তাঁর সই/দাগ দেওয়া কাগজের scan/photo attach না করলে মাস এগোয় না; প্রতিটি print-এর version নম্বর পাতায় ছাপা; MD-র প্রতিটি বদল আলাদা correction হিসেবে (কে লিখল, কে apply করল, আগে-পরে net) থাকে আর history-তে সব ধাপ। ফাইল public ফোল্ডারে নয়, শুধু অনুমোদনের পথের layer দিয়ে খোলা যায়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Payroll-এ HR Director, Accounts, Audit কি নিজের বানানো বেতন পাস করতে পারেন?</td>
+<td>না। যে বেতন চালিয়েছে/বদলেছে বা মাস পাঠিয়েছে সে HR Director review দিতে পারে না; যে পাঠিয়েছে বা Accounts-এ পাঠিয়েছে সে pay করতে পারে না; যে বানিয়েছে, পাঠিয়েছে বা pay করেছে সে audit করতে পারে না (Superadmin ছাড়া)। Audit এখন টাকা দেওয়ার পরে, ঐচ্ছিক।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Payroll-এর Top Sheet (সাইট-ভিত্তিক বেতন) কে দেখে?</td>
 <td>যাঁর Payroll module-এ "Approval — Top Sheet (view)" layer আছে (layer সেভ না থাকা Payroll ব্যবহারকারী ডিফল্টে পান; Audit / Accounts-এর "View only" থাকলে আলাদা টিক লাগে), আর Superadmin। API আর পাতার অংশ দুটোই এই layer দেখে; টেস্টে layer ছাড়া 403। এটা শুধু দেখা — approve / pay আগের নিয়মেই।</td>
 <td>✅</td>
@@ -151,6 +161,26 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>লোকেশন ট্র্যাকিং কি সম্মতি ছাড়া?</td>
 <td>না। আলাদা সুইচ (ডিফল্ট বন্ধ) ও ব্যবহারকারীকে নোটিশ ও সম্মতির পেজ।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কর্মী কি নিজের Out Time পরে বদলে বাড়িয়ে নিতে পারে?</td>
+<td>শুধু একই দিনে, শুধু Module Access-এ "Remote Attendance — update Out Time" টিক দেওয়া থাকলে (শুরুতে বন্ধ; কর্মী নিজে চালু করতে পারেন না, API 403), আর সেই সময়টাতেই project-এর এলাকায় থেকে — পরে বসে আগের সময় লেখা যায় না, সময় server-এর। প্রথম Out Time রাখা থাকে, নতুনটা আবার অনুমোদনে যায় (<code>AttendanceRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Remote check-in-এ কেউ কি অন্য project-এ বা মেয়াদ শেষের পর check-in করতে পারে?</td>
+<td>না। Module Access-এ দেওয়া project-এর তালিকা আর প্রতিটার From / To তারিখ server যাচাই করে — check-in, Correct Attendance ও Data Import-এ; অন্য project বা তারিখের বাইরে হলে 403। তালিকা বদলাতে Users module-এর <code>edit_add</code> layer লাগে, বদল <code>user_access_audit</code>-এ (<code>AttendanceProjects.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>দূরের সাইটের ZKTeco মেশিন internet-এ punch পাঠায় — কেউ ভুয়া punch পাঠাতে পারে?</td>
+<td>ADMS protocol-এ password নেই, তাই শুধু register করা চালু মেশিনের Serial number মানা হয়, আর সাইটের IP দিলে শুধু সেখান থেকে; অচেনা SN-এর কিছু লেখা হয় না, শুধু punch নেওয়া হয়, মেশিনে কোনো command যায় না। SN জেনে IP-সীমা ছাড়া মেশিন নকল করা সম্ভব — তাই fixed IP থাকলে দেওয়ার পরামর্শ (<code>zkMachines.ts</code>, 04 §১০ নং ১৩)।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>এক মেশিনের PIN অন্য মেশিনের কারও হাজিরায় চলে যায় না?</td>
+<td>"Its own numbers" ধরনের মেশিনে প্রতিটা PIN আলাদা করে link হয় (<code>zk_device_pins</code>); link না হলে punch কারও হাজিরায় যায় না। link / unlink শুধু Office Attendance-এর "Link Device PINs" layer-এর (API 403, UI লুকানো)।</td>
 <td>✅</td>
 </tr>
 </tbody>
@@ -169,6 +199,21 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>ট্রানজিটে (ইন্টারনেটে) এনক্রিপশন?</td>
 <td>সার্ভার Nginx-এর পেছনে HTTPS-এ চালানোর কনফিগ আছে (<code>deploy/nginx.conf.example</code>), HTTPS হলে HSTS যায়। <strong>সার্টিফিকেট বসানো আপনাদের কাজ।</strong></td>
 <td>🏢</td>
+</tr>
+<tr>
+<td>Chat-এর voice / ছবি / video / document কোথায় থাকে, অন্য কেউ খুলতে পারে?</td>
+<td>server-এর একটা folder-এ (<code>.env</code>-এর <code>CHAT_ATTACHMENT_DIR</code>), ডাটাবেসে শুধু path। folder ওয়েবে খোলা নয় — ফাইল যায় শুধু সেই chat-এর সদস্যের কাছে, অন্যরা 403। ফাইলের নাম এলোমেলো, আর path folder-এর বাইরে গেলে server খোলে না। Delete for everyone করলে ফাইলও মুছে যায়। folder-এর অনুমতি, disk এনক্রিপশন আর ব্যাকআপ হোস্টিংয়ের দায়িত্ব (<code>chatFiles.ts</code>)।</td>
+<td>✅ 🏢</td>
+</tr>
+<tr>
+<td>Notice-এর Animation library-তে কেউ ক্ষতিকর animation রাখতে পারে?</td>
+<td>যোগ / মোছা শুধু 🔒 <code>notice_animations</code> layer যাঁর (শুরুতে কারও নেই; API-তেও 403)। শুধু Lottie JSON নেওয়া হয় (৩ MB পর্যন্ত), আর ভেতরের expression — যেখানে JavaScript থাকতে পারে — server-এ বাদ দেওয়া হয়; app-এর light player expression চালায়ও না (<code>NoticeSafety.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Notice-এ দেওয়া ছবি বা PDF কি যে কেউ খুলতে পারে? কে পড়েছে কে দেখে?</td>
+<td>না। ফাইল server-এর folder-এ, ওয়েবে খোলা নয়; খোলে শুধু Notices module-এর লোক আর যাঁদের জন্য notice এখন live। শুধু ছবি ও অফিস-ডকুমেন্ট upload হয় (ছবির ভেতরের byte মিলিয়ে)। কে খুলেছেন / পড়েছেন সেই নাম-ধরা report শুধু <code>notice_read_report</code> layer যাঁর, আর notice email করা শুধু <code>notice_email</code> layer — দুটোই শুরুতে কাউকে দেওয়া থাকে না, API-তেও 403 (<code>NoticeRoutes.ts</code>)।</td>
+<td>✅</td>
 </tr>
 <tr>
 <td>রেস্টে (ডাটাবেস/ডিস্কে) এনক্রিপশন?</td>
@@ -249,7 +294,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>কোনো মডিউলের অনুমতি থাকলেই কি Excel দিয়ে একসাথে অনেক ডাটা ঢোকানো যায়?</td>
-<td>না। HR Data Import আলাদা মডিউল (<code>data_import</code>), আর প্রতিটি ধরন (Employee, Leave, Movement Claim, Conveyance, Remote/Office Attendance) আলাদা টিক — সব শুরুতে বন্ধ। মডিউল + সেই টিক দুটোই না থাকলে সার্ভার 403 দেয় (<code>DataImportRoutes.ts</code>)। Superadmin সবসময় পারেন।</td>
+<td>না। HR Data Import আলাদা মডিউল (<code>data_import</code>), আর প্রতিটি ধরন (Employee, Leave, Check In/Out, Conveyance, Remote/Office Attendance) আলাদা টিক — সব শুরুতে বন্ধ। মডিউল + সেই টিক দুটোই না থাকলে সার্ভার 403 দেয় (<code>DataImportRoutes.ts</code>)। Superadmin সবসময় পারেন।</td>
 <td>✅</td>
 </tr>
 <tr>

@@ -13,6 +13,20 @@ import { apiUrl } from '../lib/api';
 import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard, type CardTone } from './SelfCard';
+
+// Phone card tint from what the alert says: turned down / missed -> rose,
+// done -> green, waiting on someone -> amber, anything else violet.
+const alertTone = (title: string): CardTone =>
+  /reject|declin|cancel|stuck|never started|overdue|absent|expired|failed|block/i.test(title)
+    ? 'rose'
+    : /approved|complete|received|issued|signed|paid|settled|accepted|done|ready|assigned/i.test(title)
+    ? 'green'
+    : /waiting|request|pending|press start|due|reminder|return|no approver/i.test(title)
+    ? 'amber'
+    : 'violet';
 import { LoadingBlock } from './LoadingBlock';
 import { PagerBar } from './PagerBar';
 
@@ -55,6 +69,8 @@ interface AlertsPageProps {
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
 export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+  usePhoneHeaderTitle('Alerts');
+  const isPhone = useIsPhone();
   // Every alert this account ever got, 50 (or the chosen size) per page;
   // nothing is ever removed from here.
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -283,6 +299,17 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             }
             window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
           }
+        : alert.type === 'zk_machine' || (alert.type === 'site_attendance' && alert.title === 'Attendance machine offline')
+        ? // Admin Panel -> Office Attendance, with the Machines popup open.
+          () => {
+            try {
+              sessionStorage.setItem('open_zk_machines', '1');
+            } catch {
+              // storage unavailable — Office Attendance opens without the popup
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'office_attendance' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:open-zk-machines')), 400);
+          }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'document_sign'
@@ -327,24 +354,27 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'Alerts']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Alerts']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
           <div className="p-5 sm:p-6 max-sm:px-3 max-sm:pt-2 max-sm:pb-3 sm:border-b border-slate-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               {isNativeApp && (
-                <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
+                <button type="button" onClick={onBack} className="hidden md:block p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
                   <ChevronLeft className="w-5 h-5" />
                 </button>
               )}
-              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
+              <div className="hidden md:flex w-10 h-10 rounded-full bg-rose-50 items-center justify-center shrink-0">
                 <BellRing className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-slate-800">Alerts</h1>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <h1 className="hidden md:block text-lg font-semibold text-slate-800">Alerts</h1>
+                <p className="text-xs text-slate-500 md:mt-0.5">
                   {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
                 </p>
               </div>
@@ -397,7 +427,27 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             ) : alerts.length === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">{show === 'unread' ? 'No unread alerts.' : 'No read alerts.'}</div>
             ) : (
-              alerts.map((alert) => (
+              alerts.map((alert) =>
+                isPhone ? (
+                  // Phone: the shared Directory-style card; a dot while unread.
+                  <SelfCard
+                    key={alert.id}
+                    tone={alertTone(alert.title)}
+                    lead={<BellRing className="w-[18px] h-[18px]" />}
+                    dot={alert.is_read ? undefined : 'violet'}
+                    title={<span className={alert.is_read ? 'font-medium' : 'font-bold'}>{alert.title}</span>}
+                    sub={formatDate(alert.created_at)}
+                    actions={
+                      <CardButton label={alert.is_read ? 'Mark as unread' : 'Mark as read'} onClick={(e) => toggleRead(alert, e)}>
+                        {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
+                      </CardButton>
+                    }
+                    chips={[{ label: alert.is_read ? 'Read' : 'New', tone: alert.is_read ? undefined : 'violet' }]}
+                    onClick={() => handleAlertClick(alert)}
+                  >
+                    <p className="text-xs text-slate-700">{alert.message}</p>
+                  </SelfCard>
+                ) : (
                 <div
                   key={alert.id}
                   onClick={() => handleAlertClick(alert)}
@@ -421,7 +471,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                     {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-              ))
+                )
+              )
             )}
           </div>
           <PagerBar page={page} pageSize={pageSize} total={counts.shown} onPage={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onPageSize={(n) => { setPageSize(n); setPage(1); }} />

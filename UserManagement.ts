@@ -41,6 +41,9 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // AttendanceProjects.ts: replaces an account's check-in Project list — an
+  // older screen sending the single attendance_project_id lands there too.
+  replaceAttendanceProjects?: (queryDB: any, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) => Promise<void>;
   // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
   // Permanent Delete) — "users" is wired up to it below: create/reset-
   // password/change-email/feature-permissions/project-assignment need
@@ -68,7 +71,7 @@ interface UserManagementRouteDeps {
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets, replaceAttendanceProjects } = deps;
 
   // ---------------------------------------------------------------------
   // Access audit log + Access Templates (Admin Panel -> Users, Phase 3).
@@ -394,7 +397,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -489,6 +492,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
         can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
         can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
+        can_update_check_out: u.role === "superadmin" ? true : !!Number(u.can_update_check_out),
         can_add_adhoc_approver: u.role === "superadmin" ? true : !!Number(u.can_add_adhoc_approver || 0),
         can_use_assistant_voice: u.role === "superadmin" ? true : !!Number(u.can_use_assistant_voice || 0),
         can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
@@ -649,7 +653,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // The Self Service switches and Department scopes inside the Module Access
-  // popup (Movement Claim, Timesheet, Leave Application, Monthly Attendance
+  // popup (Check In/Out, Timesheet, Leave Application, Monthly Attendance
   // Report departments…) follow the same rule as the modules themselves: a
   // Superadmin can set them for anyone; an Admin with can_grant_module_access
   // (requireModuleGrantAccess, used before this) only for a role='user'
@@ -1092,7 +1096,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use the Movement Claim (GPS Check In/Out) section on their own User
+  // see/use the Check In/Out (GPS Check In/Out) section on their own User
   // Panel at all — same on/off switch pattern as leave-management-access above,
   // applying to BOTH roles. Nothing shows (and the underlying /api/claims/*
   // self-service routes are blocked server-side too — see requireMovementClaimAccess)
@@ -1107,7 +1111,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Movement Claim access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Check In/Out access only applies to Admin and User accounts." });
       }
 
       await queryDB("UPDATE users SET can_view_movement_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
@@ -1594,6 +1598,23 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
+  // Remote Attendance -> "Update Out Time" the same day (AttendanceRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/check-out-update-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_update_check_out;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Update Out Time only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_update_check_out = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_update_check_out: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Book a Ride -> saved places (VehicleManagementRoutes.ts) — OFF by default, per account.
   app.put("/api/users/:id/ride-places-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
@@ -1794,6 +1815,12 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
         [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
       );
+      // The single "Allowed project for check-in" is now a list
+      // (user_attendance_projects): sending it replaces the list with that one
+      // Project, or clears it (any project) with null.
+      if (existingRows[0].role !== "superadmin" && req.body.attendance_project_id !== undefined && replaceAttendanceProjects) {
+        await replaceAttendanceProjects(queryDB, Number(id), attendance_project_id ? [{ project_id: attendance_project_id, valid_from: null, valid_to: null }] : [], Number(req.user.id));
+      }
       res.json({
         success: true,
         can_edit_delivery_date: !!can_edit_delivery_date,

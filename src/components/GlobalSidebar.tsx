@@ -16,12 +16,42 @@ import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES } from '../
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useSiteSupervisor } from './TeamAttendance';
+import { adminTabToPath, adminUrlEnabled, ADMIN_TAB_KEYS } from '../lib/adminUrl';
+import { selfViewToPath, selfPathToView } from '../lib/selfUrl';
+
+// Address of a Self Service page / an Admin Panel tab, when it has one (not
+// inside the phone app, which has no addresses).
+const selfHref = (view: string): string | undefined => {
+  if (!adminUrlEnabled()) return undefined;
+  const path = selfViewToPath(view as any);
+  return selfPathToView(path) === view ? path : undefined;
+};
+const adminHref = (tab: string): string | undefined =>
+  adminUrlEnabled() && ADMIN_TAB_KEYS.has(tab) ? adminTabToPath(tab) : undefined;
+
+// A menu entry is a real link when it has an address: a plain click still
+// opens the page in place; right-click, Ctrl / Cmd / Shift / middle click
+// are left to the browser (new tab, new window, copy link…).
+const navLinkProps = (href: string | undefined, run: () => void): Record<string, any> =>
+  href
+    ? {
+        href,
+        onClick: (e: React.MouseEvent) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          run();
+        }
+      }
+    : { type: 'button', onClick: run };
 
 interface NavItem {
   key: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   onClick: () => void;
+  // The page's own address, so right-click -> "Open link in new tab" (and
+  // Ctrl / middle click) work. Absent for a page without one.
+  href?: string;
 }
 
 interface GlobalSidebarProps {
@@ -46,14 +76,14 @@ interface GlobalSidebarProps {
   // Edits) — every target here lives ONLY in the User Panel, so selecting any
   // of these also switches the account into the User Panel first.
   onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => void;
-  // The User Panel's OWN Movement Claims / Conveyance Bill Claim section
+  // The User Panel's OWN Check In/Out / Conveyance Bill Claim section
   // (submitting a claim) — gated separately from the Admin Panel's review
   // tabs below by can_view_movement_claims / can_view_conveyance_claims.
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
   onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
-  // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
+  // Admin Panel's own Check In/Out / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
   onGoToAdminClaims: (target: 'claims' | 'conveyance') => void;
@@ -248,12 +278,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Material Receive — material Purchase sent to this account's projects
   // (users.can_receive_material, off by default).
   if (pepmOn && (isSuperAdmin || !!user.can_receive_material)) {
-    jobEntryGroup.push({ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, onClick: () => onGoToSelfServiceTab('materialReceive') });
+    jobEntryGroup.push({ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, onClick: () => onGoToSelfServiceTab('materialReceive'), href: selfHref('materialReceive') });
   }
 
   // "Self Service" — everyday employee items. Employee Directory stays
   // ungated for every account (company-wide roster); Timesheet/Leave
-  // Application/My Leave are gated the same way as Movement Claim/
+  // Application/My Leave are gated the same way as Check In/Out/
   // Conveyance Bill Claim below — OFF by default, granted per account via
   // Admin Panel -> Users -> Module Access.
   const canSeeTimesheet = isSuperAdmin || !!user.can_view_timesheet;
@@ -272,7 +302,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // active item" behavior as everything else — see the effect below.
   const hrmClaimGroup: NavItem[] = [];
   if (hasUserPanel && user.can_view_movement_claims) {
-    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
+    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Check In/Out', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
   }
   // Holding the Bill Claim ("conveyance") Admin module also brings your OWN
   // claims here (it used to be a separate "My Conveyance Bill Claim" page
@@ -282,7 +312,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   }
   const hrmAttendanceGroup: NavItem[] = [];
   if (canSeeTimesheet) {
-    hrmAttendanceGroup.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
+    hrmAttendanceGroup.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet'), href: selfHref('timesheet') });
   }
   // "Leave Application" — the merged submit/review + own-balance interface
   // (LeaveReviewPage.tsx now shows both, see its own comment) — one single
@@ -292,7 +322,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // already holding just one of them keeps access to the merged page).
   const hrmLeaveGroup: NavItem[] = [];
   if (canSeeLeaveApplication || canSeeMyLeave) {
-    hrmLeaveGroup.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
+    hrmLeaveGroup.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication'), href: selfHref('leaveApplication') });
   }
   // "Leave Manage" (every account's balances, Year Settings, Balance
   // Workflows) is HR's work, so it lives in Admin Panel -> HRM -> Leave
@@ -320,35 +350,35 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Admin Panel module access (unlike Admin Panel -> Employees, which is
   // the HR-editing view gated behind the 'employees' module) — see
   // EmployeeDirectory.tsx / EmployeeDirectoryRoutes.ts.
-  selfServiceItems.push({ key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory') });
+  selfServiceItems.push({ key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory'), href: selfHref('employeeDirectory') });
   // NOT Admin-gated — a Template Layer or a Leave Application's Reliever can
   // be ANY account, so every account gets this.
-  selfServiceItems.push({ key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, onClick: () => onGoToSelfServiceTab('approveApplications') });
+  selfServiceItems.push({ key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, onClick: () => onGoToSelfServiceTab('approveApplications'), href: selfHref('approveApplications') });
   // My Resignation (MyResignation.tsx) — NOT Admin-gated either: every
   // account can submit their own resignation (POST /api/exit-requests
   // already allows a plain account to submit for themselves, see that
   // route's own comment), regardless of whether they hold the
   // exit_offboarding module grant used by the management-side
   // ExitOffboardingPanel under Admin Panel -> HR Advanced.
-  selfServiceItems.push({ key: 'resignation', label: 'My Resignation', icon: LogOut, onClick: () => onGoToSelfServiceTab('resignation') });
+  selfServiceItems.push({ key: 'resignation', label: 'My Resignation', icon: LogOut, onClick: () => onGoToSelfServiceTab('resignation'), href: selfHref('resignation') });
   // Asset Management (AssetManagement.tsx) — self-service My Assets/New
   // Requisition/Requisition Status, previously reachable only from Profile
   // -> Settings. NOT Admin-gated, same as Chat/Employee Directory/My
   // Resignation just above: any signed-in account can raise an asset
   // requisition for themselves, regardless of module_permissions.
-  selfServiceItems.push({ key: 'assetManagement', label: 'My Asset', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement') });
+  selfServiceItems.push({ key: 'assetManagement', label: 'My Asset', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement'), href: selfHref('assetManagement') });
   // Vehicle Requisition (VehicleManagement.tsx) — self-service "Book a
   // Ride"/Ride Status, same reasoning as My Asset just above: NOT
   // Admin-gated, any signed-in account can request a ride for themselves.
-  selfServiceItems.push({ key: 'vehicleManagement', label: 'Book a Ride', icon: Car, onClick: () => onGoToSelfServiceTab('vehicleManagement') });
+  selfServiceItems.push({ key: 'vehicleManagement', label: 'Book a Ride', icon: Car, onClick: () => onGoToSelfServiceTab('vehicleManagement'), href: selfHref('vehicleManagement') });
   // Grievance & Disciplinary (MyCases.tsx) — raise a grievance, and give
   // feedback on one that names you / is assigned to you, or on a
   // disciplinary action issued to you. Every account.
-  selfServiceItems.push({ key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToSelfServiceTab('myCases') });
+  selfServiceItems.push({ key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToSelfServiceTab('myCases'), href: selfHref('myCases') });
   // My Letters & Service Record (MyLetters.tsx) — letters HR issued to this
   // account (view / download / acknowledge), certificate requests, and the
   // Employee's own service record. Every account.
-  selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
+  selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters'), href: selfHref('myLetters') });
   // (Service Book has no menu item of its own: with users.can_view_service_book
   // it is a row on the Profile page — ProfilePage.tsx.)
   // Team Attendance (TeamAttendance.tsx) — only for accounts HR made the
@@ -356,55 +386,55 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // My Tasks (MyTasks.tsx) — tasks given to me, requests to HR, a
   // department head's team tasks. Off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_tasks || canSeeModule('task_management')) {
-    selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks') });
+    selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks'), href: selfHref('myTasks') });
   }
   // My Mobile SIM (MyMobileSim.tsx) — company SIMs, limits, bills, limit
   // requests. Off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_mobile_bill || canSeeModule('mobile_bill')) {
-    selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim') });
+    selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim'), href: selfHref('myMobileSim') });
   }
   // My Loan / Advance (MyLoans.tsx) — apply for a loan or salary advance.
   // users.can_view_loan_request.
   if (isSuperAdmin || !!user.can_view_loan_request) {
-    selfServiceItems.push({ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, onClick: () => onGoToSelfServiceTab('myLoans') });
+    selfServiceItems.push({ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, onClick: () => onGoToSelfServiceTab('myLoans'), href: selfHref('myLoans') });
   }
   // Credence Mail (mail/CredenceMail.tsx) — the account's own mailbox.
   // users.can_use_mail, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_use_mail) {
-    selfServiceItems.push({ key: 'credenceMail', label: 'Credence Mail', icon: Mail, onClick: () => onGoToSelfServiceTab('credenceMail') });
+    selfServiceItems.push({ key: 'credenceMail', label: 'Credence Mail', icon: Mail, onClick: () => onGoToSelfServiceTab('credenceMail'), href: selfHref('credenceMail') });
   }
   // My Duty Roster (MyRoster.tsx) — this account's own shifts and Off days.
   // users.can_view_roster, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_roster) {
-    selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster') });
+    selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster'), href: selfHref('myRoster') });
   }
   // Break Time (MyBreak.tsx) — start / end a break. users.can_take_break,
   // off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_take_break) {
-    selfServiceItems.push({ key: 'myBreak', label: 'Break Time', icon: Coffee, onClick: () => onGoToSelfServiceTab('myBreak') });
+    selfServiceItems.push({ key: 'myBreak', label: 'Break Time', icon: Coffee, onClick: () => onGoToSelfServiceTab('myBreak'), href: selfHref('myBreak') });
   }
   // Documents to Sign (MySignatures.tsx) — documents HR sent this account
   // to sign. users.can_sign_documents, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_sign_documents) {
-    selfServiceItems.push({ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, onClick: () => onGoToSelfServiceTab('mySignatures') });
+    selfServiceItems.push({ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, onClick: () => onGoToSelfServiceTab('mySignatures'), href: selfHref('mySignatures') });
   }
   // SIM & ID Card (MyRequisitions.tsx) — ask HR for a SIM or an ID card.
   // users.can_request_items, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_request_items) {
-    selfServiceItems.push({ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions') });
+    selfServiceItems.push({ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions'), href: selfHref('myRequisitions') });
   }
   // My Payslip (MyPayslips.tsx) — this account's approved / paid payslips.
   // users.can_view_payslip, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_payslip) {
-    selfServiceItems.push({ key: 'myPayslips', label: 'My Payslip', icon: ReceiptText, onClick: () => onGoToSelfServiceTab('myPayslips') });
+    selfServiceItems.push({ key: 'myPayslips', label: 'My Payslip', icon: ReceiptText, onClick: () => onGoToSelfServiceTab('myPayslips'), href: selfHref('myPayslips') });
   }
   // My Targets (MyTargets.tsx) — monthly / yearly targets and their tasks;
   // a supervisor's Team tab too. users.can_view_targets.
   if (isSuperAdmin || !!user.can_view_targets) {
-    selfServiceItems.push({ key: 'myTargets', label: 'My Targets', icon: Target, onClick: () => onGoToSelfServiceTab('myTargets') });
+    selfServiceItems.push({ key: 'myTargets', label: 'My Targets', icon: Target, onClick: () => onGoToSelfServiceTab('myTargets'), href: selfHref('myTargets') });
   }
   if (siteSupervisor.teams > 0) {
-    selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
+    selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance'), href: selfHref('teamAttendance') });
   }
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
@@ -416,18 +446,18 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // see canSeeModule above.
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
   const adminDashboardItem: NavItem | null = isAdminRole || canSeeModule('admin_dashboard')
-    ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
+    ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard'), href: adminHref('dashboard') }
     : null;
   // Reports & Insights — every operational report in one place; shown to
   // anyone holding at least one of the modules its reports come from.
   const reportsInsightsItem: NavItem | null = REPORTS_INSIGHTS_MODULES.some((m) => canSeeModule(m))
-    ? { key: 'reports_insights', label: 'Reports & Insights', icon: PieChart, onClick: () => onGoToAdminModule('reports_insights') }
+    ? { key: 'reports_insights', label: 'Reports & Insights', icon: PieChart, onClick: () => onGoToAdminModule('reports_insights'), href: adminHref('reports_insights') }
     : null;
   // HR Data Import — employees, leave, claims and attendance history from
   // Excel/CSV; its own module (Module Access -> HR Data Import), not shown
   // just because an account has the modules it writes into.
   const dataImportItem: NavItem | null = canSeeModule('data_import')
-    ? { key: 'data_import', label: 'HR Data Import', icon: FileUp, onClick: () => onGoToAdminModule('data_import') }
+    ? { key: 'data_import', label: 'HR Data Import', icon: FileUp, onClick: () => onGoToAdminModule('data_import'), href: adminHref('data_import') }
     : null;
 
   // "Admin Panel" — PEPM Management group (expandable) + flat items, same
@@ -435,20 +465,20 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // (Group label shown to the user is "PEPM Management"; internal names
   // kept as reportsGroup/reportsOpen to minimize diff.)
   const reportsGroup: NavItem[] = [
-    { key: 'reports', label: 'Reports', icon: BarChart3, onClick: () => onGoToAdminModule('reports') },
-    { key: 'mprs', label: 'MPR Nos', icon: FileText, onClick: () => onGoToAdminModule('mprs') },
-    { key: 'imports', label: 'Data Import', icon: Upload, onClick: () => onGoToAdminModule('imports') },
-    { key: 'recycle', label: 'Job Recycle', icon: Recycle, onClick: () => onGoToAdminModule('recycle') },
-    { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
+    { key: 'reports', label: 'Reports', icon: BarChart3, onClick: () => onGoToAdminModule('reports'), href: adminHref('reports') },
+    { key: 'mprs', label: 'MPR Nos', icon: FileText, onClick: () => onGoToAdminModule('mprs'), href: adminHref('mprs') },
+    { key: 'imports', label: 'Data Import', icon: Upload, onClick: () => onGoToAdminModule('imports'), href: adminHref('imports') },
+    { key: 'recycle', label: 'Job Recycle', icon: Recycle, onClick: () => onGoToAdminModule('recycle'), href: adminHref('recycle') },
+    { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog'), href: adminHref('editlog') },
   ].filter((i) => pepmOn && canSeeModule(i.key as AdminModuleKey));
 
-  // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance
+  // "Claims" — Check In/Out, Conveyance Bill Claim, Conveyance
   // Disbursement. No longer its own collapsible group — merged as flat
   // items into "HR" below.
   const claimsItems: NavItem[] = [
-    { key: 'claims', label: 'Movement Claims', icon: Route, onClick: () => onGoToAdminClaims('claims') },
-    { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
-    { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
+    { key: 'claims', label: 'Check In/Out', icon: Route, onClick: () => onGoToAdminClaims('claims'), href: adminHref('claims') },
+    { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance'), href: adminHref('conveyance') },
+    { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement'), href: adminHref('disbursement') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   if (canSeeModule('conveyance')) {
     // "Bill Claim Policy" — rules for Bill Claims (limits, receipts, deadlines…).
@@ -457,7 +487,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'bill_claim_policy',
       label: 'Bill Claim Policy',
       icon: ShieldCheck,
-      onClick: () => onGoToAdminModule('bill_claim_policy')
+      onClick: () => onGoToAdminModule('bill_claim_policy'), href: adminHref('bill_claim_policy')
     });
   }
 
@@ -465,11 +495,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Attendance. No longer its own collapsible group — merged as flat items
   // into "HR" below.
   const attendanceItems: NavItem[] = [
-    { key: 'attendance', label: 'Remote Attendance', icon: Navigation, onClick: () => onGoToAdminModule('attendance') },
-    { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports') },
-    { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
-    { key: 'duty_roster', label: 'Duty Roster', icon: CalendarRange, onClick: () => onGoToAdminModule('duty_roster') },
-    { key: 'break_time', label: 'Break Time', icon: Coffee, onClick: () => onGoToAdminModule('break_time') },
+    { key: 'attendance', label: 'Remote Attendance', icon: Navigation, onClick: () => onGoToAdminModule('attendance'), href: adminHref('attendance') },
+    { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports'), href: adminHref('attendance_reports') },
+    { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance'), href: adminHref('office_attendance') },
+    { key: 'duty_roster', label: 'Duty Roster', icon: CalendarRange, onClick: () => onGoToAdminModule('duty_roster'), href: adminHref('duty_roster') },
+    { key: 'break_time', label: 'Break Time', icon: Coffee, onClick: () => onGoToAdminModule('break_time'), href: adminHref('break_time') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   // Site Attendance (supervisor muster roll) lives inside Office Attendance
   // (SiteAttendanceAdmin.tsx) — same module grant, its own entry here.
@@ -494,39 +524,39 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // group — Projects/Branches merged into "MIS" below, Departments merged
   // into "HR" below.
   const orgItems: NavItem[] = [
-    { key: 'projects', label: 'Projects', icon: Building2, onClick: () => onGoToAdminModule('projects') },
-    { key: 'branches', label: 'Branches', icon: Building2, onClick: () => onGoToAdminModule('branches') },
+    { key: 'projects', label: 'Projects', icon: Building2, onClick: () => onGoToAdminModule('projects'), href: adminHref('projects') },
+    { key: 'branches', label: 'Branches', icon: Building2, onClick: () => onGoToAdminModule('branches'), href: adminHref('branches') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   const departmentsItem: NavItem[] = [
-    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
+    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments'), href: adminHref('departments') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Employee" — Employees, Employee Tracking, Asset Management. No longer
   // its own "Workforce" top-level group — merged in as a nested sub-group
   // inside HR below (Users already moved out to MIS separately).
   const employeeItems: NavItem[] = [
-    { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
-    { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
-    { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
-    { key: 'vehicle_management', label: 'Vehicle Management', icon: Car, onClick: () => onGoToAdminModule('vehicle_management') },
+    { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees'), href: adminHref('employees') },
+    { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking'), href: adminHref('tracking') },
+    { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management'), href: adminHref('asset_management') },
+    { key: 'vehicle_management', label: 'Vehicle Management', icon: Car, onClick: () => onGoToAdminModule('vehicle_management'), href: adminHref('vehicle_management') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "HR" — approvals, notices, holidays, leave reporting, plus Departments
   // (from the dissolved Organization group) and every item from the
   // dissolved Claims/Attendance groups.
   const hrGroup: NavItem[] = [
-    { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
-    { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
-    { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
-    { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management') },
-    { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill') },
-    { key: 'target_reports', label: 'Target Reports', icon: Target, onClick: () => onGoToAdminModule('target_reports') },
+    { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals'), href: adminHref('approvals') },
+    { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices'), href: adminHref('notices') },
+    { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays'), href: adminHref('holidays') },
+    { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management'), href: adminHref('task_management') },
+    { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill'), href: adminHref('mobile_bill') },
+    { key: 'target_reports', label: 'Target Reports', icon: Target, onClick: () => onGoToAdminModule('target_reports'), href: adminHref('target_reports') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
   // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
-  // (Movement Claims, Conveyance Bill Claim, Conveyance Disbursement, My
+  // (Check In/Out, Conveyance Bill Claim, Conveyance Disbursement, My
   // Conveyance Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
   // World-class HRM extension modules (Exit/Offboarding, Performance,
@@ -535,13 +565,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // every other item here; grouped together so they don't crowd the flat
   // hrGroup list above.
   const hrAdvancedItems: NavItem[] = [
-    { key: 'exit_offboarding', label: 'Exit / Offboarding', icon: LogOut, onClick: () => onGoToAdminModule('exit_offboarding') },
-    { key: 'performance_management', label: 'Performance Management', icon: Target, onClick: () => onGoToAdminModule('performance_management') },
-    { key: 'recruitment', label: 'Recruitment (ATS)', icon: UserPlus, onClick: () => onGoToAdminModule('recruitment') },
-    { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToAdminModule('grievance_disciplinary') },
-    { key: 'hr_analytics', label: 'HR Analytics', icon: BarChart3, onClick: () => onGoToAdminModule('hr_analytics') },
-    { key: 'management_dashboard', label: 'Management Dashboard', icon: PieChart, onClick: () => onGoToAdminModule('management_dashboard') },
-    { key: 'document_vault', label: 'Document Vault', icon: FolderLock, onClick: () => onGoToAdminModule('document_vault') },
+    { key: 'exit_offboarding', label: 'Exit / Offboarding', icon: LogOut, onClick: () => onGoToAdminModule('exit_offboarding'), href: adminHref('exit_offboarding') },
+    { key: 'performance_management', label: 'Performance Management', icon: Target, onClick: () => onGoToAdminModule('performance_management'), href: adminHref('performance_management') },
+    { key: 'recruitment', label: 'Recruitment (ATS)', icon: UserPlus, onClick: () => onGoToAdminModule('recruitment'), href: adminHref('recruitment') },
+    { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToAdminModule('grievance_disciplinary'), href: adminHref('grievance_disciplinary') },
+    { key: 'hr_analytics', label: 'HR Analytics', icon: BarChart3, onClick: () => onGoToAdminModule('hr_analytics'), href: adminHref('hr_analytics') },
+    { key: 'management_dashboard', label: 'Management Dashboard', icon: PieChart, onClick: () => onGoToAdminModule('management_dashboard'), href: adminHref('management_dashboard') },
+    { key: 'document_vault', label: 'Document Vault', icon: FolderLock, onClick: () => onGoToAdminModule('document_vault'), href: adminHref('document_vault') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Payroll" — moved here from Self Service's "My HR" group: same
@@ -554,7 +584,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // AdminPanel's own tab system, so this is only a menu-location change.
   const hrPayrollGroup: NavItem[] = [];
   if (canSeeModule('payroll')) {
-    hrPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
+    hrPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll'), href: selfHref('payroll') });
   }
 
   // "HR Operations" (HROperationsPanel.tsx) — one 'hr_operations' module
@@ -596,9 +626,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // moved here from Self Service.
   const hrLeaveItems: NavItem[] = [
     ...(canSeeModule('leave_applications')
-      ? [{ key: 'leave_applications', label: 'Leave Applications', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') }]
+      ? [{ key: 'leave_applications', label: 'Leave Applications', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications'), href: adminHref('leave_applications') }]
       : []),
-    ...(canManageLeave ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') }] : []),
+    ...(canManageLeave ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement'), href: selfHref('leaveManagement') }] : []),
   ];
 
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
@@ -614,10 +644,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // "MIS" — Users, plus Projects/Branches (from the dissolved Organization
   // group). Everything here keeps its normal canSeeModule gate.
   const misGroup: NavItem[] = [
-    { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
+    { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users'), href: adminHref('users') },
     ...orgItems,
-    { key: 'mail_admin', label: 'Mail Administration', icon: Mail, onClick: () => onGoToAdminModule('mail_admin') },
-    { key: 'user_feedback', label: 'User Feedback', icon: MessageSquareHeart, onClick: () => onGoToAdminModule('user_feedback') },
+    { key: 'mail_admin', label: 'Mail Administration', icon: Mail, onClick: () => onGoToAdminModule('mail_admin'), href: adminHref('mail_admin') },
+    { key: 'user_feedback', label: 'User Feedback', icon: MessageSquareHeart, onClick: () => onGoToAdminModule('user_feedback'), href: adminHref('user_feedback') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // Not part of MIS — Superadmin-only, but not "Users management", so kept
@@ -625,11 +655,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const adminFlatItems: NavItem[] = [];
   if (isSuperAdmin) {
     // Multi-company (SystemCompanies.tsx) — Superadmin-only, like the log below.
-    adminFlatItems.push({ key: 'companies', label: 'Companies', icon: Building2, onClick: () => onGoToAdminModule('companies') });
+    adminFlatItems.push({ key: 'companies', label: 'Companies', icon: Building2, onClick: () => onGoToAdminModule('companies'), href: adminHref('companies') });
     // Which phone each account may use the app on (DeviceAccess.tsx).
-    adminFlatItems.push({ key: 'devices', label: 'Device Access', icon: Smartphone, onClick: () => onGoToAdminModule('devices') });
+    adminFlatItems.push({ key: 'devices', label: 'Device Access', icon: Smartphone, onClick: () => onGoToAdminModule('devices'), href: adminHref('devices') });
     // Who is signed in right now, with IP and device (ActiveUsers.tsx).
-    adminFlatItems.push({ key: 'active_users', label: 'Active Users', icon: Activity, onClick: () => onGoToAdminModule('active_users') });
+    adminFlatItems.push({ key: 'active_users', label: 'Active Users', icon: Activity, onClick: () => onGoToAdminModule('active_users'), href: adminHref('active_users') });
     // Same "not a grantable module" reasoning as Servers above — this exists
     // specifically so a Superadmin can see an Admin's permanent Job Recycle
     // erases too, so it can never be delegated away via module_permissions.
@@ -637,7 +667,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'permanent_delete_log',
       label: 'Permanent Delete Log',
       icon: ShieldAlert,
-      onClick: () => onGoToAdminModule('permanent_delete_log'),
+      onClick: () => onGoToAdminModule('permanent_delete_log'), href: adminHref('permanent_delete_log'),
     });
   }
 
@@ -895,19 +925,19 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   const renderItem = (item: NavItem) => {
     const active = item.key === activeKey;
+    const NavTag: any = item.href ? 'a' : 'button';
     return (
-      <button
+      <NavTag
         key={item.key}
-        type="button"
+        {...navLinkProps(item.href, () => selectAndClose(item.onClick))}
         {...tipProps(item.label)}
-        onClick={() => selectAndClose(item.onClick)}
         className={`w-full flex items-center rounded-xl transition-colors ${
           collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
         } ${active ? 'bg-white/15 text-white shadow-sm' : 'text-white/85 hover:bg-white/10'}`}
       >
         <item.icon className="w-[18px] h-[18px] shrink-0" />
         {!collapsed && <span className={`text-[13px] truncate ${active ? 'font-medium' : 'font-normal'}`}>{item.label}</span>}
-      </button>
+      </NavTag>
     );
   };
 
@@ -978,21 +1008,21 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         );
       }
       const active = e.key === activeKey;
+      const NavTag: any = e.href ? 'a' : 'button';
       return (
-        <button
+        <NavTag
           key={e.key}
-          type="button"
-          onClick={() => {
+          {...navLinkProps(e.href, () => {
             onPicked?.();
             selectAndClose(e.onClick);
-          }}
+          })}
           className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
             active ? 'bg-white/15 text-white font-medium' : 'text-white/75 hover:bg-white/10 hover:text-white'
           }`}
         >
           <e.icon className="w-3.5 h-3.5 shrink-0" />
           <span className="text-[12.5px] truncate">{e.label}</span>
-        </button>
+        </NavTag>
       );
     });
 
@@ -1202,9 +1232,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         <nav onScroll={() => setTip(null)} className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
           {/* Dashboard — always available, lands back on the User Panel's own
               dashboard regardless of which panel is currently showing. */}
-          <button
-            type="button"
-            onClick={() => selectAndClose(onGoToDashboard)}
+          <a
+            {...navLinkProps('/', () => selectAndClose(onGoToDashboard))}
             {...tipProps('Dashboard')}
             className={`w-full flex items-center rounded-xl transition-colors ${
               collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
@@ -1214,7 +1243,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             {!collapsed && (
               <span className={`text-[13px] truncate ${activeKey === 'dashboard' ? 'font-medium' : 'font-normal'}`}>Dashboard</span>
             )}
-          </button>
+          </a>
 
           {/* Favourites — up to four shortcuts, chosen with the pencil. */}
           {!collapsed && (favItems.length > 0 || editingFavs) && (
@@ -1249,20 +1278,22 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-4 gap-1.5">
-                  {favItems.map((i) => (
-                    <button
+                  {favItems.map((i) => {
+                    const FavTag: any = i.href ? 'a' : 'button';
+                    return (
+                    <FavTag
                       key={i.key}
-                      type="button"
                       title={i.label}
-                      onClick={() => selectAndClose(i.onClick)}
+                      {...navLinkProps(i.href, () => selectAndClose(i.onClick))}
                       className={`flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] leading-tight text-center transition-colors ${
                         i.key === activeKey ? 'bg-white/25 text-white' : 'bg-white/10 text-white/85 hover:bg-white/20'
                       }`}
                     >
                       <i.icon className="w-[18px] h-[18px]" />
                       <span className="line-clamp-2">{i.label.replace(' Application', '')}</span>
-                    </button>
-                  ))}
+                    </FavTag>
+                    );
+                  })}
                 </div>
               )}
             </>

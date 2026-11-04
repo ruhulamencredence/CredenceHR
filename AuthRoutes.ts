@@ -6,6 +6,7 @@
 // Sign-in routes (/api/auth/register, /api/auth/login, /api/auth/me), moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { listAttendanceProjects } from "./AttendanceProjects";
 import { checkWorkspaceLogin } from "./CompanyRoutes";
 import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
@@ -98,13 +99,27 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
       const u = users[0];
+      // Whether this login has its own Employee record — the Profile page
+      // hides My Service Book for a Superadmin without one (nothing to show,
+      // and "contact HR" makes no sense to them).
+      const ownEmployee: any[] = await queryDB("SELECT id FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]).catch(() => []);
+      // Remote Attendance: the Projects this account may check in at today
+      // (AttendanceProjects.ts). attendance_project_id stays the one Project
+      // when there's exactly one, so screens that drop their picker for a
+      // single Project keep working.
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
+      const checkIn = u.role === "superadmin" ? [] : await listAttendanceProjects(queryDB, Number(req.user.id), today).catch(() => []);
+      const activeCheckIn = checkIn.filter((r) => r.active);
       res.json({
         ...u,
+        has_employee: ownEmployee.length > 0,
+        attendance_projects: activeCheckIn.map((r) => ({ id: r.project_id, name: r.project_name, valid_to: r.valid_to })),
+        attendance_projects_limited: checkIn.length > 0,
         active_company_id: activeCompanyId(),
         pepm_enabled: pepmEnabled(activeGroupId()),
         is_onboarding: !!Number(u.is_onboarding || 0),
@@ -113,7 +128,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit) && pepmEnabled(activeGroupId()),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
-        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
+        attendance_project_id: checkIn.length > 0 && activeCheckIn.length === 1 ? activeCheckIn[0].project_id : null,
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
         can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
@@ -133,6 +148,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
         can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
         can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
+        can_update_check_out: u.role === "superadmin" ? true : !!Number(u.can_update_check_out),
         can_add_adhoc_approver: u.role === "superadmin" ? true : !!Number(u.can_add_adhoc_approver || 0),
         can_use_assistant_voice: u.role === "superadmin" ? true : !!Number(u.can_use_assistant_voice || 0),
         can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
@@ -276,7 +292,7 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // Admin-only grant above.
       can_manage_leave: user.role === "superadmin" ? true : !!Number(user.can_manage_leave),
       // Superadmin-granted (or implicit for the Superadmin itself): can this
-      // account see/use the Movement Claim (GPS Check In/Out) and Conveyance
+      // account see/use the Check In/Out (GPS Check In/Out) and Conveyance
       // Bill Claim sections on its own User Panel at all? Applies to both
       // 'admin' and 'user' roles, same pattern as can_manage_leave above —
       // OFF (hidden) until the Superadmin explicitly grants it.
@@ -308,6 +324,7 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       can_view_roster: user.role === "superadmin" ? true : !!Number(user.can_view_roster),
       can_take_break: user.role === "superadmin" ? true : !!Number(user.can_take_break),
       can_save_ride_places: user.role === "superadmin" ? true : !!Number(user.can_save_ride_places),
+      can_update_check_out: user.role === "superadmin" ? true : !!Number(user.can_update_check_out),
       can_add_adhoc_approver: user.role === "superadmin" ? true : !!Number(user.can_add_adhoc_approver || 0),
       can_use_assistant_voice: user.role === "superadmin" ? true : !!Number(user.can_use_assistant_voice || 0),
       can_sign_documents: user.role === "superadmin" ? true : !!Number(user.can_sign_documents),

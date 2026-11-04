@@ -32,7 +32,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   duty_roster: [...HRM, 'Attendance', 'Duty Roster'],
   break_time: [...HRM, 'Attendance', 'Break Time'],
 
-  claims: [...HRM, 'Claims/Bill/Disbursement', 'Movement Claims'],
+  claims: [...HRM, 'Claims/Bill/Disbursement', 'Check In/Out'],
   conveyance: [...HRM, 'Claims/Bill/Disbursement', 'Bill Claim'],
   disbursement: [...HRM, 'Claims/Bill/Disbursement', 'Bill Disbursement'],
   bill_claim_policy: [...HRM, 'Claims/Bill/Disbursement', 'Bill Claim Policy'],

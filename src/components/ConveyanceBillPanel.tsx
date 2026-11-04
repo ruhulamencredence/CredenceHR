@@ -53,7 +53,7 @@ const blankItemDraft = () => ({
 // Admin Panel -> Conveyance Bill Claim (Superadmin + explicitly-granted Admins
 // only — see ADMIN_MODULES/'conveyance'). A Bill groups several travel/conveyance
 // line items for ONE User into a single claim document; each item either gets
-// pulled in from that User's own completed Movement Claim (see the "Movement
+// pulled in from that User's own completed Check In/Out (see the "Movement
 // Claims" tab) or is added fully by hand.
 export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users, currentUserId }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
@@ -114,7 +114,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const hasFilters = userFilter || fromFilter || toFilter;
 
   const handleDeleteBill = async (id: number) => {
-    if (!(await confirmDialog('Delete this bill and all its items? This cannot be undone. (Any Movement Claims used in it become billable again.)'))) return;
+    if (!(await confirmDialog('Delete this bill and all its items? This cannot be undone. (Any check in/out records used in it become billable again.)'))) return;
     setDeletingBillId(id);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -211,7 +211,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const [viewingUserClaimId, setViewingUserClaimId] = useState<number | null>(null);
   const viewingUserClaim = userClaims.find((c) => c.id === viewingUserClaimId) || null;
 
-  // ---- Add from Movement Claim ----
+  // ---- Add from Check In/Out ----
   const [showClaimPicker, setShowClaimPicker] = useState(false);
   const [availableClaims, setAvailableClaims] = useState<ClaimRecord[]>([]);
   const [loadingClaims, setLoadingClaims] = useState(false);
@@ -810,17 +810,17 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                         onClick={openClaimPicker}
                         className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
                       >
-                        <Route className="w-3.5 h-3.5" /> Add from Movement Claim
+                        <Route className="w-3.5 h-3.5" /> Add from Check In/Out
                       </button>
                       <span className="text-[11px] text-slate-500">Only approved check-in/outs. Amounts can be lowered here, not raised.</span>
                     </div>
                   )}
 
-                  {/* Movement Claim picker */}
+                  {/* Check In/Out picker */}
                   {showClaimPicker && (
                     <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/40 space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-700">Completed Movement Claims for {billDetail.user_name} (not yet billed)</h4>
+                        <h4 className="text-xs font-bold text-slate-700">Completed check in/out records for {billDetail.user_name} (not yet billed)</h4>
                         <button onClick={() => setShowClaimPicker(false)} className="text-slate-400 hover:text-slate-700">
                           <X className="w-4 h-4" />
                         </button>
@@ -829,7 +829,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                       {loadingClaims ? (
                         <p className="text-xs text-slate-400 flex items-center gap-1.5"><Spinner size={14} /> Loading...</p>
                       ) : availableClaims.length === 0 ? (
-                        <p className="text-xs text-slate-400">No unbilled completed Movement Claims for this User.</p>
+                        <p className="text-xs text-slate-400">No unbilled completed check in/out records for this User.</p>
                       ) : (
                         <ul className="divide-y divide-blue-100 bg-white rounded-lg border border-blue-100 overflow-hidden">
                           {availableClaims.map((c) => (
@@ -912,7 +912,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                       : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                                 >
-                                  {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                  {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
                                 </span>
                               </div>
 
@@ -1018,7 +1018,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                     }`}
                                   >
-                                    {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                    {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-700 max-w-[200px]">

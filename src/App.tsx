@@ -1166,7 +1166,7 @@ export default function App() {
   };
 
   // mobileActiveSection isn't actually mobile-only for these values — per
-  // UserPanel.tsx's showingClaimsPage, Movement Claim/My Claims/Conveyance
+  // UserPanel.tsx's showingClaimsPage, Check In/Out/My Claims/Conveyance
   // Bill Claim/Leave/Timesheet/Employee Directory/Notice Board show as their
   // OWN page on desktop too, driven by this same state. desktopActiveSection
   // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on
@@ -1461,6 +1461,11 @@ export default function App() {
         onOpenChat={openChat}
         isChatOpen={showChat}
         onOpenAlerts={sidebarNavProps.onOpenAlerts}
+        // The blended phone header's round Back: the same step as the
+        // phone's own Back button (a page's open popup first, then the page).
+        onPageBack={() => {
+          if (!closeTopmostOrReturnFalse()) pageBackRef.current();
+        }}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —

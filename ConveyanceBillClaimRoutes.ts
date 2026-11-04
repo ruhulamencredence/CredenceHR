@@ -195,7 +195,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     return bill;
   };
 
-  // A check-in/out (Movement Claim) can go on a bill only once every approval
+  // A check-in/out (Check In/Out) can go on a bill only once every approval
   // request on it (check-in and check-out) is approved; one with no approval
   // chain at all counts as approved.
   const movementClaimApproved = async (claimId: number): Promise<boolean> => {
@@ -554,7 +554,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   });
 
   // Deleting a Bill only removes the Bill + its line items (ON DELETE CASCADE) —
-  // the underlying Movement Claim(s), if any were pulled in, are untouched and
+  // the underlying Check In/Out(s), if any were pulled in, are untouched and
   // become billable again in a future Bill. A Bill that's already been
   // disbursed (money actually paid out — see .../disburse below) can't be
   // deleted from here; it has to be undone first (POST .../undisburse), so a
@@ -618,9 +618,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  // Completed Movement Claims belonging to ONE User that haven't been pulled into
+  // Completed Check In/Out belonging to ONE User that haven't been pulled into
   // any Bill yet (a Claim can only ever be billed once — see the UNIQUE claim_id
-  // constraint on conveyance_bill_items) — powers the "Add from Movement Claim"
+  // constraint on conveyance_bill_items) — powers the "Add from Check In/Out"
   // picker inside a Bill.
   app.get("/api/conveyance-bills/available-claims/:userId", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
     try {
@@ -654,18 +654,18 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
       if (source === "movement_claim") {
         const { claim_id, rate_per_km, amount, remarks } = req.body;
-        if (!claim_id) return res.status(400).json({ error: "Select a Movement Claim." });
+        if (!claim_id) return res.status(400).json({ error: "Select a Check In/Out record." });
         const claimRows = await queryDB("SELECT * FROM claims WHERE id = ?", [claim_id]);
-        if (claimRows.length === 0) return res.status(404).json({ error: "Movement Claim not found" });
+        if (claimRows.length === 0) return res.status(404).json({ error: "Check In/Out record not found" });
         const claim = claimRows[0];
         if (claim.status !== "completed") {
-          return res.status(400).json({ error: "Only a completed Movement Claim (already checked out) can be billed." });
+          return res.status(400).json({ error: "Only a completed Check In/Out (already checked out) can be billed." });
         }
         if (Number(claim.user_id) !== Number(bill.user_id)) {
-          return res.status(400).json({ error: "That Movement Claim belongs to a different User than this Bill." });
+          return res.status(400).json({ error: "That Check In/Out belongs to a different User than this Bill." });
         }
         const already = await queryDB("SELECT id FROM conveyance_bill_items WHERE claim_id = ?", [claim_id]);
-        if (already.length > 0) return res.status(400).json({ error: "That Movement Claim has already been billed." });
+        if (already.length > 0) return res.status(400).json({ error: "That Check In/Out has already been billed." });
         if (!(await movementClaimApproved(Number(claim_id)))) {
           return res.status(400).json({ error: "That check-in/out hasn't been approved yet — it can go on a bill once its approval is through." });
         }
@@ -783,8 +783,8 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         ORDER BY r.id ASC`,
       ids
     );
-    // Same Approval Workflow status shown everywhere else a Movement Claim
-    // appears (My Claims, Admin's Movement Claims tab) — reuses
+    // Same Approval Workflow status shown everywhere else a Check In/Out
+    // appears (My Claims, Admin's Check In/Out tab) — reuses
     // attachApprovalStatuses by giving each row an `id` equal to its claim_id,
     // which is the join key that helper expects.
     const withApproval = await attachApprovalStatuses(
@@ -976,7 +976,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       }
       const usesItems = Array.isArray(items);
 
-      // Optional Check In/Out references — each one is a completed Movement Claim
+      // Optional Check In/Out references — each one is a completed Check In/Out
       // (claims table) the User owns, carrying its OWN Amount. A given check-in/
       // out can be referenced on at most one Conveyance Bill Claim ever, so every
       // id here must still show up in GET /api/claims/available at submit time.
@@ -1009,7 +1009,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
             return res.status(400).json({ error: "One of the referenced check-in/outs doesn't belong to this employee." });
           }
           if (claimRow.status !== "completed") {
-            return res.status(400).json({ error: "A referenced Movement Claim must be checked out first." });
+            return res.status(400).json({ error: "A referenced Check In/Out must be checked out first." });
           }
           // Only check-ins inside the claim's own From–To range.
           const day = String(claimRow.check_in_day || "").slice(0, 10);

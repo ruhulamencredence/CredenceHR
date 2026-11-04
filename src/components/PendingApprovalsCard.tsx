@@ -26,7 +26,7 @@ interface MyApprovalItem extends ClaimReviewFields {
   current_step: number;
   total_steps: number;
   created_at: string;
-  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
+  // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
   // this Conveyance Bill Claim's Amount was built from, so the approver can
   // open the full check-in/check-out details (including location) before
   // deciding. See ApproveApplications.tsx for the original of this pattern.
@@ -95,7 +95,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Loan / Advance Request'
     : t === 'hr_action'
     ? 'HR Action'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 interface PendingApprovalsCardProps {
   token: string;
@@ -118,7 +118,7 @@ interface PendingApprovalsCardProps {
 // request cards: a category card shows just the type + how many are waiting,
 // and tapping it opens that category's own list right here (no navigation
 // away from the Dashboard) — the same per-item Approve/Reject UI, including
-// the Conveyance Bill Claim's Movement Claim (check-in/out) location viewer,
+// the Conveyance Bill Claim's Check In/Out (check-in/out) location viewer,
 // as the full "Approve Application" page (ApproveApplications.tsx).
 export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token, className = '' }) => {
   const [items, setItems] = useState<MyApprovalItem[]>([]);
@@ -148,7 +148,11 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
   const [assignForm, setAssignForm] = useState<Record<number, { vehicle_id: string; driver_user_id: string }>>({});
 
+  // Loaded only once a request that needs the picker is waiting here — not
+  // for everyone on every Dashboard load.
+  const needsVehiclePicker = items.some((i) => i.vehicle_maintainer_bypass);
   useEffect(() => {
+    if (!needsVehiclePicker) return;
     const authHeaders = { Authorization: `Bearer ${token}` };
     fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
       .then((r) => r.json())
@@ -159,7 +163,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, needsVehiclePicker]);
 
   const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,

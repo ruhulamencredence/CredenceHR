@@ -81,6 +81,23 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   onClose,
   onSubmitted
 }) => {
+  // An account with its own check-in list (Module Access -> Remote
+  // Attendance) is offered only those Projects for a fully absent day; the
+  // server checks the day's list again. null = no list (every Project).
+  const [checkInList, setCheckInList] = useState<Set<number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        if (alive && me?.attendance_projects_limited) setCheckInList(new Set((me.attendance_projects || []).map((p: any) => Number(p.id))));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   // One option per distinct Project already recorded that day, or — when the
   // day is fully Absent — one option per Project the User has access to at
   // all. Auto-selects (and hides the dropdown for) the single-option case,
@@ -93,7 +110,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   // Project than the one now pinned. The In/Out Time still pre-fills from
   // whatever row that day actually has (there's realistically at most one),
   // just filed under the pinned Project instead.
-  const options = pinnedProjectId
+  const options = (pinnedProjectId
     ? [{
         id: pinnedProjectId,
         name: projects.find((p) => p.id === pinnedProjectId)?.project_name || `Project #${pinnedProjectId}`,
@@ -101,12 +118,18 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
       }]
     : dayRecords.length > 0
       ? dayRecords.map((r) => ({ id: r.project_id, name: r.project_name || `Project #${r.project_id}`, record: r as AttendanceRecord | null }))
-      : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }));
+      : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }))
+  ).filter((o) => pinnedProjectId || dayRecords.length > 0 || !checkInList || checkInList.has(o.id));
 
   const [projectId, setProjectId] = useState<number | ''>(options.length > 0 ? options[0].id : '');
   const [checkInTime, setCheckInTime] = useState(options.length > 0 ? toTimeInputValue(options[0].record?.check_in_at) : '');
   const [checkOutTime, setCheckOutTime] = useState(options.length > 0 ? toTimeInputValue(options[0].record?.check_out_at) : '');
   const [remarks, setRemarks] = useState('');
+  // The check-in list arrives after the first render — keep the pick on it.
+  useEffect(() => {
+    if (options.length && !options.some((o) => o.id === projectId)) setProjectId(options[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkInList]);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
   const [submitting, setSubmitting] = useState(false);

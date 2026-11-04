@@ -35,6 +35,7 @@ export type SelfServiceFeature =
   | 'can_view_roster'
   | 'can_take_break'
   | 'can_save_ride_places'
+  | 'can_update_check_out'
   | 'can_add_adhoc_approver'
   | 'can_use_assistant_voice'
   | 'can_sign_documents'
@@ -54,6 +55,7 @@ const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_roster: 'roster-access',
   can_take_break: 'break-access',
   can_save_ride_places: 'ride-places-access',
+  can_update_check_out: 'check-out-update-access',
   can_add_adhoc_approver: 'adhoc-approver-access',
   can_use_assistant_voice: 'assistant-voice-access',
   can_sign_documents: 'sign-documents-access',
@@ -68,7 +70,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard' },
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date' },
   { key: 'can_job_edit', label: 'Job Edit' },
-  { key: 'can_view_movement_claims', label: 'Movement Claim', selfService: true },
+  { key: 'can_view_movement_claims', label: 'Check In/Out', selfService: true },
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', selfService: true },
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
@@ -81,6 +83,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_roster', label: 'My Duty Roster', selfService: true },
   { key: 'can_take_break', label: 'Break Time', selfService: true },
   { key: 'can_save_ride_places', label: 'Book a Ride — saved places', selfService: true },
+  { key: 'can_update_check_out', label: 'Remote Attendance — update Out Time', selfService: true },
   { key: 'can_add_adhoc_approver', label: 'Approvals — add an ad-hoc approver', selfService: true },
   { key: 'can_use_assistant_voice', label: 'AI Assistant — voice', selfService: true },
   { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true },

@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
 import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
@@ -60,8 +61,10 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
+import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
+import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
@@ -301,6 +304,8 @@ async function initDB() {
     }
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
+    // Notices: pictures / attachments, audience groups, schedule, reads.
+    await ensureNoticeV2Schema(dbPool);
     // Measurement Sheet was taken out of the software: drop its table and the
     // module's saved permissions (no-ops once they are gone).
     for (const sql of [
@@ -320,6 +325,11 @@ async function initDB() {
     // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
     await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
+    // Several ZKTeco machines: office, LAN / internet push, own PIN numbers (zkMachines.ts).
+    await ensureZkMachinesSchema(dbPool);
+    // Remote Attendance: the Projects each account may check in at, with
+    // From/To dates (AttendanceProjects.ts) — after users and projects.
+    await ensureAttendanceProjectsSchema(dbPool);
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
@@ -328,7 +338,19 @@ async function initDB() {
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
-    if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
+    if (runsBackgroundJobs()) {
+      startZkSyncSchedule(dbPool);
+      // An attendance machine not heard from for an hour (07:00–21:00):
+      // the Office Attendance people and the Superadmin hear it once.
+      setInterval(() => {
+        void checkZkMachinesOffline(dbPool, async (title, message) => {
+          const to: any[] = await queryDB(
+            "/*unscoped*/ SELECT id FROM users WHERE role = 'superadmin' OR id IN (SELECT user_id FROM admin_module_permissions WHERE module_key = 'office_attendance')"
+          ).catch(() => []);
+          for (const u of to) await createAlert(queryDB, { userId: Number(u.id), type: "zk_machine", title, message }).catch(() => {});
+        }).catch(() => {});
+      }, 10 * 60 * 1000);
+    }
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");
     isMySQLConnected = false;
@@ -359,7 +381,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -374,8 +396,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // an account it is ticked for (and the Superadmin) can change it.
 // "salary_hold" = holding / releasing one employee's salary for a month
 // (kept out of disbursement until released) — also explicit-only.
-// "audit_approve" = Audit approves / returns a month's salary sheet;
-// "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
+// "hrd_review" = the HR Director checks a submitted month in the app (or HR
+// records the signed paper copy) before it goes to the MD on paper;
+// "audit_approve" = Audit checks a month after it is paid (optional, never
+// blocks pay); "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
 // Activity Log (who opened Payroll, what they looked at and did). All
 // explicit-only (PayrollApprovalRoutes.ts).
 // "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
@@ -393,7 +417,7 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "top_sheet" = Payroll -> Approval -> Top Sheet: the month's salary by
 // Branch / site (Accounts' top sheet, with each site's own sheet), Excel /
 // PDF. Plain reading too, so also in that default.
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet"] as const;
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -402,6 +426,11 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
 const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
+// Notices: who has read a notice (report, send again), sending it by
+// email, and adding / removing animations in the shared Animation library
+// (using one from it only needs the module) — all only when ticked
+// (EXPLICIT_ONLY_LAYERS in src/types.ts).
+const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice_animations"] as const;
 // Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Conveyance Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
@@ -513,6 +542,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
+  notices: NOTICE_LAYER_KEYS,
   conveyance: CONVEYANCE_LAYER_KEYS,
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
@@ -682,7 +712,7 @@ async function getApprovalChain(): Promise<any[]> {
 }
 
 // Fires an Approval Request through the configured global chain whenever a User
-// Checks In / Checks Out (Remote Attendance OR Movement Claims). This is called
+// Checks In / Checks Out (Remote Attendance OR Check In/Out). This is called
 // AFTER the check-in/out itself is already recorded, and deliberately never throws
 // — the workflow is non-blocking, so a failure here must never undo or block the
 // User's actual check-in/out. If no chain is configured yet, this is a no-op.
@@ -709,7 +739,7 @@ async function createApprovalRequest(
 // to route a freshly-submitted Conveyance Bill Claim / Timesheet (Attendance
 // Correction) request. (Leave Application is intentionally NOT wired to this
 // yet — see the Leave Balance + migration work grouped into Part 5.) Remote
-// Attendance / Movement Claims ('attendance'/'claim' source types) are also
+// Attendance / Check In/Out ('attendance'/'claim' source types) are also
 // untouched — they keep using the OLD global chain (createApprovalRequest
 // above) exactly as before.
 //
@@ -1565,7 +1595,7 @@ async function performApprovalAction(
   // Only a 'user_claim' request actually gates something further — a
   // Conveyance Bill Claim only becomes a real Bill line item the moment its
   // request finishes 'approved' here (the LAST step), and is freed up again
-  // the moment it's 'rejected' (at any step). Attendance/Movement Claims are
+  // the moment it's 'rejected' (at any step). Attendance/Check In/Out are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
   let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
@@ -2685,6 +2715,10 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   // No database error text in API answers (ApiErrors.ts).
   maskDatabaseErrors(app);
+  // ZKTeco machines on the internet send their punches here (ADMS "Cloud
+  // server", /iclock/...) — only registered push machines are answered
+  // (zkMachines.ts).
+  registerZkPushRoutes(app, () => dbPool);
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -2888,7 +2922,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2969,7 +3003,12 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
+  // Module Access -> Remote Attendance: the check-in Projects of an account,
+  // one or many with From/To dates (AttendanceProjects.ts). Registered
+  // before the Users routes so /api/users/attendance-projects/bulk is
+  // never read as a user id.
+  const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
@@ -2995,7 +3034,7 @@ async function startServer() {
     }
   };
 
-  // Movement Claim (GPS Check In/Out) self-service routes: a Superadmin always
+  // Check In/Out (GPS Check In/Out) self-service routes: a Superadmin always
   // passes; an Admin/User passes only once granted can_view_movement_claims (PUT
   // /api/users/:id/movement-claim-access). Enforced here so the routes are
   // actually blocked server-side, not just hidden on the User Panel — same
@@ -3008,7 +3047,7 @@ async function startServer() {
     try {
       const rows: any = await queryDB("SELECT can_view_movement_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_movement_claims)) return next();
-      return res.status(403).json({ error: "You don't have access to Movement Claim. Ask your Superadmin to grant it." });
+      return res.status(403).json({ error: "You don't have access to Check In/Out. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3171,7 +3210,7 @@ async function startServer() {
   // push notification reaches phones/browsers where the app isn't open —
   // tapping it opens the app on the popup. "all" pings every open app (the
   // fetch decides who actually sees it) and pushes to this company's users.
-  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number) {
+  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number, opts: { push?: boolean } = {}) {
     try {
       if (liveIo) {
         if (audience === "all") liveIo.emit("notices:changed");
@@ -3179,7 +3218,7 @@ async function startServer() {
       }
       const ids =
         audience === "all" ? ((await queryDB("SELECT id FROM users", [])) || []).map((u: any) => Number(u.id)) : audience.map(Number);
-      if (ids.length === 0) return;
+      if (ids.length === 0 || opts.push === false) return;
       await sendPushToUserIds(
         queryDB,
         ids,
@@ -3198,7 +3237,7 @@ async function startServer() {
 
   // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
   registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
-  // Movement Claims routes live in MovementClaimRoutes.ts.
+  // Check In/Out routes live in MovementClaimRoutes.ts.
   registerMovementClaimRoutes(app, { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString });
 
   // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — full
@@ -3476,7 +3515,7 @@ async function startServer() {
   registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
   // Notices routes live in NoticeRoutes.ts.
-  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });
+  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, runJobs: runsBackgroundJobs() });
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
   registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });

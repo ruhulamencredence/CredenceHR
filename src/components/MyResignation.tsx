@@ -10,6 +10,8 @@ import { ArrowLeft, LogOut, Plus, X, CheckCircle2, Clock, Ban, AlertTriangle } f
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
 import { User } from '../types';
 import { LoadingBlock } from './LoadingBlock';
 
@@ -57,6 +59,20 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: 'bg-slate-100 text-slate-500 border-slate-200'
 };
 
+// Phone card tint / tile per state (SelfCard's colours).
+const RES_TINT: Record<string, string> = {
+  pending: 'from-amber-100/70 via-white/50 to-orange-50/40',
+  clearance: 'from-blue-100/70 via-white/50 to-indigo-50/40',
+  settled: 'from-emerald-100/70 via-white/50 to-teal-50/40',
+  cancelled: 'from-slate-100/70 via-white/50 to-zinc-50/40'
+};
+const RES_LEAD: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-700',
+  clearance: 'bg-blue-100 text-blue-700',
+  settled: 'bg-emerald-100 text-emerald-700',
+  cancelled: 'bg-slate-100 text-slate-600'
+};
+
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Pending review',
   clearance: 'Clearance in progress',
@@ -76,6 +92,10 @@ const STATUS_LABEL: Record<string, string> = {
 // HR/Admin's to edit (requireModule('exit_offboarding') on every PUT here),
 // an employee only ever watches their own request's progress.
 export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Resignation');
+  // Phone: no white panel around the list; each resignation is a
+  // Directory-style card tinted by its state.
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -149,15 +169,19 @@ useLiveRefresh(() => load(true));
     iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    // Phone: no page colour of its own (the header's glow shows through)
+    // and the title sits in the header (usePhoneHeaderTitle).
+    <div className="w-full min-h-[calc(100vh-4rem)] md:bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <ModulePath path={['Self Service', 'My Resignation']} onBack={onBack} />
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'My Resignation']} onBack={onBack} />
+          </div>
         )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
-            <div className="flex items-center gap-3">
+        <div className={isPhone ? '' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
+          <div className="flex items-center justify-end md:justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
+            <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
                 <LogOut className="w-5 h-5 text-rose-600" />
               </div>
@@ -270,11 +294,25 @@ useLiveRefresh(() => load(true));
                 const clearedCount = r.clearance_items.filter((ci) => ci.is_cleared).length;
                 const totalCount = r.clearance_items.length;
                 return (
-                  <div key={r.id} className="rounded-xl border border-slate-200 p-4">
+                  <div
+                    key={r.id}
+                    className={
+                      isPhone
+                        ? `rounded-[28px] border border-white/70 p-3 bg-gradient-to-br shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] ${RES_TINT[r.status] || RES_TINT.pending}`
+                        : 'rounded-xl border border-slate-200 p-4'
+                    }
+                  >
                     <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div>
+                      <div className={isPhone ? 'flex items-center gap-2.5 min-w-0' : ''}>
+                        {isPhone && (
+                          <span className={`w-10 h-10 rounded-full flex items-center justify-center ring-2 ring-white/80 shadow-sm shrink-0 ${RES_LEAD[r.status] || RES_LEAD.pending}`}>
+                            <LogOut className="w-[18px] h-[18px]" />
+                          </span>
+                        )}
+                        <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-900">Resignation submitted {fmtDate(r.created_at)}</p>
                         {r.reason && <p className="text-xs text-slate-500 mt-0.5 max-w-xl">{r.reason}</p>}
+                        </div>
                       </div>
                       <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${STATUS_STYLE[r.status]}`}>
                         {r.status === 'cancelled' ? <Ban className="w-3 h-3 inline mr-1 -mt-0.5" /> : null}

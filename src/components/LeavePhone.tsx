@@ -10,6 +10,7 @@
 // switch, and compact application cards. Desktop keeps its table.
 
 import React from 'react';
+import { SelfCard } from './SelfCard';
 import { Check, Clock, Plus, X } from 'lucide-react';
 import { LeaveApplication } from '../types';
 
@@ -175,41 +176,26 @@ export const LeavePhoneCard: React.FC<{ app: LeaveApplication; typeLabel: string
       : `Rejected${a.decided_by_name ? ` by ${a.decided_by_name}` : ''}${decided}`;
   const Icon = a.status === 'pending' ? Clock : a.status === 'approved' ? Check : X;
   const title = /leave/i.test(typeLabel) ? typeLabel : `${typeLabel} leave`;
-  const cell = (label: string, value: string) => (
-    <div className="min-w-0">
-      <div className="text-[10.5px] font-semibold text-zinc-500">{label}</div>
-      <div className="text-[12.5px] font-bold text-slate-900 mt-0.5 truncate">{value}</div>
-    </div>
-  );
 
+  // The shared Directory-style card (SelfCard): tinted by the state, the
+  // leave type's own colour on the tile.
+  const tone = a.status === 'approved' ? 'green' : a.status === 'rejected' ? 'rose' : 'amber';
+  const dates = start === end ? dayMonth(start) : `${dayMonth(start)} – ${dayMonth(end)}`;
+  const days = Number(a.day_count);
   return (
-    // No backdrop-blur per card (a blur layer per list item stutters on
-    // Android).
-    <div className="rounded-[24px] px-4 py-3.5 flex flex-col gap-3 bg-white shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.28),0_2px_6px_-2px_rgba(15,23,42,.06)]">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-[14px] flex items-center justify-center shrink-0 text-xs font-extrabold" style={{ background: style.soft, color: style.fg }}>
-          {typeBadge(typeLabel)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-slate-900 truncate">{title}</div>
-          {a.purpose && <div className="text-[11.5px] font-medium text-zinc-500 mt-0.5 truncate">{a.purpose}</div>}
-        </div>
-        <div className="text-[11px] font-bold px-2.5 py-[5px] rounded-full whitespace-nowrap" style={{ background: st.soft, color: st.fg }}>
-          {st.label}
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 rounded-2xl bg-slate-50/80 px-3 py-2.5">
-        {cell('From', `${dayMonth(start)}${start.slice(0, 4) !== end.slice(0, 4) ? ` ${start.slice(0, 4)}` : ''}`)}
-        {cell('To', `${dayMonth(end)} ${end.slice(0, 4)}`)}
-        {cell('Days', String(Number(a.day_count)))}
-      </div>
-      <div
-        className="text-xs flex items-start gap-1.5"
-        style={{ color: a.status === 'pending' ? '#92400e' : a.status === 'rejected' ? '#9f1239' : '#3f3f46' }}
-      >
+    <SelfCard
+      tone={tone}
+      lead={typeBadge(typeLabel)}
+      leadStyle={{ background: style.soft, color: style.fg }}
+      title={title}
+      sub={`${dates} ${end.slice(0, 4)} · ${days} day${days === 1 ? '' : 's'}`}
+      chips={[{ label: st.label, tone }]}
+    >
+      {a.purpose && <p className="text-xs text-slate-700 truncate">{a.purpose}</p>}
+      <div className="text-[11px] flex items-start gap-1.5" style={{ color: a.status === 'pending' ? '#92400e' : a.status === 'rejected' ? '#9f1239' : '#3f3f46' }}>
         <Icon className="w-3.5 h-3.5 shrink-0 mt-px" style={a.status === 'approved' ? { color: '#16a34a' } : undefined} />
         <span className="min-w-0 break-words">{note}</span>
       </div>
-    </div>
+    </SelfCard>
   );
 };

@@ -13,8 +13,8 @@ interface ClaimsPanelProps {
   users: User[];
 }
 
-// Admin Panel -> Movement Claims: every point A -> point B travel check-in/out a
-// User has recorded from the User Panel's Movement Claim card, system-wide,
+// Admin Panel -> Check In/Out: every point A -> point B travel check-in/out a
+// User has recorded from the User Panel's Check In/Out card, system-wide,
 // filterable by User/date/status — for TA/DA-style reimbursement review.
 export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
@@ -88,7 +88,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Route className="w-4 h-4 text-blue-600" /> Movement Claims
+              <Route className="w-4 h-4 text-blue-600" /> Check In/Out
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Point A → point B travel check-ins/outs Users have recorded for office work — review for TA/DA-style
@@ -169,7 +169,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
       ) : claims.length === 0 ? (
         <div className="text-center text-xs text-slate-400 py-12 flex flex-col items-center gap-2">
           <Route className="w-6 h-6 text-slate-300" />
-          No movement claims recorded yet.
+          No check in/out recorded yet.
         </div>
       ) : (
         <>

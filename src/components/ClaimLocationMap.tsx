@@ -104,7 +104,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
   // viewport, drifting/clipping as the card's own height changed with its
   // content. A portal escapes that ancestor entirely, for every caller.
   return createPortal(
-    // z-[60] — deliberately above the Movement Claims page's own floating
+    // z-[60] — deliberately above the Check In/Out page's own floating
     // "Add Check In/Out" button and its Check In/Out sheet (both z-50 in
     // UserPanel.tsx). At equal z-50 this popup and that button sit in the
     // same stacking context, so the button — mounted later in the DOM —
@@ -119,7 +119,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
               <MapPin className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-slate-900">Movement Location</h3>
+              <h3 className="text-base font-bold text-slate-900">Check In/Out Location</h3>
               <p className="text-xs text-slate-500 truncate">{claim.purpose}</p>
             </div>
           </div>

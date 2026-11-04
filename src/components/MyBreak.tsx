@@ -11,6 +11,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Coffee, Play, Square } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { SelfCard } from './SelfCard';
 import { LoadingBlock } from './LoadingBlock';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
@@ -47,6 +50,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const stopwatch = (sec: number) => `${Math.floor(sec / 3600)}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`;
 
 export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('Break Time');
+  const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<MyBreakDay | null>(null);
   const [loadedAt, setLoadedAt] = useState(0);
@@ -107,8 +112,9 @@ export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Break Time']} />}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Break Time']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />
@@ -186,7 +192,31 @@ export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                 </div>
               </div>
 
-              {data.breaks.length > 0 && (
+              {/* Phone: each break is a Directory-style card — amber while it
+                  runs, green once ended. */}
+              {data.breaks.length > 0 && isPhone && (
+                <div className="space-y-2.5">
+                  {data.breaks.map((b, i) => (
+                    <SelfCard
+                      key={b.id}
+                      tone={b.open ? 'amber' : 'green'}
+                      lead={<Coffee className="w-[18px] h-[18px]" />}
+                      dot={b.open ? 'amber' : undefined}
+                      title={
+                        <span className="tabular-nums">
+                          {clockTime(b.started_at)} – {b.open ? 'now' : clockTime(b.ended_at)}
+                        </span>
+                      }
+                      sub={b.note || `Break ${i + 1}`}
+                      chips={[
+                        { label: b.open ? minutesLabel(Math.ceil(openSeconds / 60)) : minutesLabel(b.minutes), mono: true },
+                        { label: b.open ? 'On break' : 'Ended', tone: b.open ? 'amber' : 'green' }
+                      ]}
+                    />
+                  ))}
+                </div>
+              )}
+              {data.breaks.length > 0 && !isPhone && (
                 <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
                   {data.breaks.map((b) => (
                     <div key={b.id} className="px-4 py-2.5 flex items-center gap-3 text-sm">

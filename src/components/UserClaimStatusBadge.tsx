@@ -7,7 +7,7 @@ import React from 'react';
 import { Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { UserClaimStatus } from '../types';
 
-// Same tiny-pill visual treatment as ApprovalBadge.tsx (Attendance/Movement Claim
+// Same tiny-pill visual treatment as ApprovalBadge.tsx (Attendance/Check In/Out
 // approval trail), reused here for a Conveyance Bill Claim's simpler Pending /
 // Approved / Rejected status — this isn't a multi-step chain, just one Admin
 // decision, so it renders straight from `status` rather than an ApprovalStatusSummary.

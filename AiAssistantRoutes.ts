@@ -82,7 +82,7 @@ interface ToolResult {
 // (with all its checks) the page itself uses.
 export type AssistantDraft = LeaveDraft | RideDraft | CorrectionDraft | MovementDraft;
 
-// Movement Claim -> a live GPS Check In (purpose) or Check Out of the open
+// Check In/Out -> a live GPS Check In (purpose) or Check Out of the open
 // claim. The card takes the device's location when its button is pressed
 // and posts to /api/claims/check-in or /api/claims/:id/check-out — both
 // stamp "now", so nothing can be back-dated.
@@ -240,8 +240,8 @@ const HELP: HelpEntry[] = [
   { id: "leave_apply", title: "ছুটির আবেদন", keys: ["leave apply", "apply leave", "chuti apply", "ছুটি apply", "ছুটির আবেদন কীভাবে", "chutir abedon", "leave application kivabe", "chuti nibo", "chuti nite", "leave nibo", "ছুটি নেব", "ছুটি নিতে", "ছুটির আবেদন", "leave application", "ছুটি চাই", "chuti chai"],
     steps: "মেনু → Leave & Attendance → **Leave Application** → \"New Leave Application\"। ছুটির ধরন, তারিখ আর কারণ দিন, দরকার হলে Reliever বেছে Submit করুন। আবেদন আপনার supervisor / approval chain-এ যাবে।",
     nav: "self:leaveApplication", can: (c) => isSuper(c) || c.flags.can_view_leave_application || c.flags.can_view_my_leave },
-  { id: "movement_claim", title: "Movement Claim", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
-    steps: "মেনু → Requests & Claims → **Movement Claims**। কাজে বের হওয়ার সময় Check In, ফেরার সময় Check Out দিন — লোকেশন নিজে থেকে বসে যায়।",
+  { id: "movement_claim", title: "Check In/Out", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
+    steps: "মেনু → Requests & Claims → **Check In/Out**। কাজে বের হওয়ার সময় Check In, ফেরার সময় Check Out দিন — লোকেশন নিজে থেকে বসে যায়।",
     nav: "claims:movementClaims", can: (c) => isSuper(c) || c.flags.can_view_movement_claims },
   { id: "conveyance", title: "Conveyance Bill Claim", keys: ["conveyance", "কনভেয়েন্স", "bill claim", "বিল জমা", "bill dibo", "যাতায়াত বিল", "transport bill"],
     steps: "মেনু → Requests & Claims → **Conveyance Bill Claim** → New Claim। তারিখ, খরচের ধরন, টাকা আর বিবরণ দিয়ে জমা দিন। Transport হলে আগের Movement check-in/out রেফারেন্স হিসেবে বেছে নিতে পারবেন।",
@@ -373,7 +373,7 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → Employee Management → **Employee Tracking**। **Live** — এখন কে কোথায় (location পাঠাচ্ছেন যাঁরা); **Stay Report** — দিনে কোথায় কতক্ষণ ছিলেন; **Live Follow** — একজনকে চলতি অবস্থায় দেখা (আলাদা অনুমতি লাগে)। কর্মীর ফোনে tracking চালু থাকতে হয়।",
     nav: "admin:tracking", can: (c) => hasMod(c, "tracking") },
   { id: "claims_admin", title: "Claim অনুমোদন ও বিল পরিশোধ (HR / Accounts)", keys: ["claim approve", "bill approve", "bill disburse", "disbursement", "ডিসবার্সমেন্ট", "বিল পরিশোধ", "bill pay", "claim policy", "bill claim policy", "conveyance limit"],
-    steps: "মেনু → Payroll & Claims:\n• **Movement Claims** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
+    steps: "মেনু → Payroll & Claims:\n• **Check In/Out** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
     nav: "admin:conveyance", can: (c) => ["claims", "conveyance", "disbursement"].some((k) => hasMod(c, k)) },
   { id: "asset_admin", title: "Asset Management (HR / Store)", keys: ["asset management", "asset assign", "asset dibo", "asset return", "asset ferot", "অ্যাসেট দেওয়া", "asset inventory", "নতুন asset", "add asset", "asset claim"],
     steps: "মেনু → HR Operations → Facilities → **Asset Management**:\n• **Approvals** — কর্মীদের asset requisition অনুমোদন ও হাতে দেওয়া (Fulfill)।\n• **Claims** — কর্মী \"এটা আমার কাছে আছে\" দাবি করলে মিলিয়ে নিশ্চিত করা।\n• **Inventory** — asset যোগ, কাকে দেওয়া, ফেরত নেওয়া (Settings থেকে \"Show Inventory tab\" চালু থাকতে হয়)।",
@@ -1053,9 +1053,9 @@ const TOOLS: Tool[] = [
         const open = rows.filter((x) => x.check_in_at && !x.check_out_at).length;
         data.movement_claims = { total: rows.length, open_check_ins: open, by_status: rows.reduce((a: any, x) => ((a[x.status] = (a[x.status] || 0) + 1), a), {}) };
         parts.push(rows.length
-          ? `**Movement claim:** মোট ${bn(rows.length)}টি${open ? `, ${bn(open)}টিতে এখনো Check Out দেওয়া হয়নি` : ""}।`
-          : "**Movement claim:** কোনো claim নেই।");
-        actions.push({ label: "Movement Claims খুলুন", nav: "claims:movementClaims" });
+          ? `**Check in/out:** মোট ${bn(rows.length)}টি${open ? `, ${bn(open)}টিতে এখনো Check Out দেওয়া হয়নি` : ""}।`
+          : "**Check in/out:** কোনো claim নেই।");
+        actions.push({ label: "Check In/Out খুলুন", nav: "claims:movementClaims" });
       }
       return { ok: true, text: parts.join("\n\n"), data, actions };
     }
@@ -1244,9 +1244,15 @@ const TOOLS: Tool[] = [
       const day = (Array.isArray(mine.body) ? mine.body : []).filter((r: any) => String(r.attendance_date).slice(0, 10) === date);
       const all = Array.isArray(projects.body) ? projects.body : [];
       const pinned = Number(me.body?.user?.attendance_project_id ?? me.body?.attendance_project_id) || 0;
+      // The account's own check-in Projects (Module Access -> Remote
+      // Attendance) when it has a list; the server checks the day again.
+      const listedProjects: any[] = Array.isArray(me.body?.attendance_projects) && me.body?.attendance_projects_limited ? me.body.attendance_projects : [];
       const nameOf = (id: number) => all.find((p: any) => Number(p.id) === id)?.project_name || `Project #${id}`;
+      const rowOf = (id: number) => day.find((r: any) => Number(r.project_id) === id);
       const options = pinned
         ? [{ project_id: pinned, name: nameOf(pinned), check_in: hhmm(day[0]?.check_in_at), check_out: hhmm(day[0]?.check_out_at) }]
+        : listedProjects.length
+          ? listedProjects.map((p: any) => ({ project_id: Number(p.id), name: String(p.name), check_in: hhmm(rowOf(Number(p.id))?.check_in_at), check_out: hhmm(rowOf(Number(p.id))?.check_out_at) }))
         : day.length
           ? day.filter((r: any) => Number(r.project_id) > 0).map((r: any) => ({ project_id: Number(r.project_id), name: r.project_name || nameOf(Number(r.project_id)), check_in: hhmm(r.check_in_at), check_out: hhmm(r.check_out_at) }))
           : [];
@@ -1268,7 +1274,7 @@ const TOOLS: Tool[] = [
   {
     name: "prepare_movement_claim",
     description:
-      "Movement Claim (GPS travel record for office work): prepare (do NOT submit) a Check In with a purpose when they are heading out (client visit, bank, site…), " +
+      "Check In/Out (GPS travel record for office work): prepare (do NOT submit) a Check In with a purpose when they are heading out (client visit, bank, site…), " +
       "or a Check Out of their open claim when they have reached / finished. The card takes the phone's location when the employee presses its button. " +
       "action: check_in | check_out (omit to decide from whether a claim is open).",
     params: {
@@ -1283,14 +1289,14 @@ const TOOLS: Tool[] = [
       const open = st.ok && st.body && st.body.id ? st.body : null;
       const want = args?.action === "check_out" || args?.action === "check_in" ? String(args.action) : open ? "check_out" : "check_in";
       const remarks = String(args?.remarks || "").slice(0, 300);
-      const nav = [{ label: "Movement Claim খুলুন", nav: "claims:movementClaims" }];
+      const nav = [{ label: "Check In/Out খুলুন", nav: "claims:movementClaims" }];
       if (want === "check_out" && !open) {
-        return { ok: true, text: "আপনার কোনো Movement Claim খোলা নেই — আগে Check In করতে হবে। কোথায় যাচ্ছেন বললে Check In-এর কার্ড দিয়ে দেব।", data: { open_claim: null }, actions: nav };
+        return { ok: true, text: "আপনার কোনো Check In খোলা নেই — আগে Check In করতে হবে। কোথায় যাচ্ছেন বললে Check In-এর কার্ড দিয়ে দেব।", data: { open_claim: null }, actions: nav };
       }
       if (open) {
         const since = String(open.check_in_at || "");
         const draft: MovementDraft = { kind: "movement_claim", mode: "check_out", purpose: String(open.purpose || ""), remarks, claim_id: Number(open.id), since };
-        const pre = want === "check_in" ? "আগের Movement Claim এখনো খোলা — নতুনটা শুরু করার আগে সেটার Check Out করতে হবে। " : "";
+        const pre = want === "check_in" ? "আগের Check In এখনো খোলা — নতুনটা শুরু করার আগে সেটার Check Out করতে হবে। " : "";
         return {
           ok: true,
           text: `${pre}খোলা Claim: **${draft.purpose}** (Check In ${bnDate(since.slice(0, 10))} ${bn(since.slice(11, 16))})। পৌঁছে বা কাজ শেষে নিচে **Check Out** চাপুন — তখনকার লোকেশন নেওয়া হবে।`,
@@ -1301,7 +1307,7 @@ const TOOLS: Tool[] = [
       const draft: MovementDraft = { kind: "movement_claim", mode: "check_in", purpose: String(args?.purpose || "").slice(0, 255), remarks, claim_id: null, since: null };
       return {
         ok: true,
-        text: `Movement Claim-এর Check In তৈরি${draft.purpose ? ` — **${draft.purpose}**` : ""}। ${draft.purpose ? "" : "কোথায় / কেন যাচ্ছেন লিখে দিন, "}বের হওয়ার সময় নিচে **Check In** চাপুন — তখনকার লোকেশন নেওয়া হবে। আপনি না চাপলে কিছু জমা হবে না।`,
+        text: `Check In তৈরি${draft.purpose ? ` — **${draft.purpose}**` : ""}। ${draft.purpose ? "" : "কোথায় / কেন যাচ্ছেন লিখে দিন, "}বের হওয়ার সময় নিচে **Check In** চাপুন — তখনকার লোকেশন নেওয়া হবে। আপনি না চাপলে কিছু জমা হবে না।`,
         draft,
         data: { drafted: true, submitted: false, mode: "check_in", purpose: draft.purpose, note: "The card takes the phone's location when they press Check In." }
       };
@@ -1832,7 +1838,7 @@ const TOOLS: Tool[] = [
       const rows: any[] = Array.isArray(r.body) ? r.body : [];
       if (!rows.length) return { ok: true, text: "এই মুহূর্তে আপনার অনুমোদনের অপেক্ষায় কিছু নেই। 👍", data: { pending: 0 }, actions: [{ label: "Approve Application খুলুন", nav: "self:approveApplications" }] };
       const KIND: Record<string, string> = {
-        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Movement claim", user_claim: "Conveyance bill",
+        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Check in/out", user_claim: "Conveyance bill",
         attendance: "হাজিরা", attendance_correction: "হাজিরা সংশোধন", asset_requisition: "Asset requisition", vehicle_requisition: "গাড়ির requisition",
         mobile_limit_request: "Mobile limit", advance_request: "Loan / advance", exit_clearance: "Exit clearance", hr_action: "Personnel action"
       };
@@ -3341,7 +3347,7 @@ const wantsAttendanceQuery = (t: string, raw: string) => {
   const overMonth = hasAny(t, LAST_MONTH) || hasAny(t, THIS_MONTH) || hasAny(t, SALARY_MONTH);
   return !!(p.in_after || p.in_before || p.out_before || p.out_after || p.missing_out || p.min_hours || p.max_hours || p.overtime || p.early_leave || p.min_count || p.group_by || (p.department && (p.status || p.late)) || (who && overMonth && (p.late || p.status)));
 };
-// Starting / ending a Movement Claim ("movement check in koro", "client
+// Starting / ending a Check In/Out ("movement check in koro", "client
 // visit e jacchi movement", "pouche gechi movement check out") — not asking
 // about past claims ("movement claim koto", "kototi").
 const wantsMovement = (t: string) =>
@@ -3375,10 +3381,10 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     const r = await tool.run(c, { ...parseAttendanceQuestion(message), ...attPeriodOf(t, c, "hr") });
     return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
   }
-  // "client visit e jacchi movement check in koro" -> a Movement Claim card
+  // "client visit e jacchi movement check in koro" -> a Check In/Out card
   if (wantsMovement(t) && !asksHow) {
     const tool = TOOLS.find((x) => x.name === "prepare_movement_claim")!;
-    if (!toolAvailable(tool, c)) return { reply: "Movement Claim আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+    if (!toolAvailable(tool, c)) return { reply: "Check In/Out আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
     const r = await tool.run(c, parseMovementRequest(message));
     return { reply: r.text, actions: allowedActions(c, r.actions || []), draft: r.draft };
   }
@@ -3937,7 +3943,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
     `- When a tool says linked: false (the login has no Employee record): if can_link_self is true (a Superadmin / Employees manager) say how to link it themselves (Admin Panel → Employees → their row → "Link Existing"; add an Employee record first if there is none) — never tell them to ask HR; and if the tool also gave company figures, give those. Write only Bangla or English — no other script.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
-    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"); start / end a Movement Claim (heading out for office work, reached / finished) -> prepare_movement_claim ("Check In" / "Check Out" — the card takes the phone's location then). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
+    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"); start / end a Check In/Out (heading out for office work, reached / finished) -> prepare_movement_claim ("Check In" / "Check Out" — the card takes the phone's location then). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access. When app_help returns several entries, answer with the one that fits the question best and keep its steps, order and button names as written (you may translate into the user's language) — don't merge entries into a process of your own or add steps that aren't there.\n` +

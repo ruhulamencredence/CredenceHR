@@ -10,7 +10,7 @@
 //                      added, existing ones updated — only the cells filled
 //                      in the sheet change)
 //   leave              leave_applications (history; no balance is touched)
-//   movement_claims    claims (Movement Claim check in / check out)
+//   movement_claims    claims (Check In/Out check in / check out)
 //   bill_claims        user_claims (Conveyance Bill Claim)
 //   remote_attendance  attendance (Remote Attendance check in / check out)
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
@@ -168,9 +168,9 @@ export const IMPORT_KINDS: Kind[] = [
   },
   {
     key: "movement_claims",
-    title: "Movement Claim History",
+    title: "Check In/Out History",
     description:
-      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
+      "Past check in/out records (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
     module: "claims",
     importLayer: "import_movement_claims",
     fields: [
@@ -768,7 +768,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       }
     },
 
-    // ---- Movement claims -----------------------------------------------
+    // ---- Check in/out -----------------------------------------------
     movement_claims: {
       prepare: async () => ({ existing: ((await queryDB("SELECT user_id, check_in_at FROM claims").catch(() => [])) || []) as any[] }),
       row: async (v, ctx, prep) => {
@@ -903,12 +903,21 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     remote_attendance: {
       prepare: async () => {
         const projects: any[] = (await queryDB("SELECT id, project_name FROM projects").catch(() => [])) || [];
-        const users: any[] = (await queryDB("SELECT id, attendance_project_id FROM users").catch(() => [])) || [];
+        // Each account's check-in Projects with their From/To dates
+        // (user_attendance_projects, AttendanceProjects.ts).
+        const listed: any[] =
+          (await queryDB("SELECT user_id, project_id, DATE_FORMAT(valid_from, '%Y-%m-%d') AS f, DATE_FORMAT(valid_to, '%Y-%m-%d') AS t FROM user_attendance_projects").catch(() => [])) || [];
+        const userProjects = new Map<number, { id: number; f: string | null; t: string | null }[]>();
+        for (const r of listed) {
+          const k = Number(r.user_id);
+          if (!userProjects.has(k)) userProjects.set(k, []);
+          userProjects.get(k)!.push({ id: Number(r.project_id), f: r.f || null, t: r.t || null });
+        }
         const existing: any[] = (await queryDB("SELECT id, user_id, project_id, attendance_date, check_in_at, check_out_at FROM attendance").catch(() => [])) || [];
         return {
           projects: new Map(projects.map((p) => [norm(String(p.project_name)), p])),
           projectById: new Map(projects.map((p) => [Number(p.id), p])),
-          userProject: new Map(users.map((u) => [Number(u.id), u.attendance_project_id ? Number(u.attendance_project_id) : null])),
+          userProjects,
           existing
         };
       },
@@ -921,8 +930,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         let project: any = null;
         if (str(v.project)) project = prep.projects.get(norm(str(v.project))) || fail(`Project "${str(v.project)}" isn't in Projects.`);
         else {
-          const pid = prep.userProject.get(userId);
-          project = (pid && prep.projectById.get(pid)) || fail("Project is empty and this employee has no assigned Attendance Project.");
+          // Blank Project: the employee's only check-in Project on that date.
+          const onDay = (prep.userProjects.get(userId) || []).filter((r: any) => (!r.f || r.f <= date) && (!r.t || r.t >= date));
+          if (onDay.length > 1) fail("Project is empty and this employee has more than one check-in Project that day — fill in the Project.");
+          project = (onDay[0] && prep.projectById.get(onDay[0].id)) || fail("Project is empty and this employee has no check-in Project that day.");
         }
         const who = `${emp.name} (${str(v.employee_id)})`;
         const same = prep.existing.find((a: any) => Number(a.user_id) === userId && Number(a.project_id) === Number(project.id) && String(a.attendance_date).slice(0, 10) === date);

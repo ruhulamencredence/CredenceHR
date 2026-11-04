@@ -156,7 +156,7 @@ export const PayrollTopSheet: React.FC<{ token: string; month: string }> = ({ to
     if (!data) return;
     const wb = XLSX.utils.book_new();
     const sig = data.signatures;
-    const signRow = ['', `Prepared By: ${signLine(sig.prepared, 'HR')}`, '', '', '', `Authorized By: ${signLine(sig.authorized, 'Audit')}`, '', '', '', `Approved By: ${signLine(sig.approved, 'Accounts')}`];
+    const signRow = ['', `Prepared By: ${signLine(sig.prepared, 'HR')}`, '', '', '', `Authorized By: ${signLine(sig.authorized, 'HR Director')}`, '', '', '', `Approved By: ${signLine(sig.approved, 'Accounts')}`];
     const top: any[][] = [
       [data.company || 'Credence Housing Limited'],
       ['SALARY SHEET'],
@@ -202,7 +202,7 @@ export const PayrollTopSheet: React.FC<{ token: string; month: string }> = ({ to
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const W = doc.internal.pageSize.getWidth();
     const signatures = (y: number, s: TopSheet['signatures']) => {
-      const parts: [string, string][] = [['Prepared By', signLine(s.prepared, 'HR')], ['Authorized By', signLine(s.authorized, 'Audit')], ['Approved By', signLine(s.approved, 'Accounts')]];
+      const parts: [string, string][] = [['Prepared By', signLine(s.prepared, 'HR')], ['Authorized By', signLine(s.authorized, 'HR Director')], ['Approved By', signLine(s.approved, 'Accounts')]];
       const w = (W - 28) / 3;
       parts.forEach(([h, v], i) => {
         const x = 14 + i * w;
@@ -290,7 +290,7 @@ export const PayrollTopSheet: React.FC<{ token: string; month: string }> = ({ to
   );
   const SignBlock: React.FC<{ s: TopSheet['signatures'] }> = ({ s }) => (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 px-4 pt-8 pb-4">
-      {([['Prepared By', s.prepared, 'HR'], ['Authorized By', s.authorized, 'Audit'], ['Approved By', s.approved, 'Accounts']] as [string, Sign, string][]).map(([h, v, role]) => (
+      {([['Prepared By', s.prepared, 'HR'], ['Authorized By', s.authorized, 'HR Director'], ['Approved By', s.approved, 'Accounts']] as [string, Sign, string][]).map(([h, v, role]) => (
         <div key={h} className="border-t border-slate-300 pt-1.5 text-center">
           <p className="text-xs font-bold text-slate-800">{h}</p>
           <p className="text-[11px] text-slate-500">{signLine(v, role)}</p>
