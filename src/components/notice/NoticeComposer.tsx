@@ -18,7 +18,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, PenLine, Users, CalendarClock, CheckCircle2, ImagePlus, Paperclip, Trash2, Globe, UsersRound, UserRound, Sparkles,
-  Smartphone, Monitor, LayoutList, Send, Save, ChevronRight, ChevronLeft, Loader2, Eye, Check, Megaphone, Upload, Pin, Mail, Repeat, AlertTriangle
+  Smartphone, Monitor, LayoutList, Send, Save, ChevronRight, ChevronLeft, Loader2, Eye, Check, Megaphone, Upload, Pin, Mail, Repeat, AlertTriangle, UserPlus, UserMinus
 } from 'lucide-react';
 import type { ActiveNotice, Notice, NoticeAudience, NoticeAudiencePerson, NoticeFile, NoticePriority, User } from '../../types';
 import { apiUrl } from '../../lib/api';
@@ -47,6 +47,7 @@ interface Form {
   send_push: boolean;
   send_email: boolean;
   remind_unread: boolean;
+  new_joiners: boolean;
   cover: NoticeFile | null;
   attachments: NoticeFile[];
   lottie_json: string;
@@ -70,6 +71,7 @@ const blank = (): Form => ({
   send_push: true,
   send_email: false,
   remind_unread: false,
+  new_joiners: false,
   cover: null,
   attachments: [],
   lottie_json: '',
@@ -149,6 +151,7 @@ const fromNotice = (n: Notice): Form => ({
   send_push: n.send_push !== false,
   send_email: !!n.send_email,
   remind_unread: !!n.remind_unread,
+  new_joiners: !!n.new_joiners,
   cover: n.cover || null,
   attachments: (n.files || []).filter((f) => f.role === 'attachment'),
   lottie_json: n.lottie_json || '',
@@ -372,6 +375,7 @@ export const NoticeComposer: React.FC<{
         send_push: form.send_push,
         send_email: canEmail ? form.send_email : notice?.send_email || false,
         remind_unread: form.remind_unread,
+        new_joiners: form.target_type !== 'specific' && form.new_joiners,
         cover_file_id: form.cover?.id || null,
         attachment_ids: form.attachments.map((a) => a.id),
         lottie_json: form.lottie_json || null,
@@ -416,7 +420,7 @@ export const NoticeComposer: React.FC<{
   const whenLabel = form.publish_mode === 'later' && form.publish_at ? fmtWhen(form.publish_at.replace('T', ' ')) : 'Right away';
   const stepSub: Record<StepKey, string> = {
     write: form.title.trim() ? form.title.trim() : 'Title & message',
-    who: opts ? `${form.target_type === 'all' ? 'Everyone' : form.target_type === 'groups' ? 'Groups' : 'People'} · ${reach}` : 'Everyone',
+    who: opts ? `${form.target_type === 'all' ? 'Everyone' : form.target_type === 'groups' ? 'Groups' : 'People'} · ${reach}${form.target_type !== 'specific' && form.new_joiners ? ' + new joiners' : ''}` : 'Everyone',
     when: `${PRIORITY_STYLE[form.priority].label} · ${form.publish_mode === 'later' ? 'Later' : 'Now'}`,
     review: problems() ? 'Something to fix' : 'Ready'
   };
@@ -746,6 +750,29 @@ export const NoticeComposer: React.FC<{
                       {personPicker('— Type to leave someone out —', form.audience.exclude, (id) => setAud('exclude', [...form.audience.exclude, id]))}
                     </div>
                   )}
+                  {form.target_type !== 'specific' && (
+                    <div>
+                      <SectionLabel>People who join later</SectionLabel>
+                      <div className="grid sm:grid-cols-2 gap-2.5" role="radiogroup" aria-label="People who join later">
+                        <OptionCard
+                          on={!form.new_joiners}
+                          onClick={() => set('new_joiners', false)}
+                          icon={UserMinus}
+                          tile="from-slate-400 to-slate-600 shadow-[0_8px_16px_-8px_rgba(71,85,105,0.7)]"
+                          title="Only people here now"
+                          text="Someone who joins after it goes out won't see it — for news of the day, closures, reminders."
+                        />
+                        <OptionCard
+                          on={form.new_joiners}
+                          onClick={() => set('new_joiners', true)}
+                          icon={UserPlus}
+                          tile="from-emerald-400 to-teal-600 shadow-[0_8px_16px_-8px_rgba(16,185,129,0.8)]"
+                          title="New joiners get it too"
+                          text="Anyone who joins later (in the groups above) sees it — for policies and rules that stay."
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center gap-3.5 rounded-[22px] bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 px-4 py-3.5">
                     <span className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 text-white flex items-center justify-center shadow-[0_8px_16px_-8px_rgba(16,185,129,0.9)]">
                       <Users className="w-5 h-5" />
@@ -836,6 +863,11 @@ export const NoticeComposer: React.FC<{
                     <ReviewRow icon={Users} label="Goes to" onEdit={() => setStep('who')}>
                       <b>{audienceText}</b> <span className="text-slate-500">· {reach} {reach === 1 ? 'person' : 'people'}</span>
                     </ReviewRow>
+                    {form.target_type !== 'specific' && (
+                      <ReviewRow icon={UserPlus} label="New joiners" onEdit={() => setStep('who')}>
+                        {form.new_joiners ? 'Get it too' : "Don't get it — only people here when it goes out"}
+                      </ReviewRow>
+                    )}
                     <ReviewRow icon={Megaphone} label="Priority" onEdit={() => setStep('when')}>
                       <NoticeBadges priority={form.priority} pinned={form.pinned} />
                     </ReviewRow>

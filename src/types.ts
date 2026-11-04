@@ -1843,6 +1843,8 @@ export interface Notice {
   send_push?: boolean;
   send_email?: boolean;
   remind_unread?: boolean;
+  // People who join after it went out also get it (default: no).
+  new_joiners?: boolean;
   cover?: NoticeFile | null;
   files?: NoticeFile[];
 }

@@ -69,6 +69,9 @@ export async function ensureNoticeV2Schema(dbPool: any): Promise<void> {
     "send_push TINYINT(1) NOT NULL DEFAULT 1",
     "send_email TINYINT(1) NOT NULL DEFAULT 0",
     "remind_unread TINYINT(1) NOT NULL DEFAULT 0",
+    // People who join after it went out also get it (1), or only those who
+    // were here then (0, the default — also for every notice made before).
+    "new_joiners TINYINT(1) NOT NULL DEFAULT 0",
     "audience_json TEXT NULL",
     "cover_file_id INT NULL",
     // When it went out (push / email). Notices already out count as sent.
@@ -151,14 +154,16 @@ const statusOf = (n: any, now = dhakaNow()) =>
 
 interface AudienceCtx {
   users: any[];
+  // user id -> when they joined (account made, or joining date if later), ms.
+  joinedAt: Map<number, number>;
   empByUser: Map<number, any>;
   targetsByNotice: Map<number, Set<number>>;
 }
 async function loadAudienceCtx(queryDB: Query): Promise<AudienceCtx> {
   const [users, emps, targets] = await Promise.all([
-    queryDB("SELECT id, name, email, role, is_blocked, is_onboarding FROM users"),
+    queryDB("SELECT id, name, email, role, is_blocked, is_onboarding, created_at FROM users"),
     queryDB(
-      "SELECT e.user_id, e.employee_id, e.designation, e.department_id, e.branch_id, COALESCE(d.name, e.department) AS department_name FROM all_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.user_id IS NOT NULL"
+      "SELECT e.user_id, e.employee_id, e.designation, e.department_id, e.branch_id, e.joining_date, COALESCE(d.name, e.department) AS department_name FROM all_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.user_id IS NOT NULL"
     ),
     queryDB("SELECT notice_id, user_id FROM notice_targets")
   ]);
@@ -170,10 +175,23 @@ async function loadAudienceCtx(queryDB: Query): Promise<AudienceCtx> {
     if (!targetsByNotice.has(k)) targetsByNotice.set(k, new Set());
     targetsByNotice.get(k)!.add(Number(t.user_id));
   }
-  return { users: (users || []).filter((u: any) => !Number(u.is_blocked) && !Number(u.is_onboarding)), empByUser, targetsByNotice };
+  const joinedAt = new Map<number, number>();
+  for (const u of users || []) {
+    const t = Math.max(msOf(u.created_at) ?? 0, msOf(empByUser.get(Number(u.id))?.joining_date) ?? 0);
+    if (t > 0) joinedAt.set(Number(u.id), t);
+  }
+  return { users: (users || []).filter((u: any) => !Number(u.is_blocked) && !Number(u.is_onboarding)), joinedAt, empByUser, targetsByNotice };
 }
 
-// Everyone a notice goes to (its author left out).
+const msOf = (v: any): number | null => {
+  if (!v) return null;
+  const t = v instanceof Date ? v.getTime() : Date.parse(String(v).replace(" ", "T"));
+  return Number.isFinite(t) ? t : null;
+};
+
+// Everyone a notice goes to (its author left out). Unless the notice is set
+// for new joiners too, someone who joined after it went out doesn't get it
+// (people picked by name always do).
 function recipientsOf(n: any, ctx: AudienceCtx): number[] {
   const a = parseAudience(n.audience_json);
   const ex = new Set(a.exclude);
@@ -190,7 +208,11 @@ function recipientsOf(n: any, ctx: AudienceCtx): number[] {
     for (const id of a.include) out.add(id);
   }
   const active = new Set(ctx.users.map((u: any) => Number(u.id)));
-  return [...out].filter((id) => active.has(id) && !ex.has(id) && id !== Number(n.created_by));
+  const wentOut = Number(n.new_joiners) || n.target_type === "specific" ? null : msOf(n.announced_at);
+  const named = new Set(a.include);
+  // A day's grace: a joining date has no time, and the clocks can differ.
+  const tooNew = (id: number) => wentOut != null && !named.has(id) && (ctx.joinedAt.get(id) ?? 0) > wentOut + 86400000;
+  return [...out].filter((id) => active.has(id) && !ex.has(id) && id !== Number(n.created_by) && !tooNew(id));
 }
 
 const fileUrl = (id: number) => `/api/notices/files/${id}`;
@@ -448,6 +470,7 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
             send_push: !!Number(n.send_push),
             send_email: !!Number(n.send_email),
             remind_unread: !!Number(n.remind_unread),
+            new_joiners: !!Number(n.new_joiners),
             cover: nf.filter((f) => f.role === "cover").map(fileOut)[0] || null,
             files: nf.map(fileOut),
             created_by: n.created_by,
@@ -519,6 +542,7 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       send_push: b.send_push === false ? 0 : 1,
       send_email: send_email ? 1 : 0,
       remind_unread: b.remind_unread ? 1 : 0,
+      new_joiners: b.new_joiners ? 1 : 0,
       cover_file_id: Number(b.cover_file_id) || null,
       attachment_ids: ids(b.attachment_ids)
     };
@@ -557,10 +581,10 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       const isActive = req.body.is_active === false ? 0 : 1;
       const result = await queryDB(
         `INSERT INTO notices (title, content_html, lottie_json, lottie_url, target_type, is_active, created_by, priority, publish_at, expire_at,
-                              pinned, require_ack, send_push, send_email, remind_unread, audience_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              pinned, require_ack, send_push, send_email, remind_unread, new_joiners, audience_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [v.title, v.safeHtml, v.lottieJsonStr, v.lottieUrlStr, v.target_type, isActive, req.user.id, v.priority, v.publish_at, v.expire_at,
-          v.pinned, v.require_ack, v.send_push, v.send_email, v.remind_unread, JSON.stringify(v.audience)]
+          v.pinned, v.require_ack, v.send_push, v.send_email, v.remind_unread, v.new_joiners, JSON.stringify(v.audience)]
       );
       const noticeId = result.insertId;
       await saveTargets(noticeId, v);
@@ -584,9 +608,9 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       // An email ticked by someone else stays as it was for an editor without the right.
       await queryDB(
         `UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ?, priority = ?, publish_at = ?, expire_at = ?,
-                pinned = ?, require_ack = ?, send_push = ?, send_email = ?, remind_unread = ?, audience_json = ? WHERE id = ?`,
+                pinned = ?, require_ack = ?, send_push = ?, send_email = ?, remind_unread = ?, new_joiners = ?, audience_json = ? WHERE id = ?`,
         [v.title, v.safeHtml, v.lottieJsonStr, v.lottieUrlStr, v.target_type, v.priority, v.publish_at, v.expire_at,
-          v.pinned, v.require_ack, v.send_push, v.send_email, v.remind_unread, JSON.stringify(v.audience), id]
+          v.pinned, v.require_ack, v.send_push, v.send_email, v.remind_unread, v.new_joiners, JSON.stringify(v.audience), id]
       );
       // Edited by a person: a later Budget import writes a new draft instead
       // of overwriting these edits (BudgetNoticeDraft.ts).
