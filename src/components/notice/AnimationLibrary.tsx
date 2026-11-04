@@ -53,7 +53,10 @@ export const AnimationLibrary: React.FC<{
   const [canManage, setCanManage] = useState(false);
   const [jsons, setJsons] = useState<Record<number, string>>({});
   const [hover, setHover] = useState<number | null>(null);
-  const [adding, setAdding] = useState<{ name: string; json: string } | null>(null);
+  // Files picked for the library, each with its name (several at once);
+  // a bad file shows why and is left out.
+  const [adding, setAdding] = useState<{ key: number; name: string; json: string; file: string; error?: string; done?: boolean }[]>([]);
+  const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [paste, setPaste] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -101,37 +104,53 @@ export const AnimationLibrary: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
-  const pickFile = async (f: File) => {
+  const nameOf = (file: string) => file.replace(/\.json$/i, '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Animation';
+  const pickFiles = async (files: File[]) => {
     onError(null);
-    if (f.size > 3 * 1024 * 1024) return onError('An animation can be up to 3 MB.');
-    const text = await f.text();
-    try {
-      const d = JSON.parse(text);
-      if (!Array.isArray(d?.layers)) throw new Error();
-    } catch {
-      return onError("That isn't a Lottie animation (.json from LottieFiles / After Effects).");
-    }
-    setAdding({ name: f.name.replace(/\.json$/i, '').replace(/[-_]+/g, ' ').trim().slice(0, 120), json: text });
+    const list = files.filter((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
+    if (!list.length) return onError('Pick Lottie .json files.');
+    const read = await Promise.all(
+      list.map(async (f, i) => {
+        const base = { key: Date.now() + i, name: nameOf(f.name), file: f.name, json: '' };
+        if (f.size > 3 * 1024 * 1024) return { ...base, error: 'Over 3 MB' };
+        const text = await f.text();
+        try {
+          const d = JSON.parse(text);
+          if (!Array.isArray(d?.layers) || !(Number(d.w) > 0)) throw new Error();
+        } catch {
+          return { ...base, error: "Not a Lottie animation" };
+        }
+        return { ...base, json: text };
+      })
+    );
+    setAdding((prev) => [...prev.filter((x) => !x.done), ...read]);
   };
-  const save = async () => {
-    if (!adding) return;
+  const ready = adding.filter((a) => !a.error && !a.done);
+  const saveAll = async () => {
+    if (!ready.length) return;
     setBusy(true);
     onError(null);
-    try {
-      const r = await fetch(apiUrl('/api/notices/animations'), {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: adding.name, lottie_json: adding.json })
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Could not add it.');
-      setAdding(null);
-      await load();
-    } catch (e: any) {
-      onError(e.message);
-    } finally {
-      setBusy(false);
+    let failed = 0;
+    for (const a of ready) {
+      try {
+        const r = await fetch(apiUrl('/api/notices/animations'), {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: a.name.trim() || nameOf(a.file), lottie_json: a.json })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Could not add it.');
+        setAdding((prev) => prev.map((x) => (x.key === a.key ? { ...x, done: true } : x)));
+      } catch (e: any) {
+        failed++;
+        setAdding((prev) => prev.map((x) => (x.key === a.key ? { ...x, error: e.message } : x)));
+      }
     }
+    await load();
+    setBusy(false);
+    // Added ones leave the list; what failed stays, with the reason.
+    setAdding((prev) => prev.filter((x) => !x.done));
+    if (failed) onError(`${failed} of ${ready.length} couldn't be added — see the list.`);
   };
   const remove = async (it: Item) => {
     if (!(await confirmDialog(`Remove "${it.name}" from the animation library? Notices that already use it keep it.`, { tone: 'danger' }))) return;
@@ -163,7 +182,21 @@ export const AnimationLibrary: React.FC<{
         <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
-        <div className="px-3 pb-3 space-y-3">
+        <div
+          className={`px-3 pb-3 space-y-3 rounded-b-[22px] ${drag ? 'bg-violet-50/70 outline-2 outline-dashed outline-violet-300' : ''}`}
+          onDragOver={(e) => {
+            if (!canManage) return;
+            e.preventDefault();
+            setDrag(true);
+          }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => {
+            if (!canManage) return;
+            e.preventDefault();
+            setDrag(false);
+            void pickFiles(Array.from(e.dataTransfer.files || []));
+          }}
+        >
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             <button
               type="button"
@@ -226,34 +259,71 @@ export const AnimationLibrary: React.FC<{
                 className="aspect-square rounded-2xl border-2 border-dashed border-violet-200 bg-gradient-to-br from-violet-50/80 to-sky-50/60 flex flex-col items-center justify-center gap-1 text-[11px] font-bold text-violet-700 hover:border-violet-400"
               >
                 <Upload className="w-4 h-4" /> Import .json
+                <span className="text-[9.5px] font-medium text-slate-500">one or many</span>
               </button>
             )}
           </div>
           {items === null && <p className="text-[11px] text-slate-400">Loading the library…</p>}
           {items && items.length === 0 && (
             <p className="text-[11px] text-slate-500">
-              The library is empty.{canManage ? ' Import a Lottie .json to keep it here for every notice.' : ' Someone with "Animation library (add / remove)" can import some.'}
+              The library is empty.{canManage ? ' Import Lottie .json files (pick or drop several at once) to keep them here for every notice.' : ' Someone with "Animation library (add / remove)" can import some.'}
             </p>
           )}
 
-          {adding && (
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-white border border-violet-100 p-2.5">
-              <span className="w-12 h-12 rounded-xl bg-violet-50 overflow-hidden shrink-0">
-                <Thumb json={adding.json} play />
-              </span>
-              <input
-                value={adding.name}
-                onChange={(e) => setAdding({ ...adding, name: e.target.value })}
-                maxLength={120}
-                placeholder="Name, e.g. Eid Mubarak"
-                className="flex-1 min-w-[140px] px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
-              />
-              <button type="button" onClick={() => setAdding(null)} className="px-3 py-2 rounded-full text-xs font-semibold text-slate-600">
-                Cancel
-              </button>
-              <button type="button" disabled={busy || !adding.name.trim()} onClick={() => void save()} className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50">
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Add to library
-              </button>
+          {adding.length > 0 && (
+            <div className="rounded-2xl bg-white border border-violet-100 p-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">
+                  {adding.length} file{adding.length === 1 ? '' : 's'} to add{ready.length !== adding.length ? ` · ${ready.length} ready` : ''}
+                </span>
+                <button type="button" onClick={() => fileInput.current?.click()} className="text-[11.5px] font-semibold text-violet-700 inline-flex items-center gap-1">
+                  <Plus className="w-3.5 h-3.5" /> More files
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto space-y-1.5 pr-0.5">
+                {adding.map((a) => (
+                  <div key={a.key} className={`flex items-center gap-2 rounded-xl p-1.5 ${a.error ? 'bg-rose-50' : 'bg-slate-50'}`}>
+                    <span className="w-11 h-11 rounded-lg bg-white overflow-hidden shrink-0 flex items-center justify-center">
+                      {a.error ? <X className="w-4 h-4 text-rose-500" /> : <Thumb json={a.json} play />}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <input
+                        value={a.name}
+                        disabled={!!a.error && !a.json}
+                        onChange={(e) => setAdding((prev) => prev.map((x) => (x.key === a.key ? { ...x, name: e.target.value, error: x.json ? undefined : x.error } : x)))}
+                        maxLength={120}
+                        aria-label={`Name for ${a.file}`}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-sm disabled:bg-transparent disabled:border-transparent"
+                      />
+                      <span className={`block text-[10.5px] truncate px-0.5 mt-0.5 ${a.error ? 'text-rose-600' : 'text-slate-400'}`}>
+                        {a.file}
+                        {a.error ? ` — ${a.error}` : ''}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAdding((prev) => prev.filter((x) => x.key !== a.key))}
+                      className="w-7 h-7 rounded-full hover:bg-white text-slate-400 hover:text-rose-600 flex items-center justify-center shrink-0"
+                      aria-label={`Leave out ${a.file}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" disabled={busy} onClick={() => setAdding([])} className="px-3 py-2 rounded-full text-xs font-semibold text-slate-600">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !ready.length || ready.some((a) => !a.name.trim())}
+                  onClick={() => void saveAll()}
+                  className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Add {ready.length > 1 ? `all ${ready.length}` : ''} to library
+                </button>
+              </div>
             </div>
           )}
 
@@ -291,11 +361,12 @@ export const AnimationLibrary: React.FC<{
         ref={fileInput}
         type="file"
         accept=".json,application/json"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          const f = Array.from(e.target.files || []);
           e.target.value = '';
-          if (f) void pickFile(f);
+          if (f.length) void pickFiles(f);
         }}
       />
     </div>
