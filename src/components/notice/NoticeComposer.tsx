@@ -28,6 +28,7 @@ import { NoticeCover, NoticeBadges, PRIORITY_STYLE, PRIORITY_TILE, noticeText } 
 import { NoticeArticle } from './NoticeDetail';
 import { NoticeSheet } from '../NoticePopup';
 import { BoardCard } from '../NoticeBoard';
+import { PhoneMockup } from './PhoneMockup';
 import { uploadNoticeFile, fileSize } from '../../lib/noticeFilesClient';
 import { confirmDialog } from '../../lib/confirmDialog';
 
@@ -914,22 +915,31 @@ export const NoticeComposer: React.FC<{
               />
               <div className="flex-1 min-h-0 overflow-y-auto mt-3 pb-2">
                 {view === 'phone' && (
-                  <div className="mx-auto w-[284px] rounded-[42px] bg-slate-900 p-[7px] shadow-[0_24px_50px_-20px_rgba(15,23,42,0.7)]">
-                    <div className="relative rounded-[35px] overflow-hidden h-[520px] bg-[#f3f0fb]">
-                      {/* the app behind the popup */}
-                      <div className="absolute inset-x-0 top-0 h-[150px] rounded-b-[26px]" style={{ background: 'linear-gradient(120deg, #7c00ff, #5b00c8)' }} />
-                      <div className="absolute left-4 right-4 top-[165px] grid grid-cols-3 gap-3">
-                        {['bg-sky-300', 'bg-violet-300', 'bg-rose-300', 'bg-indigo-300', 'bg-cyan-300', 'bg-lime-300'].map((c) => (
-                          <span key={c} className={`h-16 rounded-2xl ${c} opacity-70`} />
-                        ))}
+                  <PhoneMockup width={250} height={505}>
+                    {/* the app behind the popup */}
+                    <div className="absolute inset-x-0 top-0 h-[150px] rounded-b-[26px]" style={{ background: 'linear-gradient(120deg, #7c00ff, #5b00c8)' }}>
+                      <div className="absolute left-4 right-4 top-[46px] flex items-center justify-between">
+                        <span className="w-7 h-7 rounded-[9px] bg-white/20" />
+                        <span className="text-[15px] font-black tracking-tight text-orange-400">CREDENCE</span>
+                        <span className="w-7 h-7 rounded-full bg-orange-300/90" />
                       </div>
-                      <div className="absolute left-1/2 -translate-x-1/2 top-2 w-20 h-5 rounded-full bg-slate-900 z-20" />
-                      <div className="absolute inset-0 liquid-glass-backdrop" />
-                      <div className="absolute left-0 bottom-0 w-[390px] origin-bottom-left pointer-events-none" style={{ transform: 'scale(0.6872)' }}>
-                        <div className="px-2.5 pb-3">{sheetPreview}</div>
-                      </div>
+                      <p className="absolute inset-x-0 top-[92px] text-center text-white">
+                        <span className="block text-[10px] opacity-80">Welcome back</span>
+                        <span className="block text-[18px] font-extrabold">{(user.name || '').split(' ')[0] || 'Kamal'}!</span>
+                      </p>
                     </div>
-                  </div>
+                    <div className="absolute left-4 right-4 top-[166px] grid grid-cols-3 gap-3">
+                      {['from-sky-300 to-blue-500', 'from-violet-300 to-violet-500', 'from-rose-300 to-rose-500', 'from-indigo-300 to-indigo-500', 'from-cyan-300 to-sky-500', 'from-lime-300 to-green-500'].map((c) => (
+                        <span key={c} className="h-[62px] rounded-2xl bg-white/80 flex items-center justify-center">
+                          <span className={`w-8 h-8 rounded-xl bg-gradient-to-br ${c}`} />
+                        </span>
+                      ))}
+                    </div>
+                    <div className="absolute inset-0 liquid-glass-backdrop" />
+                    <div className="absolute left-0 bottom-0 w-[390px] origin-bottom-left pointer-events-none" style={{ transform: 'scale(0.641)' }}>
+                      <div className="px-2.5 pb-6">{sheetPreview}</div>
+                    </div>
+                  </PhoneMockup>
                 )}
                 {view === 'desktop' && (
                   <div className="rounded-[26px] overflow-hidden bg-[#fbfaff] border border-white shadow-[0_18px_40px_-24px_rgba(76,29,149,0.6)]">
