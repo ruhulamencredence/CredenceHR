@@ -619,6 +619,8 @@ Admin Panel → **Notices** → **New notice** — চার ধাপের এ
 
 ## Chat call: "Connecting…"-এ আটকে না থাকা
 
+সার্ভারে TURN (coturn VM, Windows NAT, `.env`, APK) কীভাবে বসানো হয়েছে, তার পুরো বিবরণ [docs/Call-Setup-TURN.md](../Call-Setup-TURN.md)-এ আছে।
+
 Chat-এর audio / video call phone-to-phone (WebRTC); server শুধু call-টা পৌঁছে দেয় (Socket.IO, `CallRoutes.ts`)। মোবাইল microphone শুধু https-এ দেয়, তাই https চালুর পরেই আসল সংযোগ চেষ্টা শুরু হয়। দুই ফোন একে অপরকে খুঁজে পেতে Google-এর STUN সবসময় থাকে; মোবাইল data (carrier-grade NAT) বা কড়া office firewall-এ তা যথেষ্ট নয় — তখন **TURN relay** লাগে: `.env`-এ `CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_API_TOKEN` (Cloudflare Calls TURN) বা নিজের coturn-এর `TURN_URLS` / `TURN_USERNAME` / `TURN_CREDENTIAL`। TURN না থাকলে server চালুর সময় সতর্কবার্তা দেয়। Call ধরার পরে ২৫ সেকেন্ডে সংযোগ না হলে (বা ICE failed হলে) call নিজে বন্ধ হয় আর কারণ দেখায় — TURN না থাকলে "Ask IT to set up the call relay (TURN)" (`CallLayer.tsx`)।
 
 ## MySQL বন্ধ হয়ে গেলে সার্ভার
