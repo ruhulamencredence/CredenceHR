@@ -148,13 +148,17 @@ export function registerAssistantSupportRoutes(app: Express, deps: Deps) {
   // --- the person asking -----------------------------------------------------
 
   app.get("/api/assistant/support/access", authenticateToken, async (req: any, res: any) => {
-    const who = await me(req);
-    if (!who || !who.canUse) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
-    let waiting = 0;
-    if (who.isAgent) {
-      waiting = Number((await rows("SELECT COUNT(*) AS n FROM assistant_support_sessions WHERE group_id = ? AND status = 'waiting'", [activeGroupId()]))[0]?.n || 0);
+    try {
+      const who = await me(req);
+      if (!who || !who.canUse) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
+      let waiting = 0;
+      if (who.isAgent) {
+        waiting = Number((await rows("SELECT COUNT(*) AS n FROM assistant_support_sessions WHERE group_id = ? AND status = 'waiting'", [activeGroupId()]))[0]?.n || 0);
+      }
+      res.json({ is_agent: who.isAgent, waiting });
+    } catch {
+      res.status(503).json({ error: "Could not check support access right now." });
     }
-    res.json({ is_agent: who.isAgent, waiting });
   });
 
   app.post("/api/assistant/support/request", authenticateToken, async (req: any, res: any) => {

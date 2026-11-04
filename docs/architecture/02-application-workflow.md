@@ -620,3 +620,9 @@ Admin Panel → **Notices** → **New notice** — চার ধাপের এ
 ## Chat call: "Connecting…"-এ আটকে না থাকা
 
 Chat-এর audio / video call phone-to-phone (WebRTC); server শুধু call-টা পৌঁছে দেয় (Socket.IO, `CallRoutes.ts`)। মোবাইল microphone শুধু https-এ দেয়, তাই https চালুর পরেই আসল সংযোগ চেষ্টা শুরু হয়। দুই ফোন একে অপরকে খুঁজে পেতে Google-এর STUN সবসময় থাকে; মোবাইল data (carrier-grade NAT) বা কড়া office firewall-এ তা যথেষ্ট নয় — তখন **TURN relay** লাগে: `.env`-এ `CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_API_TOKEN` (Cloudflare Calls TURN) বা নিজের coturn-এর `TURN_URLS` / `TURN_USERNAME` / `TURN_CREDENTIAL`। TURN না থাকলে server চালুর সময় সতর্কবার্তা দেয়। Call ধরার পরে ২৫ সেকেন্ডে সংযোগ না হলে (বা ICE failed হলে) call নিজে বন্ধ হয় আর কারণ দেখায় — TURN না থাকলে "Ask IT to set up the call relay (TURN)" (`CallLayer.tsx`)।
+
+## MySQL বন্ধ হয়ে গেলে সার্ভার
+
+- চলার মাঝে MySQL বন্ধ হলে বা restart নিলে ("Server shutdown in progress", ECONNREFUSED, ECONNRESET) সার্ভার আর বন্ধ হয়ে যায় না। ওই সময়ের request গুলো error পায়, লগে মিনিটে একবার "MySQL is not answering" লেখা হয়। MySQL আবার চালু হলে কিছু না করেই সব আগের মতো চলে।
+- চালু হওয়ার সময় MySQL না পেলে সার্ভার প্রায় ৩০ সেকেন্ড অপেক্ষা করে, তারপর আগের মতো in-memory preview store-এ চলে।
+- `DB_REQUIRED=true` (লাইভ সার্ভারে দিন) থাকলে সার্ভার MySQL না পাওয়া পর্যন্ত অপেক্ষা করে। in-memory store-এ কখনো যায় না, কারণ সেখানে অ্যাপ খালি দেখায় আর করা কাজ restart-এ হারিয়ে যায়।

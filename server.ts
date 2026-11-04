@@ -2690,8 +2690,61 @@ async function findOrCreateMpr(mprNo: string, userId: number): Promise<{ id: num
   }
 }
 
+// MySQL going away (Laragon/MySQL stopped or restarted, "Server shutdown in
+// progress", connection refused/reset). A request whose query failed this
+// way must not end the whole server — it comes back once MySQL is up again.
+const DB_DOWN_ERR = /ER_SERVER_SHUTDOWN|ECONNREFUSED|ECONNRESET|PROTOCOL_CONNECTION_LOST|ETIMEDOUT|EPIPE|ER_CON_COUNT_ERROR|Server shutdown in progress|Connection lost|connection is in closed state/i;
+const isDbDownError = (reason: any) => {
+  const inner = Array.isArray(reason?.errors) ? reason.errors.map((e: any) => `${e?.code || ""} ${e?.message || ""}`).join(" ") : "";
+  return !!reason?.fatal || DB_DOWN_ERR.test(`${reason?.name || ""} ${reason?.code || ""} ${reason?.message || reason} ${inner}`);
+};
+let dbDownLoggedAt = 0;
+const logDbDown = (reason: any) => {
+  if (Date.now() - dbDownLoggedAt < 60_000) return;
+  dbDownLoggedAt = Date.now();
+  console.error(`⚠️ MySQL is not answering (${reason?.code || reason?.message || reason}) — requests fail until it is back; the server keeps running.`);
+};
+
+// Wait for MySQL at start-up instead of dropping straight to the in-memory
+// preview store (which on a live server means an empty app and lost data).
+// DB_REQUIRED=true (live servers): wait for ever and never use the
+// in-memory store. Otherwise: try for about 30 s, then fall back as before.
+const DB_REQUIRED = /^(1|true|yes)$/i.test(String(process.env.DB_REQUIRED || ""));
+async function waitForMySQL() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const c = await mysql.createConnection({
+        host: process.env.DB_HOST || "localhost",
+        user: process.env.DB_USER || "root",
+        password: process.env.DB_PASSWORD || "",
+        port: Number(process.env.DB_PORT) || 3306,
+        connectTimeout: 5000
+      });
+      await c.end().catch(() => undefined);
+      return;
+    } catch (err: any) {
+      if (!DB_REQUIRED && attempt >= 6) return;
+      if (attempt === 1 || attempt % 12 === 0) {
+        console.warn(`⏳ Waiting for MySQL at ${process.env.DB_HOST || "localhost"}:${Number(process.env.DB_PORT) || 3306} (${err?.code || err?.message})${DB_REQUIRED ? " — DB_REQUIRED is on, the server starts once it answers" : ""}…`);
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
 async function startServer() {
+  if (!process.env.REDIS_URL) {
+    process.on("unhandledRejection", (reason: any) => {
+      if (isDbDownError(reason)) return logDbDown(reason);
+      throw reason;
+    });
+  }
+  await waitForMySQL();
   await initDB();
+  if (DB_REQUIRED && !isMySQLConnected) {
+    console.error("❌ DB_REQUIRED is on and MySQL setup failed — not starting on the in-memory store. Fix MySQL and start again.");
+    process.exit(1);
+  }
   await seedAdminFromEnv();
 
   const app = express();
@@ -3634,6 +3687,7 @@ async function startServer() {
         logRedisError("connection", reason);
         return;
       }
+      if (isDbDownError(reason)) return logDbDown(reason);
       throw reason;
     });
     try {
