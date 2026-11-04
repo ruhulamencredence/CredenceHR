@@ -77,7 +77,8 @@ export const PhoneMockup: React.FC<{
         // Bright along the middle of the side, darker towards the back.
         // The side is flat titanium: light in the middle, rounding off darker at the front and back.
         const t = d / DEPTH;
-        const tone = d === DEPTH ? '#3a3a3c' : t < 0.12 || t > 0.88 ? '#8e8e93' : t < 0.25 || t > 0.75 ? '#aeaeb2' : '#c7c7cc';
+        // Black titanium: dark, with a soft sheen along the middle.
+        const tone = d === DEPTH ? '#0c0c0e' : t < 0.12 || t > 0.88 ? '#1c1c1e' : t < 0.25 || t > 0.75 ? '#2c2c2e' : '#3a3a3c';
         return (
           <div
             key={d}
@@ -85,15 +86,15 @@ export const PhoneMockup: React.FC<{
             className="absolute inset-0 rounded-[50px]"
             style={{
               transform: `translateZ(${-d}px)`,
-              background: `linear-gradient(180deg, ${tone}, ${tone} 8%, #e5e5ea 30%, ${tone} 55%, #ffffff 78%, ${tone} 92%)`,
+              background: `linear-gradient(180deg, ${tone}, ${tone} 8%, #545458 30%, ${tone} 55%, #6e6e73 78%, ${tone} 92%)`,
               boxShadow: d === DEPTH ? '-24px 34px 50px -26px rgba(15,23,42,0.55), 0 18px 40px -24px rgba(76,29,149,0.45)' : undefined
             }}
           >
             {/* antenna lines across the side */}
             {(Math.round(DEPTH * 0.3) === d || Math.round(DEPTH * 0.3) + 1 === d || Math.round(DEPTH * 0.7) === d || Math.round(DEPTH * 0.7) + 1 === d) && (
               <>
-                <span className="absolute right-0 w-[8px] h-[3px] bg-[#636366]" style={{ top: 64 }} />
-                <span className="absolute right-0 w-[8px] h-[3px] bg-[#636366]" style={{ bottom: 64 }} />
+                <span className="absolute right-0 w-[8px] h-[3px] bg-[#5a5a5e]" style={{ top: 64 }} />
+                <span className="absolute right-0 w-[8px] h-[3px] bg-[#5a5a5e]" style={{ bottom: 64 }} />
               </>
             )}
           </div>
@@ -115,7 +116,7 @@ export const PhoneMockup: React.FC<{
             top: top as number,
             height: h as number,
             transform: `translateZ(${-DEPTH / 2}px)`,
-            background: 'linear-gradient(180deg, #8e8e93, #f2f2f7 20%, #aeaeb2 50%, #e5e5ea 80%, #8e8e93)',
+            background: 'linear-gradient(180deg, #1c1c1e, #545458 20%, #2c2c2e 50%, #48484a 80%, #1c1c1e)',
             boxShadow: '0 0 0 0.75px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25)'
           }}
         />
@@ -124,7 +125,7 @@ export const PhoneMockup: React.FC<{
       <div
         className="relative rounded-[50px] p-[3.5px] transition-shadow duration-500"
         style={{
-          background: 'linear-gradient(100deg, #8e8e93 0%, #e5e5ea 5%, #a1a1a6 12%, #7c7c80 35%, #8e8e93 60%, #6e6e73 80%, #c7c7cc 92%, #f2f2f7 96%, #8e8e93 100%)',
+          background: 'linear-gradient(100deg, #1c1c1e 0%, #636366 5%, #2c2c2e 12%, #1c1c1e 35%, #2c2c2e 60%, #1c1c1e 80%, #48484a 92%, #6e6e73 96%, #1c1c1e 100%)',
           boxShadow: 'inset 0 0 0 0.5px rgba(255,255,255,0.35)'
         }}
       >
