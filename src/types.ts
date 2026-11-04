@@ -1986,6 +1986,8 @@ export interface ActiveNotice {
   attachments?: NoticeFile[];
   opened_at?: string | null;
   acknowledged_at?: string | null;
+  // Who posted it.
+  from_name?: string | null;
 }
 
 // "Check In/Out" — a User checks in with a Purpose (where/why they're heading

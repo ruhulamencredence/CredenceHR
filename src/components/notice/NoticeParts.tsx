@@ -136,3 +136,63 @@ export const NoticeView: React.FC<{
     <NoticeAttachments files={attachments} token={token} />
   </div>
 );
+
+// ---- helpers for the reading side (board / popup / detail) -----------------
+
+/** Plain text of a notice (for the short excerpt, search and read time). */
+export function noticeText(html: string): string {
+  if (typeof document === 'undefined') return String(html || '').replace(/<[^>]*>/g, ' ');
+  // DOMParser: an inert document, so pictures in it aren't fetched.
+  const d = new DOMParser().parseFromString(sanitizeNoticeHtml(html || '').replace(/<\/(p|li|h\d|div)>/gi, ' </$1>').replace(/<br\s*\/?>/gi, ' '), 'text/html');
+  return (d.body.textContent || '').replace(/\s+/g, ' ').trim();
+}
+export const readMinutes = (html: string) => Math.max(1, Math.round(noticeText(html).split(' ').filter(Boolean).length / 200));
+
+const parseWhen = (v?: string | null) => {
+  if (!v) return null;
+  const d = new Date(String(v).replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+/** "2 h ago" / "Today" / "Yesterday" / "04 Nov". */
+export function noticeWhen(v?: string | null): string {
+  const d = parseWhen(v);
+  if (!d) return '';
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins >= 0 && mins < 60) return mins <= 1 ? 'Just now' : `${mins} min ago`;
+  if (mins >= 0 && mins < 6 * 60) return `${Math.round(mins / 60)} h ago`;
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(new Date()) - day(d)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+}
+export function noticeWhenFull(v?: string | null): string {
+  const d = parseWhen(v);
+  return d ? d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+}
+
+/** The coloured icon tile for a notice, by priority. */
+export const PRIORITY_TILE: Record<NoticePriority, { cls: string; Icon: React.FC<{ className?: string }> }> = {
+  urgent: { cls: 'from-rose-400 to-rose-600 shadow-[0_8px_16px_-8px_rgba(225,29,72,0.8)]', Icon: AlertTriangle },
+  important: { cls: 'from-violet-400 to-violet-700 shadow-[0_8px_16px_-8px_rgba(124,0,255,0.7)]', Icon: Megaphone },
+  normal: { cls: 'from-sky-400 to-blue-600 shadow-[0_8px_16px_-8px_rgba(37,99,235,0.7)]', Icon: FileText }
+};
+
+/** A small frosted chip, for use on top of a cover picture. */
+export const GlassChip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide text-white bg-white/25 border border-white/50 backdrop-blur-md">{children}</span>
+);
+export const CoverChips: React.FC<{ priority?: NoticePriority; pinned?: boolean }> = ({ priority = 'important', pinned }) => (
+  <span className="inline-flex gap-1.5">
+    {priority !== 'normal' && (
+      <GlassChip>
+        {priority === 'urgent' ? <AlertTriangle className="w-3 h-3" /> : <Megaphone className="w-3 h-3" />} {PRIORITY_STYLE[priority].label}
+      </GlassChip>
+    )}
+    {pinned && (
+      <GlassChip>
+        <Pin className="w-3 h-3" /> Pinned
+      </GlassChip>
+    )}
+  </span>
+);

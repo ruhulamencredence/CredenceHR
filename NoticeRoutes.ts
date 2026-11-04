@@ -232,7 +232,7 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
   };
 
   // A notice as people see it (popup, board).
-  const noticeOut = (n: any, files: any[], read?: any) => ({
+  const noticeOut = (n: any, files: any[], read?: any, from?: string | null) => ({
     id: n.id,
     title: n.title,
     content_html: sanitizeNoticeHtml(n.content_html),
@@ -247,8 +247,17 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
     attachments: files.filter((f) => f.role === "attachment").map(fileOut),
     created_at: n.publish_at || n.created_at,
     opened_at: read?.opened_at || null,
-    acknowledged_at: read?.acknowledged_at || null
+    acknowledged_at: read?.acknowledged_at || null,
+    // Who posted it (shown as "From …" on the board / popup).
+    from_name: from || null
   });
+  // id -> name of the people who posted these notices.
+  const posterNames = async (list: any[]): Promise<Map<number, string>> => {
+    const ids = Array.from(new Set(list.map((n) => Number(n.created_by)).filter((x) => x > 0)));
+    if (!ids.length) return new Map();
+    const rows: any[] = (await queryDB(`SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+    return new Map(rows.map((r: any) => [Number(r.id), String(r.name || "")]));
+  };
 
   const NOTICE_SELECT = "SELECT * FROM notices";
 
@@ -723,8 +732,8 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
         return recipientsOf(n, ctx).includes(me);
       });
       visible.sort((a: any, b: any) => Number(a.id) - Number(b.id));
-      const files = await filesByNotice(visible.map((n) => Number(n.id)));
-      res.json(visible.map((n: any) => noticeOut(n, files.get(Number(n.id)) || [], readOf.get(Number(n.id)))));
+      const [files, posters] = await Promise.all([filesByNotice(visible.map((n) => Number(n.id))), posterNames(visible)]);
+      res.json(visible.map((n: any) => noticeOut(n, files.get(Number(n.id)) || [], readOf.get(Number(n.id)), posters.get(Number(n.created_by)))));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -742,8 +751,8 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       const readOf = new Map<number, any>((reads || []).map((r: any) => [Number(r.notice_id), r]));
       const visible = notices.filter((n: any) => Number(n.created_by) === me || recipientsOf(n, ctx).includes(me));
       visible.sort((a: any, b: any) => Number(b.pinned || 0) - Number(a.pinned || 0) || Number(b.id) - Number(a.id));
-      const files = await filesByNotice(visible.map((n) => Number(n.id)));
-      res.json(visible.map((n: any) => noticeOut(n, files.get(Number(n.id)) || [], readOf.get(Number(n.id)))));
+      const [files, posters] = await Promise.all([filesByNotice(visible.map((n) => Number(n.id))), posterNames(visible)]);
+      res.json(visible.map((n: any) => noticeOut(n, files.get(Number(n.id)) || [], readOf.get(Number(n.id)), posters.get(Number(n.created_by)))));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
