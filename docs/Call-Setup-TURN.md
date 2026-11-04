@@ -4,6 +4,55 @@
 
 ---
 
+## ০. এখনকার অবস্থা (কাজ আপাতত থামানো, পরে আবার ধরা হবে)
+
+### কল কোথায় চলছে
+
+| কে কাকে কল দিচ্ছে | ফল | কারণ |
+|---|---|---|
+| অফিস network ↔ অফিস network | ✅ জোড়ে | দুই ফোন সরাসরি একে অপরকে পায়, TURN লাগে না |
+| অফিস network ↔ মোবাইল ডেটা | ✅ জোড়ে (মাঝে মাঝে ব্যর্থ হতে পারে) | অফিসের ফোন coturn-কে LAN দিয়ে (`192.168.66.5`) পায়, তাই অফিসের দিকের relay ঠিকমতো কাজ করে |
+| মোবাইল ডেটা ↔ মোবাইল ডেটা | ❌ জোড়ে না | দুজনকেই বাইরে থেকে relay নিতে হয়। ঢোকে `203.95.222.58` দিয়ে, কিন্তু coturn-এর উত্তর বের হয় `103.60.175.34` দিয়ে, তাই ফোন উত্তরটা ফেলে দেয় (৫ নম্বর অংশ দেখুন) |
+
+### যা হয়ে গেছে ✅
+
+- [x] কোড: CallLayer-এ ২৫ সেকেন্ডের timeout, TURN না থাকলে আলাদা বার্তা, সার্ভার চালু হওয়ার সময় TURN-এর সতর্কবার্তা
+- [x] কোড: অ্যাপের লাইভ ঠিকানা `https://hr.credencegroupbd.com` (capacitor.config, Android/iOS workflow)
+- [x] কোড: `.env` সবার আগে লোড হয়, তাই `CORS_ORIGINS` এখন সত্যিই কাজ করে
+- [x] কোড: MySQL বন্ধ হলেও সার্ভার আর crash করে না; `DB_REQUIRED=true` থাকলে MySQL না পাওয়া পর্যন্ত অপেক্ষা করে
+- [x] Hyper-V install, অফিস LAN card-এ external switch, vEthernet = `192.168.66.4`
+- [x] Ubuntu VM `192.168.66.5`, SSH (`ssh credence@192.168.66.5`)
+- [x] coturn install আর config (port 3478, relay 40000–40039, `external-ip=203.95.222.58/192.168.66.5`, realm `hr.credencegroupbd.com`)
+- [x] VM firewall (ufw): OpenSSH, 3478 UDP/TCP, 40000–40039 UDP
+- [x] Windows Firewall-এ 3478 UDP/TCP আর 40000–40039 UDP খোলা
+- [x] Windows RRAS NAT: Ethernet 2 public (basic firewall ছাড়া), vEthernet private, Services and Ports-এ নিয়ম
+- [x] Trickle ICE: অফিসের ভেতর থেকে relay এসেছে। 401 ঠিক করা হয়েছে (username `credencehr`)
+- [x] লাইভ `.env`: `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`, Cloudflare-এর দুই লাইন ফাঁকা, `DB_REQUIRED=true`, `CORS_ORIGINS`
+- [x] Windows route metric বদলে দেখা হয়েছিল, তাতে site বন্ধ হয়ে যায়। আবার `metric=0` করে ফেরানো হয়েছে, site চলছে
+
+### যা বাকি আছে ⏳
+
+1. **মোবাইল ডেটা ↔ মোবাইল ডেটা কল (মূল কাজ):** বাইরে থেকে coturn-এ আসার পথ আর ফেরার পথ এক করতে হবে। নিচের তিনটা পথের একটা বেছে নিতে হবে (বিস্তারিত ৫ নম্বর অংশে):
+   - **ক. Cloudflare TURN:** লাইভ `.env`-এ `CLOUDFLARE_TURN_KEY_ID` আর `CLOUDFLARE_TURN_API_TOKEN` দিয়ে restart। সবচেয়ে দ্রুত। Cloudflare dashboard → Realtime/Calls → TURN → Create key।
+   - **খ. অফিস router-এ port forward:** 3478 UDP/TCP আর 40000–40039 UDP → `192.168.66.5`। আগে জেনে নিতে হবে `103.60.175.34` static IP কিনা, router কে চালান, আর অফিসে দুটো লাইন আছে কিনা (`103.60.175.41`, `202.134.11.253`-ও দেখা গেছে)।
+   - **গ. ISP থেকে /29 বা বাড়তি public IP:** VM সরাসরি public লাইনে বসবে।
+2. খ বা ক বেছে নিলে **Windows NAT বন্ধ** করতে হবে (Disable Routing and Remote Access), আর VM-এর gateway `192.168.66.1` আছে কিনা মিলিয়ে নিতে হবে।
+3. **নতুন APK build করে ফোনে বসানো:** `https://hr.credencegroupbd.com` থেকে খোলে এমন APK। পুরনো http-IP APK-তে কল কখনো চলবে না।
+4. **শেষ পরীক্ষা:** মোবাইল ডেটা ↔ মোবাইল ডেটা, মোবাইল ডেটা ↔ অফিস, আর আলাদা দুই অপারেটর (যেমন GP ↔ Robi)। কল ২–৩ মিনিট চালিয়ে দেখতে হবে কেটে যায় কিনা।
+5. **ঐচ্ছিক:** TURN password বদলানো (screenshot-এ দেখা গিয়েছিল)। পরে `use-auth-secret` দিয়ে প্রতিবার অস্থায়ী password দেওয়ার ব্যবস্থা।
+6. **অন্য network সংক্রান্ত:** MySQL কেন বন্ধ হয়েছিল তা Laragon-এর MySQL log-এ দেখা। VM-এর RAM 1 GB আর Dynamic Memory চালু করা। Laragon-এ "Start All Automatically" চালু করা।
+
+### আবার কাজ ধরার সময় প্রথমে যা চালাবেন
+
+```bash
+# VM-এ (ssh credence@192.168.66.5)
+sudo systemctl status coturn --no-pager
+ip route | grep default          # gateway কোনটা (.1 না .4) দেখে নিন
+curl -s ifconfig.me; echo         # VM কোন IP দিয়ে বের হয় (আগে ছিল 103.60.175.34)
+```
+
+---
+
 ## ১. সমস্যা কী ছিল
 
 HTTPS চালু করার পর মোবাইল থেকে কল দিলে অপর পাশে **"Connecting…"**-এ আটকে থাকত, কল আর জুড়ত না। এর পেছনে তিনটা আলাদা কারণ ছিল:
