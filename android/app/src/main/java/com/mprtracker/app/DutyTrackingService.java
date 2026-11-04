@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -19,6 +20,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -64,6 +67,10 @@ import org.json.JSONObject;
 public class DutyTrackingService extends Service {
 
     static final String KEY_DUTY = "duty_on";
+    // The alarm / a server wake-up push: report now (works in Doze).
+    static final String ACTION_TICK = "com.mprtracker.app.DUTY_TICK";
+    private static final long ALARM_MS = 10 * 60 * 1000;
+    private static volatile boolean alive = false;
     private static final String CHANNEL_ID = "duty_tracking";
     private static final int NOTIFICATION_ID = 7343;
 
@@ -87,6 +94,7 @@ public class DutyTrackingService extends Service {
     private long lastFixAt = 0;
     private boolean idle = false;
     private boolean running = false;
+    private long lastPingAt = 0;
 
     /** Turns everyday tracking on for the signed-in account (kept across restarts). */
     public static void start(Context ctx) {
@@ -103,6 +111,7 @@ public class DutyTrackingService extends Service {
     }
 
     public static void stop(Context ctx) {
+        cancelAlarm(ctx);
         ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).apply();
         ctx.stopService(new Intent(ctx, DutyTrackingService.class));
     }
@@ -130,7 +139,58 @@ public class DutyTrackingService extends Service {
             return START_NOT_STICKY;
         }
         if (!running) begin();
+        else if (intent != null && ACTION_TICK.equals(intent.getAction())) {
+            // Woken by the alarm or the server: report at once.
+            sendPing();
+            net.execute(this::postState);
+        }
+        scheduleAlarm(this);
         return START_STICKY;
+    }
+
+    // A repeating wake-up that Android still delivers in Doze / with battery
+    // optimisation on (setAndAllowWhileIdle), so reports keep going even when
+    // the phone sleeps and the service's own timers are frozen. If Android
+    // has stopped the service, the alarm tries to start it again.
+    static void scheduleAlarm(Context ctx) {
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        PendingIntent pi = alarmIntent(ctx);
+        long at = SystemClock.elapsedRealtime() + ALARM_MS;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi);
+            else am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi);
+        } catch (Exception ignore) {
+            // best effort
+        }
+    }
+
+    static void cancelAlarm(Context ctx) {
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(alarmIntent(ctx));
+    }
+
+    private static PendingIntent alarmIntent(Context ctx) {
+        Intent i = new Intent(ctx, DutyAlarmReceiver.class).setAction(ACTION_TICK);
+        return PendingIntent.getBroadcast(ctx, 7344, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /** From the alarm or a "tracking_wake" push: report now, starting the service if it was stopped. */
+    static void wake(Context ctx) {
+        if (!wanted(ctx)) {
+            cancelAlarm(ctx);
+            return;
+        }
+        Intent i = new Intent(ctx, DutyTrackingService.class).setAction(ACTION_TICK);
+        try {
+            if (alive) ctx.startService(i);
+            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i);
+            else ctx.startService(i);
+        } catch (Exception ignore) {
+            // Not allowed from here right now — the server's wake-up push
+            // (allowed to start it) or the next app open brings it back.
+            scheduleAlarm(ctx);
+        }
     }
 
     // Swiped away from Recent apps: keep reporting.
@@ -141,6 +201,7 @@ public class DutyTrackingService extends Service {
 
     private void begin() {
         running = true;
+        alive = true;
         lastFixAt = System.currentTimeMillis();
         client = LocationServices.getFusedLocationProviderClient(this);
         callback = new LocationCallback() {
@@ -182,6 +243,9 @@ public class DutyTrackingService extends Service {
         lastFixAt = System.currentTimeMillis();
         pending.add(loc);
         if (pending.size() > MAX_PENDING) pending.subList(0, pending.size() - MAX_PENDING).clear();
+        // A fix wakes the phone even in Doze, when the timers below are
+        // frozen: send from here once the interval has passed.
+        if (System.currentTimeMillis() - lastPingAt >= (idle ? IDLE_PING_MS : ACTIVE_PING_MS) - 5000) sendPing();
         // Moved past the coarse distance while idle: back to the tight settings.
         if (idle) {
             arm(false);
@@ -223,6 +287,7 @@ public class DutyTrackingService extends Service {
 
     private void sendPing() {
         if (latest == null) return;
+        lastPingAt = System.currentTimeMillis();
         final Location fix = latest;
         final boolean repeat = fix.getTime() == lastSentFixTime;
         final List<Location> batch = repeat ? new ArrayList<>() : new ArrayList<>(pending);
@@ -300,6 +365,17 @@ public class DutyTrackingService extends Service {
             return null;
         }
         HttpURLConnection c = null;
+        // Keep the CPU awake for the send itself (the phone may be asleep).
+        PowerManager.WakeLock wl = null;
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CredenceHR:tracking-send");
+                wl.acquire(30 * 1000L);
+            }
+        } catch (Exception ignore) {
+            wl = null;
+        }
         try {
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             c = (HttpURLConnection) new URL(base + path).openConnection();
@@ -328,6 +404,11 @@ public class DutyTrackingService extends Service {
             return null;
         } finally {
             if (c != null) c.disconnect();
+            try {
+                if (wl != null && wl.isHeld()) wl.release();
+            } catch (Exception ignore) {
+                // already released
+            }
         }
     }
 
@@ -369,6 +450,9 @@ public class DutyTrackingService extends Service {
         handler.removeCallbacksAndMessages(null);
         if (client != null && callback != null) client.removeLocationUpdates(callback);
         running = false;
+        alive = false;
+        // Stopped by Android (not by logout): the alarm brings it back.
+        if (wanted(this)) scheduleAlarm(this);
         net.shutdownNow();
         super.onDestroy();
     }

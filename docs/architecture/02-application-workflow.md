@@ -653,4 +653,9 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 - সার্ভার "live" বললে (Live Follow, ride) `LiveTrackingService` চালু হয়, আগের মতোই।
 - থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা `clearTrackingSession` ডাকে), বা সার্ভার sign-in না মানলে (401/403)।
 - প্রথমবার একবার জিজ্ঞেস করা হয় CredenceHR-কে battery optimisation থেকে বাদ দিতে। অনেক ফোন (Xiaomi, Oppo, Vivo, Samsung) নইলে background অ্যাপ বন্ধ করে দেয়।
+- **Battery optimisation চালু থাকলেও** তিনভাবে চলতে থাকে:
+  1. ফোন ঘুমিয়ে (Doze) থাকলে service-এর timer থেমে যায়, কিন্তু GPS fix এলে ফোন জাগে। তাই fix আসার সঙ্গে সঙ্গেই পাঠানো হয়, আর পাঠানোর সময়টুকু CPU জাগিয়ে রাখা হয় (৩০ সেকেন্ডের wake lock)।
+  2. প্রতি ১০ মিনিটে একটা alarm (`setAndAllowWhileIdle`, `DutyAlarmReceiver`) বাজে, যা Doze-এও আসে। এটা তখনই একবার পাঠায়, আর Android service বন্ধ করে দিয়ে থাকলে আবার চালু করার চেষ্টা করে।
+  3. **সার্ভারের পাহারা** (`TrackingWake.ts`, প্রতি ৫ মিনিটে): শেষ ২৪ ঘণ্টায় tracking করেছে কিন্তু ১২ মিনিট ধরে কোনো খবর নেই, এমন ফোনে একটা silent high-priority push (`tracking_wake`) যায়, প্রতি ফোনে ১৫ মিনিটে সর্বোচ্চ একবার। Android এমন push থেকে অ্যাপ বন্ধ থাকলেও tracking service আবার চালু করতে দেয়। যে ফোনে tracking চালু ছিল না (logout, অনুমতি নেই), সেটা push পেয়েও কিছু করে না।
+- সীমা: ফোনের Settings থেকে অ্যাপ **Force stop** করলে, বা কিছু Xiaomi / Oppo ফোনে "Autostart" বন্ধ থাকলে, Android নিজেই অ্যাপের কাছে alarm বা push কিছুই পৌঁছাতে দেয় না। পরের বার অ্যাপ খুললে tracking আবার শুরু হয়।
 - পুরনো APK-তে এই service নেই; সেখানে পাতা আগের মতোই পাঠায়।

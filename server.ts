@@ -52,6 +52,7 @@ import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { startTrackingWakeJob } from "./TrackingWake";
 import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
 import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
@@ -3556,6 +3557,8 @@ async function startServer() {
     await reconcilePendingApprovals();
     await companyStore.exit(() => rehomeAwaitingApprovals());
   });
+  // Tracked phones that went quiet get a silent wake-up push (TrackingWake.ts).
+  if (runsBackgroundJobs()) startTrackingWakeJob(queryDB);
   if (runsBackgroundJobs()) {
     setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);
     setTimeout(() => requestApprovalReconcile(0), 20 * 1000);

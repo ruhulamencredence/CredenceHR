@@ -24,6 +24,10 @@ public class LiveWakeMessagingService extends MessagingService {
             }
             if (until > System.currentTimeMillis()) LiveTrackingService.start(getApplicationContext(), until);
         }
+        // The server hasn't heard from this phone for a while (Android or
+        // battery saving stopped tracking): a high-priority push may start
+        // the service again even with the app closed.
+        if ("tracking_wake".equals(data.get("type"))) DutyTrackingService.wake(getApplicationContext());
         super.onMessageReceived(remoteMessage);
     }
 }

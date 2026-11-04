@@ -61,6 +61,10 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="location" />
+        <!-- Employee Tracking's repeating wake-up (works in Doze). -->
+        <receiver
+            android:name=".DutyAlarmReceiver"
+            android:exported="false" />
         <!-- Tracking that was on starts again after a phone restart / app update. -->
         <receiver
             android:name=".BootReceiver"
