@@ -37,6 +37,7 @@ import type { Express } from "express";
 import type { Server as SocketIOServer, Socket } from "socket.io";
 import crypto from "crypto";
 import { insertChatMessage, notifyNewMessage } from "./ChatRoutes";
+import { currentAppMask } from "./AppAccess";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -46,7 +47,9 @@ const STUN = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:
 // Calls access per account, cached briefly.
 const accessCache = new Map<number, { ok: boolean; name: string; at: number }>();
 async function callAccess(queryDB: QueryDB, userId: number) {
-  const hit = accessCache.get(userId);
+  // A mobile-app request with its own narrower access skips the shared cache (AppAccess.ts).
+  const app = !!currentAppMask();
+  const hit = app ? undefined : accessCache.get(userId);
   if (hit && Date.now() - hit.at < 30 * 1000) return hit;
   const rows: any[] = (await queryDB("SELECT id, name, role, can_use_calls, can_use_chat FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
   const u = rows.find((r) => Number(r.id) === userId);
@@ -56,7 +59,7 @@ async function callAccess(queryDB: QueryDB, userId: number) {
     name: u?.name || "Someone",
     at: Date.now()
   };
-  accessCache.set(userId, v);
+  if (!app) accessCache.set(userId, v);
   return v;
 }
 

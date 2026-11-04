@@ -53,6 +53,7 @@ import { sendPushToRoomMembers } from "./PushNotificationService";
 import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { saveChatFile, resolveChatPath, removeChatFileIfUnused, moveOldChatAttachments } from "./chatFiles";
 import fs from "fs";
+import { currentAppMask } from "./AppAccess";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -409,13 +410,15 @@ async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, use
 // unless turned off), cached briefly. A Superadmin always has it.
 const chatAccessCache = new Map<number, { ok: boolean; at: number }>();
 export async function canUseChat(queryDB: (sql: string, params?: any[]) => Promise<any>, userId: number): Promise<boolean> {
-  const hit = chatAccessCache.get(userId);
+  // A mobile-app request with its own narrower access skips the shared cache (AppAccess.ts).
+  const app = !!currentAppMask();
+  const hit = app ? undefined : chatAccessCache.get(userId);
   if (hit && Date.now() - hit.at < 30 * 1000) return hit.ok;
   const rows: any[] | null = await queryDB("SELECT role, can_use_chat FROM users WHERE id = ?", [userId]).catch(() => null);
   if (!rows) return hit?.ok ?? false;
   const u = rows[0];
   const ok = !!u && (u.role === "superadmin" || Number(u.can_use_chat ?? 1) !== 0);
-  chatAccessCache.set(userId, { ok, at: Date.now() });
+  if (!app) chatAccessCache.set(userId, { ok, at: Date.now() });
   return ok;
 }
 // SQL condition: the account in `alias` has Chat.

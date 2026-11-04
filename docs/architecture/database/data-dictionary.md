@@ -1546,6 +1546,14 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 
 Unique: `unique_user_company`(user_id,company_id)
 
+### `user_app_access`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `user_id` | int(11) | না | PK | logical → `users` |
+| `company_id` | int(11) | না | PK, default 0 | 0 = Self Service switch (can_*), নইলে module-এর কোম্পানি |
+| `item_key` | varchar(64) | না | PK | module key বা can_* switch |
+
 ### `user_devices`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1666,6 +1674,8 @@ Unique: `uniq_session_key`(session_key)
 | `can_use_calls` | tinyint(1) | না | default 0 | |
 | `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_use_ai_assistant` | tinyint(1) | না | default 1 | |
+| `can_use_app` | tinyint(1) | না | default 0 | মোবাইল অ্যাপ (APK) চালু; পুরনো অ্যাকাউন্ট 1 পেয়েছে |
+| `app_access_custom` | tinyint(1) | না | default 0 | 1 = অ্যাপ শুধু `user_app_access`-এর জিনিস পায় |
 | `can_export_assistant_reports` | tinyint(1) | না | default 0 | |
 | `can_handle_assistant_support` | tinyint(1) | না | default 0 | |
 | `can_view_tasks` | tinyint(1) | না | default 0 | |

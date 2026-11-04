@@ -12,6 +12,7 @@ import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
 import { workspaceStartCompany } from "./CompanyRoutes";
 import { checkAppDevice } from "./DeviceRoutes";
+import { APP_FLAG_KEYS, APP_OFF_MESSAGE, appAccessFor, appMaskStore } from "./AppAccess";
 import { loginBlocked, recordLogin } from "./LoginGuard";
 import { clientIp } from "./ActiveUsersRoutes";
 import { activeCompanyId } from "./companyContext";
@@ -210,6 +211,10 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
   // The app signs in on one phone per account unless a Superadmin allows
   // more (DeviceRoutes.ts). The website isn't limited.
   let deviceRowId: number | null = null;
+  // Mobile App switched off for this account (Module Access, AppAccess.ts).
+  if (isAppClient && !(await appAccessFor(queryDB, Number(user.id), 0)).canUse) {
+    return void res.status(403).json({ error: APP_OFF_MESSAGE, code: "APP_ACCESS_OFF" });
+  }
   if (isAppClient) {
     const device = await checkAppDevice(queryDB, user, req.body);
     if (!device.ok) {
@@ -245,7 +250,14 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
   const startCompany = await workspaceStartCompany(queryDB, req.body.workspace, user).catch(() => undefined);
   const companyCtx = await resolveCompanyContext(queryDB, user, startCompany).catch(() => ({ companyId: 1, groupId: 1 }));
 
-  res.json(await companyStore.run(companyCtx, async () => ({
+  // The app's narrower access, if any (AppAccess.ts): the switches and
+  // modules below are the app's, not the website's.
+  const appMask = isAppClient ? (await appAccessFor(queryDB, Number(user.id), companyCtx.companyId)).mask : null;
+  if (appMask) {
+    for (const k of APP_FLAG_KEYS) if (!appMask.flags.has(k === "can_view_my_leave" ? "can_view_leave_application" : k)) user[k] = 0;
+  }
+
+  res.json(await companyStore.run(companyCtx, () => appMaskStore.run(appMask, async () => ({
     token,
     ...extra,
     active_company_id: companyCtx.companyId,
@@ -351,5 +363,5 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
       module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
     }
-  })));
+  }))));
 }

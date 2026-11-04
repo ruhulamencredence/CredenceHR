@@ -512,7 +512,9 @@ export default function App() {
             ? 'This sign-in was ended. Sign in again.'
             : why === 'password'
               ? 'The password of this account was changed. Sign in again with the new password.'
-              : 'Your session has expired. Sign in again.'
+              : why === 'app_off'
+                ? 'The mobile app was turned off for your account. Use the website, or ask HR to turn it on.'
+                : 'Your session has expired. Sign in again.'
       );
       handleLogout();
     };

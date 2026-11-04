@@ -120,6 +120,11 @@ erDiagram
     int company_id
     tinyint is_default
   }
+  user_app_access {
+    int user_id PK,FK
+    int company_id PK
+    varchar item_key PK
+  }
   user_devices {
     int id PK
     int user_id FK
@@ -199,6 +204,7 @@ erDiagram
   users ||--o{ profile_photo_requests : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_devices : "user_id"
+  users ||..o{ user_app_access : "user_id"
   users ||--o{ user_profile_details : "user_id"
   projects ||--o{ user_project_permissions : "project_id"
   users ||--o{ user_project_permissions : "user_id"

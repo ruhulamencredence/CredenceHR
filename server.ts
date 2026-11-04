@@ -52,6 +52,7 @@ import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
 import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
@@ -2645,10 +2646,12 @@ const withDbTransaction = async (fn: (q: (sql: string, params?: any[]) => Promis
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
   if (isMySQLConnected && dbPool) {
     // Multi-company: keep each company's rows apart (companyScope.ts).
+    const original = sql;
     sql = scopeSql(sql);
     try {
       const [rows] = await dbPool.execute(sql, params);
-      return rows;
+      // Mobile app with narrower access than the website (AppAccess.ts).
+      return maskRowsForApp(original, params, rows);
     } catch (err) {
       console.error("MySQL query error:", err);
       throw err;
@@ -2848,7 +2851,18 @@ async function startServer() {
       ) {
         ctx = { ...ctx, wholeGroup: true };
       }
-      companyStore.run(ctx, () => next());
+      // The mobile app may have less than the website (AppAccess.ts):
+      // switched off entirely, or only the modules / switches ticked for it.
+      let appMask = null;
+      if (user?.cl === "app") {
+        const access = await appAccessFor(queryDB, Number(user.id), ctx.companyId).catch(() => ({ canUse: true, mask: null }));
+        if (!access.canUse) {
+          res.setHeader("X-Session-Ended", "app_off");
+          return res.status(401).json({ error: "The mobile app isn't turned on for your account.", code: "APP_ACCESS_OFF" });
+        }
+        appMask = access.mask;
+      }
+      companyStore.run(ctx, () => appMaskStore.run(appMask, () => next()));
     });
   };
 
@@ -3064,6 +3078,9 @@ async function startServer() {
   // never read as a user id.
   const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
   registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
+  // Admin Panel -> Users -> Module Access: Mobile App switch and App ticks
+  // (after the Users routes, so the access audit log records changes).
+  registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same

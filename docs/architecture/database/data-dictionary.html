@@ -8106,6 +8106,41 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>unique_user_company</code>(user_id,company_id)</p>
+<h3 id="user_app_access"><code>user_app_access</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK</td>
+<td>logical → <code>users</code></td>
+</tr>
+<tr>
+<td><code>company_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK, default 0</td>
+<td>0 = Self Service switch (can_*), নইলে module-এর কোম্পানি</td>
+</tr>
+<tr>
+<td><code>item_key</code></td>
+<td>varchar(64)</td>
+<td>না</td>
+<td>PK</td>
+<td>module key বা can_* switch</td>
+</tr>
+</tbody>
+</table>
 <h3 id="user_devices"><code>user_devices</code></h3>
 <table>
 <thead>
@@ -8785,6 +8820,20 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>না</td>
 <td>default 1</td>
 <td></td>
+</tr>
+<tr>
+<td><code>can_use_app</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td>মোবাইল অ্যাপ (APK) চালু; পুরনো অ্যাকাউন্ট 1 পেয়েছে</td>
+</tr>
+<tr>
+<td><code>app_access_custom</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td>1 = অ্যাপ শুধু <code>user_app_access</code>-এর জিনিস পায়</td>
 </tr>
 <tr>
 <td><code>can_export_assistant_reports</code></td>

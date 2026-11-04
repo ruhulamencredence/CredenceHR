@@ -15,7 +15,7 @@
 // access audit log apply to every account individually.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle, Smartphone } from 'lucide-react';
 import {
   ADMIN_MODULES,
   AdminModuleKey,
@@ -266,6 +266,36 @@ const cloneAccess = (a: Access): Access => ({
   layers: Object.fromEntries(Object.entries(a.layers).map(([k, v]) => [k, new Set(v)])),
   flags: { ...a.flags }
 });
+// Mobile App (APK) access (AppAccess.ts on the server): the app switched on
+// at all, and — once given its own ticks (custom) — which modules / switches
+// it has. Not custom = the app has exactly what the website has. An App
+// tick never gives more than the Web tick.
+interface AppAcc {
+  can: boolean;
+  custom: boolean;
+  items: Set<string>;
+}
+const cloneApp = (p: AppAcc): AppAcc => ({ can: p.can, custom: p.custom, items: new Set(p.items) });
+const webItems = (a: Access) => {
+  const out = new Set<string>(a.modules);
+  for (const f of FLAGS) if (a.flags[f.key]) out.add(f.key);
+  return out;
+};
+// What the app ends up with, written so two states can be compared.
+const appKey = (p: AppAcc, a: Access) => {
+  const web = webItems(a);
+  return `${p.can ? 1 : 0}|${p.custom ? [...p.items].filter((k) => web.has(k)).sort().join(',') : '='}`;
+};
+const fetchAppAccess = (token: string, ids: number[]): Promise<Record<number, AppAcc>> =>
+  fetch(apiUrl(`/api/app-access?ids=${ids.join(',')}`), { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => (r.ok ? r.json() : { items: [] }))
+    .catch(() => ({ items: [] }))
+    .then((d: any) =>
+      Object.fromEntries(
+        (Array.isArray(d?.items) ? d.items : []).map((x: any) => [Number(x.id), { can: !!x.can_use_app, custom: !!x.custom, items: new Set<string>((x.app || []).map(String)) }])
+      )
+    );
+
 const sameSet = (a: Set<string> | string[], b: Set<string> | string[]) => {
   const A = new Set(a);
   const B = new Set(b);
@@ -279,7 +309,7 @@ interface Change {
 
 // Everything that differs between an account's saved access and its draft,
 // as the requests that save it.
-function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined, track?: TrackScope): Change[] {
+function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined, track?: TrackScope, appBase?: AppAcc, appDraft?: AppAcc): Change[] {
   const put = async (path: string, body: unknown) => {
     const res = await fetch(apiUrl(`/api/users/${u.id}/${path}`), {
       method: 'PUT',
@@ -318,6 +348,14 @@ function changesFor(token: string, u: User, base: Access, draft: Access, dept: D
   if (draft.flags.can_manage_leave && (!base.flags.can_manage_leave || !sameSet(base.layers.leave_manage, draft.layers.leave_manage))) {
     out.push({ label: 'Leave Manage layers', run: () => put('module-permission-layers', { module: 'leave_manage', layers: [...draft.layers.leave_manage] }) });
   }
+  // Saved last, after the website's own access it is narrowed to.
+  if (appBase && appDraft && appKey(appBase, base) !== appKey(appDraft, draft)) {
+    const web = webItems(draft);
+    out.push({
+      label: 'Mobile App',
+      run: () => put('app-access', { can_use_app: appDraft.can, ...(appDraft.custom ? { app: [...appDraft.items].filter((k) => web.has(k)) } : {}) })
+    });
+  }
   return out;
 }
 
@@ -328,19 +366,21 @@ interface Agg {
   state: Tri;
 }
 
-const Toggle: React.FC<{ state: Tri; onClick: () => void; label: string }> = ({ state, onClick, label }) => (
+// tone: web = the website (sky), app = the mobile app (violet).
+const TONE = {
+  web: { on: 'bg-sky-500', mixed: 'bg-[repeating-linear-gradient(135deg,#0ea5e9_0_5px,#cbd5e1_5px_10px)]' },
+  app: { on: 'bg-violet-600', mixed: 'bg-[repeating-linear-gradient(135deg,#7c3aed_0_5px,#cbd5e1_5px_10px)]' }
+};
+const Toggle: React.FC<{ state: Tri; onClick: () => void; label: string; tone?: keyof typeof TONE; disabled?: boolean; hint?: string }> = ({ state, onClick, label, tone = 'web', disabled, hint }) => (
   <button
     type="button"
     onClick={onClick}
+    disabled={disabled}
     aria-label={label}
     aria-pressed={state === 'on'}
-    title={state === 'mixed' ? 'Different for the selected accounts — click to turn on for all' : state === 'on' ? 'On — click to turn off' : 'Off — click to turn on'}
-    className={`relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors shrink-0 ${
-      state === 'on'
-        ? 'bg-emerald-500'
-        : state === 'mixed'
-          ? 'bg-[repeating-linear-gradient(135deg,#10b981_0_5px,#cbd5e1_5px_10px)]'
-          : 'bg-slate-300'
+    title={hint || (state === 'mixed' ? 'Different for the selected accounts — click to turn on for all' : state === 'on' ? 'On — click to turn off' : 'Off — click to turn on')}
+    className={`relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors shrink-0 disabled:opacity-35 disabled:cursor-not-allowed ${
+      state === 'on' ? TONE[tone].on : state === 'mixed' ? TONE[tone].mixed : 'bg-slate-300'
     }`}
   >
     <span
@@ -402,6 +442,24 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   const selected = ids.map((id) => userById.get(id)).filter(Boolean) as User[];
   const single = selected.length === 1 ? selected[0] : null;
 
+  // Mobile App access of each account, saved and draft (fetched when added).
+  const [appBase, setAppBase] = useState<Record<number, AppAcc>>({});
+  const [appDrafts, setAppDrafts] = useState<Record<number, AppAcc>>({});
+  useEffect(() => {
+    const missing = ids.filter((id) => !appBase[id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    fetchAppAccess(token, missing).then((got) => {
+      if (cancelled) return;
+      setAppBase((b) => ({ ...b, ...got }));
+      setAppDrafts((d) => ({ ...d, ...Object.fromEntries(Object.entries(got).map(([id, p]) => [id, cloneApp(p)])) }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids.join(',')]);
+
   const addUsers = (list: User[]) => {
     const fresh = list.filter((u) => !base[u.id]);
     if (fresh.length > 0) {
@@ -412,7 +470,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     setIds((cur) => [...cur, ...list.map((u) => u.id).filter((id) => !cur.includes(id))]);
   };
 
-  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id], tracks[u.id]) : []);
+  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id], tracks[u.id], appBase[u.id], appDrafts[u.id]) : []);
   const pending = selected.map((u) => ({ u, changes: changesOf(u) }));
   const changeCount = pending.reduce((s, p) => s + p.changes.length, 0);
   const changedAccounts = pending.filter((p) => p.changes.length > 0).length;
@@ -421,7 +479,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const u = userById.get(id);
     if (u && changesOf(u).length > 0 && !(await confirmDialog(`Drop the unsaved changes for ${u.name}?`, { tone: 'danger' }))) return;
     setIds((cur) => cur.filter((x) => x !== id));
-    for (const set of [setBase, setDrafts, setDepts, setTracks] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
+    for (const set of [setBase, setDrafts, setDepts, setTracks, setAppBase, setAppDrafts] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
       set((m) => {
         const next = { ...m };
         delete next[id];
@@ -547,6 +605,60 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     });
   const flip = (agg: Agg) => agg.state !== 'on';
 
+  // --- the Mobile App column ---
+  // On in the app = on for the website, the app switched on, and ticked for
+  // the app (or the app has no ticks of its own and follows the website).
+  const appHas = (p: AppAcc, key: string, webOn: boolean) => webOn && p.can && (!p.custom || p.items.has(key));
+  const appAgg = (key: string, webGet: (a: Access) => boolean, eligible: (u: User, a: Access) => boolean = () => true): Agg => {
+    let on = 0;
+    let n = 0;
+    for (const u of selected) {
+      const a = drafts[u.id];
+      const p = appDrafts[u.id];
+      if (!a || !p || !eligible(u, a)) continue;
+      n++;
+      if (appHas(p, key, webGet(a))) on++;
+    }
+    return { on, n, state: n === 0 ? 'none' : on === 0 ? 'off' : on === n ? 'on' : 'mixed' };
+  };
+  const appCanAgg = (): Agg => {
+    const list = selected.filter((u) => appDrafts[u.id]);
+    const on = list.filter((u) => appDrafts[u.id].can).length;
+    return { on, n: list.length, state: list.length === 0 ? 'none' : on === 0 ? 'off' : on === list.length ? 'on' : 'mixed' };
+  };
+  const anyAppOn = selected.some((u) => appDrafts[u.id]?.can);
+  const editApp = (fn: (p: AppAcc, a: Access, u: User) => void) =>
+    setAppDrafts((d) => {
+      const next = { ...d };
+      for (const u of selected) {
+        if (!next[u.id] || !drafts[u.id]) continue;
+        const p = cloneApp(next[u.id]);
+        fn(p, drafts[u.id], u);
+        next[u.id] = p;
+      }
+      return next;
+    });
+  // An App tick of its own: the app stops following the website from here.
+  const setAppItem = (key: string, on: boolean, webGet: (a: Access) => boolean) =>
+    editApp((p, a) => {
+      if (!webGet(a) || !p.can) return;
+      if (!p.custom) {
+        p.custom = true;
+        p.items = webItems(a);
+      }
+      if (on) p.items.add(key);
+      else p.items.delete(key);
+    });
+  const setAppCan = (on: boolean) => editApp((p) => (p.can = on));
+  const copyWebToApp = () => {
+    editApp((p) => {
+      p.can = true;
+      p.custom = false;
+      p.items = new Set();
+    });
+    setNotice('The app now gets the same access as the website — check it, then Save.');
+  };
+
   const setDept = (kind: DeptKind, keys: string[], on: boolean) => {
     if (!single) return;
     setDepts((m) => {
@@ -572,6 +684,8 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
       }
       return next;
     });
+    const srcApp = (await fetchAppAccess(token, [src.id]))[src.id];
+    if (srcApp) setAppDrafts((d) => ({ ...d, ...Object.fromEntries(selected.map((u) => [u.id, cloneApp(srcApp)])) }));
     if (single) {
       const target = single;
       const lists = await Promise.all(
@@ -656,32 +770,69 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   const sectionOnCount = (s: SectionKey) =>
     FLAGS.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => flagAgg(f).on > 0).length +
     ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s && moduleAgg(m.key).on > 0).length;
+  const sectionAppCount = (s: SectionKey) =>
+    FLAGS.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => appAgg(f.key, (a) => a.flags[f.key], flagEligible(f)).on > 0).length +
+    ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s && appAgg(m.key, (a) => a.modules.has(m.key)).on > 0).length;
   const visibleSections = SECTIONS.filter((s) => s.key !== 'other' || ADMIN_MODULES.some((m) => sectionOfModule(m.key) === 'other'));
 
   const summary = [
-    ...FLAGS.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
-    ...ADMIN_MODULES.map((m) => ({ label: m.label, agg: moduleAgg(m.key), layers: LAYER_MODULES.includes(m.key) ? (m.key as string) : null }))
+    ...FLAGS.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), app: appAgg(f.key, (a) => a.flags[f.key], flagEligible(f)), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
+    ...ADMIN_MODULES.map((m) => ({ label: m.label, agg: moduleAgg(m.key), app: appAgg(m.key, (a) => a.modules.has(m.key)), layers: LAYER_MODULES.includes(m.key) ? (m.key as string) : null }))
   ].filter((x) => x.agg.on > 0);
 
   const pill = (active: boolean) =>
     `text-[11.5px] font-semibold rounded-full px-2.5 py-1 border transition-colors ${active ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-violet-300'}`;
 
-  const renderFlag = (f: FlagDef) => {
-    const agg = flagAgg(f);
+  // The App switch of one row, next to its Web switch.
+  const appCell = (key: string, label: string, webAgg: Agg, webGet: (a: Access) => boolean, eligible?: (u: User, a: Access) => boolean) => {
+    const agg = appAgg(key, webGet, eligible);
+    const off = agg.n === 0 || webAgg.on === 0 || !anyAppOn;
     return (
-      <div
-        key={f.key}
-        className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 ${f.parent ? 'ml-6' : ''} ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{f.label}</div>
-          <div className="text-xs text-slate-500">{f.desc}</div>
-        </div>
-        <MixedNote agg={agg} />
-        <Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />
-      </div>
+      <span className="w-12 sm:w-14 flex justify-center shrink-0">
+        <Toggle
+          tone="app"
+          state={off ? 'off' : agg.state}
+          disabled={off}
+          hint={agg.n === 0 ? 'Loading…' : !anyAppOn ? 'Mobile App access is off' : webAgg.on === 0 ? 'Turn it on for the website first' : undefined}
+          label={`${label} in the app`}
+          onClick={() => setAppItem(key, flip(agg), webGet)}
+        />
+      </span>
     );
   };
+  const webCell = (node: React.ReactNode) => <span className="w-12 sm:w-14 flex justify-center shrink-0">{node}</span>;
+  // On for the website but not in the app: say so under the row.
+  const websiteOnly = (key: string, webAgg: Agg, webGet: (a: Access) => boolean, ml = 'ml-4') => {
+    if (!anyAppOn || webAgg.on === 0) return null;
+    const agg = appAgg(key, webGet);
+    if (agg.n === 0 || agg.on > 0) return null;
+    return <p className={`${ml} -mt-1 mb-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5`}>Website only — not in the mobile app for {selected.length > 1 ? 'these accounts' : 'this account'}.</p>;
+  };
+
+  const renderFlag = (f: FlagDef) => {
+    const agg = flagAgg(f);
+    const webGet = (a: Access) => a.flags[f.key];
+    return (
+      <React.Fragment key={f.key}>
+        <div className={`flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 ${f.parent ? 'ml-6' : ''} ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-slate-900">{f.label}</div>
+            <div className="text-xs text-slate-500">{f.desc}</div>
+          </div>
+          <MixedNote agg={agg} />
+          {webCell(<Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />)}
+          {appCell(f.key, f.label, agg, webGet, flagEligible(f))}
+        </div>
+        {websiteOnly(f.key, agg, webGet, f.parent ? 'ml-10' : 'ml-4')}
+      </React.Fragment>
+    );
+  };
+  const columnHeads = (
+    <div className="flex justify-end pr-1.5 -mb-1" aria-hidden="true">
+      <span className="w-12 sm:w-14 text-center text-[10px] font-extrabold tracking-[0.08em] text-sky-600">WEB</span>
+      <span className="w-12 sm:w-14 text-center text-[10px] font-extrabold tracking-[0.08em] text-violet-600">APP</span>
+    </div>
+  );
 
   const renderLayers = (m: string, options: { key: string; label: string }[]) => (
     <div className="flex flex-wrap gap-1.5 -mt-1 mb-3 ml-9">
@@ -800,18 +951,16 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const showGroupView = m.key === 'admin_dashboard' && (agg.on > 0 || anyAdmin);
     return (
       <React.Fragment key={m.key}>
-        <button
-          type="button"
-          onClick={() => setModule(m.key, flip(agg))}
-          className={`w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-        >
-          <Box state={agg.state} />
+        <div className={`w-full flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-slate-900">{m.label}</div>
             {MODULE_DESC[m.key] && <div className="text-xs text-slate-500">{MODULE_DESC[m.key]}</div>}
           </div>
           <MixedNote agg={agg} />
-        </button>
+          {webCell(<Toggle state={agg.state} label={m.label} onClick={() => setModule(m.key, flip(agg))} />)}
+          {appCell(m.key, m.label, agg, (a) => a.modules.has(m.key))}
+        </div>
+        {websiteOnly(m.key, agg, (a) => a.modules.has(m.key))}
         {agg.on > 0 && LAYER_MODULES.includes(m.key) && renderLayers(m.key, layersFor(m.key))}
         {agg.on > 0 && DEPT_KINDS.some((d) => d.module === m.key) && renderDepts(m.key as DeptKind)}
         {agg.on > 0 && m.key === 'tracking' && renderTrackingScope()}
@@ -825,18 +974,16 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const agg = flagAgg(f);
     return (
       <React.Fragment key="leave_manage">
-        <button
-          type="button"
-          onClick={() => setFlag(f, flip(agg))}
-          className={`w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-        >
-          <Box state={agg.state} />
+        <div className={`w-full flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-slate-900">{f.label}</div>
             <div className="text-xs text-slate-500">{f.desc}</div>
           </div>
           <MixedNote agg={agg} />
-        </button>
+          {webCell(<Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />)}
+          {appCell(f.key, f.label, agg, (a) => a.flags[f.key])}
+        </div>
+        {websiteOnly(f.key, agg, (a) => a.flags[f.key])}
         {agg.on > 0 && renderLayers('leave_manage', LEAVE_MANAGE_LAYERS)}
       </React.Fragment>
     );
@@ -855,12 +1002,13 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         ) : (
           <>
             <h3 className="text-base font-extrabold text-slate-900">{meta.label}</h3>
-            <p className="text-xs text-slate-500 mb-3">{meta.hint} Tick a module to open it for them, then pick what they may do in it.</p>
+            <p className="text-xs text-slate-500 mb-3">{meta.hint} Turn a module on for the website (Web) and, separately, for the mobile app (App); then pick what they may do in it — the same on both.</p>
           </>
         )}
+        {columnHeads}
         {flags.length > 0 && (
           <>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-3 mb-2">On their own pages</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-1 mb-2">On their own pages</p>
             {flags.map(renderFlag)}
           </>
         )}
@@ -950,6 +1098,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
               </SearchSelect>
             </div>
           </div>
+          <AppAccessCard
+            agg={appCanAgg()}
+            following={selected.length > 0 && selected.every((u) => appDrafts[u.id] && !appDrafts[u.id].custom)}
+            onToggle={(on) => setAppCan(on)}
+            onCopy={copyWebToApp}
+          />
           {selected.length > 1 && (
             <div className="px-4 md:px-5 py-2 bg-amber-50 border-t border-amber-200 text-xs text-amber-900 flex items-start gap-2">
               <UsersIcon className="w-4 h-4 shrink-0 mt-px" />
@@ -980,6 +1134,8 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                 {x.label}
                 {layerLabels.length > 0 && <span className="font-normal text-violet-700"> · {layerLabels.join(', ')}</span>}
                 {x.agg.state === 'mixed' && <span className="font-normal text-amber-700"> ({x.agg.on} of {x.agg.n})</span>}
+                <span className="ml-1.5 text-[9.5px] font-extrabold bg-sky-100 text-sky-700 rounded-md px-1 py-px align-middle">WEB</span>
+                {x.app.on > 0 && <span className="ml-1 text-[9.5px] font-extrabold bg-violet-100 text-violet-700 rounded-md px-1 py-px align-middle">APP</span>}
               </span>
             );
           })}
@@ -1001,7 +1157,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                     }`}
                   >
                     {s.label}
-                    <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${n > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{n}</span>
+                    <span
+                      title={`${n} on the website · ${sectionAppCount(s.key)} in the app`}
+                      className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${n > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
+                    >
+                      {n > 0 ? `${n} · ${sectionAppCount(s.key)}` : n}
+                    </span>
                   </button>
                 );
               })}
@@ -1038,6 +1199,41 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             {saving ? `Saving ${saving.done} of ${saving.total}…` : selected.length > 1 ? `Save for ${changedAccounts || selected.length} account${(changedAccounts || selected.length) === 1 ? '' : 's'}` : 'Save Access'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The Mobile App (APK) switch for the whole account, and "Copy Web → App".
+function AppAccessCard({ agg, following, onToggle, onCopy }: { agg: Agg; following: boolean; onToggle: (on: boolean) => void; onCopy: () => void }) {
+  const loading = agg.n === 0;
+  return (
+    <div className="mx-4 md:mx-5 mb-3 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50 p-3 sm:p-3.5 flex flex-wrap items-center gap-3">
+      <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-700 text-white flex items-center justify-center shrink-0">
+        <Smartphone className="w-5 h-5" />
+      </span>
+      <div className="flex-1 min-w-[180px]">
+        <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          Mobile App (APK) access
+          {agg.state === 'mixed' && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{agg.on} of {agg.n}</span>}
+        </div>
+        <div className="text-xs text-slate-600">
+          {loading
+            ? 'Loading…'
+            : agg.on === 0
+              ? 'Off — this account can’t sign in to the phone app. The website is not affected.'
+              : following
+                ? 'On — the app has the same access as the website. Turn an App switch off below to take something out of the app only.'
+                : 'On — the app has only the App switches turned on below (never more than the website).'}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 ml-auto">
+        {!loading && agg.on > 0 && !following && (
+          <button type="button" onClick={onCopy} className="text-xs font-semibold text-violet-700 bg-white border border-violet-300 hover:bg-violet-50 rounded-full px-3 py-1.5 whitespace-nowrap">
+            Copy Web → App
+          </button>
+        )}
+        <Toggle tone="app" state={loading ? 'off' : agg.state} disabled={loading} label="Mobile App access" onClick={() => onToggle(agg.state !== 'on')} />
       </div>
     </div>
   );

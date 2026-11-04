@@ -154,6 +154,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>DeviceRoutes.ts</code></td>
 </tr>
 <tr>
+<td>মোবাইল অ্যাপের আলাদা অনুমতি</td>
+<td>অ্যাপ (APK) পুরো বন্ধ করা যায়, বা module / Self Service switch আলাদা করে অ্যাপ থেকে সরানো যায়; অ্যাপ কখনো ওয়েবসাইটের চেয়ে বেশি পায় না। সার্ভারে প্রতিটা অ্যাপ request-এ <code>queryDB</code> অনুমতি ছোট করে দেয়, তাই UI আর API দুটোই আটকায়। নতুন অ্যাকাউন্টে অ্যাপ ডিফল্টে বন্ধ</td>
+<td><code>AppAccess.ts</code></td>
+</tr>
+<tr>
 <td>onboarding লগইন</td>
 <td>নতুন কর্মীর অস্থায়ী লগইন শুধু "My Onboarding" পেজে সীমিত, মেয়াদ শেষে বাতিল</td>
 <td><code>OnboardingSelfServiceRoutes.ts</code></td>

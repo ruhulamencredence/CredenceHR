@@ -16,6 +16,7 @@ import { ensureBillClaimPolicySchema } from "./BillClaimPolicy";
 import { ensureChatSchema } from "./ChatRoutes";
 import { ensureCompanySchema } from "./CompanyRoutes";
 import { ensureDeviceSchema } from "./DeviceRoutes";
+import { ensureAppAccessSchema } from "./AppAccess";
 import { ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
 import { ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
@@ -154,6 +155,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
 
   // Mobile app device access (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
+  // Mobile App access, separate from the website (AppAccess.ts).
+  await ensureAppAccessSchema(queryDB).catch((e: any) => console.warn("⚠️ Mobile app access tables: " + e.message));
   await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
   await ensureSessionSecuritySchema(queryDB).catch((e: any) => console.warn("⚠️ Session security: " + e.message));
 

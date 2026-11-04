@@ -35,6 +35,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { runsBackgroundJobs } from "./jobRunner";
 import { createAlert } from "./Alerts";
+import { currentAppMask } from "./AppAccess";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -510,12 +511,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (user.onb) return false;
     if (user.role === "superadmin") return true;
     const id = Number(user.id);
-    const hit = accessCache.get(id);
+    // A mobile-app request with its own narrower access skips the shared cache (AppAccess.ts).
+    const app = !!currentAppMask();
+    const hit = app ? undefined : accessCache.get(id);
     if (hit && Date.now() - hit.at < 30_000) return hit.ok;
     const rows: any[] = (await queryDB("SELECT role, can_use_mail, is_onboarding FROM users WHERE id = ?", [id]).catch(() => [])) || [];
     const u = rows[0];
     const ok = !!u && (u.role === "superadmin" || (!!Number(u.can_use_mail) && !Number(u.is_onboarding)));
-    accessCache.set(id, { ok, at: Date.now() });
+    if (!app) accessCache.set(id, { ok, at: Date.now() });
     return ok;
   }
   // Mail Administration: an account with the "mail_open" layer can open

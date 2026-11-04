@@ -108,6 +108,7 @@
   "session_policy",
   "startup_migrations",
   "user_access_audit",
+  "user_app_access",
   "user_company_access",
   "user_devices",
   "user_profile_details",

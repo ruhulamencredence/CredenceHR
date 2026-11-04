@@ -628,3 +628,15 @@ Chat-এর audio / video call phone-to-phone (WebRTC); server শুধু call
 - চলার মাঝে MySQL বন্ধ হলে বা restart নিলে ("Server shutdown in progress", ECONNREFUSED, ECONNRESET) সার্ভার আর বন্ধ হয়ে যায় না। ওই সময়ের request গুলো error পায়, লগে মিনিটে একবার "MySQL is not answering" লেখা হয়। MySQL আবার চালু হলে কিছু না করেই সব আগের মতো চলে।
 - চালু হওয়ার সময় MySQL না পেলে সার্ভার প্রায় ৩০ সেকেন্ড অপেক্ষা করে, তারপর আগের মতো in-memory preview store-এ চলে।
 - `DB_REQUIRED=true` (লাইভ সার্ভারে দিন) থাকলে সার্ভার MySQL না পাওয়া পর্যন্ত অপেক্ষা করে। in-memory store-এ কখনো যায় না, কারণ সেখানে অ্যাপ খালি দেখায় আর করা কাজ restart-এ হারিয়ে যায়।
+
+## মোবাইল অ্যাপের আলাদা অনুমতি (Web / App)
+
+Admin Panel → Users → Module Access-এ প্রতিটা module আর Self Service switch-এর পাশে দুটো switch থাকে: **Web** (ওয়েবসাইট) আর **App** (মোবাইল APK)। উপরে **Mobile App (APK) access** নামে একটা মূল switch আছে (`AppAccess.ts`, `ModuleAccessPage.tsx`)।
+
+- **মূল switch বন্ধ থাকলে** অ্যাপে login হয় না (`APP_ACCESS_OFF`)। আগে থেকে login থাকা অ্যাপ পরের request-এই "The mobile app was turned off…" বলে বের হয়ে যায়। ওয়েবসাইট আগের মতোই চলে। আঙুলের ছাপ দিয়ে login-ও একই নিয়ম মানে (`finishLogin`)।
+- **App switch**: অ্যাপ সবসময় Web-এর চেয়ে কম বা সমান পায়, কখনো বেশি না। Web বন্ধ থাকলে App switch ঝাপসা থাকে। module-এর ভেতরের layer (Read, Edit…) দুই জায়গাতেই একই।
+- যতক্ষণ কোনো App switch আলাদা করে বদলানো হয়নি, অ্যাপ ঠিক ওয়েবসাইটের মতোই পায় (`app_access_custom = 0`)। একটা App switch বদলালে তখন থেকে অ্যাপের নিজের তালিকা থাকে (`user_app_access`), আর নতুন Web অনুমতি অ্যাপে নিজে থেকে যায় না। **Copy Web → App** চাপলে আবার "ওয়েবসাইটের মতোই" অবস্থায় ফেরে।
+- পুরনো অ্যাকাউন্ট: অ্যাপ চালু, ওয়েবসাইটের মতোই (কেউ আটকায়নি)। নতুন অ্যাকাউন্ট: অ্যাপ বন্ধ, Module Access থেকে চালু করতে হয়।
+- কারা বদলাতে পারে: Module Access যিনি দিতে পারেন (Superadmin, বা অনুমতি পাওয়া Admin শুধু User-এর জন্য)। Superadmin ও system owner-এর অ্যাপ কখনো সীমিত হয় না। প্রতিটা বদল `user_access_audit`-এ (`app-access`) থাকে।
+- সার্ভারে কীভাবে মানা হয়: অ্যাপের token-এ `cl: "app"` থাকে। এমন request-এ `queryDB` নিজে থেকে ওই অ্যাকাউন্টের নিজের `admin_module_permissions` সারি থেকে অ্যাপে না-থাকা module বাদ দেয়, আর `users`-এর নিজের সারিতে অ্যাপে না-থাকা `can_*` switch 0 করে দেয় (`maskRowsForApp`)। তাই `requireModule`, `requireModuleLayer`, প্রতিটা Self Service check, আর অ্যাপ যে user object পায় (login, `/api/auth/me`), সবাই অ্যাপের ছোট অনুমতিই দেখে, আর অ্যাপের menu-ও সেভাবে লুকায়। Chat, Calls, Mail-এর ৩০ সেকেন্ডের access cache অ্যাপের request-এ ব্যবহার হয় না।
+- সীমা: ফোনের browser দিয়ে ওয়েবসাইট খুললে সেটা Web হিসেবেই গণ্য হয়; শুধু APK আলাদা চেনা যায়।
