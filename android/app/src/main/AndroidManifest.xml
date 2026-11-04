@@ -54,6 +54,22 @@
             android:name=".LiveTrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- Everyday Employee Tracking, reported natively so it keeps going
+             in the background / after the app is swiped away. -->
+        <service
+            android:name=".DutyTrackingService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="location" />
+        <!-- Tracking that was on starts again after a phone restart / app update. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
@@ -78,6 +94,11 @@
          tracking" notification) after the app is swiped away. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Employee Tracking starts again after the phone restarts (BootReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Asks to let CredenceHR off battery optimisation, so the phone does
+         not stop tracking in the background. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Android 13+ requires this to show that foreground-service
          notification at all. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

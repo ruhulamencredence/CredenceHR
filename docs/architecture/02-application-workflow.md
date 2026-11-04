@@ -643,3 +643,14 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 - কারা বদলাতে পারে: Module Access যিনি দিতে পারেন (Superadmin, বা অনুমতি পাওয়া Admin শুধু User-এর জন্য)। Superadmin ও system owner-এর অ্যাপ কখনো সীমিত হয় না। প্রতিটা বদল `user_access_audit`-এ (`app-access`) থাকে।
 - সার্ভারে কীভাবে মানা হয়: অ্যাপের token-এ `cl: "app"` থাকে। এমন request-এ `queryDB` নিজে থেকে ওই অ্যাকাউন্টের নিজের `admin_module_permissions` সারি থেকে অ্যাপে না-থাকা module বাদ দেয়, আর `users`-এর নিজের সারিতে অ্যাপে না-থাকা `can_*` switch 0 করে দেয় (`maskRowsForApp`)। তাই `requireModule`, `requireModuleLayer`, প্রতিটা Self Service check, আর অ্যাপ যে user object পায় (login, `/api/auth/me`), সবাই অ্যাপের ছোট অনুমতিই দেখে, আর অ্যাপের menu-ও সেভাবে লুকায়। Chat, Calls, Mail-এর ৩০ সেকেন্ডের access cache অ্যাপের request-এ ব্যবহার হয় না।
 - সীমা: ফোনের browser দিয়ে ওয়েবসাইট খুললে সেটা Web হিসেবেই গণ্য হয়; শুধু APK আলাদা চেনা যায়।
+
+## Employee Tracking: অ্যাপ বন্ধ থাকলেও location যায়
+
+আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, `DutyTrackingService.java`:
+
+- এটা একটা foreground service ("Employee Tracking active" notification দেখায়)। নিজেই GPS fix জমায় আর `POST /api/tracking/ping`-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় `/api/tracking/state`-এ।
+- অ্যাপ background-এ থাকলে বা Recent apps থেকে সরালেও চলে। Android service বন্ধ করে দিলে নিজে আবার চালু হয় (`START_STICKY`)। ফোন restart বা অ্যাপ update হলে `BootReceiver` আবার চালু করে।
+- সার্ভার "live" বললে (Live Follow, ride) `LiveTrackingService` চালু হয়, আগের মতোই।
+- থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা `clearTrackingSession` ডাকে), বা সার্ভার sign-in না মানলে (401/403)।
+- প্রথমবার একবার জিজ্ঞেস করা হয় CredenceHR-কে battery optimisation থেকে বাদ দিতে। অনেক ফোন (Xiaomi, Oppo, Vivo, Samsung) নইলে background অ্যাপ বন্ধ করে দেয়।
+- পুরনো APK-তে এই service নেই; সেখানে পাতা আগের মতোই পাঠায়।
