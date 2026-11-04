@@ -17,7 +17,9 @@
 
 import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear } from 'lucide-react';
+import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio } from '../lib/callAudio';
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
@@ -109,6 +111,9 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [kind, setKind] = useState<Kind>('audio');
   const [muted, setMuted] = useState(false);
+  // Android app: sound on the loudspeaker (true) or the ear speaker (false).
+  const [speaker, setSpeaker] = useState(false);
+  const speakerChoice = callAudioAvailable();
   const [cameraOff, setCameraOff] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [notice, setNotice] = useState('');
@@ -161,6 +166,8 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     roleRef.current = null;
     startedAt.current = null;
     setMuted(false);
+    setSpeaker(false);
+    void stopCallAudio();
     setCameraOff(false);
     setSeconds(0);
     setRemoteHasVideo(false);
@@ -268,6 +275,8 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
         localRef.current = await getMedia(d.kind);
         if (d.kind === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
         if (localVideo.current) localVideo.current.srcObject = localRef.current;
+        // Like a phone call: ear speaker for audio, loudspeaker for video.
+        if (await startCallAudio(d.kind === 'video')) setSpeaker(d.kind === 'video');
       } catch (e: any) {
         return cleanup(e.message);
       }
@@ -373,6 +382,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     try {
       localRef.current = await getMedia(kind);
       if (kind === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
+      if (await startCallAudio(kind === 'video')) setSpeaker(kind === 'video');
     } catch (e: any) {
       getChatSocket()?.emit('call:decline', { callId });
       return cleanup(e.message);
@@ -394,6 +404,10 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     const next = !muted;
     localRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));
     setMuted(next);
+  };
+  const toggleSpeaker = async () => {
+    const next = !speaker;
+    if (await setCallSpeaker(next)) setSpeaker(next);
   };
   const toggleCamera = () => {
     const next = !cameraOff;
@@ -430,7 +444,23 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
 
   const roundBtn = 'w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95';
 
-  return (
+  // A labelled round button (Mute / Speaker / Camera / End).
+  const control = (label: string, on: boolean, onClick: () => void, icon: React.ReactNode, cls?: string) => (
+    <div className="flex flex-col items-center gap-1.5 w-[72px]">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={on}
+        aria-label={label}
+        className={`${roundBtn} ${cls || (on ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25')}`}
+      >
+        {icon}
+      </button>
+      <span className="text-[11.5px] text-white/80">{label}</span>
+    </div>
+  );
+
+  return createPortal(
     <div className="fixed inset-0 z-[9999] bg-gradient-to-b from-violet-950 via-slate-900 to-slate-950 text-white flex flex-col" role="dialog" aria-label="Call">
       <audio ref={remoteAudio} autoPlay playsInline />
       {showVideo && (
@@ -466,7 +496,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
         <div className="text-sm text-white/70 drop-shadow">{status}</div>
       </div>
 
-      <div className="relative pb-12 pt-4 flex items-center justify-center gap-6">
+      <div className="relative pt-4 flex items-start justify-center gap-4 sm:gap-6" style={{ paddingBottom: 'max(3rem, calc(env(safe-area-inset-bottom) + 2rem))' }}>
         {phase === 'incoming' ? (
           <>
             <button type="button" onClick={decline} className={`${roundBtn} bg-rose-600 hover:bg-rose-500`} aria-label="Decline">
@@ -478,25 +508,16 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
           </>
         ) : (
           <>
-            <button type="button" onClick={toggleMute} className={`${roundBtn} ${muted ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25'}`} aria-label={muted ? 'Unmute' : 'Mute'}>
-              {muted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-            </button>
-            {kind === 'video' && (
-              <button
-                type="button"
-                onClick={toggleCamera}
-                className={`${roundBtn} ${cameraOff ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25'}`}
-                aria-label={cameraOff ? 'Turn camera on' : 'Turn camera off'}
-              >
-                {cameraOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-              </button>
-            )}
-            <button type="button" onClick={hangUp} className={`${roundBtn} bg-rose-600 hover:bg-rose-500`} aria-label="End call">
-              <PhoneOff className="w-6 h-6" />
-            </button>
+            {control(muted ? 'Unmute' : 'Mute', muted, toggleMute, muted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />)}
+            {speakerChoice &&
+              control(speaker ? 'Speaker' : 'Earpiece', speaker, toggleSpeaker, speaker ? <Volume2 className="w-6 h-6" /> : <Ear className="w-6 h-6" />)}
+            {kind === 'video' &&
+              control(cameraOff ? 'Camera on' : 'Camera off', cameraOff, toggleCamera, cameraOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />)}
+            {control('End', false, hangUp, <PhoneOff className="w-6 h-6" />, 'bg-rose-600 hover:bg-rose-500')}
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

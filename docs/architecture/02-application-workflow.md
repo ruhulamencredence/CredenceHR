@@ -623,6 +623,9 @@ Admin Panel → **Notices** → **New notice** — চার ধাপের এ
 
 Chat-এর audio / video call phone-to-phone (WebRTC); server শুধু call-টা পৌঁছে দেয় (Socket.IO, `CallRoutes.ts`)। মোবাইল microphone শুধু https-এ দেয়, তাই https চালুর পরেই আসল সংযোগ চেষ্টা শুরু হয়। দুই ফোন একে অপরকে খুঁজে পেতে Google-এর STUN সবসময় থাকে; মোবাইল data (carrier-grade NAT) বা কড়া office firewall-এ তা যথেষ্ট নয় — তখন **TURN relay** লাগে: `.env`-এ `CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_API_TOKEN` (Cloudflare Calls TURN) বা নিজের coturn-এর `TURN_URLS` / `TURN_USERNAME` / `TURN_CREDENTIAL`। TURN না থাকলে server চালুর সময় সতর্কবার্তা দেয়। Call ধরার পরে ২৫ সেকেন্ডে সংযোগ না হলে (বা ICE failed হলে) call নিজে বন্ধ হয় আর কারণ দেখায় — TURN না থাকলে "Ask IT to set up the call relay (TURN)" (`CallLayer.tsx`)।
 
+
+**কলের বোতাম আর শব্দ কোথায় বাজে:** কল চলার সময় নিচে নাম লেখা বোতামগুলো থাকে: **Mute**, **Earpiece / Speaker** (শুধু Android অ্যাপে), video কলে **Camera**, আর **End**। কলের পর্দা `document.body`-তে আঁকা হয়, তাই অন্য কোনো পাতা বা popup এটা ঢাকতে পারে না। ফোনের নিচের navigation bar-এর জন্য জায়গাও রাখা থাকে। Android অ্যাপে কল শুরু হলে `CallAudioPlugin.java` (`src/lib/callAudio.ts`) ফোনকে "কলে আছে" অবস্থায় নেয়: audio কল বাজে কানের speaker-এ (earpiece), video কল loudspeaker-এ। Speaker বোতাম দিয়ে বদলানো যায়। কানে ধরলে পর্দা বন্ধ হয় (proximity sensor), যাতে গালে লেগে বোতাম না চাপে। headset বা Bluetooth লাগানো থাকলে earpiece-এর বদলে সেটাতেই বাজে। কল শেষ হলে সব আগের অবস্থায় ফেরে। ওয়েবসাইটে (browser) কোথায় বাজবে তা browser ঠিক করে, তাই সেখানে Speaker বোতাম থাকে না। এর জন্য নতুন APK লাগবে; পুরনো APK-তে বোতামটা দেখা যায় না, বাকি সব আগের মতো চলে।
+
 ## MySQL বন্ধ হয়ে গেলে সার্ভার
 
 - চলার মাঝে MySQL বন্ধ হলে বা restart নিলে ("Server shutdown in progress", ECONNREFUSED, ECONNRESET) সার্ভার আর বন্ধ হয়ে যায় না। ওই সময়ের request গুলো error পায়, লগে মিনিটে একবার "MySQL is not answering" লেখা হয়। MySQL আবার চালু হলে কিছু না করেই সব আগের মতো চলে।

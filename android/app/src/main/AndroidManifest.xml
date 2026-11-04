@@ -91,5 +91,7 @@
          audio routing during a call. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Screen off while a call is held to the ear (CallAudioPlugin.java). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

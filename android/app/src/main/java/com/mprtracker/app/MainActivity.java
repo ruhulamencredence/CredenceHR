@@ -48,6 +48,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // App's own plugins have to be registered before the bridge starts.
         registerPlugin(LocationAccessPlugin.class);
+        registerPlugin(CallAudioPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Set up edge-to-edge natively, synchronously, right here -- rather
