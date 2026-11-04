@@ -20,7 +20,7 @@
 //   npx cap sync android
 
 // The live server. The same address the iPhone app and the website use.
-const SERVER_DOMAIN_URL = 'https://hr.credencehousinglimited.com';
+const SERVER_DOMAIN_URL = 'https://hr.credencegroupbd.com';
 
 function checkedServerUrl(raw: string): URL {
   let url: URL;
