@@ -9,20 +9,8 @@
 
 import React, { useState } from 'react';
 
-const Btn: React.FC<{ side: 'left' | 'right'; top: number; h: number; offset?: number }> = ({ side, top, h, offset = 0 }) => (
-  <span
-    aria-hidden="true"
-    className="absolute w-[4px] rounded-full"
-    style={{
-      [side]: -3 - offset,
-      transition: 'all 0.5s ease-out',
-      top,
-      height: h,
-      background: 'linear-gradient(90deg, #4a4a4f, #c7c7cc 45%, #5e5e63)',
-      boxShadow: '0 0 0 0.5px rgba(0,0,0,0.35)'
-    }}
-  />
-);
+// How thick the phone is, in px (layers of its outline).
+const DEPTH = 22;
 
 const StatusBar: React.FC<{ dark?: boolean }> = ({ dark }) => {
   const c = dark ? '#0f172a' : '#ffffff';
@@ -80,29 +68,64 @@ export const PhoneMockup: React.FC<{
     <div
       className="relative transition-transform duration-500 ease-out"
       // Upright, turned so its right side comes towards you (that edge shows).
-      style={{ transform: tilt && !face ? 'rotateY(-24deg)' : 'none', transformStyle: 'preserve-3d' }}
+      style={{ transform: tilt && !face ? 'rotateY(-30deg)' : 'rotateY(0deg)', transformStyle: 'preserve-3d' }}
     >
-      {/* side buttons */}
-      {!(tilt && !face) && (
-        <>
-          <Btn side="left" top={92} h={22} />
-          <Btn side="left" top={132} h={40} />
-          <Btn side="left" top={180} h={40} />
-        </>
-      )}
-      <Btn side="right" top={150} h={62} offset={tilt && !face ? 12 : 0} />
+      {/* The phone's body: copies of its outline stacked behind the front,
+          so turning it shows a real rounded titanium side (corners too). */}
+      {Array.from({ length: DEPTH }).map((_, k) => {
+        const d = k + 1;
+        // Bright along the middle of the side, darker towards the back.
+        // The side is flat titanium: light in the middle, rounding off darker at the front and back.
+        const t = d / DEPTH;
+        const tone = d === DEPTH ? '#3a3a3c' : t < 0.12 || t > 0.88 ? '#8e8e93' : t < 0.25 || t > 0.75 ? '#aeaeb2' : '#c7c7cc';
+        return (
+          <div
+            key={d}
+            aria-hidden="true"
+            className="absolute inset-0 rounded-[50px]"
+            style={{
+              transform: `translateZ(${-d}px)`,
+              background: `linear-gradient(180deg, ${tone}, ${tone} 8%, #e5e5ea 30%, ${tone} 55%, #ffffff 78%, ${tone} 92%)`,
+              boxShadow: d === DEPTH ? '-24px 34px 50px -26px rgba(15,23,42,0.55), 0 18px 40px -24px rgba(76,29,149,0.45)' : undefined
+            }}
+          >
+            {/* antenna lines across the side */}
+            {(Math.round(DEPTH * 0.3) === d || Math.round(DEPTH * 0.3) + 1 === d || Math.round(DEPTH * 0.7) === d || Math.round(DEPTH * 0.7) + 1 === d) && (
+              <>
+                <span className="absolute right-0 w-[8px] h-[3px] bg-[#636366]" style={{ top: 64 }} />
+                <span className="absolute right-0 w-[8px] h-[3px] bg-[#636366]" style={{ bottom: 64 }} />
+              </>
+            )}
+          </div>
+        );
+      })}
+      {/* buttons: on the side, half way through its depth */}
+      {[
+        ['left', 92, 22],
+        ['left', 132, 40],
+        ['left', 180, 40],
+        ['right', 150, 62]
+      ].map(([side, top, h]) => (
+        <span
+          key={`${side}${top}`}
+          aria-hidden="true"
+          className="absolute w-[5px] rounded-full"
+          style={{
+            [side as string]: -3,
+            top: top as number,
+            height: h as number,
+            transform: `translateZ(${-DEPTH / 2}px)`,
+            background: 'linear-gradient(180deg, #8e8e93, #f2f2f7 20%, #aeaeb2 50%, #e5e5ea 80%, #8e8e93)',
+            boxShadow: '0 0 0 0.75px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25)'
+          }}
+        />
+      ))}
       {/* titanium band */}
       <div
         className="relative rounded-[50px] p-[3.5px] transition-shadow duration-500"
         style={{
-          background: 'linear-gradient(100deg, #5b5b60 0%, #d8d8dd 5%, #8a8a8f 11%, #5e5e63 30%, #6a6a6f 55%, #4f4f54 78%, #a1a1a6 90%, #e5e5ea 95%, #5b5b60 100%)',
-          boxShadow: [
-            // the phone's thickness: its right edge, which is turned to you
-            ...(tilt && !face ? ['2px 0 0 0 #c7c7cc', '5px 0 0 0 #8e8e93', '8px 0 0 0 #636366', '10px 0 0 0 #48484a', '11px 0 0 0 #2c2c2e'] : []),
-            // shadow on the page
-            '-24px 34px 50px -26px rgba(15,23,42,0.55)',
-            '0 18px 40px -24px rgba(76,29,149,0.45)'
-          ].join(', ')
+          background: 'linear-gradient(100deg, #8e8e93 0%, #e5e5ea 5%, #a1a1a6 12%, #7c7c80 35%, #8e8e93 60%, #6e6e73 80%, #c7c7cc 92%, #f2f2f7 96%, #8e8e93 100%)',
+          boxShadow: 'inset 0 0 0 0.5px rgba(255,255,255,0.35)'
         }}
       >
         {/* black glass bezel */}
