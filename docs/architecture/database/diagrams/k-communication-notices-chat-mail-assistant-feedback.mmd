@@ -1,4 +1,12 @@
 erDiagram
+  notice_animations {
+    int id PK
+    varchar name
+    mediumtext lottie_json
+    int size_bytes
+    int created_by FK
+    timestamp created_at
+  }
   app_feedback {
     int id PK
     int user_id FK
@@ -327,3 +335,4 @@ erDiagram
   notices ||--o{ notice_targets : "notice_id"
   users ||--o{ notice_targets : "user_id"
   users ||--o{ ride_saved_places : "user_id"
+  users ||--o{ notice_animations : "created_by"

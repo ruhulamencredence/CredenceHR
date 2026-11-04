@@ -206,6 +206,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅ 🏢</td>
 </tr>
 <tr>
+<td>Notice-এর Animation library-তে কেউ ক্ষতিকর animation রাখতে পারে?</td>
+<td>যোগ / মোছা শুধু 🔒 <code>notice_animations</code> layer যাঁর (শুরুতে কারও নেই; API-তেও 403)। শুধু Lottie JSON নেওয়া হয় (৩ MB পর্যন্ত), আর ভেতরের expression — যেখানে JavaScript থাকতে পারে — server-এ বাদ দেওয়া হয়; app-এর light player expression চালায়ও না (<code>NoticeSafety.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Notice-এ দেওয়া ছবি বা PDF কি যে কেউ খুলতে পারে? কে পড়েছে কে দেখে?</td>
 <td>না। ফাইল server-এর folder-এ, ওয়েবে খোলা নয়; খোলে শুধু Notices module-এর লোক আর যাঁদের জন্য notice এখন live। শুধু ছবি ও অফিস-ডকুমেন্ট upload হয় (ছবির ভেতরের byte মিলিয়ে)। কে খুলেছেন / পড়েছেন সেই নাম-ধরা report শুধু <code>notice_read_report</code> layer যাঁর, আর notice email করা শুধু <code>notice_email</code> layer — দুটোই শুরুতে কাউকে দেওয়া থাকে না, API-তেও 403 (<code>NoticeRoutes.ts</code>)।</td>
 <td>✅</td>

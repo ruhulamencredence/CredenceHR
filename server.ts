@@ -426,9 +426,11 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
 const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
-// Notices: who has read a notice (report, send again) and sending it by
-// email — both only when ticked (EXPLICIT_ONLY_LAYERS in src/types.ts).
-const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email"] as const;
+// Notices: who has read a notice (report, send again), sending it by
+// email, and adding / removing animations in the shared Animation library
+// (using one from it only needs the module) — all only when ticked
+// (EXPLICIT_ONLY_LAYERS in src/types.ts).
+const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice_animations"] as const;
 // Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Conveyance Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
@@ -2920,7 +2922,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email" | "hrd_review") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });

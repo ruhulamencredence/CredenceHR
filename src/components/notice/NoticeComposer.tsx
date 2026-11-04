@@ -29,6 +29,7 @@ import { NoticeArticle } from './NoticeDetail';
 import { NoticeSheet } from '../NoticePopup';
 import { BoardCard } from '../NoticeBoard';
 import { PhoneMockup } from './PhoneMockup';
+import { AnimationLibrary } from './AnimationLibrary';
 import { uploadNoticeFile, fileSize } from '../../lib/noticeFilesClient';
 import { confirmDialog } from '../../lib/confirmDialog';
 
@@ -235,7 +236,6 @@ export const NoticeComposer: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [restorable, setRestorable] = useState<Form | null>(null);
-  const [showAnim, setShowAnim] = useState(!!(notice?.lottie_json || notice?.lottie_url));
   const [previewPopup, setPreviewPopup] = useState(false);
   const [coverLocal, setCoverLocal] = useState<string | null>(null);
   const editor = useRef<NoticeEditorHandle>(null);
@@ -667,24 +667,14 @@ export const NoticeComposer: React.FC<{
                     </div>
                   </div>
 
-                  <div className="rounded-[22px] bg-white/60 border border-white">
-                    <button type="button" onClick={() => setShowAnim(!showAnim)} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left">
-                      <span className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
-                        <Sparkles className="w-4 h-4" />
-                      </span>
-                      <span className="flex-1">
-                        <span className="block text-[13px] font-bold text-slate-800">Animation</span>
-                        <span className="block text-[11px] text-slate-500">Optional — a Lottie animation at the top instead of a picture</span>
-                      </span>
-                      <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${showAnim ? 'rotate-90' : ''}`} />
-                    </button>
-                    {showAnim && (
-                      <div className="grid sm:grid-cols-2 gap-2 px-3 pb-3">
-                        <textarea value={form.lottie_json} onChange={(e) => set('lottie_json', e.target.value)} rows={3} placeholder='Paste Lottie JSON {"v":"5.7.0",…}' className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-mono" />
-                        <input value={form.lottie_url} onChange={(e) => set('lottie_url', e.target.value)} placeholder="or a link to one: https://…/animation.json" className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs" />
-                      </div>
-                    )}
-                  </div>
+                  <AnimationLibrary
+                    token={token}
+                    value={form.lottie_json}
+                    url={form.lottie_url}
+                    onPick={(json) => set('lottie_json', json)}
+                    onUrl={(u) => set('lottie_url', u)}
+                    onError={setError}
+                  />
                 </div>
               )}
 

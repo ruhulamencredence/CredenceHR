@@ -248,7 +248,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>Notice-এর ছবি ও সংযুক্তি</td>
-<td>ফাইল folder-এ (<code>NOTICE_FILES_DIR</code>), নাম এলোমেলো, path folder-এর বাইরে গেলে খোলে না; folder ওয়েবে খোলা নয় — ফাইল পান শুধু Notices module-এর লোক আর যাঁর জন্য notice এখন live (অন্যরা 403)। শুধু ছবি (PNG/JPG/WebP/GIF — প্রথম byte মিলিয়ে, নাম বদলানো ফাইল নয়) ও অফিস-ডকুমেন্ট নেওয়া হয়, .exe ইত্যাদি নয়; ছবি ৫ MB, ফাইল ২০ MB। লেখা আগের মতো server-এ পরিষ্কার হয় (script, iframe, event handler বাদ)। "Who read it" ও email আলাদা 🔒 layer (<code>notice_read_report</code>, <code>notice_email</code>)</td>
+<td>ফাইল folder-এ (<code>NOTICE_FILES_DIR</code>), নাম এলোমেলো, path folder-এর বাইরে গেলে খোলে না; folder ওয়েবে খোলা নয় — ফাইল পান শুধু Notices module-এর লোক আর যাঁর জন্য notice এখন live (অন্যরা 403)। শুধু ছবি (PNG/JPG/WebP/GIF — প্রথম byte মিলিয়ে, নাম বদলানো ফাইল নয়) ও অফিস-ডকুমেন্ট নেওয়া হয়, .exe ইত্যাদি নয়; ছবি ৫ MB, ফাইল ২০ MB। লেখা আগের মতো server-এ পরিষ্কার হয় (script, iframe, event handler বাদ)। "Who read it" ও email আলাদা 🔒 layer (<code>notice_read_report</code>, <code>notice_email</code>)। Animation library-তে Lottie যোগ / মোছা আলাদা 🔒 layer <code>notice_animations</code> (API-তেও 403); শুধু Lottie JSON (layers, w, h থাকতে হবে), ৩ MB পর্যন্ত, আর ভেতরের expression (JavaScript) server-এ বাদ দিয়ে রাখা হয় — notice-এ বসানো animation-ও একইভাবে</td>
 <td><code>NoticeRoutes.ts</code>, <code>noticeFiles.ts</code>, <code>NoticeSafety.ts</code></td>
 </tr>
 <tr>

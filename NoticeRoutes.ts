@@ -96,6 +96,18 @@ export async function ensureNoticeV2Schema(dbPool: any): Promise<void> {
     CONSTRAINT fk_notice_files_notice FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
     CONSTRAINT fk_notice_files_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
   )`);
+  // Animation library: Lottie animations imported once (Notices -> New
+  // notice -> Animation) and picked for any notice later; a notice keeps its
+  // own copy, so removing one from the library never changes a notice.
+  await run(`CREATE TABLE IF NOT EXISTS notice_animations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    lottie_json MEDIUMTEXT NOT NULL,
+    size_bytes INT NOT NULL DEFAULT 0,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_notice_animations_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  )`);
   await run(`CREATE TABLE IF NOT EXISTS notice_reads (
     id INT AUTO_INCREMENT PRIMARY KEY,
     notice_id INT NOT NULL,
@@ -351,6 +363,66 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
   });
 
   // Kept for older screens: plain User accounts only.
+  // ---- Animation library ------------------------------------------------
+  const ANIMATION_MAX_BYTES = 3 * 1024 * 1024;
+  app.get("/api/notices/animations", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
+    try {
+      const rows: any[] =
+        (await queryDB("SELECT a.id, a.name, a.size_bytes, a.created_at, u.name AS by_name FROM notice_animations a LEFT JOIN users u ON u.id = a.created_by ORDER BY a.name ASC")) || [];
+      res.json({
+        can_manage: await hasModuleLayer(req.user, "notices", "notice_animations"),
+        items: rows.map((r) => ({ id: Number(r.id), name: r.name, size: Number(r.size_bytes) || 0, by: r.by_name || null, at: r.created_at }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get("/api/notices/animations/:id(\\d+)", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
+    try {
+      const r: any = ((await queryDB("SELECT id, name, lottie_json FROM notice_animations WHERE id = ?", [Number(req.params.id)])) || [])[0];
+      if (!r) return res.status(404).json({ error: "Animation not found." });
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.json({ id: Number(r.id), name: r.name, lottie_json: safeLottieJson(r.lottie_json) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/notices/animations", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_animations"), async (req: any, res) => {
+    try {
+      const name = String(req.body?.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 120);
+      if (!name) return res.status(400).json({ error: "Give the animation a name." });
+      const raw = req.body?.lottie_json;
+      const text = typeof raw === "string" ? raw : raw ? JSON.stringify(raw) : "";
+      if (!text) return res.status(400).json({ error: "Pick a Lottie .json file." });
+      if (Buffer.byteLength(text) > ANIMATION_MAX_BYTES) return res.status(413).json({ error: "An animation can be up to 3 MB." });
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return res.status(400).json({ error: "That file isn't valid JSON." });
+      }
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.layers) || !(Number(parsed.w) > 0) || !(Number(parsed.h) > 0)) {
+        return res.status(400).json({ error: "That isn't a Lottie animation (export it from LottieFiles / After Effects as .json)." });
+      }
+      // Expressions (JavaScript inside the file) are taken out (NoticeSafety.ts).
+      const safe = safeLottieJson(parsed);
+      if (!safe) return res.status(400).json({ error: "That animation couldn't be read." });
+      const r: any = await queryDB("INSERT INTO notice_animations (name, lottie_json, size_bytes, created_by) VALUES (?, ?, ?, ?)", [name, safe, Buffer.byteLength(safe), req.user.id]);
+      res.status(201).json({ id: Number(r.insertId), name, size: Buffer.byteLength(safe) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/notices/animations/:id(\\d+)", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_animations"), async (req: any, res) => {
+    try {
+      const r: any = await queryDB("DELETE FROM notice_animations WHERE id = ?", [Number(req.params.id)]);
+      if (!r?.affectedRows) return res.status(404).json({ error: "Animation not found." });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/notices/recipients", authenticateToken, requireAdmin, requireModule("notices"), async (_req, res) => {
     try {
       const rows = await queryDB("SELECT * FROM users");

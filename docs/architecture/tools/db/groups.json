@@ -33,6 +33,7 @@
   "mail_templates",
   "mail_vacation_log",
   "notice_dismissals",
+  "notice_animations",
   "notice_files",
   "notice_reads",
   "notice_targets",

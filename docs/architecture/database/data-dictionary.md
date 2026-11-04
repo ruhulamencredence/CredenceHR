@@ -450,6 +450,17 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 
 Unique: `unique_notice_user_dismiss`(notice_id,user_id)
 
+### `notice_animations`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `name` | varchar(120) | না |  | |
+| `lottie_json` | mediumtext | না |  | |
+| `size_bytes` | int(11) | না | default 0 | |
+| `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `notice_files`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
