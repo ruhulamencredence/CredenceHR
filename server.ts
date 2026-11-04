@@ -1,9 +1,12 @@
+// Load .env before any other module: imports run before this file's own
+// code, so modules that read process.env when imported (WebSecurity,
+// MailRoutes, AiAssistantRoutes, companyScope…) otherwise saw it empty.
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fsSync from "fs";
 import http from "http";
 import compression from "compression";
-import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
@@ -106,7 +109,6 @@ import { resolveJwtSecret } from "./JwtSecret";
 import { installWebSecurity, socketCorsOrigin } from "./WebSecurity";
 import { getStartupMarker, setStartupMarker } from "./startupOnce";
 
-dotenv.config();
 
 // Never a key written in the code: a weak or missing JWT_SECRET is replaced
 // by a random one kept in .jwt-secret (JwtSecret.ts).
