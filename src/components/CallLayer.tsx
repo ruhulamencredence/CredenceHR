@@ -54,7 +54,12 @@ const ENDED_TEXT: Record<string, string> = {
   ended: 'Call ended',
   disconnected: 'Call dropped',
   failed: "Couldn't connect — check the internet on both phones",
+  // No TURN relay on the server: phones on mobile data / strict office
+  // networks often can't reach each other directly (CallRoutes.ts).
+  'failed-no-turn': "Couldn't connect — the phones can't reach each other directly. Ask IT to set up the call relay (TURN) on the server.",
 };
+// How long "Connecting…" may last before the call is given up.
+const CONNECT_TIMEOUT_MS = 25 * 1000;
 
 // A soft ring made with WebAudio (no sound file needed).
 function makeRinger() {
@@ -116,6 +121,9 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
   const remoteRef = useRef<MediaStream | null>(null);
   const pendingIce = useRef<RTCIceCandidateInit[]>([]);
   const iceServersRef = useRef<RTCIceServer[] | null>(null);
+  // Whether the server gave a TURN relay (for the message when it fails).
+  const hasTurnRef = useRef(false);
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ringer = useRef(makeRinger());
   const startedAt = useRef<number | null>(null);
   const localVideo = useRef<HTMLVideoElement>(null);
@@ -129,7 +137,10 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     try {
       const r = await fetch(apiUrl('/api/calls/ice-servers'), { headers: { Authorization: `Bearer ${token}` } });
       const d = await r.json();
-      if (r.ok && Array.isArray(d.iceServers)) iceServersRef.current = d.iceServers;
+      if (r.ok && Array.isArray(d.iceServers)) {
+        iceServersRef.current = d.iceServers;
+        hasTurnRef.current = !!d.turn;
+      }
     } catch {
       // fall back to public STUN below
     }
@@ -138,6 +149,8 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
 
   const cleanup = useCallback((text?: string) => {
     ringer.current.stop();
+    if (connectTimer.current) clearTimeout(connectTimer.current);
+    connectTimer.current = null;
     pcRef.current?.close();
     pcRef.current = null;
     localRef.current?.getTracks().forEach((t) => t.stop());
@@ -209,16 +222,30 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       if (remoteVideo.current && remoteVideo.current.srcObject !== stream) remoteVideo.current.srcObject = stream;
       if (remoteAudio.current && remoteAudio.current.srcObject !== stream) remoteAudio.current.srcObject = stream;
     };
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected' && phaseRef.current !== 'active') {
-        startedAt.current = Date.now();
-        setPhase('active');
-      }
-      if (pc.connectionState === 'failed' && callIdRef.current) {
-        getChatSocket()?.emit('call:end', { callId: callIdRef.current });
-        cleanup(ENDED_TEXT.failed);
-      }
+    const giveUp = () => {
+      if (pc !== pcRef.current || !callIdRef.current || phaseRef.current === 'active') return;
+      getChatSocket()?.emit('call:end', { callId: callIdRef.current });
+      cleanup(hasTurnRef.current ? ENDED_TEXT.failed : ENDED_TEXT['failed-no-turn']);
     };
+    const connected = () => {
+      if (phaseRef.current === 'active') return;
+      if (connectTimer.current) clearTimeout(connectTimer.current);
+      connectTimer.current = null;
+      startedAt.current = Date.now();
+      setPhase('active');
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') connected();
+      if (pc.connectionState === 'failed') giveUp();
+    };
+    // Some WebViews only report the ICE state.
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') connected();
+      if (pc.iceConnectionState === 'failed') giveUp();
+    };
+    // Never stuck on "Connecting…": give up after a while.
+    if (connectTimer.current) clearTimeout(connectTimer.current);
+    connectTimer.current = setTimeout(giveUp, CONNECT_TIMEOUT_MS);
     return pc;
   };
 
