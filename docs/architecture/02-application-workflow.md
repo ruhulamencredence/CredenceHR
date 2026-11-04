@@ -601,7 +601,7 @@ App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashb
 
 ## Notice: লেখা, কাকে, কখন, কে পড়েছে
 
-Admin Panel → **Notices** → **New notice** — চার ধাপের একটা পাতা, ডান পাশে সাথে সাথে দেখায় ফোনের popup / desktop / Notice Board-এ কেমন দেখাবে (`notice/NoticeComposer.tsx`)।
+Admin Panel → **Notices** → **New notice** — চার ধাপের একটা পাতা (প্রতিটা ধাপের নিচে ছোট করে লেখা কী বাছা হয়েছে; Review-এ কিছু বাকি থাকলে "Fix it" সেই ধাপে নিয়ে যায়)। ডান পাশের Live preview-তে কর্মীরা যা দেখবেন হুবহু তা-ই — Popup (`NoticePopup.tsx`-এর `NoticeSheet`), Opened (`NoticeDetail.tsx`-এর `NoticeArticle`), Board (`NoticeBoard.tsx`-এর `BoardCard`); ফোনে Preview বাটনে popup (`notice/NoticeComposer.tsx`)।
 
 1. **Write:** template (Holiday, Meeting, Policy update, Urgent, Congratulations, Maintenance), Title, আর Word-এর মতো editor — Bold, Heading, list, checklist, রং, highlight, link, table, emoji; Enter-এ নতুন লাইন, বাংলা / English; Word, Google Docs বা WhatsApp থেকে paste করলে format থাকে (`notice/NoticeEditor.tsx`, browser-এর নিজের editing, আলাদা library নেই)। ছবি টেনে আনা, paste বা বাছা যায় (PNG, JPG, WebP, GIF; বড় ছবি নিজে ছোট হয়, ৫ MB পর্যন্ত), cover ছবি, আর PDF / Word / Excel / PowerPoint / text সংযুক্তি (২০ MB পর্যন্ত)। ঐচ্ছিক Lottie animation আগের মতো। নতুন notice শেষ না করে বন্ধ করলে এই browser-এ থাকে, পরে "Continue it"।
 2. **Who gets it:** Everyone, Choose groups (Department ও / বা Branch, সাথে কাউকে যোগ), বা Specific people (Admin-সহ যে কাউকে, নাম · Employee ID · পদ · Department লিখে খোঁজা); যেকোনোটায় কাউকে "Leave out"। কতজন পাবেন সাথে সাথে দেখায়। Group-এর notice প্রতিবার Employee-র বর্তমান Department / Branch দেখে — নতুন কেউ যোগ হলে তিনিও পান।

@@ -74,31 +74,18 @@ export const AttachmentCards: React.FC<{ files: NoticeFile[]; token: string }> =
   );
 };
 
-export const NoticeDetail: React.FC<{
-  notice: ActiveNotice;
-  token: string;
-  onClose: () => void;
-  // The bottom button: acknowledge when the notice asks for it.
-  onAcknowledge?: () => void | Promise<void>;
-  busy?: boolean;
-  // Label of the bottom button when no acknowledgement is needed.
-  doneLabel?: string;
-  onDone?: () => void;
-}> = ({ notice: n, token, onClose, onAcknowledge, busy, doneLabel = 'Got it', onDone }) => {
-  useBackButtonClose(true, onClose);
+// The notice itself — cover with the title on it, who posted it, the text,
+// the attachments. Shared by the full view and the composer's preview.
+export const NoticeArticle: React.FC<{ notice: ActiveNotice; token: string; coverLocalUrl?: string | null }> = ({ notice: n, token, coverLocalUrl }) => {
   const priority = n.priority || 'important';
   const tile = PRIORITY_TILE[priority];
-  const needsAck = !!n.require_ack && !n.acknowledged_at;
   const minutes = readMinutes(n.content_html);
-  const hero = !!n.cover;
-  return createPortal(
-    <div className="liquid-glass-backdrop fixed inset-0 z-[95] flex items-end md:items-center justify-center md:p-6" onClick={onClose}>
-      <div className="w-full md:max-w-lg h-[100dvh] md:h-auto md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <div role="dialog" aria-label={n.title} className="liquid-glass liquid-glass-in rounded-none md:rounded-[32px] h-full md:max-h-[90vh] flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto overscroll-contain bg-[#fbfaff]/90">
+  const hero = !!n.cover || !!coverLocalUrl;
+  return (
+    <>
             {hero ? (
               <div className="relative">
-                <NoticeCover file={n.cover} token={token} className="h-[300px] md:h-[240px]" />
+                <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} className="h-[300px] md:h-[240px]" />
                 <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-indigo-950/80 pointer-events-none" />
                 <div className="absolute left-5 right-5 bottom-10 text-white">
                   <CoverChips priority={priority} pinned={n.pinned} />
@@ -139,6 +126,30 @@ export const NoticeDetail: React.FC<{
                 </p>
               )}
             </div>
+              </>
+  );
+};
+
+export const NoticeDetail: React.FC<{
+  notice: ActiveNotice;
+  token: string;
+  onClose: () => void;
+  // The bottom button: acknowledge when the notice asks for it.
+  onAcknowledge?: () => void | Promise<void>;
+  busy?: boolean;
+  // Label of the bottom button when no acknowledgement is needed.
+  doneLabel?: string;
+  onDone?: () => void;
+}> = ({ notice: n, token, onClose, onAcknowledge, busy, doneLabel = 'Got it', onDone }) => {
+  useBackButtonClose(true, onClose);
+  const needsAck = !!n.require_ack && !n.acknowledged_at;
+  const hero = !!n.cover;
+  return createPortal(
+    <div className="liquid-glass-backdrop fixed inset-0 z-[95] flex items-end md:items-center justify-center md:p-6" onClick={onClose}>
+      <div className="w-full md:max-w-lg h-[100dvh] md:h-auto md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div role="dialog" aria-label={n.title} className="liquid-glass liquid-glass-in rounded-none md:rounded-[32px] h-full md:max-h-[90vh] flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto overscroll-contain bg-[#fbfaff]/90">
+            <NoticeArticle notice={n} token={token} />
           </div>
           <button
             type="button"

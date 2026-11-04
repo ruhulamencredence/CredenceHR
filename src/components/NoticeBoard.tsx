@@ -31,6 +31,143 @@ const matches = (n: ActiveNotice, f: Filter) =>
 // Needs this person now: urgent and not yet read / acknowledged.
 const needsAttention = (n: ActiveNotice) => n.priority === 'urgent' && (n.require_ack ? !n.acknowledged_at : !n.opened_at);
 
+interface CardProps {
+  n: ActiveNotice;
+  token: string;
+  // The notice as plain text (for the short excerpt).
+  text: string;
+  onOpen: () => void;
+  onAck?: () => void | Promise<void>;
+  acking?: boolean;
+  coverLocalUrl?: string | null;
+}
+
+const Meta: React.FC<{ n: ActiveNotice }> = ({ n }) => (
+  <span className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-0">
+    {!n.opened_at && (
+      <>
+        <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--g-accent,#7F00FF)] shrink-0" />
+        <b className="text-[color:var(--g-accent,#7F00FF)]">New</b>
+        <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
+      </>
+    )}
+    <span className="truncate">{n.from_name || 'HR'}</span>
+    <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
+    <span className="shrink-0">{noticeWhen(n.created_at)}</span>
+    <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
+    <span className="shrink-0">{readMinutes(n.content_html)} min read</span>
+  </span>
+);
+
+const UrgentCard: React.FC<CardProps> = ({ n, token, text, onOpen, onAck, acking, coverLocalUrl }) => (
+  <div className="relative overflow-hidden rounded-[24px] border border-rose-200 bg-gradient-to-br from-rose-50 to-rose-100/80 p-3.5 pl-4 shadow-[0_14px_30px_-18px_rgba(225,29,72,0.55)] mb-2.5">
+    <span className="absolute left-0 top-0 bottom-0 w-[5px] bg-gradient-to-b from-rose-400 to-rose-600" />
+    <button type="button" onClick={() => onOpen()} className="block w-full text-left">
+      <span className="flex items-center gap-2">
+        <span className="w-8 h-8 rounded-[11px] flex items-center justify-center text-white bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_6px_14px_-6px_rgba(225,29,72,0.9)]">
+          <AlertTriangle className="w-4 h-4" />
+        </span>
+        <span className="text-[10.5px] font-extrabold tracking-wider px-2 py-0.5 rounded-full bg-rose-600 text-white">URGENT</span>
+        <span className="ml-auto text-[11.5px] text-slate-400">{noticeWhen(n.created_at)}</span>
+      </span>
+      <span className="block text-[15.5px] font-bold text-slate-900 mt-2.5 leading-snug">{n.title}</span>
+      <span className="text-[13px] text-slate-600 leading-relaxed mt-0.5 line-clamp-2">{text}</span>
+    </button>
+    <div className="flex items-center justify-between gap-2 mt-3">
+      <span className="text-[11.5px] text-slate-400 truncate">
+        {n.from_name || 'HR'}
+        {n.require_ack ? ' · needs your OK' : ''}
+      </span>
+      {n.require_ack ? (
+        <button
+          type="button"
+          disabled={!!acking}
+          onClick={() => void onAck?.()}
+          className="shrink-0 text-[12.5px] font-bold text-white rounded-full px-3.5 py-2 bg-gradient-to-br from-rose-500 to-rose-600 shadow-[0_8px_16px_-8px_rgba(225,29,72,0.9)] disabled:opacity-60"
+        >
+          I have read this
+        </button>
+      ) : (
+        <button type="button" onClick={() => onOpen()} className="shrink-0 text-[12.5px] font-bold text-rose-700 inline-flex items-center">
+          Read <ChevronRight className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  </div>
+);
+
+const FeatureCard: React.FC<CardProps> = ({ n, token, text, onOpen, onAck, acking, coverLocalUrl }) => (
+  <button
+    type="button"
+    onClick={() => onOpen()}
+    className="block w-full text-left rounded-[26px] overflow-hidden bg-white/90 border border-white shadow-[0_18px_36px_-22px_rgba(76,29,149,0.45)] mb-2.5"
+  >
+    {(n.cover || coverLocalUrl) && (
+      <span className="relative block">
+        <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} className="h-40 md:h-48" />
+        <span className="absolute left-3 top-3">
+          <CoverChips priority={n.priority} pinned={false} />
+        </span>
+      </span>
+    )}
+    <span className="block px-4 pt-3 pb-3.5">
+      <span className="block text-[16.5px] font-extrabold tracking-tight text-slate-900 leading-snug">{n.title}</span>
+      <span className="block mt-1">
+        <Meta n={n} />
+      </span>
+      <span className="text-[13.2px] text-slate-600 leading-relaxed mt-2 line-clamp-2">{text}</span>
+      <span className="flex items-center justify-between mt-3">
+        {(n.attachments || []).length > 0 ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-violet-50 rounded-xl px-2.5 py-1.5">
+            <Paperclip className="w-3.5 h-3.5 text-[color:var(--g-accent,#7F00FF)]" />
+            {(n.attachments || []).length} file{(n.attachments || []).length === 1 ? '' : 's'}
+          </span>
+        ) : (
+          <span />
+        )}
+        <span className="inline-flex items-center gap-0.5 text-[12.5px] font-bold text-[color:var(--g-accent,#7F00FF)]">
+          Read more <ChevronRight className="w-4 h-4" />
+        </span>
+      </span>
+    </span>
+  </button>
+);
+
+const Row: React.FC<CardProps> = ({ n, text, onOpen }) => {
+  const tile = PRIORITY_TILE[n.priority || 'important'];
+  const done = n.require_ack ? !!n.acknowledged_at : !!n.opened_at;
+  return (
+    <button type="button" onClick={() => onOpen()} className="w-full flex items-start gap-3 text-left rounded-[20px] bg-white/85 border border-white p-3 mb-2 shadow-[0_10px_22px_-18px_rgba(76,29,149,0.5)]">
+      <span className={`w-[42px] h-[42px] rounded-[14px] shrink-0 flex items-center justify-center text-white bg-gradient-to-br ${tile.cls}`}>
+        <tile.Icon className="w-5 h-5" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-bold text-slate-900 truncate">{n.title}</span>
+        <span className="block text-[12.5px] text-slate-500 truncate mt-0.5">{text}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1">
+          <span className="truncate">{n.from_name || 'HR'}</span> · <span className="shrink-0">{noticeWhen(n.created_at)}</span>
+          {(n.attachments || []).length > 0 && <Paperclip className="w-3 h-3 shrink-0" />}
+          {done && (
+            <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-600 shrink-0">
+              <CheckCircle2 className="w-3 h-3" /> Read
+            </span>
+          )}
+        </span>
+      </span>
+      {!n.opened_at && <span className="w-2 h-2 mt-1.5 rounded-full bg-[color:var(--g-accent,#7F00FF)] ring-[3px] ring-violet-100 shrink-0" aria-label="Unread" />}
+    </button>
+  );
+};
+
+
+/** Which card a notice gets on the board. */
+export const boardVariant = (n: ActiveNotice, hasCover = !!n.cover): 'urgent' | 'feature' | 'row' => (needsAttention(n) ? 'urgent' : n.pinned || hasCover ? 'feature' : 'row');
+/** One notice as the board shows it (also the composer's "Board" preview). */
+export const BoardCard: React.FC<CardProps> = (props) => {
+  const v = boardVariant(props.n, !!props.n.cover || !!props.coverLocalUrl);
+  return v === 'urgent' ? <UrgentCard {...props} /> : v === 'feature' ? <FeatureCard {...props} /> : <Row {...props} />;
+};
+
 // A persistent, browsable list of every notice currently active for this
 // account — unlike NoticePopup.tsx (the same notices as a one-at-a-time
 // sheet right after login), this page never dismisses anything: it's where
@@ -98,6 +235,7 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
   const rest = shown.filter((n) => !n.pinned && !needsAttention(n));
   const unread = counts.unread;
   const current = notices.find((n) => n.id === openId) || null;
+  const cardProps = (n: ActiveNotice): CardProps => ({ n, token, text: texts.get(n.id) || '', onOpen: () => open(n.id), onAck: () => acknowledge(n.id), acking: acking === n.id });
 
   const Section: React.FC<{ icon?: React.ReactNode; label: string }> = ({ icon, label }) => (
     <p className="flex items-center gap-1.5 text-[11px] font-extrabold tracking-[0.09em] text-slate-400 mt-5 mb-2 px-1">
@@ -105,123 +243,6 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
       {label}
     </p>
   );
-  const Meta: React.FC<{ n: ActiveNotice }> = ({ n }) => (
-    <span className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-0">
-      {!n.opened_at && (
-        <>
-          <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--g-accent,#7F00FF)] shrink-0" />
-          <b className="text-[color:var(--g-accent,#7F00FF)]">New</b>
-          <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
-        </>
-      )}
-      <span className="truncate">{n.from_name || 'HR'}</span>
-      <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
-      <span className="shrink-0">{noticeWhen(n.created_at)}</span>
-      <span className="w-[3px] h-[3px] rounded-full bg-slate-300 shrink-0" />
-      <span className="shrink-0">{readMinutes(n.content_html)} min read</span>
-    </span>
-  );
-
-  const UrgentCard: React.FC<{ n: ActiveNotice }> = ({ n }) => (
-    <div className="relative overflow-hidden rounded-[24px] border border-rose-200 bg-gradient-to-br from-rose-50 to-rose-100/80 p-3.5 pl-4 shadow-[0_14px_30px_-18px_rgba(225,29,72,0.55)] mb-2.5">
-      <span className="absolute left-0 top-0 bottom-0 w-[5px] bg-gradient-to-b from-rose-400 to-rose-600" />
-      <button type="button" onClick={() => open(n.id)} className="block w-full text-left">
-        <span className="flex items-center gap-2">
-          <span className="w-8 h-8 rounded-[11px] flex items-center justify-center text-white bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_6px_14px_-6px_rgba(225,29,72,0.9)]">
-            <AlertTriangle className="w-4 h-4" />
-          </span>
-          <span className="text-[10.5px] font-extrabold tracking-wider px-2 py-0.5 rounded-full bg-rose-600 text-white">URGENT</span>
-          <span className="ml-auto text-[11.5px] text-slate-400">{noticeWhen(n.created_at)}</span>
-        </span>
-        <span className="block text-[15.5px] font-bold text-slate-900 mt-2.5 leading-snug">{n.title}</span>
-        <span className="text-[13px] text-slate-600 leading-relaxed mt-0.5 line-clamp-2">{texts.get(n.id)}</span>
-      </button>
-      <div className="flex items-center justify-between gap-2 mt-3">
-        <span className="text-[11.5px] text-slate-400 truncate">
-          {n.from_name || 'HR'}
-          {n.require_ack ? ' · needs your OK' : ''}
-        </span>
-        {n.require_ack ? (
-          <button
-            type="button"
-            disabled={acking === n.id}
-            onClick={() => void acknowledge(n.id)}
-            className="shrink-0 text-[12.5px] font-bold text-white rounded-full px-3.5 py-2 bg-gradient-to-br from-rose-500 to-rose-600 shadow-[0_8px_16px_-8px_rgba(225,29,72,0.9)] disabled:opacity-60"
-          >
-            I have read this
-          </button>
-        ) : (
-          <button type="button" onClick={() => open(n.id)} className="shrink-0 text-[12.5px] font-bold text-rose-700 inline-flex items-center">
-            Read <ChevronRight className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-
-  const FeatureCard: React.FC<{ n: ActiveNotice }> = ({ n }) => (
-    <button
-      type="button"
-      onClick={() => open(n.id)}
-      className="block w-full text-left rounded-[26px] overflow-hidden bg-white/90 border border-white shadow-[0_18px_36px_-22px_rgba(76,29,149,0.45)] mb-2.5"
-    >
-      {n.cover && (
-        <span className="relative block">
-          <NoticeCover file={n.cover} token={token} className="h-40 md:h-48" />
-          <span className="absolute left-3 top-3">
-            <CoverChips priority={n.priority} pinned={false} />
-          </span>
-        </span>
-      )}
-      <span className="block px-4 pt-3 pb-3.5">
-        <span className="block text-[16.5px] font-extrabold tracking-tight text-slate-900 leading-snug">{n.title}</span>
-        <span className="block mt-1">
-          <Meta n={n} />
-        </span>
-        <span className="text-[13.2px] text-slate-600 leading-relaxed mt-2 line-clamp-2">{texts.get(n.id)}</span>
-        <span className="flex items-center justify-between mt-3">
-          {(n.attachments || []).length > 0 ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-violet-50 rounded-xl px-2.5 py-1.5">
-              <Paperclip className="w-3.5 h-3.5 text-[color:var(--g-accent,#7F00FF)]" />
-              {(n.attachments || []).length} file{(n.attachments || []).length === 1 ? '' : 's'}
-            </span>
-          ) : (
-            <span />
-          )}
-          <span className="inline-flex items-center gap-0.5 text-[12.5px] font-bold text-[color:var(--g-accent,#7F00FF)]">
-            Read more <ChevronRight className="w-4 h-4" />
-          </span>
-        </span>
-      </span>
-    </button>
-  );
-
-  const Row: React.FC<{ n: ActiveNotice }> = ({ n }) => {
-    const tile = PRIORITY_TILE[n.priority || 'important'];
-    const done = n.require_ack ? !!n.acknowledged_at : !!n.opened_at;
-    return (
-      <button type="button" onClick={() => open(n.id)} className="w-full flex items-start gap-3 text-left rounded-[20px] bg-white/85 border border-white p-3 mb-2 shadow-[0_10px_22px_-18px_rgba(76,29,149,0.5)]">
-        <span className={`w-[42px] h-[42px] rounded-[14px] shrink-0 flex items-center justify-center text-white bg-gradient-to-br ${tile.cls}`}>
-          <tile.Icon className="w-5 h-5" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-sm font-bold text-slate-900 truncate">{n.title}</span>
-          <span className="block text-[12.5px] text-slate-500 truncate mt-0.5">{texts.get(n.id)}</span>
-          <span className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1">
-            <span className="truncate">{n.from_name || 'HR'}</span> · <span className="shrink-0">{noticeWhen(n.created_at)}</span>
-            {(n.attachments || []).length > 0 && <Paperclip className="w-3 h-3 shrink-0" />}
-            {done && (
-              <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-600 shrink-0">
-                <CheckCircle2 className="w-3 h-3" /> Read
-              </span>
-            )}
-          </span>
-        </span>
-        {!n.opened_at && <span className="w-2 h-2 mt-1.5 rounded-full bg-[color:var(--g-accent,#7F00FF)] ring-[3px] ring-violet-100 shrink-0" aria-label="Unread" />}
-      </button>
-    );
-  };
-
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl mx-auto">
@@ -283,20 +304,20 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
         ) : (
           <div className="mt-3.5">
             {attention.map((n) => (
-              <UrgentCard key={n.id} n={n} />
+              <UrgentCard key={n.id} {...cardProps(n)} />
             ))}
             {pinned.length > 0 && (
               <>
                 <Section icon={<Pin className="w-3 h-3" />} label="PINNED" />
                 {pinned.map((n) => (
-                  <FeatureCard key={n.id} n={n} />
+                  <FeatureCard key={n.id} {...cardProps(n)} />
                 ))}
               </>
             )}
             {rest.length > 0 && (
               <>
                 {(attention.length > 0 || pinned.length > 0) && <Section label="LATEST" />}
-                {rest.map((n) => (n.cover ? <FeatureCard key={n.id} n={n} /> : <Row key={n.id} n={n} />))}
+                {rest.map((n) => (n.cover ? <FeatureCard key={n.id} {...cardProps(n)} /> : <Row key={n.id} {...cardProps(n)} />))}
               </>
             )}
           </div>
