@@ -8,15 +8,15 @@
 <!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২৩১** |
-| কলাম | **২,৫৩৬** |
+| টেবিল | **২৩২** |
+| কলাম | **২,৫৪১** |
 | ঘোষিত Foreign Key | **২৬৭** (ON DELETE: CASCADE ১৫৮, SET NULL ৯৫, RESTRICT ১৪) |
-| `company_id` আছে এমন টেবিল (multi-company) | ৫৯ |
+| `company_id` আছে এমন টেবিল (multi-company) | ৬০ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ৩০টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
-| সবচেয়ে বেশি কলামের টেবিল | `users` (৬৮), `all_employees` (৪৯), `payrolls` (৪৩) |
+| সবচেয়ে বেশি কলামের টেবিল | `users` (৭০), `all_employees` (৪৯), `payrolls` (৪৩) |
 <!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৩১<!--/n--> টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৩২<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 [SVG (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.svg) · [Graphviz সোর্স](diagrams/full-application-er.dot) · PNG/PDF: GitHub → Actions → সবশেষ **Docs sync** রান → Artifacts → `CredenceHR-documentation` (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)
@@ -96,7 +96,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 </details>
 
-### A. Accounts, Access & Security (25টি টেবিল)
+### A. Accounts, Access & Security (26টি টেবিল)
 
 লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র `users` (১৫৮টি foreign key এখানে এসে মেলে)।
 
@@ -108,7 +108,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `startup_migrations`, `user_access_audit`, `user_company_access`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`
+`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`
 
 </details>
 
@@ -261,7 +261,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | <!--n:tables-->২৩১<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২৩২<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -274,6 +274,6 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৩১<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৩২<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
 জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

@@ -11,7 +11,7 @@ pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:
 img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
 details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="on" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="data-dictionary-credencehr">Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)</h1>
 <blockquote>
-<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৩১টি টেবিল, ২৫৩৬টি কলাম)।
+<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৩২টি টেবিল, ২৫৪১টি কলাম)।
 <code>PK</code> = প্রাইমারি কী, <code>FK</code> = ঘোষিত foreign key (→ কোন টেবিল), <code>logical</code> = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।</p>
 </blockquote>
 <h2 id="k-communication-notices-chat-mail-assistant-feedback">K. Communication: Notices, Chat, Mail, Assistant, Feedback</h2>
@@ -8056,6 +8056,41 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
+<h3 id="user_app_access"><code>user_app_access</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK</td>
+<td>logical → <code>users</code></td>
+</tr>
+<tr>
+<td><code>company_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK default 0</td>
+<td>কোম্পানি-মালিকানা (code-level scope)</td>
+</tr>
+<tr>
+<td><code>item_key</code></td>
+<td>varchar(64)</td>
+<td>না</td>
+<td>PK</td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <h3 id="user_company_access"><code>user_company_access</code></h3>
 <table>
 <thead>
@@ -8106,41 +8141,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>unique_user_company</code>(user_id,company_id)</p>
-<h3 id="user_app_access"><code>user_app_access</code></h3>
-<table>
-<thead>
-<tr>
-<th>কলাম</th>
-<th>ধরন</th>
-<th>Null</th>
-<th>মান/কী</th>
-<th>সম্পর্ক</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>user_id</code></td>
-<td>int(11)</td>
-<td>না</td>
-<td>PK</td>
-<td>logical → <code>users</code></td>
-</tr>
-<tr>
-<td><code>company_id</code></td>
-<td>int(11)</td>
-<td>না</td>
-<td>PK, default 0</td>
-<td>0 = Self Service switch (can_*), নইলে module-এর কোম্পানি</td>
-</tr>
-<tr>
-<td><code>item_key</code></td>
-<td>varchar(64)</td>
-<td>না</td>
-<td>PK</td>
-<td>module key বা can_* switch</td>
-</tr>
-</tbody>
-</table>
 <h3 id="user_devices"><code>user_devices</code></h3>
 <table>
 <thead>
@@ -8710,6 +8710,20 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
+<td><code>can_use_app</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>app_access_custom</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
 <td><code>sessions_valid_after</code></td>
 <td>datetime(3)</td>
 <td>হ্যাঁ</td>
@@ -8820,20 +8834,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>না</td>
 <td>default 1</td>
 <td></td>
-</tr>
-<tr>
-<td><code>can_use_app</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td>মোবাইল অ্যাপ (APK) চালু; পুরনো অ্যাকাউন্ট 1 পেয়েছে</td>
-</tr>
-<tr>
-<td><code>app_access_custom</code></td>
-<td>tinyint(1)</td>
-<td>না</td>
-<td>default 0</td>
-<td>1 = অ্যাপ শুধু <code>user_app_access</code>-এর জিনিস পায়</td>
 </tr>
 <tr>
 <td><code>can_export_assistant_reports</code></td>

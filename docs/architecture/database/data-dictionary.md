@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩১টি টেবিল, ২৫৩৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩২টি টেবিল, ২৫৪১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1534,6 +1534,14 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `detail` | text | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
+### `user_app_access`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `user_id` | int(11) | না | PK  | logical → `users` |
+| `company_id` | int(11) | না | PK default 0 | কোম্পানি-মালিকানা (code-level scope) |
+| `item_key` | varchar(64) | না | PK  | |
+
 ### `user_company_access`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1545,14 +1553,6 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `unique_user_company`(user_id,company_id)
-
-### `user_app_access`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `user_id` | int(11) | না | PK | logical → `users` |
-| `company_id` | int(11) | না | PK, default 0 | 0 = Self Service switch (can_*), নইলে module-এর কোম্পানি |
-| `item_key` | varchar(64) | না | PK | module key বা can_* switch |
 
 ### `user_devices`
 
@@ -1658,6 +1658,8 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_group_directory` | tinyint(1) | না | default 0 | |
 | `can_work_all_companies` | tinyint(1) | না | default 0 | |
 | `max_devices` | int(11) | না | default 1 | |
+| `can_use_app` | tinyint(1) | না | default 0 | |
+| `app_access_custom` | tinyint(1) | না | default 0 | |
 | `sessions_valid_after` | datetime(3) | হ্যাঁ |  | |
 | `can_view_budget_module` | tinyint(1) | না | default 1 | |
 | `can_view_leave_summary` | tinyint(1) | না | default 0 | |
@@ -1674,8 +1676,6 @@ Unique: `uniq_session_key`(session_key)
 | `can_use_calls` | tinyint(1) | না | default 0 | |
 | `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_use_ai_assistant` | tinyint(1) | না | default 1 | |
-| `can_use_app` | tinyint(1) | না | default 0 | মোবাইল অ্যাপ (APK) চালু; পুরনো অ্যাকাউন্ট 1 পেয়েছে |
-| `app_access_custom` | tinyint(1) | না | default 0 | 1 = অ্যাপ শুধু `user_app_access`-এর জিনিস পায় |
 | `can_export_assistant_reports` | tinyint(1) | না | default 0 | |
 | `can_handle_assistant_support` | tinyint(1) | না | default 0 | |
 | `can_view_tasks` | tinyint(1) | না | default 0 | |
