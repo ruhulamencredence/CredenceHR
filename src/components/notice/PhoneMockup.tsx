@@ -106,9 +106,9 @@ export const PhoneMockup: React.FC<{
         }}
       >
         {/* black glass bezel */}
-        <div className="rounded-[47px] bg-black p-[7px]" style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)' }}>
+        <div className="rounded-[47px] bg-black p-[3px]" style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)' }}>
           {/* screen */}
-          <div className="relative rounded-[40px] overflow-hidden bg-[#f3f0fb]" style={{ width, height }}>
+          <div className="relative rounded-[44px] overflow-hidden bg-[#f3f0fb]" style={{ width, height }}>
             {children}
             <StatusBar dark={statusDark} />
             {/* Dynamic Island */}
