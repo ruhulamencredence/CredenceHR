@@ -116,11 +116,13 @@ export async function appAccessFor(queryDB: QueryDB, userId: number, companyId: 
   const key = `${userId}:${companyId}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 15_000) return hit.v;
-  const rows: any[] = await queryDB("/*unscoped*/ SELECT role, is_platform_admin, can_use_app, app_access_custom FROM users WHERE id = ?", [userId]);
+  const rows: any[] = await queryDB("/*unscoped*/ SELECT role, is_platform_admin, is_onboarding, can_use_app, app_access_custom FROM users WHERE id = ?", [userId]);
   const u = rows?.[0];
   let v: { canUse: boolean; mask: AppMask | null };
   if (!u) v = { canUse: false, mask: null };
-  else if (exempt(u)) v = { canUse: true, mask: null };
+  // A new joiner's temporary login only reaches My Onboarding anyway — it
+  // works in the app as before.
+  else if (exempt(u) || Number(u.is_onboarding || 0) === 1) v = { canUse: true, mask: null };
   else if (!Number(u.can_use_app ?? 1)) v = { canUse: false, mask: null };
   else if (!Number(u.app_access_custom || 0)) v = { canUse: true, mask: null };
   else {
