@@ -9,12 +9,13 @@
 
 import React, { useState } from 'react';
 
-const Btn: React.FC<{ side: 'left' | 'right'; top: number; h: number }> = ({ side, top, h }) => (
+const Btn: React.FC<{ side: 'left' | 'right'; top: number; h: number; offset?: number }> = ({ side, top, h, offset = 0 }) => (
   <span
     aria-hidden="true"
     className="absolute w-[4px] rounded-full"
     style={{
-      [side]: -3,
+      [side]: -3 - offset,
+      transition: 'all 0.5s ease-out',
       top,
       height: h,
       background: 'linear-gradient(90deg, #4a4a4f, #c7c7cc 45%, #5e5e63)',
@@ -78,25 +79,28 @@ export const PhoneMockup: React.FC<{
   >
     <div
       className="relative transition-transform duration-500 ease-out"
-      style={{ transform: tilt && !face ? 'rotateY(-16deg) rotateX(3deg) rotateZ(0.6deg)' : 'none', transformStyle: 'preserve-3d' }}
+      // Upright, turned so its right side comes towards you (that edge shows).
+      style={{ transform: tilt && !face ? 'rotateY(-24deg)' : 'none', transformStyle: 'preserve-3d' }}
     >
       {/* side buttons */}
-      <Btn side="left" top={92} h={22} />
-      <Btn side="left" top={132} h={40} />
-      <Btn side="left" top={180} h={40} />
-      <Btn side="right" top={150} h={62} />
+      {!(tilt && !face) && (
+        <>
+          <Btn side="left" top={92} h={22} />
+          <Btn side="left" top={132} h={40} />
+          <Btn side="left" top={180} h={40} />
+        </>
+      )}
+      <Btn side="right" top={150} h={62} offset={tilt && !face ? 12 : 0} />
       {/* titanium band */}
       <div
-        className="relative rounded-[50px] p-[3.5px]"
+        className="relative rounded-[50px] p-[3.5px] transition-shadow duration-500"
         style={{
           background: 'linear-gradient(100deg, #5b5b60 0%, #d8d8dd 5%, #8a8a8f 11%, #5e5e63 30%, #6a6a6f 55%, #4f4f54 78%, #a1a1a6 90%, #e5e5ea 95%, #5b5b60 100%)',
           boxShadow: [
-            // the phone's thickness, seen from the side it is turned to
-            '-4px 2px 0 0 #7a7a7f',
-            '-6px 4px 0 0 #48484a',
-            '-8px 6px 0 -1px #2c2c2e',
+            // the phone's thickness: its right edge, which is turned to you
+            ...(tilt && !face ? ['2px 0 0 0 #c7c7cc', '5px 0 0 0 #8e8e93', '8px 0 0 0 #636366', '10px 0 0 0 #48484a', '11px 0 0 0 #2c2c2e'] : []),
             // shadow on the page
-            '-30px 40px 60px -28px rgba(15,23,42,0.55)',
+            '-24px 34px 50px -26px rgba(15,23,42,0.55)',
             '0 18px 40px -24px rgba(76,29,149,0.45)'
           ].join(', ')
         }}
