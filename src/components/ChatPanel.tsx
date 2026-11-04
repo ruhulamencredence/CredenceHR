@@ -211,12 +211,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   // Voice message recording. On the native Android app this goes through
   // the capacitor-voice-recorder plugin (native mic APIs) rather than the
-  // browser's getUserMedia — the WebView here loads the app over plain
-  // http:// (see capacitor.config.ts's server.url), and getUserMedia is
-  // gated behind a secure-context check (https:// or localhost) that a
-  // plain LAN/IP http:// origin never satisfies, so it always failed with a
-  // generic "no permission" error regardless of what AndroidManifest.xml
-  // declared. The native plugin talks to Android's mic APIs directly and
+  // browser's getUserMedia — getUserMedia is gated behind a secure-context
+  // check (https:// or localhost) that a plain LAN/IP http:// origin never
+  // satisfies, so it failed with a generic "no permission" error regardless
+  // of what AndroidManifest.xml declared (the APK now only opens the https
+  // domain — see capacitor.config.ts — so calls get the secure address they
+  // need). The native plugin talks to Android's mic APIs directly and
   // isn't subject to that browser restriction. getUserMedia + MediaRecorder
   // is kept as the path for the web build (desktop/mobile browsers, usually
   // served over a real https:// domain where the secure-context check
