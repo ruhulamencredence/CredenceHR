@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩০টি টেবিল, ২৫৩০টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩১টি টেবিল, ২৫৩৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -439,17 +439,6 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `sender` | varchar(255) | না | PK  | |
 | `sent_at` | datetime | না |  | |
 
-### `notice_dismissals`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `notice_id` | int(11) | না |  | FK → `notices.id` |
-| `user_id` | int(11) | না |  | FK → `users.id` |
-| `dismissed_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-Unique: `unique_notice_user_dismiss`(notice_id,user_id)
-
 ### `notice_animations`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -460,6 +449,17 @@ Unique: `unique_notice_user_dismiss`(notice_id,user_id)
 | `size_bytes` | int(11) | না | default 0 | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `notice_dismissals`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `notice_id` | int(11) | না |  | FK → `notices.id` |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `dismissed_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_notice_user_dismiss`(notice_id,user_id)
 
 ### `notice_files`
 
