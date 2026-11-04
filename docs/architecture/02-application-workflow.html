@@ -583,4 +583,14 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li>কারা বদলাতে পারে: Module Access যিনি দিতে পারেন (Superadmin, বা অনুমতি পাওয়া Admin শুধু User-এর জন্য)। Superadmin ও system owner-এর অ্যাপ কখনো সীমিত হয় না। প্রতিটা বদল <code>user_access_audit</code>-এ (<code>app-access</code>) থাকে।</li>
 <li>সার্ভারে কীভাবে মানা হয়: অ্যাপের token-এ <code>cl: "app"</code> থাকে। এমন request-এ <code>queryDB</code> নিজে থেকে ওই অ্যাকাউন্টের নিজের <code>admin_module_permissions</code> সারি থেকে অ্যাপে না-থাকা module বাদ দেয়, আর <code>users</code>-এর নিজের সারিতে অ্যাপে না-থাকা <code>can_*</code> switch 0 করে দেয় (<code>maskRowsForApp</code>)। তাই <code>requireModule</code>, <code>requireModuleLayer</code>, প্রতিটা Self Service check, আর অ্যাপ যে user object পায় (login, <code>/api/auth/me</code>), সবাই অ্যাপের ছোট অনুমতিই দেখে, আর অ্যাপের menu-ও সেভাবে লুকায়। Chat, Calls, Mail-এর ৩০ সেকেন্ডের access cache অ্যাপের request-এ ব্যবহার হয় না।</li>
 <li>সীমা: ফোনের browser দিয়ে ওয়েবসাইট খুললে সেটা Web হিসেবেই গণ্য হয়; শুধু APK আলাদা চেনা যায়।</li>
+</ul>
+<h2 id="employee-tracking-location">Employee Tracking: অ্যাপ বন্ধ থাকলেও location যায়</h2>
+<p>আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, <code>DutyTrackingService.java</code>:</p>
+<ul>
+<li>এটা একটা foreground service ("Employee Tracking active" notification দেখায়)। নিজেই GPS fix জমায় আর <code>POST /api/tracking/ping</code>-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় <code>/api/tracking/state</code>-এ।</li>
+<li>অ্যাপ background-এ থাকলে বা Recent apps থেকে সরালেও চলে। Android service বন্ধ করে দিলে নিজে আবার চালু হয় (<code>START_STICKY</code>)। ফোন restart বা অ্যাপ update হলে <code>BootReceiver</code> আবার চালু করে।</li>
+<li>সার্ভার "live" বললে (Live Follow, ride) <code>LiveTrackingService</code> চালু হয়, আগের মতোই।</li>
+<li>থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা <code>clearTrackingSession</code> ডাকে), বা সার্ভার sign-in না মানলে (401/403)।</li>
+<li>প্রথমবার একবার জিজ্ঞেস করা হয় CredenceHR-কে battery optimisation থেকে বাদ দিতে। অনেক ফোন (Xiaomi, Oppo, Vivo, Samsung) নইলে background অ্যাপ বন্ধ করে দেয়।</li>
+<li>পুরনো APK-তে এই service নেই; সেখানে পাতা আগের মতোই পাঠায়।</li>
 </ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
