@@ -345,6 +345,7 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li>একটা ধরন দেখা ও import করা যায় তখনই যখন ডাটার নিজের মডিউল <strong>এবং</strong> সেই টিক দুটোই আছে (<code>GET /api/data-import/kinds</code>, <code>POST /api/data-import/:kind</code> — না থাকলে 403)।</li>
 <li>বেতন (Salary Setup bulk upload) আগের মতো Payroll layer <code>salary_bulk_upload</code> দিয়ে।</li>
 <li>যাঁরা আগে শুধু মডিউল থাকায় import করতেন, তাঁদের নতুন টিক দিতে হবে।</li>
+<li>Employee Details-এ Blood Group মিলিয়ে নেওয়া হয় (<code>b +ve</code> → B+, <code>AB(-)</code> → AB-); <code>Not Defined</code>-এর মতো অন্য কিছু ফাঁকা রাখা হয়, ফলাফলে লেখা থাকে। Gender, NID, Marital Status ইত্যাদি কলামের মাপের বেশি লম্বা হলে কেটে রাখা হয়, যাতে preview পাস করা লাইন Import-এ ডাটাবেস error না দেয়।</li>
 </ul>
 <h2 id="notice-chat-mail-alerts">১৩. যোগাযোগ: Notice, Chat, Mail, Alerts</h2>
 <table>
