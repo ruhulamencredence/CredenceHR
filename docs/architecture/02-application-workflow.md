@@ -659,3 +659,7 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
   3. **সার্ভারের পাহারা** (`TrackingWake.ts`, প্রতি ৫ মিনিটে): শেষ ২৪ ঘণ্টায় tracking করেছে কিন্তু ১২ মিনিট ধরে কোনো খবর নেই, এমন ফোনে একটা silent high-priority push (`tracking_wake`) যায়, প্রতি ফোনে ১৫ মিনিটে সর্বোচ্চ একবার। Android এমন push থেকে অ্যাপ বন্ধ থাকলেও tracking service আবার চালু করতে দেয়। যে ফোনে tracking চালু ছিল না (logout, অনুমতি নেই), সেটা push পেয়েও কিছু করে না।
 - সীমা: ফোনের Settings থেকে অ্যাপ **Force stop** করলে, বা কিছু Xiaomi / Oppo ফোনে "Autostart" বন্ধ থাকলে, Android নিজেই অ্যাপের কাছে alarm বা push কিছুই পৌঁছাতে দেয় না। পরের বার অ্যাপ খুললে tracking আবার শুরু হয়।
 - পুরনো APK-তে এই service নেই; সেখানে পাতা আগের মতোই পাঠায়।
+
+## Employee Directory: খোঁজার সাথে Department-এর তালিকা
+
+Search-এ নাম বা Employee ID লিখলে Department-এর তালিকা (ফোনে chip, কম্পিউটারে dropdown) শুধু সেই Department-গুলো দেখায় যেখানে ওই নামের কেউ আছে, আর প্রতিটার পাশে দেখায় সেখানে কতজন মেলে। "All"-এর পাশে মোট কতজন মিলেছে। Designation বা Company বাছলেও একইভাবে মেলে। কিছু না লিখলে আগের মতো সব Department আর প্রতিটার মোট লোক দেখায় (`EmployeeDirectory.tsx`)।

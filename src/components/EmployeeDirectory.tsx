@@ -276,31 +276,45 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   }, [employees]);
   const multiCompany = companies.length > 1;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  // Everyone matching the search box and the other filters, before the
+  // department is picked — the department list and its counts follow it.
+  const searchQ = search.trim().toLowerCase();
+  const matching = useMemo(() => {
     return employees.filter((e) => {
       if (companyFilter && e.company_code !== companyFilter) return false;
-      if (q && !e.name.toLowerCase().includes(q) && !(e.employee_id || '').toLowerCase().includes(q)) return false;
-      if (departmentFilter && String(e.department_id || '') !== departmentFilter) return false;
+      if (searchQ && !e.name.toLowerCase().includes(searchQ) && !(e.employee_id || '').toLowerCase().includes(searchQ)) return false;
       if (designationFilter && e.designation !== designationFilter) return false;
       return true;
     });
-  }, [employees, search, departmentFilter, designationFilter, companyFilter]);
+  }, [employees, searchQ, designationFilter, companyFilter]);
+  const filtered = useMemo(
+    () => (departmentFilter ? matching.filter((e) => String(e.department_id || '') === departmentFilter) : matching),
+    [matching, departmentFilter]
+  );
 
-  // People per department, for the phone's department chips.
+  // People per department among those matching the search (all of them when
+  // nothing is typed): typing "ruhul" leaves only the departments that have
+  // a Ruhul, each with how many.
   const deptCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of employees) {
+    for (const e of matching) {
       const k = String(e.department_id || '');
       if (k) m.set(k, (m.get(k) || 0) + 1);
     }
     return m;
-  }, [employees]);
+  }, [matching]);
+  const narrowed = !!searchQ || !!designationFilter || !!companyFilter;
+  // While searching, only departments that have someone matching (and the
+  // one already picked, so it can still be cleared).
+  const shownDepartments = useMemo(
+    () => (narrowed ? departments.filter((d) => (deptCounts.get(String(d.id)) || 0) > 0 || String(d.id) === departmentFilter) : departments),
+    [departments, deptCounts, narrowed, departmentFilter]
+  );
   const filteredDepartments = useMemo(() => {
     const q = deptSearchQuery.trim().toLowerCase();
-    if (!q) return departments;
-    return departments.filter((d) => d.name.toLowerCase().includes(q));
-  }, [departments, deptSearchQuery]);
+    if (!q) return shownDepartments;
+    return shownDepartments.filter((d) => d.name.toLowerCase().includes(q));
+  }, [shownDepartments, deptSearchQuery]);
 
   const selectedDepartmentName = departmentFilter
     ? departments.find((d) => String(d.id) === departmentFilter)?.name || 'All Departments'
@@ -429,7 +443,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
             {/* Phone: departments as a sideways-scrolling row of chips, with
                 how many people each has. */}
             <div className="sm:hidden -mx-1 px-1 flex gap-2 overflow-x-auto gsidebar-no-scrollbar pb-1" role="tablist" aria-label="Department">
-              {[{ id: '', name: 'All', count: employees.length }, ...departments.map((d) => ({ id: String(d.id), name: d.name, count: deptCounts.get(String(d.id)) || 0 }))].map((d) => {
+              {[{ id: '', name: 'All', count: matching.length }, ...shownDepartments.map((d) => ({ id: String(d.id), name: d.name, count: deptCounts.get(String(d.id)) || 0 }))].map((d) => {
                 const on = departmentFilter === d.id;
                 return (
                   <button
@@ -476,9 +490,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                         setDeptDropdownOpen(false);
                         setDeptSearchQuery('');
                       }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${!departmentFilter ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                      className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-50 ${!departmentFilter ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                     >
-                      All Departments
+                      <span>All Departments</span>
+                      <span className="shrink-0 px-1.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">{matching.length}</span>
                     </button>
                     {filteredDepartments.map((d) => (
                       <button
@@ -489,13 +504,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           setDeptDropdownOpen(false);
                           setDeptSearchQuery('');
                         }}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 truncate ${departmentFilter === String(d.id) ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                        className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-50 ${departmentFilter === String(d.id) ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                       >
-                        {d.name}
+                        <span className="truncate">{d.name}</span>
+                        <span className="shrink-0 px-1.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">{deptCounts.get(String(d.id)) || 0}</span>
                       </button>
                     ))}
                     {filteredDepartments.length === 0 && (
-                      <p className="px-3 py-2.5 text-xs text-slate-400">No matching department.</p>
+                      <p className="px-3 py-2.5 text-xs text-slate-400">{narrowed && !deptSearchQuery.trim() ? 'No department has anyone matching the search.' : 'No matching department.'}</p>
                     )}
                   </div>
                 </div>
