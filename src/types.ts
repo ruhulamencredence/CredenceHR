@@ -2187,6 +2187,14 @@ export interface ChatRoom {
   // This account's background for the conversation (chat/ChatExtras.tsx
   // CHAT_WALLPAPERS); null = the default.
   wallpaper?: string | null;
+  // Group info: photo version (changes when the photo does), description,
+  // "only admins edit info" / "only admins send messages".
+  avatar_version?: number;
+  description?: string | null;
+  info_admins_only?: number | boolean;
+  send_admins_only?: number | boolean;
+  // This account muted the chat until then (null = not muted).
+  muted_until?: string | null;
 }
 
 export interface ChatRoomMember {
@@ -2228,6 +2236,8 @@ export interface ChatMessage {
   is_forwarded?: number | boolean;
   // One per account that reacted (ChatRoutes.ts loadMessages).
   reactions?: ChatReaction[];
+  // This account starred it (its own bookmark).
+  starred?: boolean;
 }
 export interface ChatReaction {
   emoji: string;

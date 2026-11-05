@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩২টি টেবিল, ২৫৪২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৪টি টেবিল, ২৫৫২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -151,6 +151,14 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `last_read_message_id` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
+### `chat_room_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `user_id` | int(11) | না | PK  | FK → `users.id` |
+| `room_id` | int(11) | না | PK  | FK → `chat_rooms.id` |
+| `muted_until` | datetime | হ্যাঁ |  | |
+
 ### `chat_rooms`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -163,7 +171,19 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `avatar_data` | longblob | হ্যাঁ |  | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `description` | varchar(1000) | হ্যাঁ |  | |
+| `avatar_version` | int(11) | না | default 0 | |
+| `info_admins_only` | tinyint(1) | না | default 1 | |
+| `send_admins_only` | tinyint(1) | না | default 0 | |
 | `group_id` | int(11) | না | default 1 | |
+
+### `chat_starred_messages`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `user_id` | int(11) | না | PK  | FK → `users.id` |
+| `message_id` | int(11) | না | PK  | FK → `chat_messages.id` |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `chat_wallpapers`
 

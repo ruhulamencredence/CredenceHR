@@ -124,6 +124,11 @@ export async function sendPushToUserIds(
   }
 }
 
+// A member who muted this chat (Chat -> group / contact info -> Mute
+// notifications, chat_room_settings) gets no push for it until the mute ends.
+const NOT_MUTED =
+  "NOT EXISTS (SELECT 1 FROM chat_room_settings st WHERE st.user_id = m.user_id AND st.room_id = m.room_id AND st.muted_until > NOW())";
+
 export async function sendPushToRoomMembers(
   queryDB: (sql: string, params?: any[]) => Promise<any>,
   roomId: number,
@@ -135,7 +140,7 @@ export async function sendPushToRoomMembers(
   // Browsers too (desktop notifications) — with or without Firebase.
   // Only members who still have Chat (users.can_use_chat).
   void queryDB(
-    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)",
+    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0) AND " + NOT_MUTED,
     [roomId]
   )
     .then((members: any[]) =>
@@ -156,7 +161,7 @@ export async function sendPushToRoomMembers(
       `SELECT t.token FROM chat_push_tokens t
        JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
        JOIN users u ON u.id = t.user_id
-       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)`,
+       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0) AND ${NOT_MUTED}`,
       [roomId, excludeUserId]
     );
     if (rows.length === 0) return;

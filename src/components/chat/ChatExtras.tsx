@@ -15,7 +15,7 @@
 //     groups, the wallpaper picker; and editing one's own About.
 
 import React, { useEffect, useState } from 'react';
-import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
+import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil, Star } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
@@ -111,12 +111,14 @@ export const MessageMenu: React.FC<{
   isPinned: boolean;
   onPin: () => void;
   onUnpin: () => void;
+  // Starred: this account's own bookmark of the message.
+  onStarred: (starred: boolean) => void;
   onClose: () => void;
   onReacted: (reactions: ChatReaction[]) => void;
   onHidden: () => void;
   onUnsent: () => void;
   confirm: (message: string) => Promise<boolean>;
-}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, isPinned, onPin, onUnpin, onClose, onReacted, onHidden, onUnsent, confirm }) => {
+}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, isPinned, onPin, onUnpin, onStarred, onClose, onReacted, onHidden, onUnsent, confirm }) => {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const mine = msg.sender_id === meId;
@@ -209,6 +211,14 @@ export const MessageMenu: React.FC<{
                   onPin();
                   onClose();
                 }))}
+          {!unsent &&
+            item('star', <Star className={`w-4 h-4 ${msg.starred ? 'fill-amber-400 text-amber-500' : ''}`} />, msg.starred ? 'Unstar' : 'Star', async () => {
+              const data = await call('star', `/api/chat/messages/${msg.id}/star`, { starred: !msg.starred });
+              if (data) {
+                onStarred(!!data.starred);
+                onClose();
+              }
+            })}
           {!unsent &&
             item('forward', <Forward className="w-4 h-4" />, 'Forward', () => {
               onForward();
@@ -316,10 +326,20 @@ export const ReactionsWho: React.FC<{ token: string; msg: ChatMessage; meId: num
 
 // ---- Chat profile ---------------------------------------------------------------
 export interface ChatProfile {
-  room: { id: number; type: string; title: string | null; created_at: string };
+  room: {
+    id: number;
+    type: string;
+    title: string | null;
+    created_at: string;
+    description?: string;
+    created_by_name?: string | null;
+    info_admins_only?: boolean;
+    send_admins_only?: boolean;
+  };
   person: null | { id: number; name: string; username: string; about: string; email: string; phone: string; designation: string; department: string; branch: string; employee_id: string };
   commonGroups: { id: number; type: string; title: string | null }[];
   media: { id: number; message_type: 'image' | 'file' | 'audio'; attachment_filename: string | null; created_at: string; sender_name: string }[];
+  starredCount?: number;
 }
 
 export function useChatProfile(token: string, roomId: number | null, tick: number): ChatProfile | null {
