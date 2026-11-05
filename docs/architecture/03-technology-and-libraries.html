@@ -833,7 +833,17 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
-<h2 id="_4">৩. পরিষ্কার করার তালিকা (গুরুত্বপূর্ণ)</h2>
+<h3 id="_4">ভারী লাইব্রেরি কখন নামে (মোবাইলে দ্রুত খোলার জন্য)</h3>
+<p><code>xlsx</code>, <code>jspdf</code> / <code>jspdf-autotable</code>, <code>pdfjs-dist</code>, <code>leaflet</code>, <code>lottie-web</code> আর বড় অ্যানিমেশন JSON অ্যাপের প্রথম download-এ থাকে না; যে বোতাম বা পাতা সেগুলো ব্যবহার করে, প্রথম ব্যবহারের সময় নামে (<code>import()</code>):</p>
+<ul>
+<li>Admin Panel-এর প্রতিটা module-এর পাতা আলাদা ফাইল (<code>lazyPanel</code> in <code>AdminPanel.tsx</code>) — সব module-ওয়ালা account (Superadmin) আর সব পাতা একসাথে download করে না।</li>
+<li>Profile, Credence Assistant, Profile → Service Book / My Asset, মানচিত্রের popup, Tracking report: খুললে তবেই।</li>
+<li>Excel / PDF export: বোতাম চাপলে লাইব্রেরি নামে; PDF দেখা <code>src/lib/pdfjs.ts</code> দিয়ে।</li>
+<li>অ্যানিমেশন JSON: <code>useLottieJson</code> (<code>LazyLottie.tsx</code>)।</li>
+<li>খুব ছোট টুকরো (২০ KB-র কম) <code>vite.config.ts</code>-এর <code>experimentalMinChunkSize</code>-এ জুড়ে যায়, যাতে ফোনে অনেকগুলো ছোট request না যায়।</li>
+</ul>
+<p>মাপা ফল (production build, মোবাইল আকার, CPU ৪ গুণ ধীর, ২০২৬-১১-০৫): Superadmin-এর শুরুর download ১,৪২৪ KB → ৬৪২ KB, JS memory ৩৩ → ১৭ MB, Home দেখা যায় ~২.৭ → ~২.১ সেকেন্ডে; সাধারণ account ৮৮৬ → ৩৯৪ KB। নতুন কোনো ভারী লাইব্রেরি যোগ করলে সেটাও এভাবে দরকারের সময় import করুন।</p>
+<h2 id="_5">৩. পরিষ্কার করার তালিকা (গুরুত্বপূর্ণ)</h2>
 <table>
 <thead>
 <tr>
@@ -875,10 +885,10 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
-<h2 id="_5">৪. নিরাপত্তায় যে লাইব্রেরি ভূমিকা রাখে</h2>
+<h2 id="_6">৪. নিরাপত্তায় যে লাইব্রেরি ভূমিকা রাখে</h2>
 <p><code>bcryptjs</code> (পাসওয়ার্ড) · <code>jsonwebtoken</code> (token) · <code>sanitize-html</code> + <code>dompurify</code> (XSS) · <code>mysql2</code> prepared statement (SQL injection) · <code>@simplewebauthn/*</code> (passkey) · <code>@signpdf/*</code> + <code>node-forge</code> + <code>pdf-lib</code> (ডিজিটাল স্বাক্ষর) · <code>cors</code> (অন্য সাইট) · <code>node:crypto</code> (AES-256-GCM মেইল পাসওয়ার্ড, SHA-256 হ্যাশ)। বিস্তারিত: <code>04-security.md</code>।</p>
-<h2 id="_6">৫. কোনো লাইব্রেরিতে সমস্যা হলে কীভাবে সমাধান করবেন</h2>
-<h3 id="_7">৫.১ সাধারণ ধাপ (যেকোনো লাইব্রেরির জন্য)</h3>
+<h2 id="_7">৫. কোনো লাইব্রেরিতে সমস্যা হলে কীভাবে সমাধান করবেন</h2>
+<h3 id="_8">৫.১ সাধারণ ধাপ (যেকোনো লাইব্রেরির জন্য)</h3>
 <ol>
 <li><strong>কোথায় ভাঙছে ধরুন।</strong> সার্ভারের লগ: <code>npm run pm2:logs</code>। ব্রাউজারের লগ: F12 → Console।</li>
 <li><strong>সম্প্রতি কী বদলেছে দেখুন।</strong> <code>git log -5 -- package.json package-lock.json</code>। সমস্যা আপডেটের পর শুরু হলে প্রায়ই সেটাই কারণ।</li>
@@ -887,7 +897,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>ঠিক হলে যাচাই করুন:</strong> <code>npm run lint</code> (tsc), <code>npm run test:onboarding</code>, <code>npm run test:hr-linkage</code>, তারপর ব্রাউজারে মূল পেজগুলো।</li>
 <li><strong>ফেরত যাওয়া না গেলে</strong> সেই লাইব্রেরি একটা ছোট wrapper ফাইলে (যেমন <code>mailer.ts</code>, <code>NoticeSafety.ts</code>) থাকে, তাই বদলাতে এক ফাইলই ছুঁতে হয়।</li>
 </ol>
-<h3 id="_8">৫.২ গুরুত্বপূর্ণ লাইব্রেরি ধরে ধরে</h3>
+<h3 id="_9">৫.২ গুরুত্বপূর্ণ লাইব্রেরি ধরে ধরে</h3>
 <table>
 <thead>
 <tr>
@@ -1002,7 +1012,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
-<h3 id="_9">৫.৩ বিশেষ সতর্কতা</h3>
+<h3 id="_10">৫.৩ বিশেষ সতর্কতা</h3>
 <ul>
 <li><strong>অব্যবহৃত লাইব্রেরি</strong> (<code>libredwg-web</code>, <code>dxf-parser</code>, <code>motion</code> — তিনটিই এখন বাদ, §৩; ভবিষ্যতে এমন কিছু পেলে): কোনো সমস্যা হলে আগে মুছে ফেলুন (<code>npm uninstall</code>), কারণ কোডে নেই। GPL লাইসেন্সের প্যাকেজ থাকলে আইনি ঝুঁকিও কমে।</li>
 <li><strong><code>xlsx</code></strong> npm রেজিস্ট্রিতে পুরনো (0.18.5); নতুন সংস্করণ SheetJS-এর নিজস্ব সাইট থেকে আসে। সেখানে নেটওয়ার্ক আটকালে বিল্ড ফেল করতে পারে। তখন সার্ভারে <code>package-lock.json</code> অনুযায়ী <code>npm ci</code> চালান।</li>
