@@ -301,6 +301,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </ul>
 <hr />
 <ul>
+<li><strong>ফোনের কল-পর্দা থেকে Decline:</strong> <code>POST /api/calls/push-decline</code> sign-in ছাড়া চলে, কিন্তু শুধু সেই কলের ৪৮-অক্ষরের এলোমেলো চাবি দিলে — চাবিটা শুধু callee-র নিজের ফোনের push-এ যায়, আর কাজ করে শুধু কল বাজতে থাকা অবস্থায়, শুধু Decline-এর জন্য (<code>CallRoutes.ts</code>)।</li>
 <li><strong>কল আবার জোড়া লাগা:</strong> নেট কাটার পর <code>call:rejoin</code> শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (<code>CallRoutes.ts</code>)।</li>
 </ul>
 <h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
