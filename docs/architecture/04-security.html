@@ -300,6 +300,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>ত্রুটির উত্তর:</strong> সব <code>/api</code> উত্তর JSON; অজানা ঠিকানায় 404 <code>{error}</code>; ভাঙা JSON-এ 400 <code>{error}</code>; ভেতরের ত্রুটির বিবরণ বাইরে যায় না (<code>ApiErrors.ts</code>)।</li>
 </ul>
 <hr />
+<ul>
+<li><strong>কল আবার জোড়া লাগা:</strong> নেট কাটার পর <code>call:rejoin</code> শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (<code>CallRoutes.ts</code>)।</li>
+</ul>
 <h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
 <p>(<code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>, <code>DocumentVaultRoutes.ts</code>)
 - পাঠানোর সময় মূল ফাইলের <strong>SHA-256</strong> স্থির; প্রতি স্বাক্ষরে আবার মেলানো; সই করা PDF-এর SHA-256-ও রাখা।
