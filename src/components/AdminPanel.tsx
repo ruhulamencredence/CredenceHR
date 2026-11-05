@@ -1,67 +1,17 @@
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import * as XLSX from 'xlsx';
-import { readWorkbook } from '../lib/readWorkbook';
-import jsPDF from '../lib/jspdf';
-import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
-import LocationMapPicker from './LocationMapPicker';
-import { NoticeManager } from './NoticeManager';
-import { EmployeesPanel } from './EmployeesPanel';
-import { ClaimsPanel } from './ClaimsPanel';
-import { ConveyanceBillPanel } from './ConveyanceBillPanel';
-import { BillClaimPolicyPanel } from './BillClaimPolicyPanel';
-import { DisbursementPanel } from './DisbursementPanel';
-import { ApprovalManager } from './ApprovalManager';
-import { ApprovalTemplateManager } from './ApprovalTemplateManager';
-import { ManagementDashboard } from './ManagementDashboard';
-import { DepartmentAttendanceSummary } from './DepartmentAttendanceSummary';
-import { AttendanceReportBuilder } from './AttendanceReportBuilder';
-import { UserEmployeeModal } from './UserEmployeeModal';
 import { ApprovalBadge } from './ApprovalBadge';
-import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
-import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
-import { SystemCompanies } from './SystemCompanies';
-import { DeviceAccess } from './DeviceAccess';
-import { ActiveUsers } from './ActiveUsers';
-import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
-import { HolidayCalendarPanel } from './HolidayCalendarPanel';
-import { AssetManagementAdmin } from './AssetManagementAdmin';
-import { VehicleManagementAdmin } from './VehicleManagementAdmin';
-import { ExitOffboardingPanel } from './ExitOffboardingPanel';
-import { PerformanceManagementPanel } from './PerformanceManagementPanel';
-import { RecruitmentPanel } from './RecruitmentPanel';
-import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
-import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
-import { ReportsInsights } from './ReportsInsights';
-import { DataImport } from './DataImport';
-import { DocumentVaultPanel } from './DocumentVaultPanel';
-import { HROperationsPanel } from './HROperationsPanel';
-import { TaskManagement } from './TaskManagement';
-import { TargetReports } from './TargetReports';
-import { MailAdministration } from './mail/MailAdministration';
-import { DutyRoster } from './DutyRoster';
-import { BreakTimeAdmin } from './BreakTimeAdmin';
-import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
-import { ModuleAccessPage } from './ModuleAccessPage';
-import { PasswordRequestsPopup } from './PasswordRequestsPopup';
-import { ProfilePhotoRequestsPopup } from './ProfilePhotoRequestsPopup';
-import { JobEditDetailsPopup } from './JobEditDetailsPopup';
-import { FeedbackAdmin } from './feedback/FeedbackAdmin';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
-import { AccessTemplatesModal } from './AccessTemplatesModal';
-import { BudgetSubmissionReport } from './BudgetSubmissionReport';
-import { MprPoImport } from './MprPoImport';
-import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
@@ -77,11 +27,73 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
 import { LoadingBlock } from './LoadingBlock';
+import { retryImport } from '../lib/chunkReload';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
+
+// Each module's page is downloaded only when it is opened, not all at once
+// with the Admin Panel: an account with many modules (a Superadmin) used to
+// download every page — megabytes of code — before the first one showed,
+// which made the phone app slow. lazyPanel = React.lazy + its own loader.
+function lazyPanel<P extends object>(load: () => Promise<{ default: React.ComponentType<P> }>): React.FC<P> {
+  const Lazy = React.lazy(retryImport(load));
+  const Panel: React.FC<P> = (props) => (
+    <React.Suspense fallback={<LoadingBlock />}>
+      <Lazy {...(props as any)} />
+    </React.Suspense>
+  );
+  return Panel;
+}
+const NoticeManager = lazyPanel(() => import('./NoticeManager').then((m) => ({ default: m.NoticeManager })));
+const EmployeesPanel = lazyPanel(() => import('./EmployeesPanel').then((m) => ({ default: m.EmployeesPanel })));
+const ClaimsPanel = lazyPanel(() => import('./ClaimsPanel').then((m) => ({ default: m.ClaimsPanel })));
+const ConveyanceBillPanel = lazyPanel(() => import('./ConveyanceBillPanel').then((m) => ({ default: m.ConveyanceBillPanel })));
+const BillClaimPolicyPanel = lazyPanel(() => import('./BillClaimPolicyPanel').then((m) => ({ default: m.BillClaimPolicyPanel })));
+const DisbursementPanel = lazyPanel(() => import('./DisbursementPanel').then((m) => ({ default: m.DisbursementPanel })));
+const ApprovalManager = lazyPanel(() => import('./ApprovalManager').then((m) => ({ default: m.ApprovalManager })));
+const ApprovalTemplateManager = lazyPanel(() => import('./ApprovalTemplateManager').then((m) => ({ default: m.ApprovalTemplateManager })));
+const ManagementDashboard = lazyPanel(() => import('./ManagementDashboard').then((m) => ({ default: m.ManagementDashboard })));
+const DepartmentAttendanceSummary = lazyPanel(() => import('./DepartmentAttendanceSummary').then((m) => ({ default: m.DepartmentAttendanceSummary })));
+const AttendanceReportBuilder = lazyPanel(() => import('./AttendanceReportBuilder').then((m) => ({ default: m.AttendanceReportBuilder })));
+const EmployeeTrackingPanel = lazyPanel(() => import('./EmployeeTrackingPanel').then((m) => ({ default: m.EmployeeTrackingPanel })));
+const OfficeAttendanceHub = lazyPanel(() => import('./SiteAttendanceAdmin').then((m) => ({ default: m.OfficeAttendanceHub })));
+const SystemCompanies = lazyPanel(() => import('./SystemCompanies').then((m) => ({ default: m.SystemCompanies })));
+const DeviceAccess = lazyPanel(() => import('./DeviceAccess').then((m) => ({ default: m.DeviceAccess })));
+const ActiveUsers = lazyPanel(() => import('./ActiveUsers').then((m) => ({ default: m.ActiveUsers })));
+const DeliveryDateConditionsPanel = lazyPanel(() => import('./DeliveryDateConditionsPanel').then((m) => ({ default: m.DeliveryDateConditionsPanel })));
+const HolidayCalendarPanel = lazyPanel(() => import('./HolidayCalendarPanel').then((m) => ({ default: m.HolidayCalendarPanel })));
+const AssetManagementAdmin = lazyPanel(() => import('./AssetManagementAdmin').then((m) => ({ default: m.AssetManagementAdmin })));
+const VehicleManagementAdmin = lazyPanel(() => import('./VehicleManagementAdmin').then((m) => ({ default: m.VehicleManagementAdmin })));
+const ExitOffboardingPanel = lazyPanel(() => import('./ExitOffboardingPanel').then((m) => ({ default: m.ExitOffboardingPanel })));
+const PerformanceManagementPanel = lazyPanel(() => import('./PerformanceManagementPanel').then((m) => ({ default: m.PerformanceManagementPanel })));
+const RecruitmentPanel = lazyPanel(() => import('./RecruitmentPanel').then((m) => ({ default: m.RecruitmentPanel })));
+const GrievanceDisciplinaryPanel = lazyPanel(() => import('./GrievanceDisciplinaryPanel').then((m) => ({ default: m.GrievanceDisciplinaryPanel })));
+const HRAnalyticsDashboard = lazyPanel(() => import('./HRAnalyticsDashboard').then((m) => ({ default: m.HRAnalyticsDashboard })));
+const ReportsInsights = lazyPanel(() => import('./ReportsInsights').then((m) => ({ default: m.ReportsInsights })));
+const DataImport = lazyPanel(() => import('./DataImport').then((m) => ({ default: m.DataImport })));
+const DocumentVaultPanel = lazyPanel(() => import('./DocumentVaultPanel').then((m) => ({ default: m.DocumentVaultPanel })));
+const HROperationsPanel = lazyPanel(() => import('./HROperationsPanel').then((m) => ({ default: m.HROperationsPanel })));
+const TaskManagement = lazyPanel(() => import('./TaskManagement').then((m) => ({ default: m.TaskManagement })));
+const TargetReports = lazyPanel(() => import('./TargetReports').then((m) => ({ default: m.TargetReports })));
+const MailAdministration = lazyPanel(() => import('./mail/MailAdministration').then((m) => ({ default: m.MailAdministration })));
+const DutyRoster = lazyPanel(() => import('./DutyRoster').then((m) => ({ default: m.DutyRoster })));
+const BreakTimeAdmin = lazyPanel(() => import('./BreakTimeAdmin').then((m) => ({ default: m.BreakTimeAdmin })));
+const MobileBillAdmin = lazyPanel(() => import('./MobileBillAdmin').then((m) => ({ default: m.MobileBillAdmin })));
+const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) => ({ default: m.ModuleAccessPage })));
+const FeedbackAdmin = lazyPanel(() => import('./feedback/FeedbackAdmin').then((m) => ({ default: m.FeedbackAdmin })));
+const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport').then((m) => ({ default: m.BudgetSubmissionReport })));
+const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
+const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
+const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
+const PasswordRequestsPopup = lazyPanel(() => import('./PasswordRequestsPopup').then((m) => ({ default: m.PasswordRequestsPopup })));
+const ProfilePhotoRequestsPopup = lazyPanel(() => import('./ProfilePhotoRequestsPopup').then((m) => ({ default: m.ProfilePhotoRequestsPopup })));
+const JobEditDetailsPopup = lazyPanel(() => import('./JobEditDetailsPopup').then((m) => ({ default: m.JobEditDetailsPopup })));
+const UserEmployeeModal = lazyPanel(() => import('./UserEmployeeModal').then((m) => ({ default: m.UserEmployeeModal })));
+const LocationMapPicker = lazyPanel(() => import('./LocationMapPicker'));
+
 interface AdminPanelProps {
   token: string;
   // The logged-in Admin/Superadmin viewing this panel — used to decide which tabs
@@ -1231,6 +1243,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fit legibly across that many columns on paper, so the PDF always uses
   // symbols regardless of which mode the on-screen toggle is set to.
   const handleExportMonthlyReportPdf = async (mode: 'save' | 'email' = 'save') => {
+    // PDF / Excel libraries are fetched when first used, not with the Admin Panel.
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import('../lib/jspdf'), import('jspdf-autotable')]);
     if (!monthlyReport || monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport) return;
     setExportingMonthlyReport(true);
     try {
@@ -1311,6 +1325,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // groups (Present / Absent / Holiday) with a colored Status column, same
   // convention as ConveyanceBillPanel/UserPanel's own PDF exports.
   const handleExportDailyReportPdf = async (mode: 'save' | 'email' = 'save') => {
+    // PDF / Excel libraries are fetched when first used, not with the Admin Panel.
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import('../lib/jspdf'), import('jspdf-autotable')]);
     if (!dailyReport) return;
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1492,7 +1508,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // --- Export the (currently searched/filtered) MPR Edit Log to Excel (.xlsx) ---
   // Same flat row shape as the on-screen table, minus the day-grouping (a plain sheet
   // is easier to re-filter/pivot in Excel than the day-header rows would be).
-  const handleExportEditLogExcel = () => {
+  const handleExportEditLogExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = mprEditLogByDay().flatMap(([day, records]) =>
       records.map((h) => ({
         Date: day,
@@ -1796,10 +1813,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Downloads the current Missing Rate / Missing Category list from an Approve &
   // Calculate result as a .xlsx — same column shape shown on screen, so it can be
   // filled in and merged back into the Rate File for re-import.
-  const downloadMissingListExcel = (
+  const downloadMissingListExcel = async (
     kind: 'rate' | 'category',
     result: { budgetName: string; missing_rate: { item_name: string; specification: string }[]; missing_category: string[] }
   ) => {
+    const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
     if (kind === 'rate') {
       const sheetRows = result.missing_rate.map((r) => ({
@@ -2383,6 +2401,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleBudgetFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     const budgetId = pendingImportBudgetId.current;
     e.target.value = ''; // allow re-selecting the same file later
@@ -2510,6 +2530,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
 
   const handleRateFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file later
     if (!file) return;
@@ -2793,6 +2815,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // optional/ignored, header names are matched loosely so "Project" / "Password" /
   // "Pass" etc. still work) and fills the rows table below for review before Import.
   const handleBulkUsersFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file later
     if (!file) return;
@@ -3402,7 +3426,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
   const reportWidthTotal = reportVisibleCols.reduce((n, c) => n + c.w, 0);
 
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = filteredEntries.map((ent) => ({
       'Job No': ent.job_no,
       'Job Name': ent.job_name,
@@ -3450,7 +3475,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   // --- Export a Budget's raw imported sheet (every column, every row) to Excel ---
-  const handleDownloadBudgetItemsExcel = (budget: Budget, items: BudgetItem[]) => {
+  const handleDownloadBudgetItemsExcel = async (budget: Budget, items: BudgetItem[]) => {
+    const XLSX = await import('xlsx');
     const rows = items.map((it) => ({
       'Sl.No.': it.sl_no || '',
       'Project Name': it.project_name || '',

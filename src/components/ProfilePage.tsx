@@ -1,8 +1,7 @@
 import { useMdUp } from '../lib/useMdUp';
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { User } from '../types';
 import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, Camera, Palette, Contact } from 'lucide-react';
-import { Employee360 } from './HrOps360';
 import { FingerprintSettings } from './FingerprintSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { Capacitor } from '@capacitor/core';
@@ -11,8 +10,28 @@ import { FeedbackPopup, canGiveFeedback } from './feedback/FeedbackPopup';
 import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
-import { AssetManagement } from './AssetManagement';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { retryImport } from '../lib/chunkReload';
+import { Spinner } from './Spinner';
+// Heavy (Excel / PDF libraries inside): loaded only when opened, not with
+// the app's first download.
+const Employee360Lazy = lazy(retryImport(() => import('./HrOps360').then((m) => ({ default: m.Employee360 }))));
+const AssetManagementLazy = lazy(retryImport(() => import('./AssetManagement').then((m) => ({ default: m.AssetManagement }))));
+const panelLoading = (
+  <div className="flex justify-center py-10">
+    <Spinner size={28} />
+  </div>
+);
+const Employee360: React.FC<React.ComponentProps<typeof Employee360Lazy>> = (props) => (
+  <Suspense fallback={panelLoading}>
+    <Employee360Lazy {...props} />
+  </Suspense>
+);
+const AssetManagement: React.FC<React.ComponentProps<typeof AssetManagementLazy>> = (props) => (
+  <Suspense fallback={panelLoading}>
+    <AssetManagementLazy {...props} />
+  </Suspense>
+);
 import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent, HEADER_GLOWS, HeaderGlowId, applyHeaderGlow, effectiveHeaderGlow } from '../lib/backgroundTheme';

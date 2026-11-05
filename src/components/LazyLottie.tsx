@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { retryImport } from '../lib/chunkReload';
 
 // lottie-react (≈750 KB with its player) loads only when an animation is
@@ -31,3 +31,25 @@ export const LottieLight: React.FC<LottieLightProps> = (props) => (
     <LottieSmall {...props} />
   </Suspense>
 );
+
+// An animation's JSON fetched on its own (not inside the page's code): the
+// card shows at once, its animation a moment later. Big animations (100–300
+// KB each) made the Home page's first download heavy on phones.
+const jsonCache = new Map<() => Promise<any>, any>();
+export function useLottieJson(load: () => Promise<{ default: any }>, enabled = true): any {
+  const [data, setData] = useState<any>(() => jsonCache.get(load) || null);
+  useEffect(() => {
+    if (data || !enabled) return;
+    let alive = true;
+    load()
+      .then((m) => {
+        jsonCache.set(load, m.default);
+        if (alive) setData(m.default);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [load, data, enabled]);
+  return data;
+}

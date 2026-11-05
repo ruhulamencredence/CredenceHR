@@ -15,6 +15,7 @@
 // Attendance to correct / approve a sheet.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clearSiteSupervisorCache } from '../lib/siteSupervisor';
 import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft,
@@ -214,32 +215,8 @@ const getPosition = () =>
     );
   });
 
-// Is this account a Site Attendance supervisor? (sidebar item / home tile)
-let supervisorCache: { token: string; at: number; value: { teams: number; notSubmitted: number } } | null = null;
-export function useSiteSupervisor(token: string) {
-  const [value, setValue] = useState(() => (supervisorCache && supervisorCache.token === token ? supervisorCache.value : { teams: 0, notSubmitted: 0 }));
-  useEffect(() => {
-    if (!token) return;
-    if (supervisorCache && supervisorCache.token === token && Date.now() - supervisorCache.at < 60000) {
-      setValue(supervisorCache.value);
-      return;
-    }
-    let alive = true;
-    fetch(apiUrl('/api/site-attendance/my-teams'), { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d || !alive) return;
-        const v = { teams: d.teams.length, notSubmitted: d.teams.filter((t: SiteTeam) => t.members.length && !t.today?.sheet).length };
-        supervisorCache = { token, at: Date.now(), value: v };
-        setValue(v);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [token]);
-  return value;
-}
+// The supervisor check lives in lib/siteSupervisor.ts (light, for the sidebar).
+export { useSiteSupervisor } from '../lib/siteSupervisor';
 
 // ============================ Sheet editor ============================
 
@@ -802,7 +779,7 @@ export const TeamAttendance: React.FC<{ token: string; onBack?: () => void }> = 
                 date={date}
                 onDateChange={setDate}
                 onSaved={() => {
-                  supervisorCache = null;
+                  clearSiteSupervisorCache();
                   loadTeams();
                 }}
               />

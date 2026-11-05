@@ -7,7 +7,9 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
-import ClaimLocationMap from './ClaimLocationMap';
+import { retryImport } from '../lib/chunkReload';
+// The map (Leaflet) is fetched when a location is opened, not with Home.
+const ClaimLocationMap = React.lazy(retryImport(() => import('./ClaimLocationMap')));
 import { ClaimBillLines } from './ClaimBillLines';
 import { formatDate } from '../lib/formatDate';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
@@ -692,7 +694,9 @@ useLiveRefresh(() => load());
       )}
 
       {viewingRef && (
-        <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
+        <React.Suspense fallback={null}>
+          <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
+        </React.Suspense>
       )}
 
       {viewingAssetRequisition && viewingAssetRequisition.asset_requisition_details && (

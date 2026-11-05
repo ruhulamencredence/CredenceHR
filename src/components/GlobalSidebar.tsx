@@ -15,7 +15,7 @@ import {
 import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
-import { useSiteSupervisor } from './TeamAttendance';
+import { useSiteSupervisor } from '../lib/siteSupervisor';
 import { adminTabToPath, adminUrlEnabled, ADMIN_TAB_KEYS } from '../lib/adminUrl';
 import { selfViewToPath, selfPathToView } from '../lib/selfUrl';
 

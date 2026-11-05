@@ -10,7 +10,9 @@ import { Geolocation } from '@capacitor/geolocation';
 import { Route, LogIn, LogOut, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
-import ClaimMapConfirm from './ClaimMapConfirm';
+import { retryImport } from '../lib/chunkReload';
+// The map (Leaflet) is fetched when it opens, not with the card.
+const ClaimMapConfirm = React.lazy(retryImport(() => import('./ClaimMapConfirm')));
 import { Spinner } from './Spinner';
 
 interface ClaimCardProps {
@@ -271,6 +273,7 @@ useLiveRefresh(() => fetchStatus(true));
       )}
 
       {pending && (
+        <React.Suspense fallback={null}>
         <ClaimMapConfirm
           kind={pending.kind}
           purpose={purpose.trim()}
@@ -288,6 +291,7 @@ useLiveRefresh(() => fetchStatus(true));
           onConfirm={handleConfirmPending}
           onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
+        </React.Suspense>
       )}
     </div>
   );

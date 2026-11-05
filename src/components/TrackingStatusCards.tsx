@@ -11,10 +11,12 @@
 // 'tracking' module, so without it this renders nothing (and the API refuses).
 
 import { UserAvatar } from './UserAvatar';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BarChart3, CheckCircle2, Navigation, Search, Send, X } from 'lucide-react';
-import { TrackingNoticeReport } from './TrackingNoticeReport';
+import { retryImport } from '../lib/chunkReload';
+// The report (with its Excel / PDF export) is fetched when opened.
+const TrackingNoticeReport = lazy(retryImport(() => import('./TrackingNoticeReport').then((m) => ({ default: m.TrackingNoticeReport }))));
 import { apiUrl } from '../lib/api';
 
 interface TrackingRow {
@@ -514,7 +516,11 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
         </div>,
         document.body
       )}
-      {reportOpen && <TrackingNoticeReport token={token} onClose={() => setReportOpen(false)} />}
+      {reportOpen && (
+        <Suspense fallback={null}>
+          <TrackingNoticeReport token={token} onClose={() => setReportOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 };

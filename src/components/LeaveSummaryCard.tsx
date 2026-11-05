@@ -6,10 +6,10 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { Lottie } from './LazyLottie';
+import { Lottie, useLottieJson } from './LazyLottie';
 import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
-import beachAnimation from '../assets/Beach.json';
+const loadBeachAnimation = () => import('../assets/Beach.json');
 
 interface LeaveSummaryCardProps {
   token: string;
@@ -31,6 +31,7 @@ interface LeaveSummaryCardProps {
 // live in LeaveReviewPage — mirrors how the Conveyance Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
+  const beachAnimation = useLottieJson(loadBeachAnimation);
   // The Total Leave strip's blur is on in the app too (half the old
   // strength: 20px), with glass-mask-fix + translateZ(0) keeping the strip
   // from dropping out on Android reloads.
@@ -120,7 +121,7 @@ useLiveRefresh(() => load());
             <p className="text-xs text-white/70 mt-0.5">Your Leave balance and review status</p>
           </div>
           <div className="shrink-0 w-20 h-20 -mt-2 -mr-1 pointer-events-none">
-            <Lottie src={beachAnimation} autoplay loop className="w-full h-full" />
+            {beachAnimation && <Lottie src={beachAnimation} autoplay loop className="w-full h-full" />}
           </div>
         </div>
       </div>

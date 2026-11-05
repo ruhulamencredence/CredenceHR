@@ -11,13 +11,11 @@ import type { MoreItem } from './BottomNav';
 const MAX_DASHBOARD_TILES = 9;
 type DashboardTile = MoreItem & { tileBg: string; badgeBg?: string };
 import { Navigation, Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
-import { useSiteSupervisor } from './TeamAttendance';
+import { useSiteSupervisor } from '../lib/siteSupervisor';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
 import { useStableCallback } from '../lib/useStableCallback';
-import jsPDF from '../lib/jspdf';
-import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -2427,6 +2425,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // with [PDF viewer]" as well as "Save to..." — effectively the native
   // equivalent of preview-then-download).
   const handleExportPdf = async (mode: 'save' | 'email' = 'save') => {
+    // The PDF libraries are fetched on the first export, not with the page.
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import('../lib/jspdf'), import('jspdf-autotable')]);
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 

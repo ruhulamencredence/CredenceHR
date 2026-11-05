@@ -10,7 +10,6 @@ import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
-import { ProfilePage } from './components/ProfilePage';
 // UserPanel/AdminPanel are the two heaviest branches of the app (PDF export,
 // Leaflet maps, Excel import/export, etc. all live under one of these two) —
 // lazy-loading them means the Login screen only has to download/parse the
@@ -18,6 +17,9 @@ import { ProfilePage } from './components/ProfilePage';
 // eagerly-loaded bundle every visitor's phone has to fetch before they can
 // even see the login form. See the Suspense fallback below for what shows
 // during the brief gap while a panel's own chunk downloads after login.
+// Opened from the avatar / the Assistant button — not part of the first download.
+const ProfilePage = lazy(retryImport(() => import('./components/ProfilePage').then(m => ({ default: m.ProfilePage }))));
+const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant }))));
 const UserPanel = lazy(retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel }))));
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
@@ -68,7 +70,6 @@ import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
-import { AiAssistant } from './components/AiAssistant';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
@@ -1576,6 +1577,7 @@ export default function App() {
             }}
           />
         ) : showProfilePage ? (
+          <Suspense fallback={<ListPageSkeleton />}>
           <ProfilePage
             user={user}
             token={token || ''}
@@ -1598,6 +1600,7 @@ export default function App() {
               });
             }}
           />
+          </Suspense>
         ) : selfServiceView === 'leaveManagement' ? (
           <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'approveApplications' ? (
@@ -1740,6 +1743,7 @@ export default function App() {
 
       {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
           off in Module Access; its buttons open the page an answer is about. */}
+      <Suspense fallback={null}>
       <AiAssistant
         token={token || ''}
         user={user}
@@ -1776,6 +1780,7 @@ export default function App() {
           }
         }}
       />
+      </Suspense>
 
       {/* Chat audio/video calls — rings on any page; only for accounts with
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}

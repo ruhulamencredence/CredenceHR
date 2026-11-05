@@ -8,6 +8,17 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     // The build date, shown as the website's version (feedback, Version Info).
     define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')) },
+    build: {
+      rollupOptions: {
+        output: {
+          // Pages are split so each downloads only when opened. Without this
+          // Rollup also cut dozens of tiny shared pieces (single icons, small
+          // helpers) — each one more request on a phone; pieces under ~20 KB
+          // are folded into the chunk that uses them.
+          experimentalMinChunkSize: 20_000,
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

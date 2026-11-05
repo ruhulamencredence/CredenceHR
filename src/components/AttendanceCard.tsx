@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
-import AttendanceMapConfirm from './AttendanceMapConfirm';
+import { retryImport } from '../lib/chunkReload';
+// The map (Leaflet) is fetched when Set Now opens it, not with the Home page.
+const AttendanceMapConfirm = lazy(retryImport(() => import('./AttendanceMapConfirm')));
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -506,6 +508,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       )}
 
       {pending && selectedProject && (
+        <Suspense fallback={null}>
         <AttendanceMapConfirm
           kind={pending.kind}
           project={selectedProject}
@@ -519,6 +522,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           onConfirm={handleConfirmPending}
           onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
+        </Suspense>
       )}
     </div>
   );
