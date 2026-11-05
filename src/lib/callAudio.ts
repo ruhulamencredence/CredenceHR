@@ -14,6 +14,9 @@ interface CallAudioPlugin {
   start(o: { speaker: boolean }): Promise<{ active: boolean; speaker: boolean }>;
   setSpeaker(o: { on: boolean }): Promise<{ active: boolean; speaker: boolean }>;
   stop(): Promise<{ active: boolean; speaker: boolean }>;
+  takePendingCall(): Promise<{ callId?: string; action?: 'accept' | 'open' }>;
+  cancelIncoming(o: { callId: string }): Promise<void>;
+  addListener(event: 'callAction', cb: (d: { callId: string; action: 'accept' | 'open' }) => void): Promise<{ remove: () => void }>;
 }
 
 const CallAudio = registerPlugin<CallAudioPlugin>('CallAudio');
@@ -44,4 +47,37 @@ export async function setCallSpeaker(on: boolean): Promise<boolean> {
 export async function stopCallAudio(): Promise<void> {
   if (!callAudioAvailable()) return;
   await CallAudio.stop().catch(() => undefined);
+}
+
+// ---- the phone's incoming-call screen (IncomingCall.java) ----------------
+// A call answered (or opened) from the notification while the app was
+// closed / in the background, waiting for the page: once, or null.
+export async function takePendingCall(): Promise<{ callId: string; action: 'accept' | 'open' } | null> {
+  if (!callAudioAvailable()) return null;
+  try {
+    const r = await CallAudio.takePendingCall();
+    return r?.callId ? { callId: r.callId, action: r.action === 'accept' ? 'accept' : 'open' } : null;
+  } catch {
+    return null; // an older APK without it
+  }
+}
+
+/** The app opened from the call screen while already running. */
+export function onCallAction(cb: (d: { callId: string; action: 'accept' | 'open' }) => void): () => void {
+  if (!callAudioAvailable()) return () => undefined;
+  let handle: { remove: () => void } | null = null;
+  let gone = false;
+  CallAudio.addListener('callAction', cb)
+    .then((h) => (gone ? h.remove() : (handle = h)))
+    .catch(() => undefined);
+  return () => {
+    gone = true;
+    handle?.remove();
+  };
+}
+
+/** The page rings / answered / ended it: take the phone's call screen away. */
+export function cancelIncomingCallScreen(callId: string | null): void {
+  if (!callId || !callAudioAvailable()) return;
+  CallAudio.cancelIncoming({ callId }).catch(() => undefined);
 }

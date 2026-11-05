@@ -24,6 +24,52 @@ import java.util.List;
 @CapacitorPlugin(name = "CallAudio")
 public class CallAudioPlugin extends Plugin {
 
+    // A call answered / opened from the incoming-call notification
+    // (IncomingCall.java -> MainActivity), waiting for the page to take it.
+    private static String pendingCallId;
+    private static String pendingAction;
+    private static long pendingAt;
+    private static CallAudioPlugin instance;
+
+    static void setPendingCall(String callId, String action) {
+        pendingCallId = callId;
+        pendingAction = action;
+        pendingAt = System.currentTimeMillis();
+        CallAudioPlugin p = instance;
+        if (p != null) {
+            JSObject d = new JSObject();
+            d.put("callId", callId);
+            d.put("action", action);
+            p.notifyListeners("callAction", d);
+        }
+    }
+
+    @Override
+    public void load() {
+        instance = this;
+    }
+
+    // { callId, action: 'accept' | 'open' } once, or {} when there is none
+    // (older than a minute is stale: that call has ended by now).
+    @PluginMethod
+    public void takePendingCall(PluginCall call) {
+        JSObject r = new JSObject();
+        if (pendingCallId != null && System.currentTimeMillis() - pendingAt < 60 * 1000) {
+            r.put("callId", pendingCallId);
+            r.put("action", pendingAction);
+        }
+        pendingCallId = null;
+        pendingAction = null;
+        call.resolve(r);
+    }
+
+    // The page rings / answered by itself: take the phone's call screen away.
+    @PluginMethod
+    public void cancelIncoming(PluginCall call) {
+        IncomingCall.cancel(getContext(), call.getString("callId"));
+        call.resolve();
+    }
+
     private AudioManager audio;
     private AudioFocusRequest focusRequest;
     private PowerManager.WakeLock proximityLock;

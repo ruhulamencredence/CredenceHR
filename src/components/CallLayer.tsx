@@ -25,7 +25,7 @@ import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera } from 'lucide-react';
-import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio } from '../lib/callAudio';
+import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, cancelIncomingCallScreen } from '../lib/callAudio';
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
@@ -156,6 +156,10 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iceRestartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const makingOffer = useRef(false);
+  // Accept tapped on the phone's call screen (app closed / in background):
+  // answer that call as soon as it rings here.
+  const pendingAnswer = useRef<{ callId: string; at: number } | null>(null);
+  const acceptRef = useRef<(k?: Kind) => void>(() => undefined);
 
   const iceServers = useCallback(async () => {
     if (iceServersRef.current) return iceServersRef.current;
@@ -174,6 +178,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
 
   const cleanup = useCallback((text?: string) => {
     ringer.current.stop();
+    cancelIncomingCallScreen(callIdRef.current);
     if (connectTimer.current) clearTimeout(connectTimer.current);
     connectTimer.current = null;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
@@ -398,6 +403,14 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       setKind(d.kind);
       setNotice('');
       setPhase('incoming');
+      // Rings here now: the phone's own call screen isn't needed.
+      cancelIncomingCallScreen(d.callId);
+      const p = pendingAnswer.current;
+      if (p && p.callId === d.callId && Date.now() - p.at < 60_000) {
+        pendingAnswer.current = null;
+        setTimeout(() => acceptRef.current(d.kind), 0);
+        return;
+      }
       ringer.current.start('incoming');
     };
     const onAccepted = async (d: { callId: string }) => {
@@ -501,16 +514,32 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     if (remoteAudio.current && remoteRef.current && remoteAudio.current.srcObject !== remoteRef.current) remoteAudio.current.srcObject = remoteRef.current;
   });
 
+  // Opened from the phone's call screen: Accept answers that call when it
+  // rings here (the server announces it again once the socket is up).
+  useEffect(() => {
+    const take = (d: { callId: string; action: 'accept' | 'open' } | null) => {
+      if (!d) return;
+      if (d.action === 'accept') {
+        // Already ringing here (app was in the background): answer now.
+        if (phaseRef.current === 'incoming' && callIdRef.current === d.callId) return void acceptRef.current();
+        pendingAnswer.current = { callId: d.callId, at: Date.now() };
+      }
+      getChatSocket()?.emit('call:announce');
+    };
+    void takePendingCall().then(take);
+    return onCallAction(take);
+  }, []);
+
   // ---- actions ---------------------------------------------------------
-  const accept = async () => {
+  const accept = async (k: Kind = kind) => {
     const callId = callIdRef.current;
     if (!callId) return;
     ringer.current.stop();
     setPhase('connecting');
     try {
-      localRef.current = await getMedia(kind);
-      if (kind === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
-      if (await startCallAudio(kind === 'video')) setSpeaker(kind === 'video');
+      localRef.current = await getMedia(k);
+      if (k === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
+      if (await startCallAudio(k === 'video')) setSpeaker(k === 'video');
     } catch (e: any) {
       getChatSocket()?.emit('call:decline', { callId });
       return cleanup(e.message);
@@ -520,6 +549,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       if (!r?.ok) cleanup(r?.error || 'This call has ended.');
     });
   };
+  acceptRef.current = (k?: Kind) => void accept(k);
   const decline = () => {
     if (callIdRef.current) getChatSocket()?.emit('call:decline', { callId: callIdRef.current });
     cleanup();
@@ -686,7 +716,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
             <button type="button" onClick={decline} className={`${roundBtn} bg-rose-600 hover:bg-rose-500`} aria-label="Decline">
               <PhoneOff className="w-6 h-6" />
             </button>
-            <button type="button" onClick={accept} className={`${roundBtn} bg-emerald-500 hover:bg-emerald-400`} aria-label="Accept">
+            <button type="button" onClick={() => void accept()} className={`${roundBtn} bg-emerald-500 hover:bg-emerald-400`} aria-label="Accept">
               {kind === 'video' ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
             </button>
           </>

@@ -61,6 +61,10 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="location" />
+        <!-- Incoming chat call: Decline from the notification (IncomingCall.java). -->
+        <receiver
+            android:name=".IncomingCall$DeclineReceiver"
+            android:exported="false" />
         <!-- Employee Tracking's repeating wake-up (works in Doze). -->
         <receiver
             android:name=".DutyAlarmReceiver"
@@ -118,5 +122,10 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Screen off while a call is held to the ear (CallAudioPlugin.java). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Incoming chat call over the lock screen (IncomingCall.java). On
+         Android 14+ the user may have to allow it in the app's settings;
+         without it the call still rings as a heads-up notification. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

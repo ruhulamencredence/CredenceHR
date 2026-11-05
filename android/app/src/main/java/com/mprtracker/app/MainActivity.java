@@ -42,6 +42,49 @@ public class MainActivity extends BridgeActivity {
     // is an install-time permission, so only the real runtime ones (camera,
     // microphone) are asked for here, and the page gets whatever was granted.
     private PermissionRequest pendingMediaRequest;
+
+    // Whether the app is on screen — an incoming call then rings in the page
+    // (CallLayer.tsx) rather than as the phone's call screen (IncomingCall).
+    private static volatile boolean onScreen = false;
+    static boolean isOnScreen() {
+        return onScreen;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        onScreen = true;
+    }
+
+    @Override
+    public void onPause() {
+        onScreen = false;
+        super.onPause();
+    }
+
+    // Opened from the incoming-call notification (Accept / tap): hand the
+    // call to the page (CallAudioPlugin.takePendingCall / "callAction"),
+    // stop the ringing, and show over the lock screen.
+    private void handleCallIntent(Intent intent) {
+        if (intent == null) return;
+        String callId = intent.getStringExtra(IncomingCall.EXTRA_CALL_ID);
+        if (callId == null) return;
+        String action = intent.getStringExtra(IncomingCall.EXTRA_CALL_ACTION);
+        IncomingCall.cancel(this, callId);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+        CallAudioPlugin.setPendingCall(callId, action == null ? "open" : action);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleCallIntent(intent);
+    }
     private ActivityResultLauncher<String[]> mediaPermissionLauncher;
 
     @Override
@@ -50,6 +93,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LocationAccessPlugin.class);
         registerPlugin(CallAudioPlugin.class);
         super.onCreate(savedInstanceState);
+        handleCallIntent(getIntent());
 
         // Set up edge-to-edge natively, synchronously, right here -- rather
         // than solely relying on App.tsx's StatusBar.setOverlaysWebView({

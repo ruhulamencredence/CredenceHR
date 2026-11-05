@@ -30,6 +30,15 @@
 // "Also allow Audio / Video Calls"; a Superadmin always) can call or be
 // called.
 //
+// A phone with the app closed or in the background: the callee's Android
+// devices also get a high-priority "call_incoming" push, which shows the
+// phone's own incoming-call screen (IncomingCall.java). Accept opens the app;
+// when its socket connects, the ringing call is announced to it again
+// (announce below) and the page answers it. Decline posts the one-call key
+// from the push to POST /api/calls/push-decline (no sign-in needed — the key
+// only ever went to the callee's own devices). "call_cancel" takes the screen
+// away when the call ends or is answered elsewhere.
+//
 // ICE servers (GET /api/calls/ice-servers): Google's public STUN always, plus
 // TURN when the server is given one in .env —
 //   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN  (Cloudflare Calls TURN), or
@@ -43,6 +52,10 @@ import type { Server as SocketIOServer, Socket } from "socket.io";
 import crypto from "crypto";
 import { insertChatMessage, notifyNewMessage } from "./ChatRoutes";
 import { currentAppMask } from "./AppAccess";
+import { sendSilentPushToUserIds } from "./PushNotificationService";
+
+// Set by setupCallSocket: Decline tapped on the phone's call screen.
+let pushDecline: ((callId: string, key: string) => Promise<boolean>) | null = null;
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -110,6 +123,19 @@ export function registerCallRoutes(app: Express, deps: { authenticateToken: any;
       "⚠️ Calls: no TURN relay set (CLOUDFLARE_TURN_KEY_ID / CLOUDFLARE_TURN_API_TOKEN or TURN_URLS in .env) — calls between phones on mobile data or strict networks will stay on \"Connecting…\" and fail."
     );
   }
+  // Decline from the phone's incoming-call notification, the app not open.
+  // The key was in that call's push only (see the top of this file).
+  app.post("/api/calls/push-decline", async (req: any, res) => {
+    const callId = String(req.body?.callId || "").slice(0, 64);
+    const key = String(req.body?.key || "").slice(0, 128);
+    if (!callId || !key || !pushDecline) return res.status(400).json({ error: "Missing call." });
+    try {
+      res.json({ ok: await pushDecline(callId, key) });
+    } catch {
+      res.json({ ok: false });
+    }
+  });
+
   app.get("/api/calls/ice-servers", authenticateToken, async (req: any, res) => {
     try {
       if (!(await callAccess(queryDB, Number(req.user.id))).ok) return res.status(403).json({ error: "Calls aren't turned on for your account." });
@@ -136,6 +162,10 @@ interface Call {
   ringTimer: NodeJS.Timeout | null;
   // Set while a side's socket has dropped and it may still come back.
   awayTimer: NodeJS.Timeout | null;
+  // The callee's phones were rung by push (IncomingCall.java); pushKey lets
+  // Decline on that screen end the call without signing in.
+  pushed: boolean;
+  pushKey: string;
 }
 
 export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) {
@@ -170,6 +200,8 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     if (c.awayTimer) clearTimeout(c.awayTimer);
     if (busy.get(c.callerId) === c.id) busy.delete(c.callerId);
     if (busy.get(c.calleeId) === c.id) busy.delete(c.calleeId);
+    // Take the phone's incoming-call screen away (still ringing there).
+    if (c.pushed) void sendSilentPushToUserIds(queryDB, [c.calleeId], { type: "call_cancel", callId: c.id }, RING_MS);
     const payload = { callId: c.id, reason };
     // Tell both sides (every device of the callee while it was still ringing).
     io.to(c.callerSocket).emit("call:ended", payload);
@@ -198,7 +230,20 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
       }
       return null;
     }
+    if (type === "announce") {
+      // An account's socket just connected (e.g. the app opened from the
+      // incoming-call screen): a call still ringing for it rings there too.
+      for (const x of Array.from(calls.values())) {
+        if (x.calleeId === me && x.state === "ringing") io.to(socketId).emit("call:incoming", { callId: x.id, roomId: x.roomId, kind: x.kind, from: { id: x.callerId, name: x.callerName } });
+      }
+      return null;
+    }
     if (!c) return null;
+    if (type === "pushdecline") {
+      if (c.state !== "ringing" || !c.pushKey || data !== c.pushKey) return { ok: false };
+      finish(c, "declined", c.calleeId);
+      return { ok: true };
+    }
     if (type === "rejoin") {
       // Only the same account, for its own side of the call.
       let side: "caller" | "callee" | null = null;
@@ -223,6 +268,8 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
       io.to(c.callerSocket).emit("call:accepted", { callId: c.id });
       // The callee's other devices stop ringing.
       io.to(`user:${me}`).except(socketId).emit("call:taken", { callId: c.id });
+      // Other phones of the callee may still show the call screen.
+      if (c.pushed) void sendSilentPushToUserIds(queryDB, [c.calleeId], { type: "call_cancel", callId: c.id }, RING_MS);
       return { ok: true };
     }
     if (type === "decline") {
@@ -267,8 +314,9 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
       return null;
     }
   };
+  pushDecline = async (callId: string, key: string) => !!(await handleOrRelay("pushdecline", callId, 0, "", key))?.ok;
   (io as any).on("call:relay", (p: any, done?: (r: any) => void) => {
-    const r = p && (p.type === "disconnect" || calls.has(String(p.callId))) ? handle(String(p.type), String(p.callId), Number(p.me), String(p.socketId), p.data) : null;
+    const r = p && (p.type === "disconnect" || p.type === "announce" || calls.has(String(p.callId))) ? handle(String(p.type), String(p.callId), Number(p.me), String(p.socketId), p.data) : null;
     if (typeof done === "function") done(r);
   });
 
@@ -288,6 +336,10 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
   io.on("connection", (socket: Socket) => {
     const me = Number((socket.data as any)?.user?.id);
     if (!me) return;
+    // A call ringing for this account (e.g. it just opened the app from the
+    // phone's call screen) rings on this socket too — here and on any other worker.
+    if (Array.from(calls.values()).some((x) => x.calleeId === me && x.state === "ringing")) handle("announce", "", me, socket.id, null);
+    if (clustered()) (io as any).serverSideEmit("call:relay", { type: "announce", callId: "", me, socketId: socket.id, data: null });
 
     socket.on("call:invite", async (data: { roomId: number; kind: string }, ack?: (r: any) => void) => {
       const reply = (r: any) => ack && ack(r);
@@ -309,12 +361,23 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
         if (busy.has(me) || (await busyElsewhere(me))) return reply({ ok: false, error: "You're already in a call." });
         if (busy.has(peerId) || (await busyElsewhere(peerId))) return reply({ ok: false, error: `${peer.name} is on another call.` });
         const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
-        if (peerSockets.length === 0) {
+        // Ring the callee's phones by push too: with the app closed or in the
+        // background there is no socket (or a sleeping one). The phone shows
+        // its call screen only when the app isn't on screen.
+        const callId = crypto.randomUUID();
+        const pushKey = crypto.randomBytes(24).toString("hex");
+        const pushedTo = await sendSilentPushToUserIds(
+          queryDB,
+          [peerId],
+          { type: "call_incoming", callId, roomId: String(roomId), kind, fromId: String(me), fromName: mine.name, declineKey: pushKey },
+          RING_MS
+        );
+        if (peerSockets.length === 0 && pushedTo === 0) {
           void logCall({ roomId, callerId: me, kind }, `📞 Missed ${label(kind)}`);
           return reply({ ok: false, error: `${peer.name} isn't online right now — they'll see a missed call.` });
         }
         const call: Call = {
-          id: crypto.randomUUID(),
+          id: callId,
           roomId,
           kind,
           callerId: me,
@@ -326,7 +389,9 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
           state: "ringing",
           acceptedAt: null,
           ringTimer: null,
-          awayTimer: null
+          awayTimer: null,
+          pushed: pushedTo > 0,
+          pushKey: pushedTo > 0 ? pushKey : ""
         };
         call.ringTimer = setTimeout(() => finish(call, "no-answer", null), RING_MS);
         calls.set(call.id, call);
@@ -350,6 +415,12 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     socket.on("call:decline", (data: { callId: string }) => void handleOrRelay("decline", String(data?.callId), me, socket.id, null));
     socket.on("call:signal", (data: { callId: string; data: any }) => void handleOrRelay("signal", String(data?.callId), me, socket.id, data?.data));
     socket.on("call:end", (data: { callId: string }) => void handleOrRelay("end", String(data?.callId), me, socket.id, null));
+    // The page asks again once it is ready (it may have missed the announce
+    // sent the moment its socket connected).
+    socket.on("call:announce", () => {
+      handle("announce", "", me, socket.id, null);
+      if (clustered()) (io as any).serverSideEmit("call:relay", { type: "announce", callId: "", me, socketId: socket.id, data: null });
+    });
     socket.on("call:rejoin", async (data: { callId: string }, ack?: (r: any) => void) => {
       const r = await handleOrRelay("rejoin", String(data?.callId), me, socket.id, null);
       ack && ack(r || { ok: false, error: "This call has ended." });
