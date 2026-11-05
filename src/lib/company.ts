@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT } from './device';
+import { dedupedFetchJson } from './api';
 
 const KEY = 'credence_company_id';
 // "All companies" mode (an account the Superadmin allowed it): every API call
@@ -121,8 +122,8 @@ export function useMyCompanies(token: string | null) {
   useEffect(() => {
     if (!token) return;
     let alive = true;
-    fetch('/api/companies/mine', { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : null))
+    // Several places ask at sign-in (header, PDF letterhead): one request.
+    dedupedFetchJson('/api/companies/mine', token)
       .then((d: MyCompanies | null) => {
         if (!d || !alive) return;
         cache = { token, data: d };

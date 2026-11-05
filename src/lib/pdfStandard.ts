@@ -19,7 +19,7 @@
 
 import type jsPDFType from 'jspdf';
 import credenceLogo from '../assets/credence-logo.png';
-import { apiUrl } from './api';
+import { apiUrl, dedupedFetchJson } from './api';
 import { getActiveCompanyId } from './company';
 import { loadImageElement } from './pdfLetterhead';
 
@@ -43,8 +43,8 @@ export async function loadPdfCompany(token: string): Promise<PdfCompany> {
   let address: string | null = null;
   let logo: HTMLImageElement | null = null;
   try {
-    const res = await fetch(apiUrl('/api/companies/mine'), { headers: { Authorization: `Bearer ${token}` } });
-    const d = res.ok ? await res.json() : null;
+    // Same request as the company switcher's (lib/company.ts) when both ask at once.
+    const d = await dedupedFetchJson(apiUrl('/api/companies/mine'), token);
     const id = d?.active_company_id || getActiveCompanyId();
     const c = (d?.companies || []).find((x: any) => Number(x.id) === Number(id)) || d?.companies?.[0];
     if (c) {

@@ -146,6 +146,11 @@
 
 মাপা ফল (production build, মোবাইল আকার, CPU ৪ গুণ ধীর, ২০২৬-১১-০৫): Superadmin-এর শুরুর download ১,৪২৪ KB → ৬৪২ KB, JS memory ৩৩ → ১৭ MB, Home দেখা যায় ~২.৭ → ~২.১ সেকেন্ডে; সাধারণ account ৮৮৬ → ৩৯৪ KB। নতুন কোনো ভারী লাইব্রেরি যোগ করলে সেটাও এভাবে দরকারের সময় import করুন।
 
+- **ফোনে জমা থাকে (cache):** `dist/assets`-এর সব ফাইল (কোড, অ্যানিমেশন, CSS, ছবি, font) নামে hash থাকে, server সেগুলো `Cache-Control: public, max-age=31536000, immutable` দিয়ে পাঠায় (`server.ts`); অ্যাপ আবার খুললে এগুলো আর নামে না (মেপে দেখা: দ্বিতীয়বার ০টা file network থেকে)। নতুন build হলে নাম বদলায়, তাই পুরনো জিনিস আটকে থাকে না। শুধু `index.html` প্রতিবার যাচাই হয় (`no-cache`)। সামনে nginx থাকলে সে যেন এই header না বদলায়।
+- প্রতিটা অ্যানিমেশন (`src/assets/*.json`) নিজের ফাইল (`anim-*`, `vite.config.ts` `manualChunks`), যাতে শুধু যে কার্ড দেখায় সে-ই নামায়।
+- ফোনের অ্যাপে Admin Panel-এর কোড আগাম নামানো হয় না (খুললে তবেই); ওয়েবে আগের মতো ফাঁকা সময়ে আগাম নামে (`App.tsx`)।
+- একই সময়ে কয়েক জায়গা থেকে চাওয়া `companies/mine`, `chat/unread-count`, `site-attendance/my-teams` একটাই request (`dedupedFetchJson`, `lib/siteSupervisor.ts`)।
+
 ## ৩. পরিষ্কার করার তালিকা (গুরুত্বপূর্ণ)
 
 | সমস্যা | ঝুঁকি | করণীয় |

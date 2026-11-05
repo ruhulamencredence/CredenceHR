@@ -928,6 +928,10 @@ export default function App() {
     if (!user) return;
     const canAdmin = user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0;
     if (!canAdmin) return;
+    // Not in the phone app: there Home is what opens, and fetching and
+    // reading the whole Admin Panel right after made the phone slow for a
+    // few seconds. It downloads when the Admin Panel is opened instead.
+    if (Capacitor.isNativePlatform()) return;
     const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1500));
     const id = idle(() => {
       import('./components/AdminPanel').catch(() => {});

@@ -16,6 +16,13 @@ export default defineConfig(() => {
           // helpers) — each one more request on a phone; pieces under ~20 KB
           // are folded into the chunk that uses them.
           experimentalMinChunkSize: 20_000,
+          // Each animation (src/assets/*.json) stays a file of its own, so it
+          // is fetched only by the card that shows it (and the merging above
+          // can't fold one into a chunk the Home page needs anyway).
+          manualChunks(id: string) {
+            const m = /[\\/]src[\\/]assets[\\/]([\w-]+)\.json$/.exec(id);
+            return m ? `anim-${m[1]}` : undefined;
+          },
         },
       },
     },

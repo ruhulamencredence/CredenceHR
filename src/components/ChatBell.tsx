@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { getChatSocket } from '../lib/chatSocket';
 
 interface ChatBellProps {
@@ -24,9 +24,10 @@ export const ChatBell: React.FC<ChatBellProps> = ({ token, onOpenChat }) => {
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl('/api/chat/unread-count'), { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return;
-      const data = await res.json();
+      // The header badge and the floating button ask at the same moment:
+      // one request serves both (dedupedFetchJson).
+      const data = await dedupedFetchJson(apiUrl('/api/chat/unread-count'), token);
+      if (!data) return;
       setUnreadCount(Number(data?.count || 0));
     } catch {
       // Offline or server unreachable — silently skip, retried on next poll/event.
