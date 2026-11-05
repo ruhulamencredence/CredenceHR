@@ -7,14 +7,13 @@ import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
-import { Project, AttendanceRecord } from '../types';
+import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 
-import { SearchSelect } from './Combobox';
 interface AttendanceCardProps {
   token: string;
   projects: Project[];
@@ -108,6 +107,37 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// Today's In / Out as GET /api/attendance/day-status gives it: In is the
+// day's first, Out the last punch after it (Remote at any Project, or the
+// office device), each with where it was given.
+interface DayStatus {
+  check_in_at: string | null;
+  check_in_source: 'remote' | 'office' | null;
+  check_in_place: string | null;
+  check_in_distance_m: number | null;
+  check_in_remarks: string | null;
+  check_in_approval: any;
+  check_out_at: string | null;
+  check_out_source: 'remote' | 'office' | null;
+  check_out_place: string | null;
+  check_out_distance_m: number | null;
+  check_out_remarks: string | null;
+  check_out_approval: any;
+  check_out_first_at: string | null;
+  check_out_update_count: number;
+  can_update_check_out: boolean;
+}
+
+// "at Project X" / "Office device · Head Office" under a time.
+const placeLine = (source: string | null | undefined, place: string | null | undefined) => {
+  const text = source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : place ? `at ${place}` : '';
+  return text ? (
+    <div className="mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
+      {text}
+    </div>
+  ) : null;
+};
+
 // A User checks in/out for one of their assigned Projects — the server only
 // accepts it if the device's reported coordinates fall inside that Project's
 // location_radius circle. Shown near the top of the User Panel, always
@@ -119,8 +149,10 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // translateZ(0) on the shell keep the card itself from disappearing. The
   // blur is half the old strength (20px shell, 8px tiles), which is also
   // lighter on the WebView's GPU budget.
+  // The Project of the tap being confirmed — picked from where you stand
+  // (several check-in Projects) or the only one. Nothing to pick by hand.
   const [projectId, setProjectId] = useState<string>('');
-  const [status, setStatus] = useState<AttendanceRecord | null>(null);
+  const [status, setStatus] = useState<DayStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   // 'in'/'out' while getting the GPS fix (before the map even opens); the map
   // confirm modal has its own separate 'submitting' flag for the actual POST.
@@ -132,19 +164,14 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number } } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Default to the only project when there's just one, so most users never
-  // have to touch the dropdown at all.
+  // Today's In / Out from every Project and the office device, each with the
+  // place it was given (GET /api/attendance/day-status).
+  const loadDay = async () => {
+    const res = await fetch(apiUrl('/api/attendance/day-status'), { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) setStatus(await res.json());
+  };
   useEffect(() => {
-    if (!projectId && projects.length === 1) {
-      setProjectId(String(projects[0].id));
-    }
-  }, [projects, projectId]);
-
-  useEffect(() => {
-    if (!projectId) {
-      setStatus(null);
-      return;
-    }
+    if (!projects.length) return;
     let cancelled = false;
     setLoadingStatus(true);
     setMessage(null);
@@ -153,8 +180,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         // This card mounts twice on every Dashboard load (mobile + desktop
         // copies, see UserPanel.tsx) — dedupedFetchJson means only one of
         // the two actually hits the network.
-        const row = await dedupedFetchJson(apiUrl(`/api/attendance/status?project_id=${projectId}`), token);
-        if (!cancelled && row) setStatus(row);
+        const row = await dedupedFetchJson(apiUrl('/api/attendance/day-status'), token);
+        if (!cancelled && row !== undefined) setStatus(row || null);
       } catch {
         // Offline or server unreachable — leave status as-is, the buttons still work.
       } finally {
@@ -164,7 +191,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     return () => {
       cancelled = true;
     };
-  }, [projectId, token]);
+  }, [projects.length, token]);
 
   const selectedProject = projects.find((p) => String(p.id) === projectId) || null;
   const hasCheckedIn = !!status?.check_in_at;
@@ -197,41 +224,34 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
   const handleMark = async (kind: 'in' | 'out') => {
-    // Several check-in Projects: for a Check In the one whose area you're
-    // standing in is picked from your position, so no Project needs picking
-    // first.
-    const canAutoPick = kind === 'in' && projects.length > 1;
-    if (!projectId && !canAutoPick) {
-      setMessage({ type: 'error', text: 'Pick a project first.' });
-      return;
-    }
+    // The Project is the one whose area you're standing in — for the In and
+    // for the Out alike (they may be different Projects). With one Project
+    // it's simply that one (the server still checks the distance).
     setWorking(kind);
     setMessage(null);
     try {
       const coords = await getCurrentCoords();
-      if (canAutoPick) {
+      if (projects.length === 1) {
+        setProjectId(String(projects[0].id));
+      } else {
         const placed = projects
           .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
           .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
           .sort((a, b) => a.d - b.d);
         const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
-        const current = inside.find((x) => String(x.p.id) === projectId);
-        if (!current && inside.length) {
-          setProjectId(String(inside[0].p.id));
-          setMessage({ type: 'success', text: `You're at ${inside[0].p.project_name} (${Math.round(inside[0].d)} m from its centre) — picked it for you.` });
-        } else if (!inside.length && placed.length) {
+        if (!inside.length) {
           setMessage({
             type: 'error',
-            text: `You're not inside any of your projects' areas. Nearest: ${placed
-              .slice(0, 3)
-              .map((x) => `${x.p.project_name} ${x.d >= 1000 ? `${(x.d / 1000).toFixed(1)} km` : `${Math.round(x.d)} m`}`)
-              .join(' · ')}.`
+            text: placed.length
+              ? `You're not inside any of your projects' areas. Nearest: ${placed
+                  .slice(0, 3)
+                  .map((x) => `${x.p.project_name} ${x.d >= 1000 ? `${(x.d / 1000).toFixed(1)} km` : `${Math.round(x.d)} m`}`)
+                  .join(' · ')}.`
+              : "None of your projects has a location set yet. Ask your Admin to set it on the map."
           });
           return;
-        } else if (!projectId) {
-          setMessage({ type: 'error', text: 'Pick a project first.' });
-          return;
         }
+        setProjectId(String(inside[0].p.id));
       }
       setPending({ kind, coords });
     } catch (err: any) {
@@ -272,10 +292,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       });
       setPending(null);
       // Refresh today's status.
-      const statusRes = await fetch(apiUrl(`/api/attendance/status?project_id=${projectId}`), {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (statusRes.ok) setStatus(await statusRes.json());
+      await loadDay();
     } catch (err: any) {
       // Leave the map open so the user can see why (e.g. outside the radius)
       // and back out instead of losing their place.
@@ -359,25 +376,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
-        {selectedProject && (
-          <span className="text-xs font-medium text-slate-500 truncate">— {selectedProject.project_name}</span>
-        )}
+        {projects.length === 1 && <span className="text-xs font-medium text-slate-500 truncate">— {projects[0].project_name}</span>}
       </h3>
-
-      {projects.length > 1 && (
-        <div className="mb-2">
-          <SearchSelect
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
-          >
-            <option value="">Where I am now (picked when I tap Set Now)</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.project_name}</option>
-            ))}
-          </SearchSelect>
-        </div>
-      )}
 
       <div className="grid grid-cols-2 gap-2">
         {/* In Time — just the time itself, no "via Office/GPS" source line;
@@ -398,15 +398,18 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           )}
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
-            <div className="mt-0.5 font-bold text-blue-700">
-              <span className="text-base">{inParts.time}</span>{' '}
-              <span className="text-[11px] align-middle">{inParts.meridiem}</span>
-            </div>
+            <>
+              <div className="mt-0.5 font-bold text-blue-700">
+                <span className="text-base">{inParts.time}</span>{' '}
+                <span className="text-[11px] align-middle">{inParts.meridiem}</span>
+              </div>
+              {placeLine(status?.check_in_source, status?.check_in_place)}
+            </>
           ) : (
             <button
               type="button"
               onClick={() => handleMark('in')}
-              disabled={(!projectId && projects.length <= 1) || busy}
+              disabled={busy}
               className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'in' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}
@@ -425,6 +428,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 <span className="text-base">{outParts.time}</span>{' '}
                 <span className="text-[11px] align-middle">{outParts.meridiem}</span>
               </div>
+              {placeLine(status?.check_out_source, status?.check_out_place)}
               {/* Gave it too early? The same day it can be given again
                   (users.can_update_check_out — off unless ticked). */}
               {status?.can_update_check_out && (
@@ -434,7 +438,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                     if (!(await confirmDialog(`Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`))) return;
                     void handleMark('out');
                   }}
-                  disabled={!projectId || busy}
+                  disabled={busy}
                   className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {working === 'out' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
@@ -446,7 +450,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             <button
               type="button"
               onClick={() => handleMark('out')}
-              disabled={!projectId || busy || !hasCheckedIn}
+              disabled={busy || !hasCheckedIn}
               className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'out' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}
@@ -456,13 +460,14 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         </div>
       </div>
 
-      {selectedProject && !loadingStatus && (
+      {!loadingStatus && (
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
           <div className="flex flex-wrap items-center gap-2">
             <MapPin className="w-3 h-3" />
             {hasCheckedIn ? (
               <span>
-                {status?.check_in_distance_m != null ? `${status.check_in_distance_m}m from site` : 'Checked in'}
+                {status?.check_in_distance_m != null ? `In ${status.check_in_distance_m}m from site` : 'Checked in'}
+                {status?.check_out_distance_m != null && status?.check_out_source === 'remote' ? ` · Out ${status.check_out_distance_m}m` : ''}
               </span>
             ) : (
               <span>Not checked in today yet.</span>

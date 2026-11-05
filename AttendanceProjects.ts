@@ -61,7 +61,10 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
   for (const sql of [
     "ALTER TABLE users ADD COLUMN can_update_check_out TINYINT(1) NOT NULL DEFAULT 0",
     "ALTER TABLE attendance ADD COLUMN check_out_first_at TIMESTAMP NULL DEFAULT NULL",
-    "ALTER TABLE attendance ADD COLUMN check_out_update_count INT NOT NULL DEFAULT 0"
+    "ALTER TABLE attendance ADD COLUMN check_out_update_count INT NOT NULL DEFAULT 0",
+    // Several check-in Projects: Out given at another Project than the In
+    // (the day stays one row, on the In's Project; this says where Out was).
+    "ALTER TABLE attendance ADD COLUMN check_out_project_id INT NULL DEFAULT NULL"
   ]) {
     await dbPool.query(sql).catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Attendance: " + err.message);

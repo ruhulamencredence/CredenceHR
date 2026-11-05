@@ -202,6 +202,65 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   });
 
+  // One account's whole day, from every Project (Remote / GPS) and the office
+  // device (ZKTeco) together:
+  //   In  = the earliest In of the day, wherever it was given;
+  //   Out = the LAST punch after that In — a Remote Check Out at any Project
+  //         or any office-device punch, whichever came last.
+  // Each side says where it came from (Project name / office device), so the
+  // My Attendance card shows it without a Project having to be picked.
+  async function dayPicture(user: any, day: string) {
+    const rows: any[] = await attachApprovalStatuses(
+      "attendance",
+      await queryDB(
+        `SELECT a.*, p.project_name, op.project_name AS check_out_project_name
+           FROM attendance a
+           LEFT JOIN projects p ON p.id = a.project_id
+           LEFT JOIN projects op ON op.id = a.check_out_project_id
+          WHERE a.user_id = ? AND a.attendance_date = ?
+          ORDER BY a.id`,
+        [user.id, day]
+      )
+    );
+    const emp: any[] = await queryDB("SELECT zk_device_pin FROM all_employees WHERE user_id = ? AND zk_device_pin IS NOT NULL LIMIT 1", [user.id]);
+    const punches: any[] = emp.length
+      ? await queryDB(
+          `SELECT l.punch_time, d.name AS device_name FROM zk_attendance_logs l LEFT JOIN zk_devices d ON d.id = l.device_id
+            WHERE l.device_user_pin = ? AND DATE(l.punch_time) = ? ORDER BY l.punch_time`,
+          [emp[0].zk_device_pin, day]
+        )
+      : [];
+    const t = (v: any) => (v ? new Date(v).getTime() : NaN);
+    type Side = { at: any; source: "remote" | "office"; place: string | null; project_id: number | null; row: any | null };
+    let inS: Side | null = null;
+    // A row's check_in_at copied from an office punch (Check Out with only an
+    // office In) has no GPS fix — that In is the office punch itself.
+    for (const r of rows) {
+      if (!r.check_in_at || r.check_in_lat == null) continue;
+      if (!inS || t(r.check_in_at) < t(inS.at)) inS = { at: r.check_in_at, source: "remote", place: r.project_name || null, project_id: Number(r.project_id), row: r };
+    }
+    if (punches[0] && (!inS || t(punches[0].punch_time) < t(inS.at))) {
+      inS = { at: punches[0].punch_time, source: "office", place: punches[0].device_name || null, project_id: null, row: null };
+    }
+    let outS: Side | null = null;
+    if (inS) {
+      const inT = t(inS.at);
+      for (const r of rows) {
+        // A Remote Out is never before its own In (same second counts).
+        if (!r.check_out_at || !(t(r.check_out_at) >= inT)) continue;
+        if (!outS || t(r.check_out_at) > t(outS.at)) {
+          const pid = r.check_out_project_id != null ? Number(r.check_out_project_id) : Number(r.project_id);
+          outS = { at: r.check_out_at, source: "remote", place: (r.check_out_project_id != null ? r.check_out_project_name : r.project_name) || null, project_id: pid, row: r };
+        }
+      }
+      for (const pu of punches) {
+        if (!(t(pu.punch_time) > inT)) continue;
+        if (!outS || t(pu.punch_time) > t(outS.at)) outS = { at: pu.punch_time, source: "office", place: pu.device_name || null, project_id: null, row: null };
+      }
+    }
+    return { rows, inS, outS, hasOfficePin: emp.length > 0 };
+  }
+
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const parsed = parseAttendanceCoords(req.body);
@@ -219,6 +278,15 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       );
       if (existing.length > 0 && existing[0].check_in_at) {
         return res.status(400).json({ error: "You've already checked in for this project today." });
+      }
+      // One In per day: an In already given at another Project is the day's In.
+      const otherIn: any[] = await queryDB(
+        `SELECT p.project_name FROM attendance a LEFT JOIN projects p ON p.id = a.project_id
+          WHERE a.user_id = ? AND a.attendance_date = ? AND a.check_in_at IS NOT NULL AND a.check_in_lat IS NOT NULL LIMIT 1`,
+        [req.user.id, today]
+      );
+      if (otherIn.length) {
+        return res.status(400).json({ error: `You've already checked in today${otherIn[0].project_name ? ` at ${otherIn[0].project_name}` : ""}.` });
       }
 
       // Office Attendance (ZKTeco) gate — if the linked Employee already has an
@@ -278,10 +346,26 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const { distance, project } = ctx;
 
       const today = todayInDhaka();
-      const existing = await queryDB(
+      let existing: any[] = await queryDB(
         "SELECT * FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ?",
         [req.user.id, project_id, today]
       );
+      // Several check-in Projects: the In may have been given at another
+      // Project. The Out then goes on that day's In row, with the Project it
+      // was given at kept in check_out_project_id.
+      let outElsewhere = false;
+      if (!(existing.length > 0 && existing[0].check_in_at)) {
+        const inRow: any[] = await queryDB(
+          `SELECT * FROM attendance WHERE user_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL
+            ORDER BY check_in_at ASC, id ASC LIMIT 1`,
+          [req.user.id, today]
+        );
+        if (inRow.length) {
+          existing = inRow;
+          outElsewhere = Number(inRow[0].project_id) !== project_id;
+        }
+      }
+      const outProject = outElsewhere ? project_id : null;
 
       // Office Attendance (ZKTeco) fallback for the same In/Out gate this
       // endpoint already enforces — lets someone who only punched the office
@@ -319,9 +403,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!hasRemoteCheckIn && !officeCheckInAt) {
         return res.status(400).json({ error: "You need to Check In for this project before you can Check Out." });
       }
-      if (!hasRemoteCheckIn && officeCheckOutAt) {
-        return res.status(400).json({ error: "You've already checked out for this project today." });
-      }
+      // An office-device Out earlier today doesn't block this one: the day's
+      // Out is whichever punch comes last (dayPicture).
+      void officeCheckOutAt;
       if (hasRemoteCheckOut) {
         // "Update Out Time" (users.can_update_check_out, off by default): the
         // same day, the Out Time can be given again — e.g. after tapping it
@@ -332,8 +416,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         }
         await queryDB(
           `UPDATE attendance SET check_out_first_at = COALESCE(check_out_first_at, check_out_at), check_out_update_count = check_out_update_count + 1,
-                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ? WHERE id = ?`,
-          [lat, lng, distance, remarks, existing[0].id]
+                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ? WHERE id = ?`,
+          [lat, lng, distance, remarks, outProject, existing[0].id]
         );
         await queryDB("DELETE FROM approval_requests WHERE source_type = 'attendance' AND event_type = 'check_out' AND source_id = ?", [existing[0].id]);
         await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
@@ -342,8 +426,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       if (existing.length > 0) {
         await queryDB(
-          "UPDATE attendance SET check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ? WHERE id = ?",
-          [lat, lng, distance, remarks, existing[0].id]
+          "UPDATE attendance SET check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ? WHERE id = ?",
+          [lat, lng, distance, remarks, outProject, existing[0].id]
         );
         await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
       } else {
@@ -377,23 +461,44 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   app.get("/api/attendance/today-summary", authenticateToken, async (req: any, res) => {
     try {
       const today = todayInDhaka();
-      const rows: any[] = await queryDB("SELECT check_in_at, check_out_at FROM attendance WHERE user_id = ? AND attendance_date = ?", [req.user.id, today]);
-      let inAt: any = null;
-      let outAt: any = null;
-      for (const r of rows) {
-        if (r.check_in_at && (!inAt || new Date(r.check_in_at) < new Date(inAt))) inAt = r.check_in_at;
-        if (r.check_out_at && (!outAt || new Date(r.check_out_at) > new Date(outAt))) outAt = r.check_out_at;
-      }
-      const emp: any[] = await queryDB("SELECT zk_device_pin FROM all_employees WHERE user_id = ? AND zk_device_pin IS NOT NULL LIMIT 1", [req.user.id]);
-      if (emp.length > 0) {
-        const p: any[] = await queryDB(
-          "SELECT MIN(punch_time) AS first_in, CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS last_out FROM zk_attendance_logs WHERE device_user_pin = ? AND DATE(punch_time) = ?",
-          [emp[0].zk_device_pin, today]
-        );
-        if (p[0]?.first_in && (!inAt || new Date(p[0].first_in) < new Date(inAt))) inAt = p[0].first_in;
-        if (p[0]?.last_out && (!outAt || new Date(p[0].last_out) > new Date(outAt))) outAt = p[0].last_out;
-      }
-      res.json({ date: today, check_in_at: inAt, check_out_at: outAt });
+      const { inS, outS } = await dayPicture(req.user, today);
+      res.json({ date: today, check_in_at: inS?.at ?? null, check_out_at: outS?.at ?? null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/attendance/day-status — the My Attendance card: today's In and
+  // Out from every Project and the office device (dayPicture), each with
+  // where it was given. Only ever the caller's own day.
+  app.get("/api/attendance/day-status", authenticateToken, async (req: any, res) => {
+    try {
+      const today = todayInDhaka();
+      const { inS, outS } = await dayPicture(req.user, today);
+      if (!inS) return res.json(null);
+      const inRow = inS.row;
+      const outRow = outS?.row || null;
+      res.json({
+        attendance_date: today,
+        check_in_at: inS.at,
+        check_in_source: inS.source,
+        check_in_place: inS.place,
+        check_in_project_id: inS.project_id,
+        check_in_distance_m: inRow?.check_in_distance_m ?? null,
+        check_in_remarks: inRow?.check_in_remarks ?? null,
+        check_in_approval: inRow?.check_in_approval ?? null,
+        check_out_at: outS?.at ?? null,
+        check_out_source: outS?.source ?? null,
+        check_out_place: outS?.place ?? null,
+        check_out_project_id: outS?.project_id ?? null,
+        check_out_distance_m: outRow?.check_out_distance_m ?? null,
+        check_out_remarks: outRow?.check_out_remarks ?? null,
+        check_out_approval: outRow?.check_out_approval ?? null,
+        check_out_first_at: outRow?.check_out_first_at ?? null,
+        check_out_update_count: Number(outRow?.check_out_update_count || 0),
+        // An Out Time given here (not by the office device) can be given again today.
+        can_update_check_out: !!outRow && (await canUpdateCheckOut(req.user))
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -474,7 +579,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const withApprovals = await attachApprovalStatuses("attendance", rows.slice(0, 200));
       const mapped = withApprovals.map((r: any) => ({
         ...r,
-        project_name: projectMap.get(r.project_id)?.project_name || null
+        project_name: projectMap.get(r.project_id)?.project_name || null,
+        // Out given at another Project than the In (several check-in Projects).
+        check_out_project_name: r.check_out_project_id != null ? projectMap.get(r.check_out_project_id)?.project_name || null : null
       }));
 
       // Office Attendance (ZKTeco) fallback — Timesheet was showing a day as
