@@ -405,6 +405,7 @@ Admin Panel → **HR Data Import** নিজস্ব মডিউল (`data_imp
 - একটা ধরন দেখা ও import করা যায় তখনই যখন ডাটার নিজের মডিউল **এবং** সেই টিক দুটোই আছে (`GET /api/data-import/kinds`, `POST /api/data-import/:kind` — না থাকলে 403)।
 - বেতন (Salary Setup bulk upload) আগের মতো Payroll layer `salary_bulk_upload` দিয়ে।
 - যাঁরা আগে শুধু মডিউল থাকায় import করতেন, তাঁদের নতুন টিক দিতে হবে।
+- Employee Details-এ Blood Group মিলিয়ে নেওয়া হয় (`b +ve` → B+, `AB(-)` → AB-); `Not Defined`-এর মতো অন্য কিছু ফাঁকা রাখা হয়, ফলাফলে লেখা থাকে। Gender, NID, Marital Status ইত্যাদি কলামের মাপের বেশি লম্বা হলে কেটে রাখা হয়, যাতে preview পাস করা লাইন Import-এ ডাটাবেস error না দেয়।
 
 ## ১৩. যোগাযোগ: Notice, Chat, Mail, Alerts
 

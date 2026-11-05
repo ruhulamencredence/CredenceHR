@@ -500,7 +500,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           "designation", "email", "phone", "mobile", "personal_email", "gender", "blood_group", "nid_ssn", "nationality",
           "religion", "marital_status", "job_status", "employment_category", "job_base", "division", "unit", "present_address", "permanent_address"
         ];
-        for (const k of textKeys) if (str(v[k])) set[k] = str(v[k]).slice(0, k.endsWith("_address") ? 2000 : 255);
+        // Column sizes on employees (schemaMigrations.ts) — a longer value would
+        // fail the whole row on Import even though the preview passed.
+        const maxLen: Record<string, number> = { gender: 20, blood_group: 10, nid_ssn: 50, nationality: 100, marital_status: 30, religion: 50 };
+        for (const k of textKeys) if (str(v[k])) set[k] = str(v[k]).slice(0, k.endsWith("_address") ? 2000 : maxLen[k] || 255);
+        if (set.blood_group) {
+          // "B+", "b +ve", "AB(-)", "O positive" -> B+ / AB- / O+; anything else ("Not Defined") is left empty
+          const m = String(set.blood_group).toUpperCase().replace(/\s+/g, "").match(/^(AB|A|B|O)\(?(\+|-|\+VE|-VE|POSITIVE|NEGATIVE|POS|NEG)\)?$/);
+          if (m) set.blood_group = m[1] + (/^(\+|\+VE|POS)/.test(m[2]) ? "+" : "-");
+          else { notes.push(`Blood Group "${str(v.blood_group)}" isn't a blood group — left empty`); delete set.blood_group; }
+        }
         for (const [k, label] of [["joining_date", "Joining Date"], ["date_of_birth", "Date of Birth"]] as const) {
           const d = dateOf(v, k, label, false);
           if (d) set[k] = d;
