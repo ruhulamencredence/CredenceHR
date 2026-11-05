@@ -335,7 +335,11 @@ export interface ChatProfile {
     created_by_name?: string | null;
     info_admins_only?: boolean;
     send_admins_only?: boolean;
+    disappear_seconds?: number;
+    // Only for group admins.
+    invite_code?: string | null;
   };
+  links?: { message_id: number; url: string; created_at: string; sender_name: string }[];
   person: null | { id: number; name: string; username: string; about: string; email: string; phone: string; designation: string; department: string; branch: string; employee_id: string };
   commonGroups: { id: number; type: string; title: string | null }[];
   media: { id: number; message_type: 'image' | 'file' | 'audio'; attachment_filename: string | null; created_at: string; sender_name: string }[];
@@ -391,8 +395,13 @@ export const PersonDetails: React.FC<{ person: NonNullable<ChatProfile['person']
   );
 };
 
-export const SharedMedia: React.FC<{ media: ChatProfile['media']; renderImage: (id: number) => React.ReactNode; onOpenFile: (id: number) => void }> = ({ media, renderImage, onOpenFile }) => {
-  const [tab, setTab] = useState<'media' | 'docs'>('media');
+export const SharedMedia: React.FC<{
+  media: ChatProfile['media'];
+  links?: ChatProfile['links'];
+  renderImage: (id: number) => React.ReactNode;
+  onOpenFile: (id: number) => void;
+}> = ({ media, links = [], renderImage, onOpenFile }) => {
+  const [tab, setTab] = useState<'media' | 'docs' | 'links'>('media');
   const images = media.filter((m) => m.message_type === 'image');
   const docs = media.filter((m) => m.message_type !== 'image');
   return (
@@ -400,14 +409,33 @@ export const SharedMedia: React.FC<{ media: ChatProfile['media']; renderImage: (
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs font-semibold uppercase text-slate-400">Media, files and voice</div>
         <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
-          {(['media', 'docs'] as const).map((k) => (
+          {(['media', 'docs', 'links'] as const).map((k) => (
             <button key={k} type="button" onClick={() => setTab(k)} className={`px-2 py-0.5 rounded-md ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
-              {k === 'media' ? `Photos ${images.length}` : `Files ${docs.length}`}
+              {k === 'media' ? `Photos ${images.length}` : k === 'docs' ? `Files ${docs.length}` : `Links ${links.length}`}
             </button>
           ))}
         </div>
       </div>
-      {tab === 'media' ? (
+      {tab === 'links' ? (
+        links.length ? (
+          <div className="space-y-1">
+            {links.map((l, i) => (
+              <a
+                key={`${l.message_id}-${i}`}
+                href={/^https?:\/\//i.test(l.url) ? l.url : `https://${l.url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block px-2 py-1.5 rounded-lg hover:bg-slate-50"
+              >
+                <div className="text-sm text-blue-600 truncate">{l.url}</div>
+                <div className="text-[11px] text-slate-400">{l.sender_name} · {formatDate(l.created_at)}</div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 py-2">No links yet.</p>
+        )
+      ) : tab === 'media' ? (
         images.length ? (
           <div className="grid grid-cols-3 gap-1.5">
             {images.map((m) => (

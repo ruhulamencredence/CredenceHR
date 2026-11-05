@@ -9,7 +9,7 @@
 // Every change is checked again by the server (ChatRoutes.ts roomRules).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, BellOff, Camera, Check, Loader2, Pencil, Shield, Star, Trash2, Users } from 'lucide-react';
+import { Bell, BellOff, Camera, Check, Copy, Link as LinkIcon, Loader2, Pencil, RotateCcw, Share2, Shield, Star, Timer, Trash2, Users } from 'lucide-react';
 import { MailPopup as Popup, inputCls, primaryBtn, ghostBtn, Toggle } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
@@ -424,6 +424,291 @@ export const StarredPopup: React.FC<{ token: string; roomId?: number | null; meI
           ))}
         </div>
       )}
+    </Popup>
+  );
+};
+
+// ---- Disappearing messages ----------------------------------------------------
+const DISAPPEAR_OPTIONS: [number, string][] = [
+  [0, 'Off'],
+  [86400, '24 hours'],
+  [604800, '7 days'],
+  [7776000, '90 days']
+];
+export const disappearLabel = (secs?: number) => (DISAPPEAR_OPTIONS.find(([s]) => s === Number(secs || 0)) || DISAPPEAR_OPTIONS[0])[1];
+
+export const DisappearRow: React.FC<{ token: string; roomId: number; value: number; canEdit: boolean; onChanged: () => void }> = ({ token, roomId, value, canEdit, onChanged }) => {
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState(value);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <>
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={() => {
+          setChoice(value);
+          setError('');
+          setOpen(true);
+        }}
+        className="w-full px-4 py-3 flex items-center gap-3 text-sm text-slate-800 hover:bg-slate-50 disabled:hover:bg-transparent text-left"
+      >
+        <Timer className="w-4 h-4 text-slate-500" />
+        <span className="flex-1">
+          Disappearing messages
+          <span className="block text-[11px] text-slate-400">{disappearLabel(value)}{!canEdit ? ' · only admins can change it' : ''}</span>
+        </span>
+      </button>
+      {open && (
+        <Popup
+          title="Disappearing messages"
+          icon={<Timer className="w-4 h-4" />}
+          size="md"
+          onClose={() => !busy && setOpen(false)}
+          footer={
+            <>
+              <button type="button" className={ghostBtn} onClick={() => setOpen(false)} disabled={busy}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={primaryBtn}
+                disabled={busy || choice === value}
+                onClick={async () => {
+                  setBusy(true);
+                  setError('');
+                  try {
+                    await send(token, `/api/chat/rooms/${roomId}`, 'PATCH', { disappear_seconds: choice });
+                    onChanged();
+                    setOpen(false);
+                  } catch (e: any) {
+                    setError(e.message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy && <Loader2 className="w-4 h-4 animate-spin" />} Save
+              </button>
+            </>
+          }
+        >
+          <p className="text-xs text-slate-500 mb-3">New messages in this chat will disappear for everyone after the time you choose. Messages sent before this stay.</p>
+          <div className="liquid-glass-inset rounded-[20px] overflow-hidden divide-y divide-slate-200/60">
+            {DISAPPEAR_OPTIONS.map(([secs, label]) => (
+              <label key={secs} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer">
+                <input type="radio" name="disappear" checked={choice === secs} onChange={() => setChoice(secs)} className="accent-violet-600" />
+                {label}
+              </label>
+            ))}
+          </div>
+          {error && <div className="mt-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+        </Popup>
+      )}
+    </>
+  );
+};
+
+// ---- Invite link (group admins) ---------------------------------------------------
+export const inviteUrl = (code: string) => `${window.location.origin}/chat?invite=${encodeURIComponent(code)}`;
+// A pasted link or a bare code -> the code.
+export const inviteCodeFrom = (text: string): string | null => {
+  const t = text.trim();
+  const m = t.match(/[?&]invite=([A-Za-z0-9_-]{10,40})/) || t.match(/^([A-Za-z0-9_-]{10,40})$/);
+  return m ? m[1] : null;
+};
+
+export const InviteLinkRow: React.FC<{ token: string; roomId: number; code: string | null | undefined; onChanged: () => void; confirm: (m: string) => Promise<boolean> }> = ({
+  token,
+  roomId,
+  code,
+  onChanged,
+  confirm
+}) => {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState<string | null>(code || null);
+  const [busy, setBusy] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => setCurrent(code || null), [code]);
+  const make = async (reset = false) => {
+    setBusy(reset ? 'reset' : 'make');
+    setError('');
+    try {
+      const d = await send(token, `/api/chat/rooms/${roomId}/invite`, 'POST', { reset });
+      setCurrent(d.code);
+      onChanged();
+      if (reset) setNote('A new link was made. The old one no longer works.');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+  const link = current ? inviteUrl(current) : '';
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setNote('');
+          setOpen(true);
+          if (!current) void make();
+        }}
+        className="w-full px-4 py-3 flex items-center gap-3 text-sm text-slate-800 hover:bg-slate-50 text-left"
+      >
+        <LinkIcon className="w-4 h-4 text-slate-500" />
+        <span className="flex-1">Invite via link</span>
+      </button>
+      {open && (
+        <Popup title="Invite via link" icon={<LinkIcon className="w-4 h-4" />} size="md" onClose={() => !busy && setOpen(false)}>
+          <p className="text-xs text-slate-500 mb-3">Anyone in the company who has Chat and this link can join the group. Only share it with people you trust.</p>
+          <div className="liquid-glass-inset rounded-[20px] px-3 py-2.5 text-xs text-slate-700 break-all min-h-[40px]">{busy === 'make' ? 'Making the link…' : link || '—'}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!link}
+              className={primaryBtn}
+              onClick={async () => {
+                try {
+                  if ((navigator as any).share) await (navigator as any).share({ title: 'Join my group on CredenceHR', url: link });
+                  else {
+                    await navigator.clipboard.writeText(link);
+                    setNote('Link copied.');
+                  }
+                } catch {
+                  // share sheet closed
+                }
+              }}
+            >
+              <Share2 className="w-4 h-4" /> Share
+            </button>
+            <button
+              type="button"
+              disabled={!link}
+              className={ghostBtn}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(link);
+                  setNote('Link copied.');
+                } catch {
+                  setNote('Copy it from the box above.');
+                }
+              }}
+            >
+              <Copy className="w-4 h-4 inline mr-1" /> Copy
+            </button>
+            <button
+              type="button"
+              disabled={!!busy || !link}
+              className={ghostBtn}
+              onClick={async () => {
+                if (await confirm('Reset the invite link? The current link stops working.')) void make(true);
+              }}
+            >
+              {busy === 'reset' ? <Loader2 className="w-4 h-4 inline animate-spin" /> : <RotateCcw className="w-4 h-4 inline mr-1" />} Reset link
+            </button>
+            <button
+              type="button"
+              disabled={!!busy || !link}
+              className={`${ghostBtn} text-rose-600`}
+              onClick={async () => {
+                if (!(await confirm('Turn off the invite link? Nobody can join with it any more.'))) return;
+                setBusy('off');
+                try {
+                  await send(token, `/api/chat/rooms/${roomId}/invite`, 'DELETE');
+                  setCurrent(null);
+                  onChanged();
+                  setOpen(false);
+                } catch (e: any) {
+                  setError(e.message);
+                } finally {
+                  setBusy('');
+                }
+              }}
+            >
+              Turn off
+            </button>
+          </div>
+          {note && <div className="mt-2 text-xs text-emerald-700">{note}</div>}
+          {error && <div className="mt-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+        </Popup>
+      )}
+    </>
+  );
+};
+
+// ---- Join with an invite link ---------------------------------------------------------
+export const JoinInvitePopup: React.FC<{ token: string; initialCode?: string | null; onClose: () => void; onJoined: (roomId: number) => void }> = ({ token, initialCode, onClose, onJoined }) => {
+  const [text, setText] = useState(initialCode || '');
+  const [preview, setPreview] = useState<{ id: number; title: string; type: string; description: string; member_count: number; already_member: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const code = inviteCodeFrom(text);
+  useEffect(() => {
+    setPreview(null);
+    setError('');
+    if (!code) return;
+    let off = false;
+    fetch(apiUrl(`/api/chat/invite/${code}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (off) return;
+        if (!r.ok) setError(d.error || 'This invite link is not valid.');
+        else setPreview(d);
+      })
+      .catch(() => !off && setError("Couldn't reach the server."));
+    return () => {
+      off = true;
+    };
+  }, [token, code]);
+  return (
+    <Popup
+      title="Join a group"
+      icon={<LinkIcon className="w-4 h-4" />}
+      size="md"
+      onClose={() => !busy && onClose()}
+      footer={
+        <>
+          <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={primaryBtn}
+            disabled={busy || !preview}
+            onClick={async () => {
+              if (!preview || !code) return;
+              if (preview.already_member) return onJoined(preview.id);
+              setBusy(true);
+              setError('');
+              try {
+                const d = await send(token, `/api/chat/invite/${code}/join`, 'POST');
+                onJoined(Number(d.id));
+              } catch (e: any) {
+                setError(e.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy && <Loader2 className="w-4 h-4 animate-spin" />} {preview?.already_member ? 'Open group' : 'Join group'}
+          </button>
+        </>
+      }
+    >
+      <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the invite link" aria-label="Invite link" className={inputCls} autoFocus={!initialCode} />
+      {preview && (
+        <div className="mt-3 liquid-glass-inset rounded-[20px] px-4 py-3">
+          <div className="font-semibold text-slate-900">{preview.title}</div>
+          <div className="text-xs text-slate-500">
+            {preview.type === 'community' ? 'Community' : 'Group'} · {preview.member_count} members{preview.already_member ? ' · you are already in it' : ''}
+          </div>
+          {preview.description && <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap line-clamp-4">{preview.description}</p>}
+        </div>
+      )}
+      {error && <div className="mt-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
     </Popup>
   );
 };

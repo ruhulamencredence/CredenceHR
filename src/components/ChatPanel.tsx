@@ -22,9 +22,9 @@ import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Star, BellOff, Eraser
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Star, BellOff, Eraser, Timer
 } from 'lucide-react';
-import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted } from './chat/GroupInfo';
+import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
 import { formatDate } from '../lib/formatDate';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
 import { apiUrl } from '../lib/api';
@@ -299,6 +299,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearch, setMsgSearch] = useState('');
   const [msgResults, setMsgResults] = useState<ChatMessage[] | null>(null);
+  // Join a group with an invite link — opened from the list, or by a link
+  // (…/chat?invite=CODE) this page was opened with.
+  const [joinCode, setJoinCode] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('invite');
+    } catch {
+      return null;
+    }
+  });
   const [showNewChatModal, setShowNewChatModal] = useState<'direct' | 'group' | 'community' | null>(null);
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [showLinkGroup, setShowLinkGroup] = useState(false);
@@ -409,7 +418,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           last_message_type: msg.message_type,
           last_message_sender_id: msg.sender_id,
           last_message_at: msg.created_at,
-          unread_count: isActive || msg.sender_id === user.id ? next[idx].unread_count : next[idx].unread_count + 1
+          unread_count: isActive || msg.sender_id === user.id || msg.message_type === 'system' ? next[idx].unread_count : next[idx].unread_count + 1
         };
         const [room] = next.splice(idx, 1);
         next.unshift(room);
@@ -559,7 +568,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const lastOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].sender_id === user.id) return messages[i].id;
+      if (messages[i].sender_id === user.id && messages[i].message_type !== 'system') return messages[i].id;
     }
     return null;
   }, [messages, user.id]);
@@ -1039,6 +1048,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               <button type="button" onClick={() => setShowNewChatModal('community')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-slate-400" /> New Community
               </button>
+              <button type="button" onClick={() => setJoinCode('')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
+                <LinkIcon className="w-4 h-4 text-slate-400" /> Join with a link
+              </button>
             </div>
           </div>
         </div>
@@ -1075,7 +1087,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           {filteredRooms.map((room) => {
             const name = roomDisplayName(room, user.id);
             const isOnline = room.type === 'direct' && room.other_participant && onlineUserIds.has(room.other_participant.id);
-            const previewPrefix = room.last_message_sender_id === user.id ? 'You: ' : '';
+            const previewPrefix = room.last_message_sender_id === user.id && room.last_message_type !== 'system' ? 'You: ' : '';
             const previewText =
               room.last_message_type === 'image'
                 ? '📷 Photo'
@@ -1217,6 +1229,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         <Icon className="w-4 h-4 text-violet-600" /> {label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewMenuOpen(false);
+                        setJoinCode('');
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                    >
+                      <LinkIcon className="w-4 h-4 text-violet-600" /> Join with a link
+                    </button>
                   </div>
                   </div>
                 </>
@@ -1399,6 +1421,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
+                // "Rahim added Karim", "… changed the group name": a centred note.
+                if (msg.message_type === 'system')
+                  return (
+                    <div key={msg.id} data-msg-id={msg.id} className="flex justify-center py-1">
+                      <span className="max-w-[85%] text-center text-[11px] leading-snug text-slate-600 bg-white/85 border border-white rounded-xl px-3 py-1.5 shadow-sm">
+                        {msg.content}
+                      </span>
+                    </div>
+                  );
                 const isMe = msg.sender_id === user.id;
                 const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
                 const unsent = !!msg.unsent_at;
@@ -1486,6 +1517,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           </>
                         )}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
+                          {msg.expires_at && !unsent && <Timer className="w-3 h-3" aria-label="Disappearing message" />}
                           {msg.starred && !unsent && <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
                           {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
@@ -1712,6 +1744,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             {/* Mute, starred messages, and (admins) the group settings. */}
             <div className="divide-y divide-slate-100">
               <MuteRow token={token} room={activeRoom} onChanged={fetchRooms} />
+              <DisappearRow
+                token={token}
+                roomId={activeRoom.id}
+                value={Number(profile?.room.disappear_seconds ?? activeRoom.disappear_seconds ?? 0)}
+                canEdit={activeRoom.type === 'direct' || canEditGroupInfo}
+                onChanged={() => {
+                  fetchRooms();
+                  setProfileTick((t) => t + 1);
+                }}
+              />
+              {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && (
+                <InviteLinkRow token={token} roomId={activeRoom.id} code={profile?.room.invite_code} onChanged={() => setProfileTick((t) => t + 1)} confirm={(m) => confirmDialog(m, { tone: 'danger' })} />
+              )}
               <button type="button" onClick={() => setStarredFor({ roomId: activeRoom.id })} className="w-full px-4 py-3 flex items-center gap-3 text-sm text-slate-800 hover:bg-slate-50 text-left">
                 <Star className="w-4 h-4 text-slate-500" />
                 <span className="flex-1">Starred messages</span>
@@ -1731,7 +1776,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
             {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
-            {profile && <SharedMedia media={profile.media} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
             {activeRoom.type === 'direct' && profile && (
               <CommonGroups
                 groups={profile.commonGroups}
@@ -1844,6 +1889,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             </button>
           )}
         </div>
+      )}
+
+      {joinCode !== null && (
+        <JoinInvitePopup
+          token={token}
+          initialCode={joinCode}
+          onClose={() => {
+            setJoinCode(null);
+            try {
+              const u = new URL(window.location.href);
+              if (u.searchParams.has('invite')) {
+                u.searchParams.delete('invite');
+                window.history.replaceState(null, '', u.toString());
+              }
+            } catch {
+              // nothing to tidy
+            }
+          }}
+          onJoined={async (roomId) => {
+            setJoinCode(null);
+            await fetchRooms();
+            void openRoom(roomId);
+          }}
+        />
       )}
 
       {starredFor && (

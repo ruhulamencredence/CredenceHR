@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৪টি টেবিল, ২৫৫২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৪টি টেবিল, ২৫৫৫টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -94,7 +94,7 @@ Unique: `uq_assistant_learned_q`(question)
 | `id` | int(11) | না | PK auto_increment | |
 | `room_id` | int(11) | না |  | FK → `chat_rooms.id` |
 | `sender_id` | int(11) | না |  | FK → `users.id` |
-| `message_type` | enum('text','image','file','audio') | না | default 'text' | |
+| `message_type` | enum('text','image','file','audio','system') | না | default 'text' | |
 | `content` | text | হ্যাঁ |  | |
 | `attachment_filename` | varchar(255) | হ্যাঁ |  | |
 | `attachment_mimetype` | varchar(150) | হ্যাঁ |  | |
@@ -107,6 +107,7 @@ Unique: `uq_assistant_learned_q`(question)
 | `edited_at` | timestamp | হ্যাঁ |  | |
 | `is_forwarded` | tinyint(1) | না | default 0 | |
 | `attachment_path` | varchar(500) | হ্যাঁ |  | |
+| `expires_at` | timestamp | হ্যাঁ |  | |
 
 ### `chat_pinned_messages`
 
@@ -175,7 +176,11 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `avatar_version` | int(11) | না | default 0 | |
 | `info_admins_only` | tinyint(1) | না | default 1 | |
 | `send_admins_only` | tinyint(1) | না | default 0 | |
+| `disappear_seconds` | int(11) | না | default 0 | |
+| `invite_code` | varchar(40) | হ্যাঁ | UNI  | |
 | `group_id` | int(11) | না | default 1 | |
+
+Unique: `uniq_chat_rooms_invite`(invite_code)
 
 ### `chat_starred_messages`
 

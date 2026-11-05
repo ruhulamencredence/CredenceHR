@@ -2177,7 +2177,7 @@ export interface ChatRoom {
   my_role: 'admin' | 'member';
   last_message_id: number | null;
   last_message_content: string | null;
-  last_message_type: 'text' | 'image' | 'file' | 'audio' | null;
+  last_message_type: 'text' | 'image' | 'file' | 'audio' | 'system' | null;
   last_message_sender_id: number | null;
   last_message_at: string | null;
   unread_count: number;
@@ -2195,6 +2195,8 @@ export interface ChatRoom {
   send_admins_only?: number | boolean;
   // This account muted the chat until then (null = not muted).
   muted_until?: string | null;
+  // Disappearing messages for new messages (seconds; 0 = off).
+  disappear_seconds?: number;
 }
 
 export interface ChatRoomMember {
@@ -2219,11 +2221,14 @@ export interface ChatMessage {
   room_id: number;
   sender_id: number;
   sender_name: string;
-  message_type: 'text' | 'image' | 'file' | 'audio';
+  // 'system': a centred note ("Rahim added Karim") — no menu, no unread.
+  message_type: 'text' | 'image' | 'file' | 'audio' | 'system';
   content: string | null;
   attachment_filename: string | null;
   attachment_mimetype: string | null;
   has_attachment: boolean;
+  // Disappearing messages: when this one goes.
+  expires_at?: string | null;
   reply_to_id: number | null;
   reply_to_content: string | null;
   reply_to_sender_name: string | null;
