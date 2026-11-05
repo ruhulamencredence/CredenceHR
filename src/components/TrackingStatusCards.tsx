@@ -37,6 +37,8 @@ export interface TrackingStatus {
   not_tracked: number;
   // Accounts with the Notices module may send a notice from the Not Tracked list.
   can_send_notice?: boolean;
+  // Location updates per minute over the last 30 minutes, oldest first.
+  updates_per_minute?: number[];
   employees: TrackingRow[];
 }
 
@@ -88,7 +90,9 @@ interface Props {
   // 'card': the web Dashboard's quick access card (like My Asset).
   // 'chooser': no tile of its own — the app Dashboard's quick access tile
   // (UserPanel.tsx) opens it via chooserOpen; it shows both numbers.
-  variant?: 'panel' | 'card' | 'chooser';
+  // 'lists': no tile at all — Employee Tracking's own cards open the who-list
+  // (and its Send Notice step) through openRequest / reportRequest.
+  variant?: 'panel' | 'card' | 'chooser' | 'lists';
   className?: string;
   // Counts loaded by the caller (useTrackingStatus) — set `external` and this
   // component skips its own fetch. undefined = still loading.
@@ -96,12 +100,16 @@ interface Props {
   status?: TrackingStatus | null;
   chooserOpen?: boolean;
   onChooserClose?: () => void;
+  // Open a list from outside; `at` changes on every request, `query` pre-fills
+  // the search (e.g. a Department name).
+  openRequest?: { which: 'tracked' | 'not_tracked'; query?: string; at: number } | null;
+  reportRequest?: number;
 }
 
 // Admin Panel -> Employee Tracking (the live map).
 const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose }) => {
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose, openRequest, reportRequest }) => {
   const own = useTrackingStatus(token, !external);
   const data = external ? status : own;
   const chooser = chooserOpen;
@@ -145,6 +153,18 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       setSending(false);
     }
   };
+
+  useEffect(() => {
+    if (!openRequest) return;
+    setPicked(new Set());
+    setComposing(false);
+    setSendResult(null);
+    setQuery(openRequest.query || '');
+    setOpen(openRequest.which);
+  }, [openRequest?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (reportRequest) setReportOpen(true);
+  }, [reportRequest]);
 
   useEffect(() => {
     if (!open) return;
@@ -308,11 +328,11 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       {/* z-[1050]: above the Leaflet map on Employee Tracking (its panes and
           controls go up to 1000), below the Notice Report it opens (1100). */}
       {open && createPortal(
-        <div className="fixed inset-0 z-[1050] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1050] flex items-center justify-center p-4" onClick={() => setOpen(null)}>
           <div
             role="dialog"
             aria-label={open === 'tracked' ? 'Currently Under Tracking' : 'Currently Not Tracked'}
-            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+            className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">

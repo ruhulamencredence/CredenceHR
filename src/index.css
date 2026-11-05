@@ -815,3 +815,9 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
 .notice-editor:empty::before { content: attr(data-placeholder); color: #94a3b8; pointer-events: none; }
 .notice-editor:focus { outline: none; }
 .notice-editor img.nb-selected { outline: 3px solid #a78bfa; }
+
+/* Employee Tracking map: OSM tiles in soft grey so the coloured people,
+   paths and the floating cards stand out (Analytics-style map). */
+.tracking-tiles {
+  filter: grayscale(1) contrast(0.92) brightness(1.06);
+}

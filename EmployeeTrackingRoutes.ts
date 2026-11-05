@@ -220,11 +220,28 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const rows = await trackingStatusRows(req.user);
+      // Location updates per minute over the last 30 minutes (oldest first),
+      // counting only the people in this viewer's tracking scope — the bar
+      // chart on the Employee Tracking page.
+      const inScope = new Set<number>(rows.filter((r) => r.user_id).map((r) => Number(r.user_id)));
+      const recent: any[] =
+        (await queryDB(
+          `SELECT user_id, TIMESTAMPDIFF(MINUTE, recorded_at, NOW()) AS m
+             FROM location_pings WHERE recorded_at >= NOW() - INTERVAL 30 MINUTE`,
+          []
+        ).catch(() => [])) || [];
+      const perMinute = new Array(30).fill(0);
+      for (const p of recent) {
+        const m = Number(p.m);
+        if (!inScope.has(Number(p.user_id)) || !Number.isFinite(m) || m < 0 || m > 29) continue;
+        perMinute[29 - m] += 1;
+      }
       res.json({
         live_minutes: TRACKING_LIVE_MIN,
         tracked: rows.filter((r) => r.tracked).length,
         not_tracked: rows.filter((r) => !r.tracked).length,
         can_send_notice: await canSendTrackingNotice(req.user),
+        updates_per_minute: perMinute,
         employees: rows
       });
     } catch (err: any) {
