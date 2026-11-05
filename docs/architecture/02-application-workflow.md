@@ -665,3 +665,7 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 ## Employee Directory: খোঁজার সাথে Department-এর তালিকা
 
 Search-এ নাম বা Employee ID লিখলে Department-এর তালিকা (ফোনে chip, কম্পিউটারে dropdown) শুধু সেই Department-গুলো দেখায় যেখানে ওই নামের কেউ আছে, আর প্রতিটার পাশে দেখায় সেখানে কতজন মেলে। "All"-এর পাশে মোট কতজন মিলেছে। Designation বা Company বাছলেও একইভাবে মেলে। কিছু না লিখলে আগের মতো সব Department আর প্রতিটার মোট লোক দেখায় (`EmployeeDirectory.tsx`)।
+
+## IP দিয়ে খুললে domain-এ পাঠানো
+
+`.env`-এ `IP_REDIRECT_TO=https://hr.credencegroupbd.com` থাকলে, কেউ browser-এ server-এর IP দিয়ে অ্যাপ খুললে (যেমন `http://203.95.222.58:3000/login` বা `http://192.168.66.4:3000/...`) একই পাতা domain-এ খোলে (302 redirect, পথ আর `?…` একই থাকে)। যা redirect হয় না: `/api`, `/iclock` (ZKTeco push), `/socket.io`, `/downloads`, GET ছাড়া অন্য request, আর Android অ্যাপের WebView (পুরনো APK এখনো IP থেকে চলে)। `127.0.0.1` / `localhost` (nginx-এর proxy) কখনো redirect হয় না। খালি থাকলে কিছুই হয় না। IP দিয়ে port 80/443 (360 ERP) nginx নিজে `https://360.credencegroupbd.com`-এ পাঠায়।

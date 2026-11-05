@@ -2769,6 +2769,23 @@ async function startServer() {
   // quarter on the wire, which is the single biggest lever available for
   // "the login page takes a long time to load" on a mobile connection.
   app.use(compression());
+  // Opened in a browser by the server's IP (http://203.95.222.58:3000/…):
+  // send it to the domain (IP_REDIRECT_TO in .env, e.g.
+  // https://hr.credencegroupbd.com). Only browser pages — the API, the
+  // ZKTeco push (/iclock), Socket.IO, APK downloads and the Android app's
+  // own WebView (older APKs still load the IP) are left as they are.
+  const ipRedirectTo = String(process.env.IP_REDIRECT_TO || "").trim().replace(/\/+$/, "");
+  if (ipRedirectTo) {
+    app.use((req: any, res: any, next: any) => {
+      const host = String(req.headers.host || "").split(":")[0];
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("127.")) return next();
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
+      if (/^\/(api|iclock|socket\.io|downloads)(\/|$)/.test(String(req.path || ""))) return next();
+      if (/; wv\)/.test(String(req.headers["user-agent"] || ""))) return next();
+      if (!String(req.headers.accept || "").includes("text/html")) return next();
+      res.redirect(302, ipRedirectTo + req.originalUrl);
+    });
+  }
   // Raised from Express's 100kb default so a Budget Excel file (sent as base64 in the
   // import request) doesn't get rejected before it reaches the route handler.
   app.use(express.json({ limit: "25mb" }));
