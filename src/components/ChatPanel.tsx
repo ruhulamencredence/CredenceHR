@@ -28,6 +28,7 @@ import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatRea
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { confirmDialog } from '../lib/confirmDialog';
 
 interface ChatPanelProps {
@@ -1825,6 +1826,9 @@ const MemberPickerModal: React.FC<{
   const [depts, setDepts] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
+  // Phone keyboard: lift the sheet above it (the fixed backdrop doesn't
+  // shrink when the keyboard opens, so the list ended up underneath it).
+  const keyboardInset = useKeyboardInset();
 
   const q = search.trim().toLowerCase();
   const filtered = directory.filter(
@@ -1844,15 +1848,23 @@ const MemberPickerModal: React.FC<{
     });
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="bg-white w-full md:w-96 md:rounded-2xl rounded-t-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+    <div
+      className="fixed inset-0 liquid-glass-backdrop z-30 flex items-end md:items-center justify-center p-2 md:p-4"
+      style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
+      onClick={onClose}
+    >
+      <div
+        className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
+        style={{ maxHeight: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : '80dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between">
           <h3 className="font-bold text-slate-900">{title}</h3>
-          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-600">
+            <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-3 border-b border-slate-100">
+        <div className="px-3 pb-3">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -1874,7 +1886,7 @@ const MemberPickerModal: React.FC<{
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="liquid-glass-inset mx-3 rounded-2xl flex-1 min-h-0 overflow-y-auto">
             {filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
           {filtered.map((d) => {
             const isSelected = selected.has(d.id);
@@ -1890,7 +1902,7 @@ const MemberPickerModal: React.FC<{
                     return next;
                   })
                 }
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/50"
               >
                 <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
                 <span className="flex-1 min-w-0 text-left">
@@ -1906,12 +1918,12 @@ const MemberPickerModal: React.FC<{
             );
           })}
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3">
           <button
             type="button"
             disabled={selected.size === 0}
             onClick={() => onConfirm([...selected])}
-            className="w-full py-2.5 bg-emerald-600 text-white font-semibold rounded-xl disabled:opacity-40"
+            className="liquid-glass-button rounded-full w-full py-2.5 bg-emerald-600 text-white font-semibold disabled:opacity-40"
           >
             {confirmLabel} ({selected.size})
           </button>

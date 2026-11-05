@@ -29,27 +29,71 @@ export function reloadForNewVersion(): boolean {
   return true;
 }
 
+// A chunk also fails to load when the phone simply has no internet. That is
+// NOT a new version: reloading then threw the whole app onto the "Can't reach
+// the server" page and restarted it (losing an ongoing call, a half-typed
+// message…). So first check the server answers at all.
+export async function serverReachable(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 5000);
+    // Any answer (even 404) means the server is there.
+    await fetch(`/?_ping=${Date.now()}`, { method: 'HEAD', cache: 'no-store', signal: ctl.signal });
+    clearTimeout(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resolves once the network is back and the server answers again.
+export function waitUntilReachable(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const check = async () => {
+      if (done) return;
+      if (await serverReachable()) {
+        done = true;
+        window.removeEventListener('online', check);
+        clearInterval(timer);
+        resolve();
+      }
+    };
+    window.addEventListener('online', check);
+    const timer = setInterval(check, 5000);
+  });
+}
+
 // Vite fires this when a chunk's preload fails.
 export function installChunkReload() {
   window.addEventListener('vite:preloadError', (e) => {
+    // Offline: let the import fail; retryImport waits for the network.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (reloadForNewVersion()) e.preventDefault();
   });
 }
 
-// lazy(() => import(...)) that retries once, then reloads for a new version.
+// lazy(() => import(...)) that retries once; offline it waits for the
+// network and tries again (the page's loader stays up); only when the server
+// is reachable and the file is still missing is it a new version -> reload.
 export function retryImport<T>(load: () => Promise<T>): () => Promise<T> {
-  return () =>
-    load().catch(
-      (err) =>
-        new Promise<T>((resolve, reject) => {
-          setTimeout(() => {
-            load()
-              .then(resolve)
-              .catch((err2) => {
-                if (isChunkLoadError(err2) && reloadForNewVersion()) return; // page is reloading
-                reject(err2 || err);
-              });
-          }, 600);
-        })
-    );
+  const attempt = (first: unknown): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      setTimeout(() => {
+        load()
+          .then(resolve)
+          .catch(async (err2) => {
+            if (isChunkLoadError(err2) || isChunkLoadError(first)) {
+              if (!(await serverReachable())) {
+                await waitUntilReachable();
+                return attempt(err2).then(resolve, reject);
+              }
+              if (reloadForNewVersion()) return; // page is reloading
+            }
+            reject(err2 || first);
+          });
+      }, 600);
+    });
+  return () => load().catch((err) => attempt(err));
 }

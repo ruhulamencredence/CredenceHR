@@ -15,8 +15,13 @@
 //   call:signal  {callId, data}      offer / answer / ICE candidates, to the other side
 //   call:end     {callId}            either side -> the other: call:ended
 //
-// Unanswered after RING_MS it ends as a missed call; a side that drops off
-// (last socket gone) ends it too. Every call leaves a line in the chat
+//   call:rejoin  {callId}            a side whose connection dropped is back (new socket)
+//                                    -> the other side: call:peer-back (call:peer-away when it dropped)
+//
+// Unanswered after RING_MS it ends as a missed call. A side whose connection
+// drops (phone switching Wi-Fi <-> mobile data, a short network gap) gets
+// RECONNECT_MS to come back with call:rejoin before the call ends as
+// "dropped"; the media itself reconnects with an ICE restart (CallLayer.tsx). Every call leaves a line in the chat
 // ("📞 Audio call · 3:12" / "📞 Missed video call"), which also pushes the
 // usual chat notification — so a missed call reaches a phone with the app
 // closed.
@@ -42,6 +47,8 @@ import { currentAppMask } from "./AppAccess";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 const RING_MS = 45 * 1000;
+// How long a side may be gone (socket dropped) before the call ends.
+const RECONNECT_MS = 30 * 1000;
 const STUN = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
 
 // Calls access per account, cached briefly.
@@ -127,6 +134,8 @@ interface Call {
   state: "ringing" | "active";
   acceptedAt: number | null;
   ringTimer: NodeJS.Timeout | null;
+  // Set while a side's socket has dropped and it may still come back.
+  awayTimer: NodeJS.Timeout | null;
 }
 
 export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) {
@@ -158,6 +167,7 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     if (!calls.has(c.id)) return;
     calls.delete(c.id);
     if (c.ringTimer) clearTimeout(c.ringTimer);
+    if (c.awayTimer) clearTimeout(c.awayTimer);
     if (busy.get(c.callerId) === c.id) busy.delete(c.callerId);
     if (busy.get(c.calleeId) === c.id) busy.delete(c.calleeId);
     const payload = { callId: c.id, reason };
@@ -176,10 +186,33 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
   const handle = (type: string, callId: string, me: number, socketId: string, data: any): any => {
     const c = calls.get(callId);
     if (type === "disconnect") {
-      for (const x of Array.from(calls.values())) if (x.callerSocket === socketId || x.calleeSocket === socketId) finish(x, "disconnected", me);
+      for (const x of Array.from(calls.values())) {
+        const caller = x.callerSocket === socketId;
+        if (!caller && x.calleeSocket !== socketId) continue;
+        // Give the side a moment to come back (call:rejoin) instead of
+        // ending the call on the first network blip.
+        const other = caller ? x.calleeSocket : x.callerSocket;
+        if (other) io.to(other).emit("call:peer-away", { callId: x.id });
+        if (x.awayTimer) clearTimeout(x.awayTimer);
+        x.awayTimer = setTimeout(() => finish(x, "disconnected", me), RECONNECT_MS);
+      }
       return null;
     }
     if (!c) return null;
+    if (type === "rejoin") {
+      // Only the same account, for its own side of the call.
+      let side: "caller" | "callee" | null = null;
+      if (c.callerId === me) side = "caller";
+      else if (c.calleeId === me && c.state === "active") side = "callee";
+      if (!side) return { ok: false, error: "This call has ended." };
+      if (side === "caller") c.callerSocket = socketId;
+      else c.calleeSocket = socketId;
+      if (c.awayTimer) clearTimeout(c.awayTimer);
+      c.awayTimer = null;
+      const other = side === "caller" ? c.calleeSocket : c.callerSocket;
+      if (other) io.to(other).emit("call:peer-back", { callId: c.id });
+      return { ok: true, state: c.state, role: side };
+    }
     if (type === "accept") {
       if (c.calleeId !== me || c.state !== "ringing") return { ok: false, error: "This call has ended." };
       if (c.ringTimer) clearTimeout(c.ringTimer);
@@ -292,7 +325,8 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
           calleeSocket: null,
           state: "ringing",
           acceptedAt: null,
-          ringTimer: null
+          ringTimer: null,
+          awayTimer: null
         };
         call.ringTimer = setTimeout(() => finish(call, "no-answer", null), RING_MS);
         calls.set(call.id, call);
@@ -316,10 +350,12 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     socket.on("call:decline", (data: { callId: string }) => void handleOrRelay("decline", String(data?.callId), me, socket.id, null));
     socket.on("call:signal", (data: { callId: string; data: any }) => void handleOrRelay("signal", String(data?.callId), me, socket.id, data?.data));
     socket.on("call:end", (data: { callId: string }) => void handleOrRelay("end", String(data?.callId), me, socket.id, null));
+    socket.on("call:rejoin", async (data: { callId: string }, ack?: (r: any) => void) => {
+      const r = await handleOrRelay("rejoin", String(data?.callId), me, socket.id, null);
+      ack && ack(r || { ok: false, error: "This call has ended." });
+    });
     socket.on("disconnect", () => {
-      for (const c of Array.from(calls.values())) {
-        if (c.callerSocket === socket.id || c.calleeSocket === socket.id) finish(c, "disconnected", me);
-      }
+      handle("disconnect", "", me, socket.id, null);
       if (clustered()) (io as any).serverSideEmit("call:relay", { type: "disconnect", callId: "", me, socketId: socket.id, data: null });
     });
   });

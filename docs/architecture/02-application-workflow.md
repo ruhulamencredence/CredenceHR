@@ -629,6 +629,14 @@ Chat-এর audio / video call phone-to-phone (WebRTC); server শুধু call
 
 **কলের বোতাম আর শব্দ কোথায় বাজে:** কল চলার সময় নিচে নাম লেখা বোতামগুলো থাকে: **Mute**, **Earpiece / Speaker** (শুধু Android অ্যাপে), video কলে **Camera**, আর **End**। কলের পর্দা `document.body`-তে আঁকা হয়, তাই অন্য কোনো পাতা বা popup এটা ঢাকতে পারে না। ফোনের নিচের navigation bar-এর জন্য জায়গাও রাখা থাকে। Android অ্যাপে কল শুরু হলে `CallAudioPlugin.java` (`src/lib/callAudio.ts`) ফোনকে "কলে আছে" অবস্থায় নেয়: audio কল বাজে কানের speaker-এ (earpiece), video কল loudspeaker-এ। Speaker বোতাম দিয়ে বদলানো যায়। কানে ধরলে পর্দা বন্ধ হয় (proximity sensor), যাতে গালে লেগে বোতাম না চাপে। headset বা Bluetooth লাগানো থাকলে earpiece-এর বদলে সেটাতেই বাজে। কল শেষ হলে সব আগের অবস্থায় ফেরে। ওয়েবসাইটে (browser) কোথায় বাজবে তা browser ঠিক করে, তাই সেখানে Speaker বোতাম থাকে না। এর জন্য নতুন APK লাগবে; পুরনো APK-তে বোতামটা দেখা যায় না, বাকি সব আগের মতো চলে।
 
+**Video কলে ক্যামেরা বদল:** **Flip** বোতাম সামনের ↔ পেছনের ক্যামেরা বদলায়। পুরনো ক্যামেরা আগে ছেড়ে নতুনটা খোলে (অনেক ফোন দুটো একসাথে খুলতে পারে না), আর নতুন ছবি কলে `RTCRtpSender.replaceTrack` দিয়ে বসে, কল নতুন করে জোড়া লাগে না। নিজের ছোট ছবি শুধু সামনের ক্যামেরায় আয়নার মতো উল্টো দেখায়। একটাই ক্যামেরা থাকলে সেটাই ফিরে আসে, আর "This phone has only one camera." দেখায়।
+
+**নেট চলে গেলে কল কাটে না:** Wi-Fi ↔ mobile data বদল বা অল্প সময়ের network gap-এ কলের পর্দায় "Reconnecting…" দেখায়। Server কলটা `RECONNECT_MS` (৩০ সেকেন্ড) ধরে রাখে (`CallRoutes.ts`); socket ফিরে এলে `call:rejoin` দিয়ে সেই দিকের নতুন socket বসে, আর অন্য দিক `call:peer-away` / `call:peer-back` পায়। Media বন্ধ হলে caller ICE restart করে নতুন network-এ পথ খোঁজে (callee শুধু caller-কে বলে, যাতে দুই দিক একসাথে offer না দেয়)। ৩০ সেকেন্ডে socket না ফিরলে বা ৪০ সেকেন্ডে media না ফিরলে কল "Call dropped" হয়ে শেষ হয়। `call:rejoin` শুধু সেই কলের নিজের দিকের account-ই করতে পারে।
+
+**নেট না থাকলে অ্যাপ reload হয় না:** নেট না থাকার সময় কোনো পাতা খুললে তার কোড-ফাইল নামতে পারে না। আগে অ্যাপ এটাকে নতুন version ধরে reload দিত, ফলে Android অ্যাপ "Can't reach the server" পাতায় চলে যেত, আর নেট ফিরলে পুরো অ্যাপ নতুন করে খুলত (চলতি কল, লেখা message হারাত)। এখন আগে দেখা হয় server সাড়া দেয় কিনা (`src/lib/chunkReload.ts`)। না দিলে পাতা অপেক্ষা করে ("No internet"), নেট ফিরলে নিজে খোলে। server সাড়া দিলে আর ফাইলটা না থাকলে তবেই নতুন version ধরে একবার reload হয়।
+
+**New Chat / Group-এ লোক খোঁজা (মোবাইল):** লোক বাছার popup (liquid-glass) keyboard খুললে তার উপরে উঠে যায়, আর তালিকা বাকি জায়গায় scroll হয় (`useKeyboardInset`)। আগে তালিকা keyboard-এর নিচে ঢাকা পড়ত।
+
 ## MySQL বন্ধ হয়ে গেলে সার্ভার
 
 - চলার মাঝে MySQL বন্ধ হলে বা restart নিলে ("Server shutdown in progress", ECONNREFUSED, ECONNRESET) সার্ভার আর বন্ধ হয়ে যায় না। ওই সময়ের request গুলো error পায়, লগে মিনিটে একবার "MySQL is not answering" লেখা হয়। MySQL আবার চালু হলে কিছু না করেই সব আগের মতো চলে।

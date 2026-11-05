@@ -119,6 +119,8 @@
 
 ---
 
+- **কল আবার জোড়া লাগা:** নেট কাটার পর `call:rejoin` শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (`CallRoutes.ts`)।
+
 ## ৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা
 
 (`ESignRoutes.ts`, `ESignCertificate.ts`, `DocumentVaultRoutes.ts`)
