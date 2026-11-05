@@ -51,6 +51,7 @@ import { Spinner } from './Spinner';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
+import { useCachedState } from '../lib/screenCache';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -948,8 +949,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   // Remote Attendance card's own Projects (GET /api/attendance/my-projects) —
   // the pinned check-in Project, even without any Budget / Jobs / MPR access.
-  const [attendanceProjects, setAttendanceProjects] = useState<Project[]>([]);
-  const [attendanceProjectsLoaded, setAttendanceProjectsLoaded] = useState(false);
+  // Kept on the device too (screenCache.ts), so the card shows at once next time.
+  const [attendanceProjects, setAttendanceProjects, attendanceProjectsCached] = useCachedState<Project[]>('att-projects', []);
+  const [attendanceProjectsLoadedNow, setAttendanceProjectsLoaded] = useState(false);
+  const attendanceProjectsLoaded = attendanceProjectsLoadedNow || attendanceProjectsCached;
   useEffect(() => {
     if (!user.can_use_attendance) return;
     let cancelled = false;
@@ -1037,7 +1040,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Employee Tracking tile (mobile) — counts only for accounts with the
   // 'tracking' module; its popup opens from the tile.
   const canSeeTracking = user.role === 'superadmin' || (user.module_permissions || []).includes('tracking');
-  const trackingStatus = useTrackingStatus(token, canSeeTracking);
+  const trackingStatus = useTrackingStatus(token, canSeeTracking, true);
   const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(

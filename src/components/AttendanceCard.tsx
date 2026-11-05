@@ -4,6 +4,7 @@
  */
 
 import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
@@ -154,7 +155,10 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // The Project of the tap being confirmed — picked from where you stand
   // (several check-in Projects) or the only one. Nothing to pick by hand.
   const [projectId, setProjectId] = useState<string>('');
-  const [status, setStatus] = useState<DayStatus | null>(null);
+  // Today's In / Out shown at once from this device's last copy (screenCache.ts,
+  // keyed by the day so yesterday's never shows), then refreshed.
+  const dayKey = `att-day:${new Date().toLocaleDateString('en-CA')}`;
+  const [status, setStatus, statusFromCache] = useCachedState<DayStatus | null>(dayKey, null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   // 'in'/'out' while getting the GPS fix (before the map even opens); the map
   // confirm modal has its own separate 'submitting' flag for the actual POST.
@@ -175,7 +179,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   useEffect(() => {
     if (!projects.length) return;
     let cancelled = false;
-    setLoadingStatus(true);
+    if (!statusFromCache) setLoadingStatus(true);
     setMessage(null);
     (async () => {
       try {
@@ -205,12 +209,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // the In Time tile's corner says so ("2/3 late"; the full sentence is its
   // tooltip).
   // Read again after each check-in, since that's what can add a late.
-  const [lateSummary, setLateSummary] = useState<{
+  const [lateSummary, setLateSummary] = useCachedState<{
     linked: boolean;
     late_count: number;
     extreme_late_count: number;
     policy: { lates_per_deduction_day: number; extreme_lates_per_deduction_day: number } | null;
-  } | null>(null);
+  } | null>('att-late', null);
   useEffect(() => {
     let cancelled = false;
     dedupedFetchJson(apiUrl('/api/my-attendance-summary'), token).then((d) => {

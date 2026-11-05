@@ -1,5 +1,6 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
+import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
@@ -123,8 +124,15 @@ interface PendingApprovalsCardProps {
 // the Conveyance Bill Claim's Check In/Out (check-in/out) location viewer,
 // as the full "Approve Application" page (ApproveApplications.tsx).
 export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token, className = '' }) => {
-  const [items, setItems] = useState<MyApprovalItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from this device's last copy (screenCache.ts) and refreshed
+  // behind it; every Approve / Reject still goes to the server, which refuses
+  // anything already decided.
+  const [items, setItems] = useState<MyApprovalItem[]>(() => readScreenCache<MyApprovalItem[]>('approvals') || []);
+  const [loading, setLoading] = useState(() => readScreenCache('approvals') === undefined);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  useEffect(() => {
+    if (loadedOnce) writeScreenCache('approvals', items);
+  }, [items, loadedOnce]);
   const [actingId, setActingId] = useState<number | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<number, string>>({});
@@ -192,7 +200,10 @@ useLiveRefresh(() => load());
       // copies, see UserPanel.tsx) — dedupedFetchJson means only one of the
       // two actually hits the network.
       const rows = await dedupedFetchJson(apiUrl('/api/my-approvals'), token);
-      if (rows) setItems(rows);
+      if (rows) {
+        setItems(rows);
+        setLoadedOnce(true);
+      }
     } catch {
       // Offline/unreachable — card just stays with whatever it already had.
     } finally {

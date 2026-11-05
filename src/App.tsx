@@ -20,7 +20,21 @@ import { GlobalSidebar } from './components/GlobalSidebar';
 // Opened from the avatar / the Assistant button — not part of the first download.
 const ProfilePage = lazy(retryImport(() => import('./components/ProfilePage').then(m => ({ default: m.ProfilePage }))));
 const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant }))));
-const UserPanel = lazy(retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel }))));
+// The Dashboard's code starts downloading the moment the app starts (or the
+// moment someone signs in) — not only once React gets round to drawing it —
+// so the Dashboard opens without its placeholder on a signed-in phone.
+const loadUserPanel = retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
+let userPanelLoad: ReturnType<typeof loadUserPanel> | null = null;
+const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().catch((err) => {
+  userPanelLoad = null; // let the next try download it again
+  throw err;
+}));
+const UserPanel = lazy(preloadUserPanel);
+try {
+  if (localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
+} catch {
+  // storage unavailable — it loads when first drawn instead
+}
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
@@ -80,6 +94,7 @@ import { useBackButtonClose } from './lib/useBackButtonClose';
 import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
+import { clearScreenCache } from './lib/screenCache';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
@@ -417,6 +432,9 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
+    // Nothing saved from an earlier sign-in on this device is shown.
+    clearScreenCache();
+    void preloadUserPanel().catch(() => {});
     localStorage.setItem('mpr_token', newToken);
     localStorage.setItem('mpr_user', JSON.stringify(newUser));
     // A new joiner's temporary login opens only My Onboarding (main.tsx).
@@ -477,6 +495,8 @@ export default function App() {
     void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
+    // The Dashboard's saved copy of this account's data (screenCache.ts).
+    clearScreenCache();
     refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);

@@ -5,6 +5,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
+import { useCachedState } from '../lib/screenCache';
 import { CalendarDays } from 'lucide-react';
 import { Lottie, useLottieJson } from './LazyLottie';
 import { LeaveApplication, LeaveBalance } from '../types';
@@ -35,8 +36,9 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
   // The Total Leave strip's blur is on in the app too (half the old
   // strength: 20px), with glass-mask-fix + translateZ(0) keeping the strip
   // from dropping out on Android reloads.
-  const [applications, setApplications] = useState<LeaveApplication[]>([]);
-  const [balance, setBalance] = useState<LeaveBalance | null>(null);
+  // Last numbers shown at once from this device (screenCache.ts), then refreshed.
+  const [applications, setApplications] = useCachedState<LeaveApplication[]>('leave-apps', []);
+  const [balance, setBalance] = useCachedState<LeaveBalance | null>('leave-balance', null);
 
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => load());

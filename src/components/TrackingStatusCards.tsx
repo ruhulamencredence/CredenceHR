@@ -18,6 +18,7 @@ import { retryImport } from '../lib/chunkReload';
 // The report (with its Excel / PDF export) is fetched when opened.
 const TrackingNoticeReport = lazy(retryImport(() => import('./TrackingNoticeReport').then((m) => ({ default: m.TrackingNoticeReport }))));
 import { apiUrl } from '../lib/api';
+import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 
 interface TrackingRow {
   employee_pk: number;
@@ -52,15 +53,24 @@ const DEFAULT_NOTICE_MESSAGE =
 
 // The counts, refreshed every minute: undefined while the first load is on
 // its way, null without the tracking module (the API refuses).
-export function useTrackingStatus(token: string, enabled = true): TrackingStatus | null | undefined {
-  const [data, setData] = useState<TrackingStatus | null | undefined>(enabled ? undefined : null);
+// `cache`: start from this device's last counts (screenCache.ts) — only the
+// numbers are kept on the device, never the list of people; that comes with
+// the fresh load a moment later.
+export function useTrackingStatus(token: string, enabled = true, cache = false): TrackingStatus | null | undefined {
+  const [data, setData] = useState<TrackingStatus | null | undefined>(() =>
+    !enabled ? null : (cache && readScreenCache<TrackingStatus>('tracking-counts')) || undefined
+  );
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     const load = () =>
       fetch(apiUrl('/api/tracking/status'), { headers: { Authorization: `Bearer ${token}` } })
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => alive && setData(d))
+        .then((d) => {
+          if (!alive) return;
+          setData(d);
+          if (cache) writeScreenCache('tracking-counts', d ? { live_minutes: d.live_minutes, tracked: d.tracked, not_tracked: d.not_tracked, employees: [] } : null);
+        })
         .catch(() => {});
     load();
     const t = setInterval(load, REFRESH_MS);
@@ -68,7 +78,7 @@ export function useTrackingStatus(token: string, enabled = true): TrackingStatus
       alive = false;
       clearInterval(t);
     };
-  }, [token, enabled]);
+  }, [token, enabled, cache]);
   return data;
 }
 

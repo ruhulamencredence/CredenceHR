@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiUrl } from './api';
+import { readScreenCache, writeScreenCache } from './screenCache';
 
 let supervisorCache: { token: string; at: number; value: { teams: number; notSubmitted: number } } | null = null;
 // The sidebar and the Home page ask at the same moment: one request.
@@ -20,7 +21,11 @@ export function clearSiteSupervisorCache() {
 }
 
 export function useSiteSupervisor(token: string) {
-  const [value, setValue] = useState(() => (supervisorCache && supervisorCache.token === token ? supervisorCache.value : { teams: 0, notSubmitted: 0 }));
+  const [value, setValue] = useState(() =>
+    supervisorCache && supervisorCache.token === token
+      ? supervisorCache.value
+      : readScreenCache<{ teams: number; notSubmitted: number }>('site-supervisor') || { teams: 0, notSubmitted: 0 }
+  );
   useEffect(() => {
     if (!token) return;
     if (supervisorCache && supervisorCache.token === token && Date.now() - supervisorCache.at < 60000) {
@@ -42,6 +47,7 @@ export function useSiteSupervisor(token: string) {
         const teams: any[] = Array.isArray(d.teams) ? d.teams : [];
         const v = { teams: teams.length, notSubmitted: teams.filter((t) => t.members?.length && !t.today?.sheet).length };
         supervisorCache = { token, at: Date.now(), value: v };
+        writeScreenCache('site-supervisor', v);
         setValue(v);
       })
       .catch(() => {});

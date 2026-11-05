@@ -4,6 +4,7 @@
  */
 
 import { useLiveTick } from '../lib/liveRefresh';
+import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
 import { Lottie, useLottieJson } from './LazyLottie';
@@ -41,7 +42,8 @@ export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
 // This account's own rides still in progress (awaiting approval, awaiting a
 // vehicle, or ongoing), newest first.
 export function useActiveRides(token: string, userId: number): Ride[] | null {
-  const [active, setActive] = useState<Ride[] | null>(null);
+  // Last copy from this device first (screenCache.ts), then the fresh list.
+  const [active, setActive] = useCachedState<Ride[] | null>('rides-active', null);
   // Live refresh: the ride's status updates without a page reload.
   const liveTick = useLiveTick();
   useEffect(() => {
