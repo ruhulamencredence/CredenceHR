@@ -265,7 +265,7 @@ flowchart TD
   BACK -- বদল আছে --> COR["HR প্রতিটি correction লেখে ও apply করে<br/>দেরি মাফ / Fine মাফ / যোগ / কাটা<br/>(এক মাসের pay item, বেতন আবার হিসাব)"]
   COR --> PR
   PR --> PAY["Accounts (View only + accounts_pay)<br/>যে চালিয়েছে, পাঠিয়েছে সে নয়<br/>তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay"]
-  PAY --> PD["Paid: আর বদলানো যায় না<br/>ঋণের কিস্তি কাটা হিসেবে ধরা হয়"]
+  PAY --> PD["Disburse (paid): আর বদলানো যায় না<br/>ঋণের কিস্তি কাটা হিসেবে ধরা হয়"]
   PD --> PSLIP["কর্মীর My Payslip + PDF + 'Salary Paid' alert"]
   PD -.-> AUD["Audit (ঐচ্ছিক, audit_approve)<br/>OK বা নোট — pay আটকায় না"]
   GEN -. প্রতিটি লেখা .-> LOG[(payroll_access_log)]

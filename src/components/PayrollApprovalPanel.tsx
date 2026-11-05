@@ -144,7 +144,7 @@ const ACTION_LABEL: Record<string, string> = {
   printed: 'Printed',
   approved: 'Approved (old flow)',
   returned: 'Returned to HR',
-  paid: 'Paid by Accounts',
+  paid: 'Disbursed by Accounts',
   audited_ok: 'Audited — OK',
   audit_note: 'Audit note'
 };
@@ -154,7 +154,7 @@ const STEPS = [
   { key: 'md_review', label: 'MD (on paper)' },
   { key: 'corrections', label: 'HR corrections' },
   { key: 'approved', label: 'Accounts' },
-  { key: 'paid', label: 'Paid' }
+  { key: 'paid', label: 'Disburse' }
 ];
 const stepOf = (st: Status) => (st === 'returned' || st === 'draft' ? 0 : st === 'submitted' ? 1 : Math.max(0, STEPS.findIndex((x) => x.key === st)));
 const KIND_LABEL: Record<Correction['kind'], string> = {
@@ -173,7 +173,7 @@ const NEXT: Record<Status, string> = {
   md_review: "Print the sheet for the MD. When it comes back, attach the scan / photo and record whether he changed anything.",
   corrections: "Enter each change the MD wrote on the paper, apply it, then send the sheet to Accounts.",
   approved: 'With Accounts to pay.',
-  paid: 'Paid. Audit may check it afterwards (optional).'
+  paid: 'Disbursed. Audit may check it afterwards (optional).'
 };
 
 async function call<T>(token: string, path: string, body?: any, method?: string): Promise<T> {
@@ -342,7 +342,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
             )}
             {data.status === 'paid' && b && (
               <div className="mt-3 text-xs px-3 py-2 rounded-xl bg-emerald-50 text-emerald-800">
-                Paid on {b.payment_date} · {b.payment_method}
+                Disbursed on {b.payment_date} · {b.payment_method}
                 {b.payment_reference ? ` · Ref ${b.payment_reference}` : ''} · by {b.paid_by}
               </div>
             )}
@@ -359,7 +359,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
                 ['Net total', tk(s!.total_net)],
                 ['To pay', tk(s!.payable_net)],
                 ['Fines', tk(data.people.reduce((a, p) => a + (p.fine || 0), 0))],
-                ['Paid', s!.paid]
+                ['Disbursed', s!.paid]
               ].map(([k, v]) => (
                 <div key={k as string} className="rounded-xl border border-slate-200 px-3 py-2">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{k}</div>
@@ -425,7 +425,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
               )}
               {data.can.pay && (
                 <button type="button" onClick={() => setDialog('pay')} className={`${btn} bg-violet-600 text-white hover:bg-violet-700`}>
-                  <Landmark className="w-3.5 h-3.5" /> Pay (Accounts)
+                  <Landmark className="w-3.5 h-3.5" /> Disburse (Accounts)
                 </button>
               )}
               {data.can.audit && (
@@ -525,7 +525,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
             if (dialog === 'return' || dialog === 'recall') return void act('return', { note: v.note }, 'Returned to HR.');
             if (dialog === 'audit') return void act('audit', { result: v.auditResult, note: v.note }, 'Audit recorded. HR and Accounts have been told.');
             if (!(await confirmDialog(`Pay ${data.summary.processed} salaries (${tk(data.summary.payable_net)}) for ${month}? This can't be undone.`))) return;
-            return void act('pay', { payment_date: v.date, payment_method: v.method, payment_reference: v.reference }, 'Paid. Employees have been notified.');
+            return void act('pay', { payment_date: v.date, payment_method: v.method, payment_reference: v.reference }, 'Disbursed. Employees have been notified.');
           }}
         />
       )}
@@ -931,7 +931,7 @@ const ApprovalDialog: React.FC<{
     md_back: "MD's copy came back",
     return: 'Return to HR',
     recall: 'Take back to edit',
-    pay: 'Pay salary',
+    pay: 'Disburse salary',
     audit: 'Audit this month'
   }[kind];
   const noteRequired = kind === 'return' || kind === 'recall' || (kind === 'audit' && auditResult === 'note');
@@ -964,7 +964,7 @@ const ApprovalDialog: React.FC<{
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Paid by *</label>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Disbursed by *</label>
               <select value={method} onChange={(e) => setMethod(e.target.value)} className={inputCls}>
                 {['Bank Transfer', 'Cheque', 'bKash / MFS', 'Cash', 'Mixed (as per sheet)'].map((m) => (
                   <option key={m}>{m}</option>
