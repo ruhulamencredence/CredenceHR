@@ -1080,7 +1080,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         : mobileActiveSection === 'jobEdit'
         ? 'Job Edit'
         : mobileActiveSection === 'claim' || mobileActiveSection === 'claims'
-        ? 'My Claims'
+        ? 'Check In/Out'
         : mobileActiveSection === 'conveyanceClaim'
         ? 'Conveyance Bill Claim'
         : mobileActiveSection === 'noticeBoard'

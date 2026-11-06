@@ -204,10 +204,10 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           <Inbox className="w-5 h-5 text-slate-300" />
           <p className="text-sm">
             {claims.length === 0
-              ? 'No claims yet — check in from the Check In/Out card when you head out.'
+              ? 'No check in/out yet — check in from the Check In/Out card when you head out.'
               : filter === 'open'
-                ? 'No open claim.'
-                : 'No completed claims yet.'}
+                ? 'Nothing checked in right now.'
+                : 'No completed check in/out yet.'}
           </p>
         </div>
       ) : (

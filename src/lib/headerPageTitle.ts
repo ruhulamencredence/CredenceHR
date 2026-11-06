@@ -46,7 +46,7 @@ export function useHeaderPageTitle(): string | null {
 // .page-glow, backgroundTheme.ts HEADER_GLOWS).
 export const BLENDED_HEADER_TITLES = new Set([
   'Timesheet',
-  'My Claims',
+  'Check In/Out',
   'Leave',
   'My Tasks',
   'My Targets',

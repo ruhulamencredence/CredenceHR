@@ -1299,7 +1299,7 @@ const TOOLS: Tool[] = [
         const pre = want === "check_in" ? "আগের Check In এখনো খোলা — নতুনটা শুরু করার আগে সেটার Check Out করতে হবে। " : "";
         return {
           ok: true,
-          text: `${pre}খোলা Claim: **${draft.purpose}** (Check In ${bnDate(since.slice(0, 10))} ${bn(since.slice(11, 16))})। পৌঁছে বা কাজ শেষে নিচে **Check Out** চাপুন — তখনকার লোকেশন নেওয়া হবে।`,
+          text: `${pre}খোলা Check In: **${draft.purpose}** (Check In ${bnDate(since.slice(0, 10))} ${bn(since.slice(11, 16))})। পৌঁছে বা কাজ শেষে নিচে **Check Out** চাপুন — তখনকার লোকেশন নেওয়া হবে।`,
           draft,
           data: { drafted: true, submitted: false, mode: "check_out", open_claim: { purpose: draft.purpose, since }, note: "The card takes the phone's location when they press Check Out." }
         };

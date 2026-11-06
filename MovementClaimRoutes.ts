@@ -47,7 +47,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
 
       const openExisting = await queryDB("SELECT * FROM claims WHERE user_id = ? AND status = 'open'", [req.user.id]);
       if (openExisting.length > 0) {
-        return res.status(400).json({ error: "You already have an open claim — check out of it before starting a new one." });
+        return res.status(400).json({ error: "You are already checked in — check out first before starting a new one." });
       }
 
       const result = await queryDB(
@@ -74,13 +74,13 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
       const { lat, lng, remarks } = parsed;
 
       const rows = await queryDB("SELECT * FROM claims WHERE id = ?", [id]);
-      if (rows.length === 0) return res.status(404).json({ error: "Claim not found." });
+      if (rows.length === 0) return res.status(404).json({ error: "Check in/out not found." });
       const claim = rows[0];
       if (Number(claim.user_id) !== Number(req.user.id)) {
-        return res.status(403).json({ error: "This claim doesn't belong to you." });
+        return res.status(403).json({ error: "This check in/out doesn't belong to you." });
       }
       if (claim.status !== "open") {
-        return res.status(400).json({ error: "This claim has already been checked out." });
+        return res.status(400).json({ error: "This has already been checked out." });
       }
 
       const distanceKm = Number(

@@ -200,8 +200,8 @@ useLiveRefresh(() => fetchStatus(true));
       </div>
       <p className="text-xs text-slate-500 mb-2.5">
         Going out for office work? Check in from where you start and check out once you reach or finish — your
-        travel distance is recorded for claim review. See your past claims and their locations on the
-        <span className="font-semibold text-slate-600"> My Claims</span> card below.
+        travel distance is recorded for review. See your past check in/outs and their locations in the
+        <span className="font-semibold text-slate-600"> Check In/Out</span> list below.
       </p>
 
       <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -257,7 +257,7 @@ useLiveRefresh(() => fetchStatus(true));
                 {lastCompletedClaim.distance_km != null ? ` — ${lastCompletedClaim.distance_km} km travelled.` : '.'}
               </span>
             ) : (
-              <span>No open claim right now — start one above when you head out.</span>
+              <span>Nothing checked in right now — check in above when you head out.</span>
             )}
           </div>
           {openClaim?.check_in_remarks && (

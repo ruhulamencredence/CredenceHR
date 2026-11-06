@@ -91,7 +91,7 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
 export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [] }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
-    ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Claim', icon: Route }] : []),
+    ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Check In/Out', icon: Route }] : []),
     ...(canViewTimesheet ? [{ key: 'timesheet' as MobileSection, label: 'Timesheet', icon: Clock }] : []),
     canViewLeave
       ? { key: 'leave' as MobileSection, label: 'Leave', icon: CalendarClock }
