@@ -648,8 +648,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-semibold text-slate-900 text-sm truncate">{emp.name}</p>
-                          <p className="text-xs text-slate-600 sm:text-slate-500 truncate">{emp.designation || '—'}</p>
+                          {/* Full name, wrapping onto a second line when long. */}
+                          <p className="font-semibold text-slate-900 text-sm leading-snug break-words">{emp.name}</p>
+                          <p className="text-xs text-slate-600 sm:text-slate-500 leading-snug break-words">{emp.designation || '—'}</p>
                         </div>
                       </div>
                       <ChevronRight className="w-4 h-4 text-slate-500 sm:text-slate-300 shrink-0 sm:hidden" />
@@ -890,17 +891,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
 
             {/* Overlapping card */}
             <div className="relative -mt-6 rounded-t-[32px] bg-white/50 backdrop-blur-2xl border-t border-white/60 px-5 pt-5 pb-6 space-y-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-slate-900 truncate">{selectedEmployee.name}</h2>
-                  <p className="text-sm text-slate-500 mt-0.5 truncate">
-                    {selectedEmployee.designation || '—'}
-                    {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
-                    {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
-                  </p>
-                </div>
+              {/* The full name and designation, however long — they wrap
+                  rather than being cut off; the ID sits under them. */}
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-slate-900 leading-snug break-words">{selectedEmployee.name}</h2>
+                <p className="text-sm text-slate-500 mt-0.5 leading-snug break-words">
+                  {selectedEmployee.designation || '—'}
+                  {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
+                  {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
+                </p>
                 {selectedEmployee.employee_id && (
-                  <span className="shrink-0 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
+                  <span className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
                     ID: {selectedEmployee.employee_id}
                   </span>
                 )}
@@ -910,7 +911,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               <div className="grid grid-cols-3 divide-x divide-white/50 bg-white/40 backdrop-blur rounded-2xl border border-white/60 overflow-hidden">
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Department</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.department || '—'}</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.department || '—'}</p>
                 </div>
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Status</p>
@@ -920,25 +921,25 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 </div>
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Reports To</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.supervisor_name || '—'}</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.supervisor_name || '—'}</p>
                 </div>
               </div>
 
               <div className="space-y-2.5">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact Information</p>
                 {selectedEmployee.email && (
-                  <a href={`mailto:${selectedEmployee.email}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <Mail className="w-4 h-4 text-slate-400" /> {selectedEmployee.email}
+                  <a href={`mailto:${selectedEmployee.email}`} className="flex items-start gap-2 text-sm text-slate-700 hover:text-blue-600 min-w-0">
+                    <Mail className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-all">{selectedEmployee.email}</span>
                   </a>
                 )}
                 {selectedEmployee.mobile && (
                   <a href={`tel:${selectedEmployee.mobile}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <Phone className="w-4 h-4 text-slate-400" /> {selectedEmployee.mobile}
+                    <Phone className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.mobile}
                   </a>
                 )}
                 {selectedEmployee.phone && selectedEmployee.phone !== selectedEmployee.mobile && (
                   <a href={`tel:${selectedEmployee.phone}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <PhoneCall className="w-4 h-4 text-slate-400" /> {selectedEmployee.phone}
+                    <PhoneCall className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.phone}
                   </a>
                 )}
                 {selectedEmployee.telephone && (
@@ -947,8 +948,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                   </p>
                 )}
                 {officeLocationOf(selectedEmployee) && (
-                  <p className="flex items-center gap-2 text-sm text-slate-700">
-                    <MapPin className="w-4 h-4 text-slate-400" /> {officeLocationOf(selectedEmployee)}
+                  <p className="flex items-start gap-2 text-sm text-slate-700">
+                    <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-words">{officeLocationOf(selectedEmployee)}</span>
                   </p>
                 )}
                 {!selectedEmployee.email && !selectedEmployee.mobile && !selectedEmployee.phone && !selectedEmployee.telephone && (
