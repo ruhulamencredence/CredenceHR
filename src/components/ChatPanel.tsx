@@ -22,7 +22,7 @@ import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Star, BellOff, Eraser, Timer
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer
 } from 'lucide-react';
 import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
 import { formatDate } from '../lib/formatDate';
@@ -232,6 +232,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  // Swipe-to-reply on a phone: the message being pulled and how far.
+  const swipeRef = useRef<{ id: number; x: number; y: number; dx: number; el: HTMLElement | null } | null>(null);
   // WhatsApp-style message menu / who reacted / own About (chat/ChatExtras.tsx).
   const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
   // Editing one of your own text messages (menu -> Edit): the box below
@@ -1274,7 +1276,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       </div>
 
       {/* Main chat window */}
-      <div className={`flex-1 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
+      <div className={`flex-1 min-w-0 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
         {!activeRoom ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-2">
             <MessageSquare className="w-12 h-12" />
@@ -1498,9 +1500,63 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   if (longPressRef.current) clearTimeout(longPressRef.current);
                   longPressRef.current = null;
                 };
+                // Not in a group where only admins may send (the box is hidden there).
+                const startReply = () => {
+                  if (cannotSend) return;
+                  setEditing(null);
+                  setReplyTo(msg);
+                  messageInputRef.current?.focus();
+                };
                 return (
-                  <div key={msg.id} data-msg-id={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}>
-                    <div className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div
+                    key={msg.id}
+                    data-msg-id={msg.id}
+                    className={`group/row flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}
+                    // Phone: pull a message to the right to reply (like WhatsApp).
+                    onTouchStart={(e) => {
+                      if (unsent) return;
+                      swipeRef.current = { id: msg.id, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, el: e.currentTarget.querySelector('[data-swipe]') as HTMLElement | null };
+                    }}
+                    onTouchMove={(e) => {
+                      const sw = swipeRef.current;
+                      if (!sw || sw.id !== msg.id) return;
+                      const dx = e.touches[0].clientX - sw.x;
+                      const dy = Math.abs(e.touches[0].clientY - sw.y);
+                      if (dy > 30 && Math.abs(dx) < dy) {
+                        swipeRef.current = null;
+                        if (sw.el) sw.el.style.transform = '';
+                        return;
+                      }
+                      sw.dx = Math.max(0, Math.min(80, dx));
+                      if (sw.el) sw.el.style.transform = sw.dx ? `translateX(${sw.dx}px)` : '';
+                    }}
+                    onTouchEnd={() => {
+                      const sw = swipeRef.current;
+                      swipeRef.current = null;
+                      if (!sw || sw.id !== msg.id) return;
+                      if (sw.el) {
+                        sw.el.style.transition = 'transform 160ms ease-out';
+                        sw.el.style.transform = '';
+                        setTimeout(() => sw.el && (sw.el.style.transition = ''), 180);
+                      }
+                      if (sw.dx >= 56) {
+                        navigator.vibrate?.(10);
+                        startReply();
+                      }
+                    }}
+                  >
+                    {/* Computer: Reply / Forward beside your own message. */}
+                    {isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
+                    <div data-swipe className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       {!isMe && activeRoom.type !== 'direct' && (
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
@@ -1590,6 +1646,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         </div>
                       )}
                     </div>
+                    {/* Computer: Reply / Forward beside someone else's message. */}
+                    {!isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -1617,8 +1684,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
             {replyTo && !editing && (
-              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
-                <div className="text-xs text-slate-600 truncate">
+              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between gap-2 min-w-0">
+                <div className="text-xs text-slate-600 truncate min-w-0 flex-1">
                   Replying to <span className="font-semibold">{replyTo.sender_id === user.id ? 'yourself' : replyTo.sender_name}</span>:{' '}
                   {replyTo.content || (replyTo.message_type === 'image' ? '📷 Photo' : replyTo.message_type === 'audio' ? '🎤 Voice message' : `📎 ${replyTo.attachment_filename || 'File'}`)}
                 </div>
