@@ -64,7 +64,20 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
     "ALTER TABLE attendance ADD COLUMN check_out_update_count INT NOT NULL DEFAULT 0",
     // Several check-in Projects: Out given at another Project than the In
     // (the day stays one row, on the In's Project; this says where Out was).
-    "ALTER TABLE attendance ADD COLUMN check_out_project_id INT NULL DEFAULT NULL"
+    "ALTER TABLE attendance ADD COLUMN check_out_project_id INT NULL DEFAULT NULL",
+    // Off-site attendance: an In / Out given outside the account's own
+    // check-in Projects goes to the Timesheet approval chain as an
+    // attendance correction, with where it was given (AttendanceRoutes.ts).
+    "ALTER TABLE attendance_corrections ADD COLUMN offsite_in TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE attendance_corrections ADD COLUMN offsite_out TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE attendance_corrections ADD COLUMN in_lat DECIMAL(10,7) NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN in_lng DECIMAL(10,7) NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN in_distance_m INT NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN in_place VARCHAR(255) NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN out_lat DECIMAL(10,7) NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN out_lng DECIMAL(10,7) NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN out_distance_m INT NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN out_place VARCHAR(255) NULL"
   ]) {
     await dbPool.query(sql).catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Attendance: " + err.message);

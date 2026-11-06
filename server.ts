@@ -1851,15 +1851,30 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     c.project_id,
     c.attendance_date
   ]);
+  // An off-site In / Out (AttendanceRoutes.ts offsitePunch) also brings the
+  // place it was given; an ordinary correction has none and changes no place.
+  const offIn = Number(c.offsite_in) === 1 && c.requested_check_in_at;
+  const offOut = Number(c.offsite_out) === 1 && c.requested_check_out_at;
+  const inGeo = offIn ? [c.in_lat, c.in_lng, c.in_distance_m] : [null, null, null];
+  const outGeo = offOut ? [c.out_lat, c.out_lng, c.out_distance_m] : [null, null, null];
+  const inNote = offIn ? `Off-site: ${c.in_place || "outside the project area"} (approved)` : null;
+  const outNote = offOut ? `Off-site: ${c.out_place || "outside the project area"} (approved)` : null;
   if (existing.length > 0) {
     await queryDB(
-      "UPDATE attendance SET check_in_at = COALESCE(?, check_in_at), check_out_at = COALESCE(?, check_out_at) WHERE id = ?",
-      [c.requested_check_in_at, c.requested_check_out_at, existing[0].id]
+      `UPDATE attendance SET check_in_at = COALESCE(?, check_in_at), check_out_at = COALESCE(?, check_out_at),
+              check_in_lat = COALESCE(?, check_in_lat), check_in_lng = COALESCE(?, check_in_lng), check_in_distance_m = COALESCE(?, check_in_distance_m),
+              check_in_remarks = COALESCE(?, check_in_remarks),
+              check_out_lat = COALESCE(?, check_out_lat), check_out_lng = COALESCE(?, check_out_lng), check_out_distance_m = COALESCE(?, check_out_distance_m),
+              check_out_remarks = COALESCE(?, check_out_remarks)
+        WHERE id = ?`,
+      [c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote, existing[0].id]
     );
   } else {
     await queryDB(
-      "INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at) VALUES (?, ?, ?, ?, ?)",
-      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at]
+      `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at,
+                               check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote]
     );
   }
 
@@ -1871,8 +1886,11 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
   await createAlert(queryDB, {
     userId: Number(c.user_id),
     type: "hr_action",
-    title: "Attendance Correction Approved",
-    message: `Your attendance correction for ${toDateOnlyString(c.attendance_date)} was approved — the Timesheet now shows the corrected time.${remarks ? ` Note: ${remarks}` : ""}`,
+    title: offIn || offOut ? "Off-site Attendance Approved" : "Attendance Correction Approved",
+    message:
+      offIn || offOut
+        ? `Your off-site attendance for ${toDateOnlyString(c.attendance_date)} was approved — it now counts as attendance.${remarks ? ` Note: ${remarks}` : ""}`
+        : `Your attendance correction for ${toDateOnlyString(c.attendance_date)} was approved — the Timesheet now shows the corrected time.${remarks ? ` Note: ${remarks}` : ""}`,
     relatedType: "attendance_correction",
     relatedId: Number(correctionId)
   }).catch(() => {});
@@ -1899,8 +1917,11 @@ async function notifyAttendanceCorrectionFirstApprovers(correctionId: number) {
       await createAlert(queryDB, {
         userId: a.user_id,
         type: "hr_action",
-        title: "Attendance Correction Awaiting Your Approval",
-        message: `${who[0]?.name || "An employee"} asked to correct their attendance for ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""}. Please review it.`,
+        title: Number(c.offsite_in) || Number(c.offsite_out) ? "Off-site Attendance Awaiting Your Approval" : "Attendance Correction Awaiting Your Approval",
+        message:
+          Number(c.offsite_in) || Number(c.offsite_out)
+            ? `${who[0]?.name || "An employee"} gave attendance from outside their project area on ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""} — ${c.in_place || c.out_place || "off-site"}. It counts only once approved.`
+            : `${who[0]?.name || "An employee"} asked to correct their attendance for ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""}. Please review it.`,
         relatedType: "attendance_correction",
         relatedId: Number(correctionId)
       }).catch(() => {});

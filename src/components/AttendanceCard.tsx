@@ -129,6 +129,8 @@ interface DayStatus {
   check_out_first_at: string | null;
   check_out_update_count: number;
   can_update_check_out: boolean;
+  // Off-site In / Out given today, waiting for approval (counts once approved).
+  pending_offsite?: { in_at: string | null; in_place: string | null; out_at: string | null; out_place: string | null } | null;
 }
 
 // "at Project X" / "Office device · Head Office" under a time.
@@ -167,7 +169,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Set once a GPS fix comes back for a Check In/Out tap — this is what opens
   // the map confirm modal. Cleared (without ever hitting the API) if the user
   // cancels there instead of confirming.
-  const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number } } | null>(null);
+  // `offsite`: outside every one of the account's own Projects — it goes for
+  // approval and counts once approved (AttendanceRoutes.ts offsitePunch).
+  const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number }; offsite?: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Today's In / Out from every Project and the office device, each with the
@@ -200,7 +204,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   }, [projects.length, token]);
 
   const selectedProject = projects.find((p) => String(p.id) === projectId) || null;
-  const hasCheckedIn = !!status?.check_in_at;
+  const waiting = status?.pending_offsite || null;
+  const hasCheckedIn = !!status?.check_in_at || !!waiting?.in_at;
 
   // Late warning: this month's own Delay / Extreme Delay counts against the
   // Late Attendance Policy (same /api/my-attendance-summary figures the
@@ -237,29 +242,25 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     try {
       const coords = await getCurrentCoords();
-      if (projects.length === 1) {
-        setProjectId(String(projects[0].id));
-      } else {
-        const placed = projects
-          .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
-          .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
-          .sort((a, b) => a.d - b.d);
-        const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
-        if (!inside.length) {
-          setMessage({
-            type: 'error',
-            text: placed.length
-              ? `You're not inside any of your projects' areas. Nearest: ${placed
-                  .slice(0, 3)
-                  .map((x) => `${x.p.project_name} ${x.d >= 1000 ? `${(x.d / 1000).toFixed(1)} km` : `${Math.round(x.d)} m`}`)
-                  .join(' · ')}.`
-              : "None of your projects has a location set yet. Ask your Admin to set it on the map."
-          });
-          return;
-        }
+      const placed = projects
+        .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
+        .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
+        .sort((a, b) => a.d - b.d);
+      const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
+      if (inside.length) {
         setProjectId(String(inside[0].p.id));
+        setPending({ kind, coords });
+      } else if (!placed.length) {
+        // No Project with a location to measure against: as before, the
+        // server says what's missing.
+        setProjectId(String(projects[0].id));
+        setPending({ kind, coords });
+      } else {
+        // Outside every own Project: it can still be given, for approval
+        // (the map shows the nearest one).
+        setProjectId(String(placed[0].p.id));
+        setPending({ kind, coords, offsite: true });
       }
-      setPending({ kind, coords });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || `Failed to check ${kind}` });
     } finally {
@@ -283,11 +284,23 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           project_id: Number(projectId),
           latitude: coords.latitude,
           longitude: coords.longitude,
-          remarks: remarks || undefined
+          remarks: remarks || undefined,
+          ...(pending.offsite ? { offsite: true } : {})
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to check ${kind}`);
+      if (data.pending !== undefined) {
+        setMessage({
+          type: 'success',
+          text: data.pending
+            ? `Sent for approval — your ${kind === 'in' ? 'In' : 'Out'} Time counts once it's approved. ${data.place || ''}`
+            : `Recorded — ${data.place || 'off-site'}.`
+        });
+        setPending(null);
+        await loadDay();
+        return;
+      }
       setMessage({
         type: 'success',
         text: kind === 'in'
@@ -411,6 +424,14 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
               </div>
               {placeLine(status?.check_in_source, status?.check_in_place)}
             </>
+          ) : waiting?.in_at ? (
+            <>
+              <div className="mt-0.5 font-bold text-amber-700">
+                <span className="text-base">{formatTimeParts(waiting.in_at).time}</span>{' '}
+                <span className="text-[11px] align-middle">{formatTimeParts(waiting.in_at).meridiem}</span>
+              </div>
+              <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
+            </>
           ) : (
             <button
               type="button"
@@ -428,7 +449,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             In Time above. */}
         <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
-          {hasCheckedOut && outParts ? (
+          {!hasCheckedOut && waiting?.out_at ? (
+            <>
+              <div className="mt-0.5 font-bold text-amber-700">
+                <span className="text-base">{formatTimeParts(waiting.out_at).time}</span>{' '}
+                <span className="text-[11px] align-middle">{formatTimeParts(waiting.out_at).meridiem}</span>
+              </div>
+              <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
+            </>
+          ) : hasCheckedOut && outParts ? (
             <>
               <div className="mt-0.5 font-bold text-blue-700">
                 <span className="text-base">{outParts.time}</span>{' '}
@@ -470,15 +499,20 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
           <div className="flex flex-wrap items-center gap-2">
             <MapPin className="w-3 h-3" />
-            {hasCheckedIn ? (
+            {status?.check_in_at ? (
               <span>
                 {status?.check_in_distance_m != null ? `In ${status.check_in_distance_m}m from site` : 'Checked in'}
                 {status?.check_out_distance_m != null && status?.check_out_source === 'remote' ? ` · Out ${status.check_out_distance_m}m` : ''}
               </span>
-            ) : (
+            ) : waiting ? null : (
               <span>Not checked in today yet.</span>
             )}
-            {hasCheckedIn && <ApprovalBadge approval={status?.check_in_approval} />}
+            {waiting && (
+              <span className="text-amber-700">
+                Off-site · {waiting.in_place || waiting.out_place} — counts once approved
+              </span>
+            )}
+            {!!status?.check_in_at && <ApprovalBadge approval={status?.check_in_approval} />}
             {hasCheckedOut && <ApprovalBadge approval={status?.check_out_approval} />}
           </div>
           {status?.check_in_remarks && (
@@ -515,6 +549,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         <Suspense fallback={null}>
         <AttendanceMapConfirm
           kind={pending.kind}
+          offsite={!!pending.offsite}
           project={selectedProject}
           coords={pending.coords}
           submitting={submitting}

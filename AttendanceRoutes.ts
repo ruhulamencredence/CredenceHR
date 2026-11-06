@@ -261,8 +261,177 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     return { rows, inS, outS, hasOfficePin: emp.length > 0 };
   }
 
+  // ---- Off-site attendance ------------------------------------------------
+  // Inside one of the account's own check-in Projects: an ordinary Check In /
+  // Out (counted at once, as before). Anywhere else — at a Project that isn't
+  // the account's, or outside every Project — it may still be given, with a
+  // reason, but it is NOT written to `attendance`: it becomes an attendance
+  // correction (offsite_in / offsite_out) that goes up the same Timesheet
+  // approval chain as Timesheet -> Correct Attendance (the employee's
+  // Approval Template, supervisor layers). Only when that is approved does
+  // finalizeAttendanceCorrection write it, so it counts as attendance from
+  // then on; a rejection leaves the day as it was.
+  const OFFSITE_REASON = "Write why you're giving attendance from outside your project area.";
+  // `joinPending`: an Out given inside the account's own Project while its
+  // off-site In still waits for approval — it joins that request (no reason
+  // needed), so the day is decided as one.
+  async function offsitePunch(req: any, res: any, kind: "in" | "out", joinPending = false): Promise<boolean> {
+    const lat = Number(req.body?.latitude);
+    const lng = Number(req.body?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ error: "Couldn't read your current location. Please allow location access and try again." });
+      return true;
+    }
+    const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
+    const all: any[] = (await queryDB("SELECT * FROM projects")) || [];
+    const placed = all
+      .filter((p) => p.location_lat != null && p.location_lng != null)
+      .map((p) => ({ p, d: Math.round(haversineMeters(lat, lng, Number(p.location_lat), Number(p.location_lng))) }))
+      .sort((a, b) => a.d - b.d);
+    const mine = (p: any) => !allowed || allowed.has(Number(p.id));
+    // Actually inside one of the account's own Projects: an ordinary punch.
+    const insideMine = placed.find((x) => mine(x.p) && x.p.location_radius && x.d <= Number(x.p.location_radius));
+    if (insideMine && !joinPending) {
+      req.body.project_id = insideMine.p.id;
+      return false;
+    }
+    const note = (typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 900) : "") || (joinPending ? "Out given at my project" : "");
+    if (!note) {
+      res.status(400).json({ error: OFFSITE_REASON, needs_reason: true });
+      return true;
+    }
+    const fmt = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`);
+    const insideOther = placed.find((x) => x.p.location_radius && x.d <= Number(x.p.location_radius));
+    const nearestMine = placed.find((x) => mine(x.p));
+    const anyMine = all.find((p) => mine(p));
+    const target = insideOther || nearestMine || (anyMine ? { p: anyMine, d: null as number | null } : placed[0]);
+    if (!target) {
+      res.status(400).json({ error: "There is no project to record this attendance against yet. Ask your Admin." });
+      return true;
+    }
+    const place = joinPending && insideMine
+      ? `At ${insideMine.p.project_name}`
+      : insideOther
+      ? `At ${insideOther.p.project_name} (not one of your check-in projects)`
+      : nearestMine
+      ? `Outside every project area · ${fmt(nearestMine.d)} from ${nearestMine.p.project_name}`
+      : "Outside every project area";
+    const today = todayInDhaka();
+    const label = kind === "in" ? "In" : "Out";
+    const remarks = `[Off-site ${label}: ${place}] ${note}`;
+    const dist = target.d ?? null;
+
+    const pendingIn: any[] =
+      (await queryDB(
+        "SELECT * FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND offsite_in = 1 ORDER BY id DESC LIMIT 1",
+        [req.user.id, today]
+      )) || [];
+    let correctionId: number;
+    if (kind === "in") {
+      if (pendingIn.length) {
+        res.status(400).json({ error: "Your off-site In for today is already waiting for approval." });
+        return true;
+      }
+      const remoteIn: any[] = await queryDB(
+        `SELECT p.project_name FROM attendance a LEFT JOIN projects p ON p.id = a.project_id
+          WHERE a.user_id = ? AND a.attendance_date = ? AND a.check_in_at IS NOT NULL LIMIT 1`,
+        [req.user.id, today]
+      );
+      if (remoteIn.length) {
+        res.status(400).json({ error: `You've already checked in today${remoteIn[0].project_name ? ` at ${remoteIn[0].project_name}` : ""}.` });
+        return true;
+      }
+      const emp: any[] = await queryDB("SELECT zk_device_pin FROM all_employees WHERE user_id = ? AND zk_device_pin IS NOT NULL LIMIT 1", [req.user.id]);
+      if (emp.length) {
+        const office: any[] = await queryDB("SELECT MIN(punch_time) AS t FROM zk_attendance_logs WHERE device_user_pin = ? AND DATE(punch_time) = ?", [emp[0].zk_device_pin, today]);
+        if (office[0]?.t) {
+          res.status(400).json({ error: "You're already marked present today via Office Attendance." });
+          return true;
+        }
+      }
+      const clash: any[] = await queryDB(
+        "SELECT id FROM attendance_corrections WHERE user_id = ? AND project_id = ? AND attendance_date = ? AND status = 'pending'",
+        [req.user.id, target.p.id, today]
+      );
+      if (clash.length) {
+        res.status(400).json({ error: "You already have a pending correction request for today. Wait for it to be decided first." });
+        return true;
+      }
+      const r = await queryDB(
+        `INSERT INTO attendance_corrections
+           (user_id, project_id, attendance_date, requested_check_in_at, remarks, status, offsite_in, in_lat, in_lng, in_distance_m, in_place)
+         VALUES (?, ?, ?, NOW(), ?, 'pending', 1, ?, ?, ?, ?)`,
+        [req.user.id, target.p.id, today, remarks, lat, lng, dist, place.slice(0, 255)]
+      );
+      correctionId = r.insertId;
+    } else {
+      if (pendingIn.length) {
+        // The In is itself waiting for approval: the Out joins that request.
+        if (pendingIn[0].requested_check_out_at) {
+          res.status(400).json({ error: "Your off-site Out for today is already waiting for approval." });
+          return true;
+        }
+        await queryDB(
+          `UPDATE attendance_corrections SET requested_check_out_at = NOW(), offsite_out = 1, out_lat = ?, out_lng = ?, out_distance_m = ?, out_place = ?,
+                  remarks = CONCAT(COALESCE(remarks, ''), ?) WHERE id = ? AND status = 'pending'`,
+          [lat, lng, dist, place.slice(0, 255), `\n${remarks}`, pendingIn[0].id]
+        );
+        res.json({ success: true, pending: true, place, project_name: target.p.project_name });
+        return true;
+      }
+      // An ordinary In today (remote or the office device): the Out goes for approval on that day's row.
+      const inRow: any[] = await queryDB(
+        "SELECT * FROM attendance WHERE user_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL ORDER BY check_in_at ASC, id ASC LIMIT 1",
+        [req.user.id, today]
+      );
+      let projectForOut = inRow.length ? Number(inRow[0].project_id) : null;
+      if (!projectForOut) {
+        const emp: any[] = await queryDB("SELECT zk_device_pin FROM all_employees WHERE user_id = ? AND zk_device_pin IS NOT NULL LIMIT 1", [req.user.id]);
+        const office: any[] = emp.length ? await queryDB("SELECT MIN(punch_time) AS t FROM zk_attendance_logs WHERE device_user_pin = ? AND DATE(punch_time) = ?", [emp[0].zk_device_pin, today]) : [];
+        if (!office[0]?.t) {
+          res.status(400).json({ error: "You need to Check In before you can Check Out." });
+          return true;
+        }
+        projectForOut = Number(target.p.id);
+      }
+      if (inRow.length && inRow[0].check_out_at && !(await canUpdateCheckOut(req.user))) {
+        res.status(400).json({ error: "You've already checked out today." });
+        return true;
+      }
+      const clash: any[] = await queryDB(
+        "SELECT id FROM attendance_corrections WHERE user_id = ? AND project_id = ? AND attendance_date = ? AND status = 'pending'",
+        [req.user.id, projectForOut, today]
+      );
+      if (clash.length) {
+        res.status(400).json({ error: "You already have a pending correction request for today. Wait for it to be decided first." });
+        return true;
+      }
+      const r = await queryDB(
+        `INSERT INTO attendance_corrections
+           (user_id, project_id, attendance_date, requested_check_out_at, remarks, status, offsite_out, out_lat, out_lng, out_distance_m, out_place)
+         VALUES (?, ?, ?, NOW(), ?, 'pending', 1, ?, ?, ?, ?)`,
+        [req.user.id, projectForOut, today, remarks, lat, lng, dist, place.slice(0, 255)]
+      );
+      correctionId = r.insertId;
+    }
+    // The same approval chain as Timesheet -> Correct Attendance.
+    const { autoApproved } = await createTemplateApprovalRequest("timesheet", "attendance_correction", correctionId, req.user.id);
+    if (autoApproved) {
+      try {
+        await finalizeAttendanceCorrection(correctionId, req.user.id, "Auto-approved (no Approval Template configured for Timesheet).");
+      } catch (e: any) {
+        console.warn("⚠️ Could not auto-process off-site attendance #" + correctionId + ": " + e.message);
+      }
+    } else {
+      await notifyAttendanceCorrectionFirstApprovers(correctionId);
+    }
+    res.json({ success: true, pending: !autoApproved, place, project_name: target.p.project_name });
+    return true;
+  }
+
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
+      if (req.body?.offsite === true && (await offsitePunch(req, res, "in"))) return;
       const parsed = parseAttendanceCoords(req.body);
       if ("error" in parsed) return res.status(400).json({ error: parsed.error });
       const { project_id, lat, lng, remarks } = parsed;
@@ -288,6 +457,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (otherIn.length) {
         return res.status(400).json({ error: `You've already checked in today${otherIn[0].project_name ? ` at ${otherIn[0].project_name}` : ""}.` });
       }
+      const waitingIn: any[] = await queryDB(
+        "SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND offsite_in = 1 LIMIT 1",
+        [req.user.id, today]
+      );
+      if (waitingIn.length) return res.status(400).json({ error: "Your off-site In for today is already waiting for approval." });
 
       // Office Attendance (ZKTeco) gate — if the linked Employee already has an
       // In Time today from the office biometric device, that's already this
@@ -337,6 +511,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
   app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
+      if (req.body?.offsite === true && (await offsitePunch(req, res, "out"))) return;
+      {
+        // No In on record yet but an off-site In waiting for approval: this Out joins it.
+        const today0 = todayInDhaka();
+        const [hasIn, waiting] = await Promise.all([
+          queryDB("SELECT id FROM attendance WHERE user_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL LIMIT 1", [req.user.id, today0]),
+          queryDB("SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND offsite_in = 1 LIMIT 1", [req.user.id, today0])
+        ]);
+        if (!hasIn.length && waiting.length && (await offsitePunch(req, res, "out", true))) return;
+      }
       const parsed = parseAttendanceCoords(req.body);
       if ("error" in parsed) return res.status(400).json({ error: parsed.error });
       const { project_id, lat, lng, remarks } = parsed;
@@ -475,10 +659,26 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     try {
       const today = todayInDhaka();
       const { inS, outS } = await dayPicture(req.user, today);
-      if (!inS) return res.json(null);
+      // Off-site In / Out given today and still waiting for approval.
+      const pend: any[] =
+        (await queryDB(
+          `SELECT id, requested_check_in_at, requested_check_out_at, in_place, out_place FROM attendance_corrections
+            WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND (offsite_in = 1 OR offsite_out = 1) ORDER BY id`,
+          [req.user.id, today]
+        ).catch(() => [])) || [];
+      const pendingOffsite = pend.length
+        ? {
+            in_at: pend.find((p) => p.requested_check_in_at)?.requested_check_in_at || null,
+            in_place: pend.find((p) => p.requested_check_in_at)?.in_place || null,
+            out_at: [...pend].reverse().find((p) => p.requested_check_out_at)?.requested_check_out_at || null,
+            out_place: [...pend].reverse().find((p) => p.requested_check_out_at)?.out_place || null
+          }
+        : null;
+      if (!inS) return res.json(pendingOffsite ? { attendance_date: today, check_in_at: null, check_out_at: null, pending_offsite: pendingOffsite } : null);
       const inRow = inS.row;
       const outRow = outS?.row || null;
       res.json({
+        pending_offsite: pendingOffsite,
         attendance_date: today,
         check_in_at: inS.at,
         check_in_source: inS.source,
