@@ -78,21 +78,21 @@ interface GlobalSidebarProps {
   onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => void;
   // The User Panel's OWN Check In/Out / Bill Claim section
   // (submitting a claim) — gated separately from the Admin Panel's review
-  // tabs below by can_view_movement_claims / can_view_conveyance_claims.
-  onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
+  // tabs below by can_view_movement_claims / can_view_bill_claims.
+  onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
   onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
   // Admin Panel's own Check In/Out / Bill Claim review tabs —
-  // separate feature from onGoToUserClaims above, gated by module_permissions
+  // separate feature from onGoToBillClaims above, gated by module_permissions
   // like every other Admin Panel module.
-  onGoToAdminClaims: (target: 'claims' | 'conveyance') => void;
+  onGoToAdminClaims: (target: 'claims' | 'bill_claim') => void;
   // Every other Admin Panel module (Reports, Projects, Users, ...) — gated by
   // module_permissions (a Superadmin always sees all of them).
   // 'bill_claim_policy' is the one exception below: not its own
-  // module_permissions entry, shown alongside 'conveyance' in the HR group
-  // and gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => void;
+  // module_permissions entry, shown alongside 'bill_claim' in the HR group
+  // and gated on the same 'bill_claim' grant.
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'bill_claim'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -126,7 +126,7 @@ interface GlobalSidebarProps {
 // granted, side by side. Visual language (profile header, violet glass
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
-  open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToUserClaims,
+  open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
@@ -302,13 +302,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // active item" behavior as everything else — see the effect below.
   const hrmClaimGroup: NavItem[] = [];
   if (hasUserPanel && user.can_view_movement_claims) {
-    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Check In/Out', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
+    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Check In/Out', icon: Route, onClick: () => onGoToBillClaims('movementClaims') });
   }
-  // Holding the Bill Claim ("conveyance") Admin module also brings your OWN
+  // Holding the Bill Claim ("bill_claim") Admin module also brings your OWN
   // claims here (it used to be a separate "My Bill Claim" page
   // under Claims/Bill/Disbursement).
-  if ((hasUserPanel && user.can_view_conveyance_claims) || canSeeModule('conveyance')) {
-    hrmClaimGroup.push({ key: 'userConveyanceClaims', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
+  if ((hasUserPanel && user.can_view_bill_claims) || canSeeModule('bill_claim')) {
+    hrmClaimGroup.push({ key: 'userBillClaims', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToBillClaims('billClaim') });
   }
   const hrmAttendanceGroup: NavItem[] = [];
   if (canSeeTimesheet) {
@@ -477,12 +477,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // items into "HR" below.
   const claimsItems: NavItem[] = [
     { key: 'claims', label: 'Check In/Out', icon: Route, onClick: () => onGoToAdminClaims('claims'), href: adminHref('claims') },
-    { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance'), href: adminHref('conveyance') },
+    { key: 'bill_claim', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('bill_claim'), href: adminHref('bill_claim') },
     { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement'), href: adminHref('disbursement') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
-  if (canSeeModule('conveyance')) {
+  if (canSeeModule('bill_claim')) {
     // "Bill Claim Policy" — rules for Bill Claims (limits, receipts, deadlines…).
-    // Rides along with the 'conveyance' module like My Bill Claim.
+    // Rides along with the 'bill_claim' module like My Bill Claim.
     claimsItems.push({
       key: 'bill_claim_policy',
       label: 'Bill Claim Policy',
@@ -724,7 +724,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Wallet,
       // Grouped by what they are: money, things the office gives you, HR papers.
       entries: pick(
-        { heading: 'Claims & Money' }, 'userMovementClaims', 'userConveyanceClaims', 'myLoans', 'myPayslips',
+        { heading: 'Claims & Money' }, 'userMovementClaims', 'userBillClaims', 'myLoans', 'myPayslips',
         { heading: 'Office Items' }, 'assetManagement', 'myMobileSim', 'myRequisitions', 'vehicleManagement',
         { heading: 'HR Documents' }, 'myLetters'
       )
@@ -753,7 +753,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Fingerprint,
       entries: pick('attendance', 'office_attendance', 'site_attendance', 'duty_roster', 'break_time', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
     },
-    { key: 'g_payroll', label: 'Payroll & Claims', icon: Banknote, entries: pick('payroll', 'claims', 'conveyance', 'disbursement', 'bill_claim_policy') },
+    { key: 'g_payroll', label: 'Payroll & Claims', icon: Banknote, entries: pick('payroll', 'claims', 'bill_claim', 'disbursement', 'bill_claim_policy') },
     {
       key: 'g_hr_ops',
       label: 'HR Operations',

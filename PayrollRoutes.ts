@@ -5,7 +5,7 @@
 
 // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — split
 // into its own file from day one (same reasoning as
-// ConveyanceBillClaimRoutes.ts, AttendanceRoutes.ts, LeaveRoutes.ts, etc. —
+// BillClaimRoutes.ts, AttendanceRoutes.ts, LeaveRoutes.ts, etc. —
 // keeps server.ts from growing further) and registered from inside
 // startServer() via registerPayrollRoutes(), reusing that request's
 // authenticateToken/requireAdmin/queryDB/requireModule rather than a second
@@ -236,7 +236,7 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
     // *request* separately from the actual employee_advances row. Approving
     // one INSERTs into employee_advances (advance_id records which row) —
     // rejecting just closes the request out with a remark. Modeled on
-    // ConveyanceBillClaimRoutes.ts's user_claims pending -> decision shape.
+    // BillClaimRoutes.ts's bill_claims pending -> decision shape.
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS advance_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,

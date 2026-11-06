@@ -6,18 +6,18 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Paperclip, Download, CalendarRange, MessageSquare, AlertTriangle, Route, Clock, Pencil, RotateCcw, Lock, History } from 'lucide-react';
-import { UserClaim } from '../types';
+import { BillClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import { ClaimBillLines } from './ClaimBillLines';
 
-interface ConveyanceClaimDetailModalProps {
-  claim: UserClaim;
+interface BillClaimDetailModalProps {
+  claim: BillClaim;
   onClose: () => void;
   // Shown while the claim can still be edited (claim.editable).
   onEdit?: () => void;
-  // Loads the claim's edit trail (GET /api/user-claims/:id/history).
+  // Loads the claim's edit trail (GET /api/bill-claims/:id/history).
   token?: string;
 }
 
@@ -43,12 +43,12 @@ const HISTORY_LABEL: Record<ClaimHistoryRow['action'], string> = {
 // Preview/Download link (if an attachment was uploaded), and Admin Remarks
 // whenever the claim has been reviewed (always shown on Rejected, optionally
 // present on Approved).
-export const ConveyanceClaimDetailModal: React.FC<ConveyanceClaimDetailModalProps> = ({ claim, onClose, onEdit, token }) => {
+export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ claim, onClose, onEdit, token }) => {
   const [history, setHistory] = useState<ClaimHistoryRow[]>([]);
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    fetch(apiUrl(`/api/user-claims/${claim.id}/history`), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(`/api/bill-claims/${claim.id}/history`), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows) => {
         if (!cancelled && Array.isArray(rows)) setHistory(rows);
@@ -59,16 +59,16 @@ export const ConveyanceClaimDetailModal: React.FC<ConveyanceClaimDetailModalProp
     };
   }, [token, claim.id]);
   const isImage = (claim.file_mimetype || '').startsWith('image/');
-  const fileUrl = apiUrl(`/api/user-claims/${claim.id}/file`);
+  const fileUrl = apiUrl(`/api/bill-claims/${claim.id}/file`);
 
   // Rendered via a portal straight onto document.body instead of in place —
-  // this row is opened from ConveyanceClaimCard, which sits inside
+  // this row is opened from BillClaimCard, which sits inside
   // UserPanel's dashboard tree, which has an `overflow-hidden` ancestor. On
   // a number of Android WebViews a `position: fixed` element nested inside
   // `overflow: hidden` doesn't truly pin to the full device screen — it gets
   // clipped to that ancestor's box instead, which is what was pushing this
   // modal under BottomNav. Escaping to document.body via a portal sidesteps
-  // that ancestor entirely (same fix as NewConveyanceClaimModal/
+  // that ancestor entirely (same fix as NewBillClaimModal/
   // AttendanceMapConfirm/ClaimMapConfirm).
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
@@ -88,7 +88,7 @@ export const ConveyanceClaimDetailModal: React.FC<ConveyanceClaimDetailModalProp
             <span className="text-xl font-bold text-slate-900">
               ৳{Number(claim.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <UserClaimStatusBadge status={claim.status} />
+            <BillClaimStatusBadge status={claim.status} />
           </div>
 
           {claim.edit_mode === 'returned' && (

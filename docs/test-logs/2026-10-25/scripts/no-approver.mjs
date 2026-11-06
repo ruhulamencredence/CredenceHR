@@ -21,7 +21,7 @@ await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0,
 async function person(name, email) {
   const e = await api(SA, 'POST', '/api/employees', { name, designation: 'Head of Sales', department_id: 2, joining_date: '2024-01-01', email, create_login: true, login_email: email, login_password: 'Pass12345' });
   const uid = Number(sql(`SELECT user_id FROM all_employees WHERE id=${e.body.id}`));
-  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['conveyance-claim-access', 'can_view_conveyance_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
+  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['bill-claim-access', 'can_view_bill_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
   await api(SA, 'PUT', `/api/users/${uid}/feature-permissions`, { can_use_attendance: true });
   sql(`INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (${uid}, 10, 14, 0)`);
   return { emp: e.body.id, uid, name, token: await login(email, 'Pass12345') };
@@ -29,7 +29,7 @@ async function person(name, email) {
 const H = await person('Rafiq Head', 'rafiq.head@credence.test');
 // An HR admin with the Approvals module (Edit) and one with Conveyance.
 const hrId = (await api(SA, 'POST', '/api/users', { name: 'Nasrin HR', email: 'nasrin.r01@credence.test', password: 'Pass12345x', role: 'admin' })).body.id;
-await api(SA, 'PUT', `/api/users/${hrId}/module-permissions`, { modules: ['approvals', 'leave_applications', 'conveyance', 'attendance'] });
+await api(SA, 'PUT', `/api/users/${hrId}/module-permissions`, { modules: ['approvals', 'leave_applications', 'bill_claim', 'attendance'] });
 await api(SA, 'PUT', `/api/users/${hrId}/module-permission-layers`, { module: 'approvals', layers: ['read', 'edit_add'] });
 const HR = await login('nasrin.r01@credence.test', 'Pass12345x');
 const cats = (await api(H.token, 'GET', '/api/bill-claim-categories')).body;
@@ -37,9 +37,9 @@ const cat = list(cats)[0];
 console.log(`Setup: ${H.name} — no Direct Supervisor, Department has no Supervisor, no Approval Template for leave / conveyance / timesheet.\n`);
 
 const leave = await api(H.token, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: day(12), end_date: day(12), purpose: 'Family program' });
-const claim = await api(H.token, 'POST', '/api/user-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 420, description: 'CNG' }], description: 'Client visit' });
+const claim = await api(H.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 420, description: 'CNG' }], description: 'Client visit' });
 const ts = await api(H.token, 'POST', '/api/attendance/corrections', { project_id: proj.body.id, attendance_date: day(-2), check_in_at: `${day(-2)} 09:05:00`, check_out_at: `${day(-2)} 18:00:00`, remarks: 'Forgot to check in' });
-const items = [['leave_application', 'Leave', leave, 'leave_applications'], ['user_claim', 'Conveyance Bill Claim', claim, 'user_claims'], ['attendance_correction', 'Timesheet correction', ts, 'attendance_corrections']];
+const items = [['leave_application', 'Leave', leave, 'leave_applications'], ['bill_claim', 'Bill Claim', claim, 'bill_claims'], ['attendance_correction', 'Timesheet correction', ts, 'attendance_corrections']];
 let i = 0;
 for (const [type, label, r, table] of items) {
   i++;
@@ -50,7 +50,7 @@ for (const [type, label, r, table] of items) {
 }
 // What the employee sees.
 const myL = list((await api(H.token, 'GET', '/api/leave-applications/mine')).body)[0];
-const myC = list((await api(H.token, 'GET', '/api/user-claims/mine')).body)[0];
+const myC = list((await api(H.token, 'GET', '/api/bill-claims/mine')).body)[0];
 const myT = list((await api(H.token, 'GET', '/api/attendance/corrections/mine')).body)[0];
 say('4.1', 'What the employee sees on their own pages (no_approver = page shows "No approver set yet — tell HR")', `Leave: ${myL?.status}, no_approver=${myL?.no_approver}; Claim: ${myC?.status}, no_approver=${myC?.approval?.no_approver}; Timesheet: ${myT?.status}, no_approver=${myT?.approval?.no_approver}`);
 say('4.1b', 'Alert to the employee', `${sql(`SELECT COUNT(*) FROM alerts WHERE user_id=${H.uid} AND title='No approver set yet'`)} × "${sql(`SELECT message FROM alerts WHERE user_id=${H.uid} AND title='No approver set yet' LIMIT 1`)}"`);
@@ -76,10 +76,10 @@ say('5.4', 'HR tries the old direct Leave decision', `${direct.status} ${JSON.st
 const saTry = leaveReq ? await api(SA, 'POST', `/api/approvals/${leaveReq.id}/act`, { action: 'approved', remarks: 'Approved by Superadmin' }) : null;
 say('5.5', 'Superadmin approves the leave from Admin Panel → Approvals', `${saTry?.status} ${JSON.stringify(saTry?.body)}; leave now ${sql(`SELECT status FROM leave_applications WHERE id=${leave.body.id}`)}`);
 // Later: a Template appears for conveyance, a Supervisor for the person.
-const t = await api(SA, 'POST', '/api/approval-templates', { name: 'Conveyance — 1 layer', request_type: 'conveyance', is_default: true, is_active: true, steps: [{ approver_user_ids: [hrId], approver_type: 'admin', label: 'HR' }] });
+const t = await api(SA, 'POST', '/api/approval-templates', { name: 'Conveyance — 1 layer', request_type: 'bill_claim', is_default: true, is_active: true, steps: [{ approver_user_ids: [hrId], approver_type: 'admin', label: 'HR' }] });
 await api(HR, 'GET', '/api/my-approvals');
-const claimReq = sql(`SELECT CONCAT('awaiting_approver=',awaiting_approver,' template=',IFNULL(template_id,'none')) FROM approval_requests WHERE source_type='user_claim' AND source_id=${claim.body.id}`);
-const hrGot = list((await api(HR, 'GET', '/api/my-approvals')).body).some((r) => r.source_type === 'user_claim' && Number(r.source_id) === Number(claim.body.id));
+const claimReq = sql(`SELECT CONCAT('awaiting_approver=',awaiting_approver,' template=',IFNULL(template_id,'none')) FROM approval_requests WHERE source_type='bill_claim' AND source_id=${claim.body.id}`);
+const hrGot = list((await api(HR, 'GET', '/api/my-approvals')).body).some((r) => r.source_type === 'bill_claim' && Number(r.source_id) === Number(claim.body.id));
 say('6.1', 'Superadmin later adds a Conveyance Template (Layer 1 = HR) — the waiting claim moves?', `template ${t.status}; request now ${claimReq}; in HR's My Approvals: ${hrGot}; HR alerted "Approval waiting on you": ${sql(`SELECT COUNT(*) FROM alerts WHERE user_id=${hrId} AND title='Approval waiting on you'`)}`);
 const bossE = await api(SA, 'POST', '/api/employees', { name: 'Karim MD', designation: 'Managing Director', department_id: 5, joining_date: '2020-01-01', email: 'karim.md@credence.test', create_login: true, login_email: 'karim.md@credence.test', login_password: 'Pass12345' });
 await api(SA, 'POST', `/api/employees/${H.emp}/supervisors`, { supervisor_id: bossE.body.id, effective_date: '2024-01-01', is_direct: true });

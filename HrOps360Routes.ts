@@ -756,7 +756,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     const uid = Number(emp.user_id);
     const inYear = (d: any) => (toDate(d) || "").startsWith(String(year));
     const [claims, bills, items, moves] = await Promise.all([
-      rowsFor(queryDB, "user_claims", "user_id", uid),
+      rowsFor(queryDB, "bill_claims", "user_id", uid),
       rowsFor(queryDB, "conveyance_bills", "user_id", uid),
       queryDB("SELECT * FROM conveyance_bill_items").catch(() => []),
       rowsFor(queryDB, "claims", "user_id", uid)

@@ -192,7 +192,7 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
 
   // POST /api/profile/photo — base64 upload, same FileReader/Base64 ->
   // LONGBLOB pattern already used for Bill Claim attachments
-  // (user_claims.file_data) and Attendance Correction attachments — no
+  // (bill_claims.file_data) and Attendance Correction attachments — no
   // multipart/multer anywhere else in this app, so this doesn't introduce a
   // second upload mechanism.
   app.post("/api/profile/photo", authenticateToken, async (req: any, res) => {

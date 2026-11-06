@@ -40,7 +40,7 @@ interface AttendanceCorrectionModalProps {
   onSubmitted: () => void;
 }
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches NewConveyanceClaimModal's cap
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches NewBillClaimModal's cap
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
 
 // "YYYY-MM-DD HH:MM:SS"/ISO -> "HH:MM" for pre-filling an <input type="time">.
@@ -219,7 +219,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   };
 
   // Rendered via a portal straight onto document.body — same reasoning as
-  // NewConveyanceClaimModal/AttendanceMapConfirm: this gets opened from deep
+  // NewBillClaimModal/AttendanceMapConfirm: this gets opened from deep
   // inside Timesheet's tree, and a `position: fixed` element nested inside an
   // `overflow-hidden` ancestor doesn't reliably pin to the full screen on
   // Android WebViews otherwise.

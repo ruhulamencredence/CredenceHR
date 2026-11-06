@@ -6,24 +6,24 @@
 import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ClipboardList, Route, CreditCard, CalendarClock, Clock, ChevronRight } from 'lucide-react';
-import { LeaveApplication, ClaimRecord, UserClaim, AttendanceCorrection } from '../types';
+import { LeaveApplication, ClaimRecord, BillClaim, AttendanceCorrection } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 
 // Which UserPanel section a row opens — same values goToMobileSection takes
 // (these four drive the page on desktop too, not just mobile; see
 // showingClaimsPage in UserPanel.tsx).
-export type MyRequestTarget = 'claim' | 'conveyanceClaim' | 'leave' | 'timesheet';
+export type MyRequestTarget = 'claim' | 'billClaim' | 'leave' | 'timesheet';
 
 interface MyRequestsCardProps {
   token: string;
   // Each source endpoint is module-gated server-side
-  // (requireMovementClaimAccess / requireConveyanceClaimAccess /
+  // (requireMovementClaimAccess / requireBillClaimAccess /
   // requireTimesheetAccess), so a source this account isn't granted is never
   // fetched at all rather than fetched and 403'd. Leave Applications have no
   // such gate — every account can have them — so they're always fetched.
   canSeeMovementClaim: boolean;
-  canSeeConveyanceClaim: boolean;
+  canSeeBillClaim: boolean;
   canSeeTimesheet: boolean;
   onOpen: (target: MyRequestTarget) => void;
   // Applied to this card's own root, for the Dashboard grid's column span.
@@ -77,7 +77,7 @@ const NO_APPROVER = 'No approver set yet — tell HR';
 export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
   token,
   canSeeMovementClaim,
-  canSeeConveyanceClaim,
+  canSeeBillClaim,
   canSeeTimesheet,
   onOpen,
   className = ''
@@ -108,7 +108,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
       const [leaves, claims, conveyance, corrections] = await Promise.all([
         fetchMine<LeaveApplication>('/api/leave-applications/mine', true),
         fetchMine<ClaimRecord>('/api/claims/mine', canSeeMovementClaim),
-        fetchMine<UserClaim>('/api/user-claims/mine', canSeeConveyanceClaim),
+        fetchMine<BillClaim>('/api/bill-claims/mine', canSeeBillClaim),
         fetchMine<AttendanceCorrection>('/api/attendance/corrections/mine', canSeeTimesheet)
       ]);
       if (cancelled) return;
@@ -158,7 +158,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           })),
         ...conveyance.map((c) => ({
           key: `conveyance-${c.id}`,
-          target: 'conveyanceClaim' as const,
+          target: 'billClaim' as const,
           icon: CreditCard,
           title: 'Bill Claim',
           detail: `${c.category} · ৳${Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`,
@@ -193,7 +193,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet, liveTick]);
+  }, [token, canSeeMovementClaim, canSeeBillClaim, canSeeTimesheet, liveTick]);
 
   const waitingCount = rows.filter((r) => isWaiting(r.status)).length;
   const visible = rows.slice(0, MAX_ROWS);

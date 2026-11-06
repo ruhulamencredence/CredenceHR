@@ -33,7 +33,7 @@ type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 // Every Self Service switch that has an App tick (ModuleAccessPage.tsx FLAGS).
 export const APP_FLAG_KEYS = [
   "can_access_user_panel", "can_use_attendance", "can_use_tracking", "can_view_leave_summary", "can_edit_delivery_date",
-  "can_job_edit", "can_manage_leave", "can_view_movement_claims", "can_view_conveyance_claims", "can_view_budget_module",
+  "can_job_edit", "can_manage_leave", "can_view_movement_claims", "can_view_bill_claims", "can_view_budget_module",
   "can_view_timesheet", "can_view_leave_application", "can_view_group_dashboard", "can_view_tasks", "can_view_mobile_bill",
   "can_view_service_book", "can_view_loan_request", "can_view_targets", "can_use_ai_assistant", "can_export_assistant_reports",
   "can_handle_assistant_support", "can_use_calls", "can_use_chat", "can_use_mail", "can_view_mail_directory",

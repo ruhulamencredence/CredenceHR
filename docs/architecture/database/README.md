@@ -130,9 +130,9 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 ### F. Claims, Conveyance & Mobile Bill (17টি টেবিল)
 
-Movement claim, Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।
+Movement claim, Conveyance Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।
 
-মূল টেবিল: `claims`, `user_claims`, `conveyance_bills`, `mobile_sims`, `bill_claim_*`
+মূল টেবিল: `claims`, `bill_claims`, `conveyance_bills`, `mobile_sims`, `bill_claim_*`
 
 ![F. Claims, Conveyance & Mobile Bill](diagrams/f-claims-conveyance-mobile-bill.png)
 
@@ -140,7 +140,7 @@ Movement claim, Bill Claim (employee claim → approval → bill → disbursemen
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`bill_claim_categories`, `bill_claim_policy_history`, `bill_claim_policy_settings`, `claim_approval_signatures`, `claims`, `conveyance_bill_items`, `conveyance_bills`, `conveyance_claim_department_access`, `mobile_bills`, `mobile_limit_policies`, `mobile_limit_requests`, `mobile_sim_events`, `mobile_sims`, `user_claim_history`, `user_claim_items`, `user_claim_references`, `user_claims`
+`bill_claim_categories`, `bill_claim_department_access`, `bill_claim_history`, `bill_claim_items`, `bill_claim_policy_history`, `bill_claim_policy_settings`, `bill_claim_references`, `bill_claims`, `claim_approval_signatures`, `claims`, `conveyance_bill_items`, `conveyance_bills`, `mobile_bills`, `mobile_limit_policies`, `mobile_limit_requests`, `mobile_sim_events`, `mobile_sims`
 
 </details>
 

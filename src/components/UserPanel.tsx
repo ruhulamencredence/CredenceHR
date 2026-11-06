@@ -42,7 +42,7 @@ const NoticeBoard = React.lazy(() => import('./NoticeBoard').then((m) => ({ defa
 const Timesheet = React.lazy(() => import('./Timesheet').then((m) => ({ default: m.Timesheet })));
 const ClaimCard = React.lazy(() => import('./ClaimCard').then((m) => ({ default: m.ClaimCard })));
 const MyClaimsCard = React.lazy(() => import('./MyClaimsCard').then((m) => ({ default: m.MyClaimsCard })));
-const ConveyanceClaimCard = React.lazy(() => import('./ConveyanceClaimCard').then((m) => ({ default: m.ConveyanceClaimCard })));
+const BillClaimCard = React.lazy(() => import('./BillClaimCard').then((m) => ({ default: m.BillClaimCard })));
 import { BottomNav } from './BottomNav';
 import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -1043,10 +1043,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const trackingStatus = useTrackingStatus(token, canSeeTracking, true);
   const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
-  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
+  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'billClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
         const saved = localStorage.getItem(userSectionStorageKey);
+        // Phones that had the Bill Claim page open before it was renamed.
+        if (saved === 'conveyanceClaim') return 'billClaim';
         return (saved as any) || null;
       } catch {
         return null;
@@ -1081,7 +1083,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         ? 'Job Edit'
         : mobileActiveSection === 'claim' || mobileActiveSection === 'claims'
         ? 'Check In/Out'
-        : mobileActiveSection === 'conveyanceClaim'
+        : mobileActiveSection === 'billClaim'
         ? 'Bill Claim'
         : mobileActiveSection === 'noticeBoard'
         ? 'Notice Board'
@@ -1117,7 +1119,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const tabScroll = useRef<Record<string, number>>({});
   const goToMobileSection = (section: typeof mobileActiveSection) => {
     const order = (x: typeof mobileActiveSection) =>
-      x === null ? 0 : x === 'claim' || x === 'claims' || x === 'conveyanceClaim' ? 1 : x === 'timesheet' ? 2 : x === 'leave' || x === 'employeeDirectory' ? 3 : 1.5;
+      x === null ? 0 : x === 'claim' || x === 'claims' || x === 'billClaim' ? 1 : x === 'timesheet' ? 2 : x === 'leave' || x === 'employeeDirectory' ? 3 : 1.5;
     const isTab = (x: typeof mobileActiveSection) => x === null || x === 'claim' || x === 'timesheet' || x === 'leave' || x === 'employeeDirectory';
     // The tab already open: just back to its top, as before.
     if (section === mobileActiveSection) return void window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1149,29 +1151,29 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const showingClaimsPage =
     mobileActiveSection === 'claim' ||
     mobileActiveSection === 'claims' ||
-    mobileActiveSection === 'conveyanceClaim' ||
+    mobileActiveSection === 'billClaim' ||
     mobileActiveSection === 'leave' ||
     mobileActiveSection === 'timesheet' ||
     mobileActiveSection === 'employeeDirectory' ||
     mobileActiveSection === 'noticeBoard';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
   // sees Check In/Out / Bill Claim once the Superadmin has granted
-  // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
+  // can_view_movement_claims / can_view_bill_claims (Admin Panel -> Users
   // -> Module Access). A Superadmin always sees both. Used to hide the mobile
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
   // from opening at all (e.g. a stale nav request) without the grant.
   const canSeeMovementClaim = user.role === 'superadmin' || !!user.can_view_movement_claims;
-  // Holding the Bill Claim ("conveyance") Admin module counts too — that's
+  // Holding the Bill Claim ("bill_claim") Admin module counts too — that's
   // where those accounts see their own claims.
-  const canSeeConveyanceClaim =
-    user.role === 'superadmin' || !!user.can_view_conveyance_claims || (user.module_permissions || []).includes('conveyance');
+  const canSeeBillClaim =
+    user.role === 'superadmin' || !!user.can_view_bill_claims || (user.module_permissions || []).includes('bill_claim');
   // Same Superadmin-gated pattern as the two above, but ON by default (see
   // types.ts) — covers the "Select a Budget", "Jobs" and "Job Entry Details"
   // mobile tiles, the matching BottomNav tabs, and the desktop Navbar/
   // GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items. Job Edit stays
   // on its own separate can_job_edit gate.
   const canSeeBudgetModule = user.pepm_enabled !== false && (user.role === 'superadmin' || user.can_view_budget_module !== false);
-  // Superadmin-gated, same as can_view_movement_claims/can_view_conveyance_claims
+  // Superadmin-gated, same as can_view_movement_claims/can_view_bill_claims
   // above — OFF by default, granted per account via Admin Panel -> Users ->
   // Module Access (PUT /api/users/:id/timesheet-access). Also mirrored in
   // GlobalSidebar's selfServiceItems.
@@ -1264,7 +1266,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   useEffect(() => {
     if ((mobileActiveSection === 'claim' || mobileActiveSection === 'claims') && !canSeeMovementClaim) {
       setMobileActiveSection(null);
-    } else if (mobileActiveSection === 'conveyanceClaim' && !canSeeConveyanceClaim) {
+    } else if (mobileActiveSection === 'billClaim' && !canSeeBillClaim) {
       setMobileActiveSection(null);
     } else if (
       (mobileActiveSection === 'budget' || mobileActiveSection === 'jobs' || mobileActiveSection === 'entries') &&
@@ -1281,7 +1283,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       setMobileActiveSection(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule, canSeeTimesheet, canSeeLeave]);
+  }, [canSeeMovementClaim, canSeeBillClaim, canSeeBudgetModule, canSeeTimesheet, canSeeLeave]);
   // Check In/Out page: the "Add Check In/Out" floating button opens the actual
   // Check In/Out form in a sheet (see below); claimListRefreshKey bumps every
   // time that form reports a successful Check In/Out, so MyClaimsCard's list
@@ -1313,8 +1315,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   useEffect(() => {
     if (!claimsNavRequest || !isLatestNav(claimsNavRequest)) return;
     const wantsMovement = claimsNavRequest.target === 'movementClaims';
-    if (wantsMovement ? !canSeeMovementClaim : !canSeeConveyanceClaim) return;
-    setMobileActiveSection(wantsMovement ? 'claim' : 'conveyanceClaim');
+    if (wantsMovement ? !canSeeMovementClaim : !canSeeBillClaim) return;
+    setMobileActiveSection(wantsMovement ? 'claim' : 'billClaim');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsNavRequest]);
@@ -1369,7 +1371,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // showingClaimsPage while any of these four standalone pages is open.
   const showingMainGroupPage = desktopActiveSection !== 'dashboard';
   // Same isNativeApp split every other ModulePath breadcrumb uses (Timesheet,
-  // Leave Application, ConveyanceClaimCard, etc.) — the "Main / X" trail below
+  // Leave Application, BillClaimCard, etc.) — the "Main / X" trail below
   // is a web-only affordance, desktop only (mobile already has its own "Back
   // to Menu" header for these same sections).
   const isNativeApp = Capacitor.isNativePlatform();
@@ -3123,7 +3125,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       : []),
     ...(user.can_job_edit ? [{ key: 'jobEdit', label: 'Job Edit', icon: Edit2, tileBg: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => goToMobileSection('jobEdit') }] : []),
     ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Check In/Out', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
-    ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
+    ...(canSeeBillClaim ? [{ key: 'billClaim', label: 'Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('billClaim') }] : []),
     { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, tileBg: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => goToMobileSection('employeeDirectory') },
     ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
     ...(onOpenMyAsset ? [{ key: 'myAsset', label: 'My Asset', icon: Package, badge: assetSummary?.awaitingAck || 0, badgeBg: 'bg-green-600', tileBg: 'from-lime-100/70 via-white/50 to-green-50/40', iconBg: 'from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)]', onClick: () => onOpenMyAsset('my-assets') }] : []),
@@ -3268,7 +3270,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <MyRequestsCard
           token={token}
           canSeeMovementClaim={canSeeMovementClaim}
-          canSeeConveyanceClaim={canSeeConveyanceClaim}
+          canSeeBillClaim={canSeeBillClaim}
           canSeeTimesheet={canSeeTimesheet}
           onOpen={(target) => goToMobileSection(target)}
           className="md:col-span-2 xl:col-span-3"
@@ -3340,10 +3342,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           from the GPS-based Check In/Out above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
-      {canSeeConveyanceClaim && seen('conveyanceClaim') && (
-      <div className={mobileActiveSection === 'conveyanceClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {canSeeBillClaim && seen('billClaim') && (
+      <div className={mobileActiveSection === 'billClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
-        <ConveyanceClaimCard token={token} onBack={() => goToMobileSection(null)} />
+        <BillClaimCard token={token} onBack={() => goToMobileSection(null)} />
         </React.Suspense>
       </div>
       )}

@@ -55,7 +55,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_access_user_panel: 'User Panel access',
   can_manage_leave: 'Leave balance edit',
   can_view_movement_claims: 'Check In/Out',
-  can_view_conveyance_claims: 'Bill Claim',
+  can_view_bill_claims: 'Bill Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
   can_use_chat: 'Chat',
@@ -385,7 +385,7 @@ export function UserAccessDrawer({
     { label: 'Loan / Advance Request', on: !!u.can_view_loan_request },
     { label: 'My Targets', on: !!u.can_view_targets },
     { label: 'Check In/Out', on: !!u.can_view_movement_claims },
-    { label: 'Bill Claim', on: !!u.can_view_conveyance_claims },
+    { label: 'Bill Claim', on: !!u.can_view_bill_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
 

@@ -15,7 +15,7 @@ import { LeaveGauge, LeavePhoneCard, LeaveTypeInfo, leaveTypeStyle } from './Lea
 
 interface LeaveReviewPageProps {
   token: string;
-  // Same "Back to Menu" pattern MyClaimsCard/ConveyanceClaimCard already use —
+  // Same "Back to Menu" pattern MyClaimsCard/BillClaimCard already use —
   // this page takes over the whole screen (mobile tile-menu section and/or
   // desktop nav target) same as those, so it's always passed here.
   onBack: () => void;

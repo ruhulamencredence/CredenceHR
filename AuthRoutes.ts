@@ -100,7 +100,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -135,7 +135,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
         can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
         can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
-        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
+        can_view_bill_claims: u.role === "superadmin" ? true : !!Number(u.can_view_bill_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
@@ -309,7 +309,7 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // 'admin' and 'user' roles, same pattern as can_manage_leave above —
       // OFF (hidden) until the Superadmin explicitly grants it.
       can_view_movement_claims: user.role === "superadmin" ? true : !!Number(user.can_view_movement_claims),
-      can_view_conveyance_claims: user.role === "superadmin" ? true : !!Number(user.can_view_conveyance_claims),
+      can_view_bill_claims: user.role === "superadmin" ? true : !!Number(user.can_view_bill_claims),
       // Superadmin-granted (or implicit for the Superadmin itself, and ON
       // by default for everyone else — see the ALTER TABLE): can this
       // account see/use "Select a Budget", "Jobs" and "Job Entry Details"

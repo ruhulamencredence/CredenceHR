@@ -20,7 +20,7 @@ import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
-import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
+import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
@@ -41,6 +41,7 @@ import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
 import { ensureFeedbackSchema, registerFeedbackRoutes } from "./FeedbackRoutes";
 import { ensureFingerprintSchema, registerFingerprintRoutes } from "./FingerprintRoutes";
 import { ensureSchemaMigrations } from "./schemaMigrations";
+import { renameConveyanceClaimToBillClaim } from "./billClaimRename";
 import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
 import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
 import { registerOfficeAttendanceRoutes } from "./OfficeAttendanceRoutes";
@@ -96,7 +97,7 @@ import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
-import { recordClaimHistory } from "./ConveyanceClaimHistory";
+import { recordClaimHistory } from "./BillClaimHistory";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
 import { companyStore, activeCompanyId, activeGroupId, type CompanyContext } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
@@ -278,6 +279,9 @@ async function initDB() {
     isMySQLConnected = true;
     connection.release();
     await bootstrapBaseSchema(dbPool);
+    // Old "Conveyance claim" tables / keys -> Bill Claim, before anything
+    // below creates the new names empty (billClaimRename.ts).
+    await renameConveyanceClaimToBillClaim(dbPool);
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
@@ -364,7 +368,7 @@ async function initDB() {
 
 // Every Admin Panel tab, gated per-Admin by the Superadmin. Kept as a single source
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
-const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
+const BILL_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
 // 'vehicle_maintainer' — deliberately separate from 'vehicle_management':
 // grants ONLY the Vehicle Requisition bypass actions in
@@ -373,7 +377,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -386,7 +390,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -439,7 +443,7 @@ const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice
 // Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
-const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
+const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // HR Operations: "read" = the module as it was; New Joiner Onboarding
 // (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
 // application and its temporary login), "onboarding_review" (see, reject,
@@ -528,7 +532,7 @@ const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_catego
 // it — the account also needs the HR Data Import module and that kind's tick
 // here. All explicit-only: an account with no saved layers gets none.
 // (Salary import keeps its own explicit Payroll layer "salary_bulk_upload".)
-const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_conveyance", "import_attendance", "import_office_attendance"] as const;
+const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_bill_claims", "import_attendance", "import_office_attendance"] as const;
 const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
@@ -548,7 +552,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
   notices: NOTICE_LAYER_KEYS,
-  conveyance: CONVEYANCE_LAYER_KEYS,
+  bill_claim: BILL_CLAIM_LAYER_KEYS,
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
   target_reports: TARGET_LAYER_KEYS,
@@ -689,14 +693,14 @@ async function getLeaveApplicationDeptScope(userId: number): Promise<string[] | 
   }
 }
 
-// Department-wise scope for the 'conveyance' module — same shape and same
+// Department-wise scope for the 'bill_claim' module — same shape and same
 // "no rows = unrestricted" convention as getAttendanceReportDeptScope/
 // getLeaveApplicationDeptScope above, backed by
-// conveyance_claim_department_access instead. See that table's comment in
+// bill_claim_department_access instead. See that table's comment in
 // initDB() for the full design.
-async function getConveyanceClaimDeptScope(userId: number): Promise<string[] | null> {
+async function getBillClaimDeptScope(userId: number): Promise<string[] | null> {
   try {
-    const rows: any = await queryDB("SELECT department FROM conveyance_claim_department_access WHERE user_id = ?", [userId]);
+    const rows: any = await queryDB("SELECT department FROM bill_claim_department_access WHERE user_id = ?", [userId]);
     if (rows.length === 0) return null;
     return rows.map((r: any) => r.department);
   } catch {
@@ -722,7 +726,7 @@ async function getApprovalChain(): Promise<any[]> {
 // — the workflow is non-blocking, so a failure here must never undo or block the
 // User's actual check-in/out. If no chain is configured yet, this is a no-op.
 async function createApprovalRequest(
-  sourceType: "attendance" | "claim" | "user_claim",
+  sourceType: "attendance" | "claim" | "bill_claim",
   eventType: "check_in" | "check_out" | "submit",
   sourceId: number,
   requestedBy: number
@@ -760,7 +764,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -887,7 +891,7 @@ async function inactiveUserIds(ids: number[]): Promise<Set<number>> {
 // Creates a Template-driven approval_requests row for a just-submitted
 // Conveyance/Timesheet request, OR reports back that no Template applies at
 // all (autoApproved: true) so the caller finalizes the request immediately
-// instead — see the two POST /api/user-claims and POST
+// instead — see the two POST /api/bill-claims and POST
 // /api/attendance/corrections call sites below for how that edge case is
 // actually handled (each source type finalizes differently).
 //
@@ -902,8 +906,8 @@ async function inactiveUserIds(ids: number[]): Promise<Set<number>> {
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
+  requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
+  sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
   sourceId: number,
   requestedBy: number,
   // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
@@ -982,8 +986,8 @@ async function createTemplateApprovalRequest(
 // Supervisor or Template exists for that employee later, the request moves
 // to it (step 1) and that approver is alerted. Runs when an approvals list
 // is opened, when the request's approver is looked up, and every 10 minutes.
-const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
-  user_claim: "conveyance",
+const APPROVAL_REQUEST_TYPE: Record<string, "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
+  bill_claim: "bill_claim",
   attendance_correction: "timesheet",
   leave_application: "leave",
   asset_requisition: "asset",
@@ -992,7 +996,7 @@ const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet"
   advance_request: "loan"
 };
 const APPROVAL_ALERT: Record<string, { type: AlertType; label: string }> = {
-  user_claim: { type: "conveyance_approval", label: "Bill Claim" },
+  bill_claim: { type: "bill_claim_approval", label: "Bill Claim" },
   attendance_correction: { type: "hr_action", label: "Attendance Correction" },
   leave_application: { type: "leave_approval", label: "Leave Application" },
   asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
@@ -1178,7 +1182,7 @@ async function reconcileOneApproval(r: any): Promise<number> {
     createAlert(queryDB, { userId, type: alertType, title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
   // The employee's own alert opens their own request, not Approve Application.
   const REQUESTER_TYPE: Record<string, AlertType> = {
-    user_claim: "conveyance_claim",
+    bill_claim: "bill_claim",
     attendance_correction: "hr_action",
     leave_application: "leave_application",
     asset_requisition: "asset_requisition",
@@ -1342,7 +1346,7 @@ async function isVehicleMaintainerStep(request: any): Promise<boolean> {
 async function isAssetFulfillerStep(request: any): Promise<boolean> {
   return (await getCurrentTemplateStepType(request)) === "asset_fulfiller";
 }
-// Conveyance counterpart — a 'conveyance' Template's last Layer set to
+// Conveyance counterpart — a 'bill_claim' Template's last Layer set to
 // 'conveyance_disburser': that approver pays the claim out (Bill + voucher)
 // instead of only approving it. See performApprovalAction.
 async function isConveyanceDisburserStep(request: any): Promise<boolean> {
@@ -1446,10 +1450,10 @@ async function performApprovalAction(
 
   // Bill Claim review rules (Bill Claim Policy -> Editing & review).
   let claimPolicy: any = null;
-  if (request.source_type === "user_claim") {
+  if (request.source_type === "bill_claim") {
     claimPolicy = await loadBillClaimPolicy(queryDB);
     if (claimOpts.claimVersion != null) {
-      const v = await queryDB("SELECT version FROM user_claims WHERE id = ?", [request.source_id]);
+      const v = await queryDB("SELECT version FROM bill_claims WHERE id = ?", [request.source_id]);
       if (v.length > 0 && Number(v[0].version || 1) !== Number(claimOpts.claimVersion)) {
         throw new ApprovalActionError(409, "The employee changed this claim after you opened it — reload it and check the changes first.");
       }
@@ -1486,19 +1490,19 @@ async function performApprovalAction(
       [JSON.stringify(trail), requestId, Number(request.current_step)]
     );
     if (back && back.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
-    await queryDB("UPDATE user_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
+    await queryDB("UPDATE bill_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
     await recordClaimHistory(queryDB, Number(request.source_id), "returned", { id: actorUser.id, name: actorUser.name }, remarks);
     try {
-      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM user_claims WHERE id = ?", [request.source_id]);
+      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM bill_claims WHERE id = ?", [request.source_id]);
       const uc = ucRows[0];
       const notifyIds = [...new Set([Number(uc?.user_id), Number(uc?.filed_by || 0)].filter((x) => x > 0))];
       for (const uid of notifyIds) {
         await createAlert(queryDB, {
           userId: uid,
-          type: "conveyance_claim",
+          type: "bill_claim",
           title: "Bill Claim Returned",
           message: `${actorUser.name} returned Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
-          relatedType: "user_claim",
+          relatedType: "bill_claim",
           relatedId: Number(request.source_id)
         });
       }
@@ -1511,7 +1515,7 @@ async function performApprovalAction(
   // own new Bill (never folded into an existing one) and that Bill is marked
   // disbursed in the same action.
   const disburseOnApprove =
-    request.source_type === "user_claim" &&
+    request.source_type === "bill_claim" &&
     action === "approved" &&
     Number(request.current_step) >= Number(request.total_steps) &&
     (await isConveyanceDisburserStep(request));
@@ -1524,8 +1528,8 @@ async function performApprovalAction(
   }
 
   // Approved Amount history (for the Admin's Bill Claim "History" —
-  // ConveyanceBillPanel.tsx's UserClaimDetailModal): only meaningful for a
-  // 'user_claim' Approve. Records the amount THIS Layer actually decided
+  // ConveyanceBillPanel.tsx's AdminBillClaimDetailModal): only meaningful for a
+  // 'bill_claim' Approve. Records the amount THIS Layer actually decided
   // (whatever was submitted, or whatever was already on record if they left
   // it untouched) and whether that's a change from what was on record
   // immediately before this action — so "who approved" and "how many times
@@ -1534,8 +1538,8 @@ async function performApprovalAction(
   // table.
   let actionApprovedAmount: number | null = null;
   let actionAmountEdited = false;
-  if (request.source_type === "user_claim" && action === "approved") {
-    const ucRows = await queryDB("SELECT amount, approved_amount FROM user_claims WHERE id = ?", [request.source_id]);
+  if (request.source_type === "bill_claim" && action === "approved") {
+    const ucRows = await queryDB("SELECT amount, approved_amount FROM bill_claims WHERE id = ?", [request.source_id]);
     if (ucRows.length > 0) {
       // Checked before anything is written, so a refused amount leaves the
       // request exactly where it was.
@@ -1588,7 +1592,7 @@ async function performApprovalAction(
   if (moved && moved.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
   // Bill Claim: keep this approver's signature with this approval
   // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
-  if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
+  if (request.source_type === "bill_claim" && action === "approved" && claimPolicy?.approver_signature) {
     try {
       const sig: any[] = (await queryDB("SELECT image FROM user_signatures WHERE user_id = ?", [actorUser.id])) || [];
       if (sig[0]?.image) {
@@ -1605,29 +1609,29 @@ async function performApprovalAction(
   // other tabs refresh at once, even when this layer sends no alert.
   notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
 
-  // Only a 'user_claim' request actually gates something further — a
+  // Only a 'bill_claim' request actually gates something further — a
   // Bill Claim only becomes a real Bill line item the moment its
   // request finishes 'approved' here (the LAST step), and is freed up again
   // the moment it's 'rejected' (at any step). Attendance/Check In/Out are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
   let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
-  if (request.source_type === "user_claim") {
+  if (request.source_type === "bill_claim") {
     try {
       if (newStatus === "approved") {
-        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
+        billInfo = await finalizeBillClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
         if (disburseOnApprove) {
           billInfo.voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, billInfo.bill_id, actorUser.id, voucherNo);
         }
       } else if (newStatus === "rejected") {
-        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
+        await rejectBillClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
       } else if (action === "approved" && approvedAmount != null) {
         // Approved on a NON-final step (e.g. the Supervisor auto-layer at
         // step 1 of a multi-step chain) with an Approved Amount edit — same
         // capability the last step already had, just recorded as a running
         // draft instead of finalizing a Bill line item yet. See
-        // updateUserClaimApprovedAmountDraft.
-        await updateUserClaimApprovedAmountDraft(Number(request.source_id), approvedAmount);
+        // updateBillClaimApprovedAmountDraft.
+        await updateBillClaimApprovedAmountDraft(Number(request.source_id), approvedAmount);
       }
     } catch (finalizeErr: any) {
       // The Approval Request itself already recorded above — surface the
@@ -1757,11 +1761,11 @@ async function attachApprovalStatuses(sourceType: "attendance" | "claim", rows: 
 // now, while still 'pending') and the request's actions trail — same
 // enrichment attachAttendanceCorrectionApproval does for Timesheet — so a User
 // can tell exactly which Layer their Bill Claim is waiting on.
-async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
+async function attachBillClaimApproval(rows: any[]): Promise<any[]> {
   if (rows.length === 0) return rows;
   let requests: any[] = [];
   try {
-    requests = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["user_claim"]);
+    requests = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["bill_claim"]);
   } catch {
     requests = [];
   }
@@ -1794,7 +1798,7 @@ async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
   );
 }
 
-// Same idea as attachUserClaimApproval above, but for Attendance Correction
+// Same idea as attachBillClaimApproval above, but for Attendance Correction
 // requests (single Approval Request per request, event_type 'submit').
 // Additionally resolves current_approver_name (who the request is sitting
 // with right now, while still 'pending') and the request's actions trail —
@@ -2080,18 +2084,18 @@ async function rejectVehicleRequisitionRecord(requisitionId: number, rejectedBy:
 
 // Actually attaches an Approved User Claim onto a Conveyance Bill as a line item
 // (creating a new Bill for that User if billId isn't given) and flips the claim to
-// 'approved'. Shared by two callers: POST /api/user-claims/:id/decision (the
+// 'approved'. Shared by two callers: POST /api/bill-claims/:id/decision (the
 // no-chain-configured / legacy single-step path) and POST /api/approvals/:id/act
-// (the moment the LAST step of a configured chain approves a 'user_claim'
+// (the moment the LAST step of a configured chain approves a 'bill_claim'
 // request). Throws on any problem — callers decide how to surface that.
-async function finalizeUserClaimApproval(
-  userClaimId: number,
+async function finalizeBillClaimApproval(
+  billClaimId: number,
   approvedBy: number,
   billId: number | null,
   remarks: string | null,
   approvedAmount?: number | null
 ) {
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length === 0) throw new Error("Claim not found");
   const uc = rows[0];
   if (uc.status !== "pending") throw new Error("This claim has already been reviewed.");
@@ -2099,10 +2103,10 @@ async function finalizeUserClaimApproval(
   // Approver may partially approve — Approved Amount must be a positive number
   // no greater than what was actually claimed. Falls back to whatever an
   // EARLIER Layer already set as a running draft (see
-  // updateUserClaimApprovedAmountDraft — e.g. the Supervisor auto-layer
+  // updateBillClaimApprovedAmountDraft — e.g. the Supervisor auto-layer
   // editing it at step 1 of a multi-step chain), and only falls back further
   // to the full Claim Amount when nobody has touched it yet (also covers the
-  // legacy /api/user-claims/:id/decision path, which never supports partial
+  // legacy /api/bill-claims/:id/decision path, which never supports partial
   // approval).
   let finalAmount = uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount);
   if (approvedAmount != null) {
@@ -2134,39 +2138,39 @@ async function finalizeUserClaimApproval(
     String(uc.from_date) !== String(uc.to_date)
       ? `Covers ${toDateOnlyString(uc.from_date)} to ${toDateOnlyString(uc.to_date)}.`
       : null;
-  const refRows = await queryDB("SELECT claim_id FROM user_claim_references WHERE user_claim_id = ?", [uc.id]);
+  const refRows = await queryDB("SELECT claim_id FROM bill_claim_references WHERE bill_claim_id = ?", [uc.id]);
   const refNote = refRows.length > 0 ? `Includes ${refRows.length} referenced check-in/out(s).` : null;
   const itemRemarks = [dateRangeNote, refNote, remarks].filter(Boolean).join(" ") || null;
 
   const item = await queryDB(
     `INSERT INTO conveyance_bill_items
-       (bill_id, source, user_claim_id, entry_date, particulars, amount, remarks)
-     VALUES (?, 'user_claim', ?, ?, ?, ?, ?)`,
+       (bill_id, source, bill_claim_id, entry_date, particulars, amount, remarks)
+     VALUES (?, 'bill_claim', ?, ?, ?, ?, ?)`,
     [targetBillId, uc.id, toDateOnlyString(uc.claim_date), particulars, finalAmount, itemRemarks]
   );
 
   await queryDB(
-    "UPDATE user_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
-    [finalAmount, remarks, approvedBy, userClaimId]
+    "UPDATE bill_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
+    [finalAmount, remarks, approvedBy, billClaimId]
   );
-  await notifyUserClaimDecision(uc, "approved", finalAmount, remarks);
+  await notifyBillClaimDecision(uc, "approved", finalAmount, remarks);
 
   return { bill_id: Number(targetBillId), bill_item_id: Number(item.insertId) };
 }
 
 // Tells the claimant their Bill Claim was approved or rejected.
-async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
+async function notifyBillClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
   try {
     const amt = amount != null ? `\u09f3${Number(amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
     await createAlert(queryDB, {
       userId: Number(uc.user_id),
-      type: "conveyance_claim",
+      type: "bill_claim",
       title: decision === "approved" ? "Bill Claim Approved" : "Bill Claim Rejected",
       message:
         decision === "approved"
           ? `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) has been approved${amt ? ` for ${amt}` : ""}.${remarks ? ` Remarks: ${remarks}` : ""}`
           : `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
-      relatedType: "user_claim",
+      relatedType: "bill_claim",
       relatedId: Number(uc.id)
     });
   } catch (err: any) {
@@ -2175,21 +2179,21 @@ async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected
 }
 
 // Records an Approved Amount edit made at a NON-final step of a still-pending
-// 'user_claim' chain (e.g. the Department/Direct Supervisor auto-layer at
+// 'bill_claim' chain (e.g. the Department/Direct Supervisor auto-layer at
 // step 1 of a 2+ step chain, or any earlier Template Layer) — same Approved
-// Amount capability the LAST step already had via finalizeUserClaimApproval,
+// Amount capability the LAST step already had via finalizeBillClaimApproval,
 // just without creating a Bill line item yet, since the claim isn't decided
 // until the chain finishes. The value is stored as a running draft on
-// user_claims.approved_amount so it carries forward as the next Layer's
+// bill_claims.approved_amount so it carries forward as the next Layer's
 // pre-fill (GET /api/my-approvals' source_approved_amount) and as
-// finalizeUserClaimApproval's own fallback if the LAST approver doesn't
-// change it. Same validation as finalizeUserClaimApproval: positive, and
+// finalizeBillClaimApproval's own fallback if the LAST approver doesn't
+// change it. Same validation as finalizeBillClaimApproval: positive, and
 // never more than the Claim Amount. No-ops quietly if the claim was somehow
 // already decided by the time this runs (status changed underneath it) or
 // the row is gone — the Approval Request's own step still advanced either
 // way, this only affects the pre-fill an approver later sees.
-async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedAmount: number) {
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+async function updateBillClaimApprovedAmountDraft(billClaimId: number, approvedAmount: number) {
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length === 0) return;
   const uc = rows[0];
   if (uc.status !== "pending") return;
@@ -2200,11 +2204,11 @@ async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedA
   }
   assertWithinApprovedCap(uc, amt);
 
-  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+  await queryDB("UPDATE bill_claims SET approved_amount = ? WHERE id = ?", [amt, billClaimId]);
 }
 
 // A Layer may cut a claim's amount but never raise it: the ceiling is what the
-// previous Layer approved (user_claims.approved_amount, the running draft), or
+// previous Layer approved (bill_claims.approved_amount, the running draft), or
 // the Claim Amount when no Layer has set one yet.
 function assertWithinApprovedCap(uc: any, amt: number) {
   const prior = uc.approved_amount != null ? Number(uc.approved_amount) : null;
@@ -2221,20 +2225,20 @@ function assertWithinApprovedCap(uc: any, amt: number) {
 // Rejects a User Claim — frees up any referenced check-in/out(s) (a rejected claim
 // never becomes a Bill line item, so there's no reason to keep them unavailable)
 // and marks the claim 'rejected'. Shared by the same two callers as
-// finalizeUserClaimApproval above.
+// finalizeBillClaimApproval above.
 // allowReclaim: the approver ticked "Allow re-claim" — the employee may edit
 // and resubmit this same claim (its check-in/outs stay with it). Otherwise the
 // rejection is final: its check-in/outs are freed, its dates stay closed.
-async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
-  if (!allowReclaim) await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
+async function rejectBillClaimRecord(billClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
+  if (!allowReclaim) await queryDB("DELETE FROM bill_claim_references WHERE bill_claim_id = ?", [billClaimId]);
   await queryDB(
-    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
-    [remarks, rejectedBy, allowReclaim ? 1 : 0, userClaimId]
+    "UPDATE bill_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
+    [remarks, rejectedBy, allowReclaim ? 1 : 0, billClaimId]
   );
-  await recordClaimHistory(queryDB, userClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  await recordClaimHistory(queryDB, billClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length > 0) {
-    await notifyUserClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
+    await notifyBillClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
   }
 }
 
@@ -2243,7 +2247,7 @@ async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, re
 // so approving here only flips status + notifies the applicant; nothing else
 // to move. Shared by the no-Template auto-approve edge case and
 // performApprovalAction's LAST-step approval — same pattern as
-// finalizeAttendanceCorrection/finalizeUserClaimApproval above.
+// finalizeAttendanceCorrection/finalizeBillClaimApproval above.
 // --- Leave Type helpers (fixed Casual/Sick/Leave-without-Pay + custom Leave
 // Categories) ---
 // leave_applications.leave_type (and, before it, POST /api/leave-applications'
@@ -3066,7 +3070,7 @@ async function startServer() {
             ? ["read", "approval_sheet", "month_compare", "top_sheet"]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3100,7 +3104,7 @@ async function startServer() {
         ? ["read", "approval_sheet", "month_compare", "top_sheet"]
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3178,17 +3182,17 @@ async function startServer() {
   };
 
   // Bill Claim self-service routes — same pattern as
-  // requireMovementClaimAccess above, gated by can_view_conveyance_claims.
-  // Anyone holding the Bill Claim ("conveyance") Admin module also passes, so
+  // requireMovementClaimAccess above, gated by can_view_bill_claims.
+  // Anyone holding the Bill Claim ("bill_claim") Admin module also passes, so
   // they file / see their own claims from Self Service like everyone else.
-  const requireConveyanceClaimAccess = async (req: any, res: any, next: any) => {
+  const requireBillClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
-      const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
-      if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return next();
-      if ((await getAdminModules(req.user.id)).includes("conveyance")) return next();
+      const rows: any = await queryDB("SELECT can_view_bill_claims FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && !!Number(rows[0].can_view_bill_claims)) return next();
+      if ((await getAdminModules(req.user.id)).includes("bill_claim")) return next();
       return res.status(403).json({ error: "You don't have access to Bill Claim. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3532,7 +3536,7 @@ async function startServer() {
         ? getAttendanceReportDeptScope(userId)
         : kind === "leave"
           ? getLeaveApplicationDeptScope(userId)
-          : getConveyanceClaimDeptScope(userId)
+          : getBillClaimDeptScope(userId)
   });
   // Information requests: ask employees for missing documents / nominee /
   // emergency contact; HR approves each submission before it is recorded.
@@ -3566,14 +3570,14 @@ async function startServer() {
 
   // Bill Claim (Admin Panel -> Conveyance, Conveyance
   // Disbursement, and the User Panel's own self-service card) — kept in its
-  // own file (ConveyanceBillClaimRoutes.ts), same reasoning as
+  // own file (BillClaimRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts above.
-  registerConveyanceBillClaimRoutes(app, {
+  registerBillClaimRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
     requireAnyModule,
-    requireConveyanceClaimAccess,
+    requireBillClaimAccess,
     requireModuleLayer,
     hasModuleLayer,
     queryDB,
@@ -3582,16 +3586,16 @@ async function startServer() {
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     attachApprovalStatuses,
-    attachUserClaimApproval,
-    finalizeUserClaimApproval,
-    rejectUserClaimRecord,
+    attachBillClaimApproval,
+    finalizeBillClaimApproval,
+    rejectBillClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    getConveyanceClaimDeptScope
+    getBillClaimDeptScope
   });
 
   // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
-  registerBillClaimPolicyRoutes(app, { authenticateToken, requireConveyanceClaimAccess, queryDB, getAdminModules, todayInDhaka });
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template
@@ -3648,7 +3652,7 @@ async function startServer() {
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/
-  // ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts/LeaveRoutes.ts above.
+  // BillClaimRoutes.ts/AttendanceRoutes.ts/LeaveRoutes.ts above.
   registerEntriesRoutes(app, {
     authenticateToken,
     requireAdmin,
@@ -3666,7 +3670,7 @@ async function startServer() {
 
   // Self Service -> Leave Balances & Leave Applications — kept in its own
   // file (LeaveRoutes.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
-  // Alerts.ts/UserManagement.ts/ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts
+  // Alerts.ts/UserManagement.ts/BillClaimRoutes.ts/AttendanceRoutes.ts
   // above.
   ({ ensureDefaultLeaveBalances } = registerLeaveRoutes(app, {
     authenticateToken,

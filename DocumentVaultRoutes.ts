@@ -11,7 +11,7 @@
 //                          (Appointment Letter, ID copy, contract, etc.),
 //                          file bytes stored the same base64 -> LONGBLOB way
 //                          every other upload in this app already does (see
-//                          ConveyanceBillClaimRoutes.ts/profileRoutes.ts —
+//                          BillClaimRoutes.ts/profileRoutes.ts —
 //                          no multipart/multer anywhere in this codebase).
 //                          expiry_date (e.g. visa/license) is optional, read
 //                          by the panel to flag documents expiring soon.

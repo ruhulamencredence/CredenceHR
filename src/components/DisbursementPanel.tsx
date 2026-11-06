@@ -51,7 +51,7 @@ function voucherSections(items: ConveyanceBillItem[]): VoucherSection[] {
   const kindOf = (category: string) => (TRAVEL_CATEGORY.test(category) ? 'travel' : 'other');
   for (const it of items) {
     const amount = Number(it.amount);
-    if (it.source !== 'user_claim') {
+    if (it.source !== 'bill_claim') {
       add('Conveyance', 'travel', { date: it.entry_date, particulars: it.particulars || '', from: it.from_location, to: it.to_location, km: it.distance_km, amount });
       continue;
     }
@@ -112,7 +112,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // makes the Bill and pays it (GET /api/disbursement/awaiting-claims).
   interface AwaitingClaim {
     approval_id: number;
-    user_claim_id: number;
+    bill_claim_id: number;
     user_id: number;
     user_name: string | null;
     employee_code: string;
@@ -338,7 +338,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(40, 40, 40);
-    doc.text(`Received Tk ${pdfMoney(total)} in full settlement of the conveyance claim referenced above.`, 8, y + 8, { maxWidth: pageWidth - 16 });
+    doc.text(`Received Tk ${pdfMoney(total)} in full settlement of the bill claim referenced above.`, 8, y + 8, { maxWidth: pageWidth - 16 });
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
     // for both the person disbursing and the claimant receiving to sign.
@@ -563,7 +563,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                           {[c.user_name, c.employee_code, c.designation, c.department].filter(Boolean).join(' · ')}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Claim #{c.user_claim_id} · {formatDate(c.claim_date)} · {c.category}
+                          Claim #{c.bill_claim_id} · {formatDate(c.claim_date)} · {c.category}
                           {c.description ? ` — ${c.description}` : ''}
                         </div>
                         <div className="text-[11px] text-slate-400">Waiting on: {c.waiting_on.join(', ') || '—'}</div>

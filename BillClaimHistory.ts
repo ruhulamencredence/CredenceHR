@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Bill Claim edit trail (user_claim_history, see server.ts).
+// Bill Claim edit trail (bill_claim_history, see server.ts).
 //
 // A claim can be edited until its lock Layer approves it, and again after a
-// Return or a Reject with "Allow re-claim" (ConveyanceBillClaimRoutes.ts). Each
+// Return or a Reject with "Allow re-claim" (BillClaimRoutes.ts). Each
 // submit / edit / resubmit / return / reject is stored with the claim as it
 // stood right after it (a snapshot), so an approver can be shown exactly what
 // changed since they (or the Layer before them) last looked: the snapshot at
@@ -33,12 +33,12 @@ export interface ClaimSnapshot {
 export type ClaimHistoryAction = "submitted" | "edited" | "resubmitted" | "returned" | "rejected";
 
 export async function claimSnapshot(queryDB: QueryDB, claimId: number): Promise<ClaimSnapshot | null> {
-  const rows: any[] = (await queryDB("SELECT from_date, to_date, amount, description, file_name FROM user_claims WHERE id = ?", [claimId])) || [];
+  const rows: any[] = (await queryDB("SELECT from_date, to_date, amount, description, file_name FROM bill_claims WHERE id = ?", [claimId])) || [];
   if (!rows.length) return null;
   const uc = rows[0];
   const items: any[] =
-    (await queryDB("SELECT category_name, bill_date, amount, description FROM user_claim_items WHERE user_claim_id = ? ORDER BY bill_date, id", [claimId])) || [];
-  const refs: any[] = (await queryDB("SELECT claim_id, amount FROM user_claim_references WHERE user_claim_id = ? ORDER BY claim_id", [claimId])) || [];
+    (await queryDB("SELECT category_name, bill_date, amount, description FROM bill_claim_items WHERE bill_claim_id = ? ORDER BY bill_date, id", [claimId])) || [];
+  const refs: any[] = (await queryDB("SELECT claim_id, amount FROM bill_claim_references WHERE bill_claim_id = ? ORDER BY claim_id", [claimId])) || [];
   return {
     from_date: dhakaDate(uc.from_date),
     to_date: dhakaDate(uc.to_date),
@@ -59,9 +59,9 @@ export async function recordClaimHistory(
 ): Promise<void> {
   try {
     const snap = await claimSnapshot(queryDB, claimId);
-    const v: any[] = (await queryDB("SELECT version FROM user_claims WHERE id = ?", [claimId])) || [];
+    const v: any[] = (await queryDB("SELECT version FROM bill_claims WHERE id = ?", [claimId])) || [];
     await queryDB(
-      "INSERT INTO user_claim_history (user_claim_id, action, actor_id, actor_name, reason, version, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO bill_claim_history (bill_claim_id, action, actor_id, actor_name, reason, version, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [claimId, action, actor?.id ?? null, actor?.name ?? null, reason, Number(v[0]?.version || 1), snap ? JSON.stringify(snap) : null]
     );
   } catch (err: any) {
@@ -118,14 +118,14 @@ export async function claimChangesFor(queryDB: QueryDB, claimIds: number[]): Pro
   try {
     rows =
       (await queryDB(
-        `SELECT user_claim_id, action, reason, snapshot_json FROM user_claim_history WHERE user_claim_id IN (${claimIds.map(() => "?").join(",")}) ORDER BY id`,
+        `SELECT bill_claim_id, action, reason, snapshot_json FROM bill_claim_history WHERE bill_claim_id IN (${claimIds.map(() => "?").join(",")}) ORDER BY id`,
         claimIds
       )) || [];
   } catch {
     return out;
   }
   const by = new Map<number, any[]>();
-  for (const r of rows) (by.get(Number(r.user_claim_id)) || by.set(Number(r.user_claim_id), []).get(Number(r.user_claim_id))!).push(r);
+  for (const r of rows) (by.get(Number(r.bill_claim_id)) || by.set(Number(r.bill_claim_id), []).get(Number(r.bill_claim_id))!).push(r);
   for (const [id, list] of by) {
     const latest = list[list.length - 1];
     let baseIdx = -1;
@@ -197,7 +197,7 @@ export async function claimRequests(queryDB: QueryDB, claimIds: number[]): Promi
   if (!claimIds.length) return out;
   const rows: any[] =
     (await queryDB(
-      `SELECT * FROM approval_requests WHERE source_type = 'user_claim' AND source_id IN (${claimIds.map(() => "?").join(",")}) ORDER BY id`,
+      `SELECT * FROM approval_requests WHERE source_type = 'bill_claim' AND source_id IN (${claimIds.map(() => "?").join(",")}) ORDER BY id`,
       claimIds
     )) || [];
   for (const r of rows) out.set(Number(r.source_id), r);

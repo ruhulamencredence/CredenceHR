@@ -11,7 +11,7 @@ import credenceLogo from '../assets/credence-logo.png';
 export type AdminTab =
   | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments'
   | 'attendance' | 'attendance_reports' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims'
-  | 'approvals' | 'conveyance';
+  | 'approvals' | 'bill_claim';
 
 interface FlatItem {
   tab: AdminTab;
@@ -80,7 +80,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     { tab: 'departments', label: 'Departments', icon: Users2 },
     { tab: 'notices', label: 'Notices', icon: Bell },
     { tab: 'claims', label: 'Check In/Out', icon: Route },
-    { tab: 'conveyance', label: 'Conveyance Bill', icon: Wallet },
+    { tab: 'bill_claim', label: 'Conveyance Bill', icon: Wallet },
     { tab: 'approvals', label: 'Approvals', icon: ShieldCheck },
     { tab: 'attendance', label: 'Remote Attendance', icon: Navigation },
     { tab: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar },

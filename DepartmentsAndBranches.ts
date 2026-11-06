@@ -397,10 +397,10 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         } catch {
           // Non-fatal — see comment above.
         }
-        // Same reasoning for the 'conveyance' module's own per-user
-        // Department scope (conveyance_claim_department_access).
+        // Same reasoning for the 'bill_claim' module's own per-user
+        // Department scope (bill_claim_department_access).
         try {
-          await queryDB("UPDATE conveyance_claim_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+          await queryDB("UPDATE bill_claim_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
         } catch {
           // Non-fatal — see comment above.
         }

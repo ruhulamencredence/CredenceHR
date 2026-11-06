@@ -37,7 +37,7 @@ interface AdminDashboardRouteDeps {
 // sees only the kinds whose module it has) and the Admin Panel tab to open.
 const STUCK_SOURCES: Record<string, { label: string; module: string; tab: string }> = {
   leave_application: { label: "Leave application", module: "leave_applications", tab: "leave_applications" },
-  user_claim: { label: "Conveyance bill", module: "conveyance", tab: "conveyance" },
+  bill_claim: { label: "Conveyance bill", module: "bill_claim", tab: "bill_claim" },
   claim: { label: "Check in/out", module: "claims", tab: "claims" },
   attendance: { label: "Attendance", module: "attendance", tab: "approvals" },
   attendance_correction: { label: "Attendance correction", module: "attendance", tab: "approvals" },
@@ -114,7 +114,7 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
           rows("SELECT id, employee_id, user_id, item_type, doc_type, status, submitted_at FROM hr_info_requests"),
           rows("SELECT id, employee_id, action_type, effective_date, status, applied FROM hr_actions"),
           rows("SELECT id, status FROM leave_applications"),
-          rows("SELECT id, status FROM user_claims"),
+          rows("SELECT id, status FROM bill_claims"),
           rows("SELECT id, is_disbursed FROM conveyance_bills"),
           rows("SELECT id, status FROM advance_requests"),
           rows("SELECT id, status FROM asset_requisitions"),

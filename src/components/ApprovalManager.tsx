@@ -75,13 +75,13 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [actingId, setActingId] = useState<number | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
-  // Only relevant for a 'user_claim' request on its LAST step — which existing
+  // Only relevant for a 'bill_claim' request on its LAST step — which existing
   // Conveyance Bill (for that same User) to attach it to on Approve. Left blank
   // to auto-create a new Bill, same default POST /api/approvals/:id/act uses.
   const [billChoice, setBillChoice] = useState<Record<number, string>>({});
   const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [userBillsCache, setUserBillsCache] = useState<Record<number, { id: number; bill_date: string }[]>>({});
-  // Approved Amount draft for a 'user_claim' request's LAST step — pre-filled
+  // Approved Amount draft for a 'bill_claim' request's LAST step — pre-filled
   // with the full Claim Amount (default = approve as claimed) the first time
   // that row is shown, editable down to support a partial approval. Remaining
   // Amount (Claim Amount - Approved Amount) is derived from this, never its
@@ -135,7 +135,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
   // The three amount columns only mean anything for a Bill Claim —
   // left out when none is listed, so Remote Attendance rows aren't squeezed.
-  const hasClaims = requests.some((r) => r.source_type === 'user_claim');
+  const hasClaims = requests.some((r) => r.source_type === 'bill_claim');
   // Only Admins/Superadmins are eligible to be added to the chain.
   const eligibleApprovers = activePeople(users.filter((u) => u.role === 'admin' || u.role === 'superadmin'));
 
@@ -200,7 +200,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const handleAct = async (id: number, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const target = requests.find((r) => r.id === id);
     // Bill Claim: Return / Reject tell the employee why.
-    if (target?.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+    if (target?.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
@@ -219,8 +219,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
           bill_id: disburse ? undefined : bill_id,
           voucher_no: disburse && action === 'approved' ? voucherDraft[id] || undefined : undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
-          claim_version: target?.source_type === 'user_claim' ? target.claim_version : undefined,
-          allow_reclaim: target?.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
+          claim_version: target?.source_type === 'bill_claim' ? target.claim_version : undefined,
+          allow_reclaim: target?.source_type === 'bill_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
         })
       });
       const data = await res.json();
@@ -240,7 +240,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
     }
   };
 
-  // Lazily loads a User's existing Conveyance Bills the first time a 'user_claim'
+  // Lazily loads a User's existing Conveyance Bills the first time a 'bill_claim'
   // request's LAST-step row is shown, so the approver can pick one instead of
   // always auto-creating a brand-new Bill per claim.
   const ensureUserBillsLoaded = async (userId: number) => {
@@ -388,7 +388,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       <div className="font-semibold text-slate-900">
                         {r.source_type === 'attendance'
                           ? 'Remote Attendance'
-                          : r.source_type === 'user_claim'
+                          : r.source_type === 'bill_claim'
                           ? 'Bill Claim'
                           : r.source_type === 'attendance_correction'
                           ? 'Attendance Correction'
@@ -413,20 +413,20 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           : 'Submitted'}
                       </div>
                       <div className="text-xs text-slate-500">{r.source_label}</div>
-                      {r.source_type === 'user_claim' && r.source_category && (
+                      {r.source_type === 'bill_claim' && r.source_category && (
                         <div className="text-xs text-slate-500">{r.source_category}</div>
                       )}
                     </td>
                     {hasClaims && (() => {
-                      // Only a 'user_claim' request finishing its LAST step is
+                      // Only a 'bill_claim' request finishing its LAST step is
                       // where an Approve actually finalizes an Approved Amount
-                      // (see finalizeUserClaimApproval) — that's the only case
+                      // (see finalizeBillClaimApproval) — that's the only case
                       // this row lets the approver type one in. Everywhere else
                       // (other source types, an earlier step, already decided)
                       // these three columns just show what's known, or a dash.
-                      const isUserClaim = r.source_type === 'user_claim';
+                      const isBillClaim = r.source_type === 'bill_claim';
                       const isLastStep = Number(r.current_step) === Number(r.total_steps);
-                      const editable = isUserClaim && canAct && r.status === 'pending' && isLastStep;
+                      const editable = isBillClaim && canAct && r.status === 'pending' && isLastStep;
                       const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
                       // An earlier Layer may already have cut the amount — start from that.
                       const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
@@ -443,7 +443,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       return (
                         <>
                           <td className="px-4 py-3 text-xs text-slate-700 whitespace-nowrap">
-                            {isUserClaim && claimAmount != null ? fmt(claimAmount) : <span className="text-slate-300">—</span>}
+                            {isBillClaim && claimAmount != null ? fmt(claimAmount) : <span className="text-slate-300">—</span>}
                           </td>
                           <td className="px-4 py-3 text-xs whitespace-nowrap">
                             {editable ? (
@@ -456,7 +456,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                 onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                                 className="w-28 text-xs px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                               />
-                            ) : isUserClaim && approvedAmount != null ? (
+                            ) : isBillClaim && approvedAmount != null ? (
                               <span className="text-slate-700">{fmt(approvedAmount)}</span>
                             ) : (
                               <span className="text-slate-300">—</span>
@@ -506,7 +506,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                               className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                             />
                           )}
-                          {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && !r.conveyance_disburser_step && (
+                          {r.source_type === 'bill_claim' && Number(r.current_step) === Number(r.total_steps) && !r.conveyance_disburser_step && (
                             <SearchSelect
                               value={billChoice[r.id] || ''}
                               onFocus={() => ensureUserBillsLoaded(r.requested_by)}
@@ -521,16 +521,16 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                               ))}
                             </SearchSelect>
                           )}
-                          {r.source_type === 'user_claim' && <ClaimChangesNotice item={r} className="w-full" />}
+                          {r.source_type === 'bill_claim' && <ClaimChangesNotice item={r} className="w-full" />}
                           <input
                             type="text"
                             aria-label="Remarks"
-                            placeholder={r.source_type === 'user_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
+                            placeholder={r.source_type === 'bill_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
                             value={remarksDraft[r.id] || ''}
                             onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                             className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           />
-                          {r.source_type === 'user_claim' && (
+                          {r.source_type === 'bill_claim' && (
                             <ReclaimTick item={r} checked={!!reclaimDraft[r.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [r.id]: v }))} />
                           )}
                           <div className="flex gap-1.5">
@@ -542,14 +542,14 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                             >
                               Reject
                             </button>
-                            {r.source_type === 'user_claim' && (
+                            {r.source_type === 'bill_claim' && (
                               <ReturnButton item={r} compact disabled={actingId === r.id} onClick={() => handleAct(r.id, 'returned')} />
                             )}
                             <button
                               type="button"
                               disabled={actingId === r.id}
                               onClick={async () => {
-                                if (r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps)) {
+                                if (r.source_type === 'bill_claim' && Number(r.current_step) === Number(r.total_steps)) {
                                   const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
                                   const draft = approvedAmountDraft[r.id];
                                   const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;

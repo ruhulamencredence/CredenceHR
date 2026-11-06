@@ -5,22 +5,22 @@
 
 import React, { useEffect, useState } from 'react';
 import { Inbox, Check, X, Paperclip, ChevronDown, ChevronUp, Pencil, Trash2, Save, MapPin, Clock } from 'lucide-react';
-import { UserClaim, UserClaimCategory, USER_CLAIM_CATEGORIES, UserClaimReference, ClaimRecord } from '../types';
+import { BillClaim, BillClaimCategoryName, BILL_CLAIM_CATEGORIES, BillClaimReference, ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 import { confirmDialog } from '../lib/confirmDialog';
 
-interface UserClaimsReviewPanelProps {
+interface BillClaimsReviewPanelProps {
   token: string;
 }
 
-// Admin Panel -> Bill Claim -> "User Claims" (source: user_claim) —
-// direct User-submitted claims (ConveyanceClaimCard on the User Panel), separate
+// Admin Panel -> Bill Claim -> "User Claims" (source: bill_claim) —
+// direct User-submitted claims (BillClaimCard on the User Panel), separate
 // from the Bills table below it which is built from completed Check In/Out /
 // manual entries. This panel is READ-ONLY on status: it only shows where each
 // claim stands (Pending/Approved/Rejected, and which step of the Approval Chain
@@ -28,10 +28,10 @@ interface UserClaimsReviewPanelProps {
 // Panel -> Approvals tab, same as Remote Attendance/Check In/Out — a Pending
 // claim only shows Approve/Reject buttons HERE when it has no Approval Request
 // tracking it at all (a claim submitted back when no Chain was configured yet).
-export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ token }) => {
+export const BillClaimsReviewPanel: React.FC<BillClaimsReviewPanelProps> = ({ token }) => {
   const categoryNames = useBillClaimCategoryNames(token);
   const authHeaders = { Authorization: `Bearer ${token}` };
-  const [claims, setClaims] = useState<UserClaim[]>([]);
+  const [claims, setClaims] = useState<BillClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'all'>('pending');
   const [expanded, setExpanded] = useState(true);
@@ -46,7 +46,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     claim_date: string;
     from_date: string;
     to_date: string;
-    category: UserClaimCategory;
+    category: BillClaimCategoryName;
     amount: string;
     description: string;
   } | null>(null);
@@ -55,10 +55,10 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
   // The referenced Check In/Out currently shown on the read-only location map
   // (opened by tapping a claim_refs row) — reuses the same ClaimLocationMap the
   // User's own My Claims history uses, shaped from the reference's own fields
-  // (which already carry lat/lng + approval status, see attachUserClaimRefs).
-  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; userId: number; userName?: string | null } | null>(null);
+  // (which already carry lat/lng + approval status, see attachBillClaimRefs).
+  const [viewingRef, setViewingRef] = useState<{ ref: BillClaimReference; userId: number; userName?: string | null } | null>(null);
 
-  const refToClaimRecord = (ref: UserClaimReference, userId: number, userName?: string | null): ClaimRecord => ({
+  const refToClaimRecord = (ref: BillClaimReference, userId: number, userName?: string | null): ClaimRecord => ({
     id: ref.claim_id,
     user_id: userId,
     user_name: userName,
@@ -80,7 +80,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     try {
       const params = new URLSearchParams();
       if (statusFilter === 'pending') params.set('status', 'pending');
-      const res = await fetch(apiUrl(`/api/user-claims?${params.toString()}`), { headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/bill-claims?${params.toString()}`), { headers: authHeaders });
       if (res.ok) setClaims(await res.json());
     } catch (err) {
       console.error('Failed to load user claims', err);
@@ -98,7 +98,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
   // was submitted before an Approval Chain existed). Everything submitted after
   // a Chain was configured always carries `approval` and is acted on from the
   // Approvals tab instead — see handleDecision below.
-  const handleDecision = async (claim: UserClaim, action: 'approve' | 'reject') => {
+  const handleDecision = async (claim: BillClaim, action: 'approve' | 'reject') => {
     const remarks = (remarksDraft[claim.id] || '').trim();
     if (action === 'reject' && !remarks) {
       setError('Add a remark so the User understands why this was rejected.');
@@ -107,7 +107,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     setActingId(claim.id);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}/decision`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}/decision`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ action, remarks: remarks || undefined })
@@ -122,7 +122,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     }
   };
 
-  const startEdit = (claim: UserClaim) => {
+  const startEdit = (claim: BillClaim) => {
     setError('');
     setEditingId(claim.id);
     setEditDraft({
@@ -140,7 +140,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     setEditDraft(null);
   };
 
-  const saveEdit = async (claim: UserClaim) => {
+  const saveEdit = async (claim: BillClaim) => {
     if (!editDraft) return;
     if (String(editDraft.to_date) < String(editDraft.from_date)) {
       setError("To Date can't be before From Date.");
@@ -154,7 +154,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     setSavingEdit(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
@@ -177,12 +177,12 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
     }
   };
 
-  const handleDelete = async (claim: UserClaim) => {
+  const handleDelete = async (claim: BillClaim) => {
     if (!(await confirmDialog(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`))) return;
     setDeletingId(claim.id);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete claim');
       setClaims((prev) => prev.filter((c) => c.id !== claim.id));
@@ -283,7 +283,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                           </button>
                         </>
                       )}
-                      <UserClaimStatusBadge status={c.status} />
+                      <BillClaimStatusBadge status={c.status} />
                     </div>
                   </div>
 
@@ -323,7 +323,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                             value={editDraft.category}
                             disabled={!!c.items && c.items.length > 0}
                             title={c.items && c.items.length > 0 ? 'Set per bill — not editable here' : undefined}
-                            onChange={(e) => setEditDraft((d) => (d ? { ...d, category: e.target.value as UserClaimCategory } : d))}
+                            onChange={(e) => setEditDraft((d) => (d ? { ...d, category: e.target.value as BillClaimCategoryName } : d))}
                             className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                           >
                             {[...new Set([...categoryNames, editDraft.category])].map((cat) => (
@@ -401,7 +401,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
                       )}
                       {c.has_file && (
                         <a
-                          href={apiUrl(`/api/user-claims/${c.id}/file`)}
+                          href={apiUrl(`/api/bill-claims/${c.id}/file`)}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold mt-1 hover:underline"

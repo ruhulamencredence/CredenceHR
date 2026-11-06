@@ -49,7 +49,7 @@ interface NavbarProps {
   // Only passed (non-undefined) when this Admin has been granted
   // can_access_user_panel by the Superadmin. No longer renders a visible
   // switcher in the header (removed) — kept only so this component's
-  // inUserView/canSeeMovementClaims/canSeeConveyanceBillClaim logic still
+  // inUserView/canSeeMovementClaims/canSeeBillClaim logic still
   // knows which panel App.tsx is currently showing for this account. Absent
   // entirely for a plain User or Superadmin, or an Admin without the grant.
   viewMode?: 'admin' | 'user';
@@ -65,7 +65,7 @@ interface NavbarProps {
   // Android APK / narrow screens, where the existing tile menu / bottom nav
   // already covers this.
   onGoToMovementClaims: () => void;
-  onGoToConveyanceBillClaim: () => void;
+  onGoToBillClaim: () => void;
   // Web-only "Jobs" menu (see the dropdown below) — jumps straight to one of
   // the four User Panel sections it groups (Entry, Jobs, Entry Details, Job
   // Edits). Unlike Claims above, every one of these lives ONLY in the User
@@ -126,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onViewModeChange,
   onGoToDashboard,
   onGoToMovementClaims,
-  onGoToConveyanceBillClaim,
+  onGoToBillClaim,
   onGoToJobsTab,
   onGoToBudgetTab,
   onGoToManageTab,
@@ -259,7 +259,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         requestQuickAccessTab('bookRide', target || 'status');
         onGoToSelfServiceTab('vehicleManagement');
       }}
-      onOpenConveyanceClaim={onGoToConveyanceBillClaim}
+      onOpenBillClaim={onGoToBillClaim}
       onOpenMyAsset={(target) => {
         requestQuickAccessTab('myAsset', target);
         onGoToSelfServiceTab('assetManagement');

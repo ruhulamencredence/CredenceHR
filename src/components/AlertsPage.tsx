@@ -44,7 +44,7 @@ interface AlertsPageProps {
   // that expired): open where vehicles are assigned instead of Approvals.
   onOpenVehicleManagement?: (target?: 'status' | 'assign' | 'trips') => void;
   // The claimant's own Bill Claim updates -> Bill Claim.
-  onOpenConveyanceClaim?: () => void;
+  onOpenBillClaim?: () => void;
   // The requester's own Asset Requisition updates -> My Asset (Status for
   // the requisition's approval updates, My Assets for handed-over items).
   onOpenMyAsset?: (target: MyAssetTarget) => void;
@@ -68,7 +68,7 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenBillClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
   usePhoneHeaderTitle('Alerts');
   const isPhone = useIsPhone();
   // Every alert this account ever got, 50 (or the chosen size) per page;
@@ -147,12 +147,12 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         ? () => onOpenVehicleManagement('assign')
         : rideForDriver && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('trips')
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'bill_claim_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition' && alert.related_type !== 'vehicle_driver' && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('status')
-        : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
-        ? onOpenConveyanceClaim
+        : alert.type === 'bill_claim' || alert.type === 'conveyance_disbursed'
+        ? onOpenBillClaim
         : alert.type === 'asset_requisition' && alert.related_type !== 'asset_return' && onOpenMyAsset
         ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : alert.related_type === 'asset_return_incoming' ? 'returns' : 'my-assets')
         : alert.type === 'resignation'

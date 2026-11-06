@@ -274,7 +274,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
   const [leaveBalances, setLeaveBalances] = useState<any[] | null>(null);
   const [pendingAdvances, setPendingAdvances] = useState<any[] | null>(null);
   const [pendingAssetReqs, setPendingAssetReqs] = useState<any[] | null>(null);
-  const [userClaims, setUserClaims] = useState<any[] | null>(null);
+  const [billClaims, setBillClaims] = useState<any[] | null>(null);
   const [conveyanceBills, setConveyanceBills] = useState<any[] | null>(null);
   const [notices, setNotices] = useState<any[] | null>(null);
   const [employees, setEmployees] = useState<any[] | null>(null);
@@ -308,7 +308,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         safeGet<any[]>('/api/leave-balances', authHeaders),
         safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
         safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
-        safeGet<any[]>(`/api/user-claims?since=${claimsSince}&slim=1`, authHeaders),
+        safeGet<any[]>(`/api/bill-claims?since=${claimsSince}&slim=1`, authHeaders),
         safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders),
         safeGet<any[]>('/api/notices/active', authHeaders),
         safeGet<any[]>('/api/employee-directory', groupHeaders),
@@ -325,7 +325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       setLeaveBalances(balances);
       setPendingAdvances(advances);
       setPendingAssetReqs(assetReqs);
-      setUserClaims(claims);
+      setBillClaims(claims);
       setConveyanceBills(bills);
       setNotices(activeNotices);
       setEmployees(empDir);
@@ -428,16 +428,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
 
   const claimChartData = useMemo(() => {
     return last3Months.map(({ key, label }) => {
-      const claimSum = (userClaims || []).filter((c) => monthKey(c.claim_date) === key).reduce((s, c) => s + Number(c.amount || 0), 0);
+      const claimSum = (billClaims || []).filter((c) => monthKey(c.claim_date) === key).reduce((s, c) => s + Number(c.amount || 0), 0);
       const disbursedSum = (conveyanceBills || []).filter((b) => b.is_disbursed && monthKey(b.bill_date) === key).reduce((s, b) => s + Number(b.total_amount || 0), 0);
       return { label, claimSum, disbursedSum };
     });
-  }, [last3Months, userClaims, conveyanceBills]);
+  }, [last3Months, billClaims, conveyanceBills]);
 
   const monthlyClaimAmount = useMemo(() => {
-    if (!userClaims) return null;
-    return userClaims.filter((c) => monthKey(c.claim_date) === thisMonth).reduce((s, c) => s + Number(c.amount || 0), 0);
-  }, [userClaims, thisMonth]);
+    if (!billClaims) return null;
+    return billClaims.filter((c) => monthKey(c.claim_date) === thisMonth).reduce((s, c) => s + Number(c.amount || 0), 0);
+  }, [billClaims, thisMonth]);
 
   const monthlyDisburseAmount = useMemo(() => {
     if (!conveyanceBills) return null;

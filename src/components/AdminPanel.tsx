@@ -102,7 +102,7 @@ interface AdminPanelProps {
   // (role promotion, Module Access) render in the Users tab.
   user: User;
   // Navbar's web-only "Claims" header menu — jumps this panel's activeTab to
-  // 'claims' (Check In/Out) or 'conveyance' (Bill Claim). Ignored
+  // 'claims' (Check In/Out) or 'bill_claim' (Bill Claim). Ignored
   // if this Admin hasn't been granted that module.
   claimsNavRequest?: ClaimsNavRequest | null;
   // Navbar's web-only "Budget" header menu — jumps this panel's activeTab to
@@ -518,18 +518,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
   // Whether this account may open that tab. 'bill_claim_policy' isn't its own
-  // module_permissions entry — it rides along with 'conveyance'.
+  // module_permissions entry — it rides along with 'bill_claim'.
   // 'permanent_delete_log' isn't either — Superadmin-only, never granted via
   // module_permissions (see GET /api/entries/permanent-delete-log).
   const isTabVisible = (tab: string) =>
     tab === 'dashboard' ? canSeeDashboard :
     tab === 'reports_insights' ? canSeeReportsInsights :
     tab === 'data_import' ? canSeeDataImport :
-    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
+    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('bill_claim') :
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -614,7 +614,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Silently ignored if this Admin hasn't been granted that module.
   useEffect(() => {
     if (!claimsNavRequest) return;
-    const wanted = claimsNavRequest.target === 'movementClaims' ? 'claims' : 'conveyance';
+    const wanted = claimsNavRequest.target === 'movementClaims' ? 'claims' : 'bill_claim';
     if (canSee(wanted as AdminModuleKey)) setActiveTab(wanted as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsNavRequest]);
@@ -643,8 +643,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       return;
     }
     // 'bill_claim_policy' isn't its own module_permissions entry — it rides along
-    // with 'conveyance' (see the "Bill Claim Policy" item in GlobalSidebar).
-    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    // with 'bill_claim' (see the "Bill Claim Policy" item in GlobalSidebar).
+    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('bill_claim') : canSee(adminNavRequest.target as AdminModuleKey);
     if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
@@ -658,7 +658,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       activeTab === 'reports_insights' ? canSeeReportsInsights :
       activeTab === 'data_import' ? canSeeDataImport :
       activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' || activeTab === 'active_users' ? isSuperAdmin :
-      activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
+      activeTab === 'bill_claim_policy' ? canSee('bill_claim') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -1749,7 +1749,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // only for the Users tab. Tabs that just pick or filter by an account get the light
   // `people` list (id, name, role…); every other tab loads neither.
   const PEOPLE_TABS = new Set<string>([
-    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
+    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'bill_claim', 'disbursement', 'approvals'
   ]);
   const sharedFor = (tab: string): SharedKey[] =>
     SELF_CONTAINED_TABS.has(tab)
@@ -4773,7 +4773,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               {/* Mobile — stacked cards instead of the same table squeezed
                   into a horizontal scroll (same pattern as ClaimsPanel.tsx /
-                  ConveyanceClaimCard.tsx's own mobile treatment). */}
+                  BillClaimCard.tsx's own mobile treatment). */}
               <div className="md:hidden divide-y divide-slate-100">
                 {leaveApplicationsReport
                   .map((a) => (
@@ -7088,18 +7088,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           Build a travel/conveyance claim bill for a User: pull items in from their
           completed Check In/Out (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
-      {activeTab === 'conveyance' && (
+      {activeTab === 'bill_claim' && (
         <ConveyanceBillPanel token={token} users={people} currentUserId={user.id} />
       )}
 
-      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;
+      {/* TAB: BILL CLAIM POLICY — same "bill_claim" grant as the Bill Claim tab;
           only the Superadmin can change it (BillClaimPolicyPanel.tsx). */}
       {activeTab === 'bill_claim_policy' && <BillClaimPolicyPanel token={token} />}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins
           only. Marks a Conveyance Bill's claim(s) as actually paid out (voucher
           no. + disbursed date/by) and prints a Payment Voucher PDF for it. Kept
-          as its own module (separate from 'conveyance' above) so an Admin can be
+          as its own module (separate from 'bill_claim' above) so an Admin can be
           allowed to BUILD bills without also being able to authorize payouts. */}
       {activeTab === 'disbursement' && (
         <DisbursementPanel token={token} users={people} />

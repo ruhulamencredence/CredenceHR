@@ -74,8 +74,8 @@ interface LeaveRouteDeps {
   // straight to the Dynamic Approval Engine itself (the same two calls
   // approveLeaveApplicationReliever makes once a real Reliever approves).
   createTemplateApprovalRequest: (
-    requestType: "conveyance" | "leave" | "timesheet",
-    sourceType: "user_claim" | "attendance_correction" | "leave_application",
+    requestType: "bill_claim" | "leave" | "timesheet",
+    sourceType: "bill_claim" | "attendance_correction" | "leave_application",
     sourceId: number,
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;

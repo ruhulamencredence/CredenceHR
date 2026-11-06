@@ -10,7 +10,7 @@
 //   - the "Allow re-claim" tick that goes with Reject;
 //   - the Return button (send it back for correction).
 // The rules behind them are in the Bill Claim Policy (Editing & review) and
-// ConveyanceClaimHistory.ts.
+// BillClaimHistory.ts.
 
 import React from 'react';
 import { History, RotateCcw } from 'lucide-react';

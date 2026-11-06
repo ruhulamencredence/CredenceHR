@@ -30,7 +30,7 @@ await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0,
 async function person(name, email, designation) {
   const e = await api(SA, 'POST', '/api/employees', { name, designation, department_id: 2, joining_date: '2024-01-01', email, create_login: true, login_email: email, login_password: 'Pass12345' });
   const uid = Number(sql(`SELECT user_id FROM all_employees WHERE id=${e.body.id}`));
-  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['conveyance-claim-access', 'can_view_conveyance_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
+  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['bill-claim-access', 'can_view_bill_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
   await api(SA, 'PUT', `/api/users/${uid}/feature-permissions`, { can_use_attendance: true });
   sql(`INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (${uid}, 10, 14, 0)`);
   return { emp: e.body.id, uid, name, token: await login(email, 'Pass12345') };
@@ -42,7 +42,7 @@ const L2 = await person('Layer Two (Director)', 'layer.two@credence.test', 'Dire
 const sup = await api(SA, 'POST', `/api/employees/${EMP.emp}/supervisors`, { supervisor_id: SUP.emp, effective_date: '2024-01-01', is_direct: true });
 note(`Setup: ${SUP.name} supervises ${EMP.name} (${sup.status}); ${SUP.name} has no supervisor; department has no Department Supervisor`);
 const tpl = {};
-for (const t of ['leave', 'conveyance', 'timesheet']) {
+for (const t of ['leave', 'bill_claim', 'timesheet']) {
   const r = await api(SA, 'POST', '/api/approval-templates', { name: `${t} — 2 layers`, request_type: t, is_default: true, is_active: true, steps: [{ approver_user_ids: [L1.uid], approver_type: 'employee', label: 'Layer 1' }, { approver_user_ids: [L2.uid], approver_type: 'employee', label: 'Layer 2' }] });
   tpl[t] = r.body?.id;
   note(`Template "${t}": Layer 1 = ${L1.name}, Layer 2 = ${L2.name} (${r.status})`);
@@ -53,11 +53,11 @@ const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
 // ---------------- submit three requests ----------------
 async function submitAll(P, tag, offset) {
   const leave = await api(P.token, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: day(10 + offset), end_date: day(10 + offset), purpose: `${tag} leave` });
-  const claim = await api(P.token, 'POST', '/api/user-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 350 + offset, description: `${tag} CNG` }], description: `${tag} client visit` });
+  const claim = await api(P.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 350 + offset, description: `${tag} CNG` }], description: `${tag} client visit` });
   const ts = await api(P.token, 'POST', '/api/attendance/corrections', { project_id: proj.body.id, attendance_date: day(-2 - offset), check_in_at: `${day(-2 - offset)} 09:05:00`, check_out_at: `${day(-2 - offset)} 18:00:00`, remarks: `${tag} forgot to check in` });
-  return [['leave_application', 'Leave', leave], ['user_claim', 'Conveyance Bill Claim', claim], ['attendance_correction', 'Timesheet correction', ts]];
+  return [['leave_application', 'Leave', leave], ['bill_claim', 'Bill Claim', claim], ['attendance_correction', 'Timesheet correction', ts]];
 }
-const status = (type, id) => sql(type === 'leave_application' ? `SELECT status FROM leave_applications WHERE id=${id}` : type === 'user_claim' ? `SELECT status FROM user_claims WHERE id=${id}` : `SELECT status FROM attendance_corrections WHERE id=${id}`);
+const status = (type, id) => sql(type === 'leave_application' ? `SELECT status FROM leave_applications WHERE id=${id}` : type === 'bill_claim' ? `SELECT status FROM bill_claims WHERE id=${id}` : `SELECT status FROM attendance_corrections WHERE id=${id}`);
 const reqRow = (type, id) => sql(`SELECT CONCAT('steps=',total_steps,' supervisor_step=',IFNULL(supervisor_step_user_id,'none'),' template=',IFNULL(template_id,'none'),' awaiting=',awaiting_approver) FROM approval_requests WHERE source_type='${type}' AND source_id=${id}`);
 
 console.log('\n=== A. The Supervisor\'s own requests ===');

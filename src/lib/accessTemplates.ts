@@ -23,7 +23,7 @@ export type TemplateFeature =
 // endpoint (UserManagement.ts) and, like modules, needs module-grant rights.
 export type SelfServiceFeature =
   | 'can_view_movement_claims'
-  | 'can_view_conveyance_claims'
+  | 'can_view_bill_claims'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
   | 'can_view_tasks'
@@ -43,7 +43,7 @@ export type SelfServiceFeature =
   | 'can_request_items';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
-  can_view_conveyance_claims: 'conveyance-claim-access',
+  can_view_bill_claims: 'bill-claim-access',
   can_view_timesheet: 'timesheet-access',
   can_view_leave_application: 'leave-application-access',
   can_view_tasks: 'tasks-access',
@@ -71,7 +71,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date' },
   { key: 'can_job_edit', label: 'Job Edit' },
   { key: 'can_view_movement_claims', label: 'Check In/Out', selfService: true },
-  { key: 'can_view_conveyance_claims', label: 'Bill Claim', selfService: true },
+  { key: 'can_view_bill_claims', label: 'Bill Claim', selfService: true },
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_tasks', label: 'My Tasks', selfService: true },

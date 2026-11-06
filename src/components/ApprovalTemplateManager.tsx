@@ -17,7 +17,7 @@ interface ApprovalTemplateManagerProps {
 }
 
 const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
-  { key: 'conveyance', label: 'Bill Claim' },
+  { key: 'bill_claim', label: 'Bill Claim' },
   { key: 'leave', label: 'Leave Application' },
   { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
   { key: 'asset', label: 'Asset Requisition' },
@@ -98,7 +98,7 @@ const isAdminRole = (role: string) => role === 'admin' || role === 'superadmin';
 export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = ({ token, user, users }) => {
   const isSuperAdmin = user.role === 'superadmin';
   const [subView, setSubView] = useState<'templates' | 'assign'>('templates');
-  const [requestType, setRequestType] = useState<ApprovalRequestType>('conveyance');
+  const [requestType, setRequestType] = useState<ApprovalRequestType>('bill_claim');
 
   const [templates, setTemplates] = useState<ApprovalTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,7 +108,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [showEditor, setShowEditor] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameDraft, setNameDraft] = useState('');
-  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('conveyance');
+  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('bill_claim');
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [isActiveDraft, setIsActiveDraft] = useState(true);
   const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
@@ -933,7 +933,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               </span>
                             </label>
                           )}
-                          {typeDraft === 'conveyance' && isLastLayer && (
+                          {typeDraft === 'bill_claim' && isLastLayer && (
                             <label className="flex items-start gap-2 pl-7 cursor-pointer">
                               <input
                                 type="checkbox"

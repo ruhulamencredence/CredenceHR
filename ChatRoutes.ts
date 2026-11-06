@@ -4,7 +4,7 @@
  */
 
 // Chat (Direct messages / Group chat / Community — WhatsApp-style) — split
-// into its own file from day one, same reasoning as ConveyanceBillClaimRoutes.ts
+// into its own file from day one, same reasoning as BillClaimRoutes.ts
 // / AssetManagementRoutes.ts: server.ts is already huge, so this stays out as
 // its own module, registered from inside startServer() via
 // registerChatRoutes(), reusing that request's authenticateToken/queryDB

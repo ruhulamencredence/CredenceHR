@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { Receipt } from 'lucide-react';
-import { UserClaimItem } from '../types';
+import { BillClaimItem } from '../types';
 import { formatDate } from '../lib/formatDate';
 
 const money = (n: number) => `৳${Number(n).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -14,7 +14,7 @@ const money = (n: number) => `৳${Number(n).toLocaleString('en-BD', { minimumFr
 // wherever the claim is looked at — the claimant's own detail view, the Admin's
 // Bill Claim review and the approvers' screens. Category names are the ones
 // the bills were filed under.
-export const ClaimBillLines: React.FC<{ items?: UserClaimItem[] | null; compact?: boolean }> = ({ items, compact }) => {
+export const ClaimBillLines: React.FC<{ items?: BillClaimItem[] | null; compact?: boolean }> = ({ items, compact }) => {
   if (!items || items.length === 0) return null;
   const total = items.reduce((s, i) => s + Number(i.amount), 0);
   return (

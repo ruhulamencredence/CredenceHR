@@ -8,10 +8,10 @@ import {
   ConveyanceBillItem,
   ClaimRecord,
   User,
-  UserClaim,
-  UserClaimCategory,
-  USER_CLAIM_CATEGORIES,
-  UserClaimReference
+  BillClaim,
+  BillClaimCategoryName,
+  BILL_CLAIM_CATEGORIES,
+  BillClaimReference
 } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -20,13 +20,13 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
-import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 import { confirmDialog } from '../lib/confirmDialog';
-import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
+import { NewBillClaimModal } from './NewBillClaimModal';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { SearchSelect } from './Combobox';
@@ -51,7 +51,7 @@ const blankItemDraft = () => ({
 });
 
 // Admin Panel -> Bill Claim (Superadmin + explicitly-granted Admins
-// only — see ADMIN_MODULES/'conveyance'). A Bill groups several travel/conveyance
+// only — see ADMIN_MODULES/'bill_claim'). A Bill groups several travel/conveyance
 // line items for ONE User into a single claim document; each item either gets
 // pulled in from that User's own completed Check In/Out (see the "Movement
 // Claims" tab) or is added fully by hand.
@@ -62,7 +62,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
   const [billItems, setBillItems] = useState<Record<number, ConveyanceBillItem[]>>({});
-  const [userClaims, setUserClaims] = useState<UserClaim[]>([]);
+  const [billClaims, setBillClaims] = useState<BillClaim[]>([]);
   const [loading, setLoading] = useState(false);
   const [userFilter, setUserFilter] = useState('');
   const [fromFilter, setFromFilter] = useState('');
@@ -86,10 +86,10 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       if (toFilter) params.set('to', toFilter);
       const res = await fetch(apiUrl(`/api/conveyance-bills/combined/list?${params.toString()}`), { headers: authHeaders });
       if (res.ok) {
-        const data: { total: number; bills: ConveyanceBill[]; claims: UserClaim[] } = await res.json();
+        const data: { total: number; bills: ConveyanceBill[]; claims: BillClaim[] } = await res.json();
         if (req !== listReq.current) return; // a newer request is on its way
         setBills(data.bills);
-        setUserClaims(data.claims);
+        setBillClaims(data.claims);
         setBillItems(Object.fromEntries(data.bills.map((b) => [b.id, (b.items || []) as ConveyanceBillItem[]])));
         setTotal(Number(data.total) || 0);
       }
@@ -135,12 +135,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const [showBehalfPicker, setShowBehalfPicker] = useState(false);
   const [behalfUserId, setBehalfUserId] = useState('');
   const [behalfFor, setBehalfFor] = useState<{ id: number; name: string } | null>(null);
-  const [behalfEditClaim, setBehalfEditClaim] = useState<UserClaim | null>(null);
+  const [behalfEditClaim, setBehalfEditClaim] = useState<BillClaim | null>(null);
   const behalfCandidates = activePeople(users.filter((u) => u.id !== currentUserId)).sort((a, b) => a.name.localeCompare(b.name));
 
   useEffect(() => {
     let cancelled = false;
-    fetch(apiUrl('/api/user-claims/on-behalf/access'), { headers: authHeaders })
+    fetch(apiUrl('/api/bill-claims/on-behalf/access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!cancelled) setCanClaimOnBehalf(!!d?.on_behalf);
@@ -208,8 +208,8 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   };
 
   // ---- User Claim detail (unified table row click) ----
-  const [viewingUserClaimId, setViewingUserClaimId] = useState<number | null>(null);
-  const viewingUserClaim = userClaims.find((c) => c.id === viewingUserClaimId) || null;
+  const [viewingBillClaimId, setViewingBillClaimId] = useState<number | null>(null);
+  const viewingBillClaim = billClaims.find((c) => c.id === viewingBillClaimId) || null;
 
   // ---- Add from Check In/Out ----
   const [showClaimPicker, setShowClaimPicker] = useState(false);
@@ -448,7 +448,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
   type CombinedRow =
     | { kind: 'bill'; key: string; date: string; user_name?: string | null; amount: number; bill: ConveyanceBill }
-    | { kind: 'user_claim'; key: string; date: string; user_name?: string | null; amount: number; claim: UserClaim };
+    | { kind: 'bill_claim'; key: string; date: string; user_name?: string | null; amount: number; claim: BillClaim };
 
   const combinedRows: CombinedRow[] = [
     ...bills.map((b): CombinedRow => ({
@@ -462,10 +462,10 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     // A User Claim that's already been attached into a Bill (bill_id set)
     // is already visible inside that Bill's own row (its items list) —
     // showing it again here would just be the same claim twice.
-    ...userClaims
+    ...billClaims
       .filter((c) => !c.bill_id)
       .map((c): CombinedRow => ({
-        kind: 'user_claim',
+        kind: 'bill_claim',
         key: `claim-${c.id}`,
         date: c.claim_date,
         user_name: c.user_name,
@@ -563,7 +563,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 <button
                   key={row.key}
                   type="button"
-                  onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingUserClaimId(row.claim.id))}
+                  onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingBillClaimId(row.claim.id))}
                   className="w-full text-left p-4 flex flex-col gap-2.5 hover:bg-slate-50/80 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -585,7 +585,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-500">
                     <span>{formatDate(row.date)}</span>
-                    {row.kind !== 'bill' && <UserClaimStatusBadge status={row.claim.status} />}
+                    {row.kind !== 'bill' && <BillClaimStatusBadge status={row.claim.status} />}
                   </div>
                   {row.kind === 'bill' && (
                     <div className="text-xs">{renderBillItemsSummary(row.bill.id, row.bill.item_count)}</div>
@@ -612,7 +612,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   {combinedRows.map((row) => (
                     <tr
                       key={row.key}
-                      onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingUserClaimId(row.claim.id))}
+                      onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingBillClaimId(row.claim.id))}
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-3 whitespace-nowrap text-xs">
@@ -635,7 +635,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                         {row.kind === 'bill' ? (
                           renderBillItemsSummary(row.bill.id, row.bill.item_count)
                         ) : (
-                          <UserClaimStatusBadge status={row.claim.status} />
+                          <BillClaimStatusBadge status={row.claim.status} />
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-900 font-semibold text-xs">{row.amount.toFixed(2)}</td>
@@ -753,7 +753,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         </div>
       )}
       {behalfFor && (
-        <NewConveyanceClaimModal
+        <NewBillClaimModal
           token={token}
           onBehalfOf={behalfFor}
           onClose={() => setBehalfFor(null)}
@@ -907,12 +907,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                   className={`shrink-0 px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                     it.source === 'movement_claim'
                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                      : it.source === 'user_claim'
+                                      : it.source === 'bill_claim'
                                       ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                       : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                                 >
-                                  {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                  {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'bill_claim' ? 'User Claim' : 'Manual'}
                                 </span>
                               </div>
 
@@ -927,12 +927,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                               </div>
 
                               <div className="flex items-center gap-2 pt-1">
-                                {it.source === 'user_claim' && it.user_claim_id && (
+                                {it.source === 'bill_claim' && it.bill_claim_id && (
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setViewingBillId(null);
-                                      setViewingUserClaimId(it.user_claim_id!);
+                                      setViewingBillClaimId(it.bill_claim_id!);
                                     }}
                                     className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-medium transition-colors"
                                   >
@@ -1013,12 +1013,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                     className={`px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                       it.source === 'movement_claim'
                                         ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                        : it.source === 'user_claim'
+                                        : it.source === 'bill_claim'
                                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                     }`}
                                   >
-                                    {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                    {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'bill_claim' ? 'User Claim' : 'Manual'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-700 max-w-[200px]">
@@ -1032,12 +1032,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                 <td className="px-3 py-2.5 whitespace-nowrap font-semibold text-slate-900">{it.amount.toFixed(2)}</td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">
                                   <div className="flex items-center gap-1">
-                                    {it.source === 'user_claim' && it.user_claim_id && (
+                                    {it.source === 'bill_claim' && it.bill_claim_id && (
                                       <button
                                         type="button"
                                         onClick={() => {
                                           setViewingBillId(null);
-                                          setViewingUserClaimId(it.user_claim_id!);
+                                          setViewingBillClaimId(it.bill_claim_id!);
                                         }}
                                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                         title="View this claim's approval History"
@@ -1087,17 +1087,17 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       )}
 
       {/* User Claim detail modal — opened by clicking a "User Claim" row */}
-      {viewingUserClaim && (
-        <UserClaimDetailModal
-          claim={viewingUserClaim}
+      {viewingBillClaim && (
+        <AdminBillClaimDetailModal
+          claim={viewingBillClaim}
           token={token}
-          onClose={() => setViewingUserClaimId(null)}
+          onClose={() => setViewingBillClaimId(null)}
           onChanged={fetchAll}
           onFilerEdit={
-            viewingUserClaim.filed_by === currentUserId && viewingUserClaim.editable && canClaimOnBehalf
+            viewingBillClaim.filed_by === currentUserId && viewingBillClaim.editable && canClaimOnBehalf
               ? () => {
-                  setBehalfEditClaim(viewingUserClaim);
-                  setViewingUserClaimId(null);
+                  setBehalfEditClaim(viewingBillClaim);
+                  setViewingBillClaimId(null);
                 }
               : undefined
           }
@@ -1105,7 +1105,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       )}
       {/* The Admin who filed a claim on behalf can edit it while it's open. */}
       {behalfEditClaim && (
-        <NewConveyanceClaimModal
+        <NewBillClaimModal
           token={token}
           onBehalfOf={{ id: behalfEditClaim.user_id, name: behalfEditClaim.user_name || '' }}
           editClaim={behalfEditClaim}
@@ -1179,14 +1179,14 @@ const ItemFields: React.FC<{
 };
 // Full detail view for ONE User Claim — opened by clicking a "User Claim" row
 // in the unified table above. Originally ported from a standalone
-// always-expanded list (UserClaimsReviewPanel.tsx) so nothing was lost
+// always-expanded list (BillClaimsReviewPanel.tsx) so nothing was lost
 // (edit, delete, approve/reject for legacy pending claims with no Approval
 // Request, referenced check-in/out map, attachment link) — just shown one
 // claim at a time instead of a long list. That standalone file was never
 // actually wired into App.tsx/AdminPanel.tsx (dead code) and has since been
 // deleted; this modal is the real, live "User Claim detail + History" view.
-const UserClaimDetailModal: React.FC<{
-  claim: UserClaim;
+const AdminBillClaimDetailModal: React.FC<{
+  claim: BillClaim;
   token: string;
   onClose: () => void;
   onChanged: () => void;
@@ -1210,13 +1210,13 @@ const UserClaimDetailModal: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState('');
-  const [viewingRef, setViewingRef] = useState<UserClaimReference | null>(null);
+  const [viewingRef, setViewingRef] = useState<BillClaimReference | null>(null);
 
   const hasRefs = !!claim.claim_refs && claim.claim_refs.length > 0;
   const hasItems = !!claim.items && claim.items.length > 0;
   const categoryNames = useBillClaimCategoryNames(token);
 
-  const refToClaimRecord = (ref: UserClaimReference): ClaimRecord => ({
+  const refToClaimRecord = (ref: BillClaimReference): ClaimRecord => ({
     id: ref.claim_id,
     user_id: claim.user_id,
     user_name: claim.user_name,
@@ -1258,7 +1258,7 @@ const UserClaimDetailModal: React.FC<{
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
@@ -1290,7 +1290,7 @@ const UserClaimDetailModal: React.FC<{
     setActing(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}/decision`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}/decision`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ action, remarks: remarks.trim() || undefined })
@@ -1311,7 +1311,7 @@ const UserClaimDetailModal: React.FC<{
     setDeleting(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete claim');
       onChanged();
@@ -1331,7 +1331,7 @@ const UserClaimDetailModal: React.FC<{
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap">
               {claim.category} Claim
               {claim.has_file && <Paperclip className="w-3.5 h-3.5 text-slate-400" />}
-              <UserClaimStatusBadge status={claim.status} />
+              <BillClaimStatusBadge status={claim.status} />
             </h3>
             <p className="text-xs text-slate-500 mt-0.5 truncate">{claim.user_name || '—'}</p>
           </div>
@@ -1396,7 +1396,7 @@ const UserClaimDetailModal: React.FC<{
                     value={editDraft.category}
                     disabled={hasItems}
                     title={hasItems ? 'Set per bill — not editable here' : undefined}
-                    onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value as UserClaimCategory }))}
+                    onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value as BillClaimCategoryName }))}
                     className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                   >
                     {[...new Set([...categoryNames, editDraft.category])].map((cat) => (
@@ -1488,7 +1488,7 @@ const UserClaimDetailModal: React.FC<{
 
               {claim.has_file && (
                 <a
-                  href={apiUrl(`/api/user-claims/${claim.id}/file`)}
+                  href={apiUrl(`/api/bill-claims/${claim.id}/file`)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold hover:underline"

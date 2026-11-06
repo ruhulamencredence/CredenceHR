@@ -32,7 +32,7 @@ await run('superadmin-desktop',SA,adminUrls,{width:1440,height:900});
 await run('superadmin-self-desktop',SA,slugs.map(s=>'/self/'+s),{width:1440,height:900});
 await run('employee-desktop',BOB,['/',...slugs.map(s=>'/self/'+s)],{width:1440,height:900});
 await run('employee-mobile',BOB,['/',...slugs.map(s=>'/self/'+s)],{width:390,height:844});
-await run('superadmin-mobile',SA,['/','/admin/employees','/admin/payroll','/admin/leave-applications','/admin/approvals','/admin/conveyance','/admin/users'],{width:390,height:844});
+await run('superadmin-mobile',SA,['/','/admin/employees','/admin/payroll','/admin/leave-applications','/admin/approvals','/admin/bill-claim','/admin/users'],{width:390,height:844});
 await b.close();
 fs.writeFileSync(process.argv[2]||'/tmp/claude-0/review/ui-smoke.json',JSON.stringify(out,null,1));
 const bad=out.filter(o=>o.errors.length||o.overflowPx||o.blank);

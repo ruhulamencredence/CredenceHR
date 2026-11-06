@@ -397,7 +397,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -476,7 +476,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
         can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
         can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
-        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
+        can_view_bill_claims: u.role === "superadmin" ? true : !!Number(u.can_view_bill_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
@@ -642,7 +642,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
-        await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM duty_roster_department_access WHERE user_id = ?", [id]).catch(() => {});
         await queryDB("UPDATE users SET can_view_login_location = 0, can_access_user_panel = 0 WHERE id = ?", [id]);
       }
@@ -888,22 +888,22 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  // Superadmin: department-wise scope for the 'conveyance' module — exact
+  // Superadmin: department-wise scope for the 'bill_claim' module — exact
   // same shape/rules as the 'attendance_report_departments'/'leave_
-  // application_departments' pairs above, just backed by conveyance_claim_
+  // application_departments' pairs above, just backed by bill_claim_
   // department_access instead (Admin Panel -> Users -> Module Access ->
-  // "Bill Claim Departments", shown once 'conveyance' is ticked). No
+  // "Bill Claim Departments", shown once 'bill_claim' is ticked). No
   // rows for a user means unrestricted — every Department's Conveyance Bill
   // Claims visible, exactly like granting the module alone. Applies equally
   // to role 'admin' and role 'user' accounts, and to accounts that supervise
   // no Department at all — the Department picker in the modal only uses
   // supervisor_user_id client-side to pre-tick a sensible starting
   // selection, it isn't required here.
-  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+  app.get("/api/users/:id/bill-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
-        "SELECT department FROM conveyance_claim_department_access WHERE user_id = ? ORDER BY department ASC",
+        "SELECT department FROM bill_claim_department_access WHERE user_id = ? ORDER BY department ASC",
         [id]
       );
       res.json({ departments: rows.map((r: any) => r.department) });
@@ -912,7 +912,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+  app.put("/api/users/:id/bill-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -931,9 +931,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
       );
 
-      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
       for (const department of valid) {
-        await queryDB("INSERT INTO conveyance_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+        await queryDB("INSERT INTO bill_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
       }
       res.json({ success: true, departments: valid });
     } catch (err: any) {
@@ -945,7 +945,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // duty_roster_department_access): ticked Departments = this account sees
   // and sets only those Departments' roster and can't change the shifts; no
   // rows = every Department (HR's full setup). Same shape and rules as
-  // conveyance-claim-departments above.
+  // bill-claim-departments above.
   app.get("/api/users/:id/roster-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
@@ -1124,10 +1124,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use the Bill Claim section on their own User Panel at all —
   // same on/off switch pattern as movement-claim-access above.
-  app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+  app.put("/api/users/:id/bill-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
-      const canView = !!req.body?.can_view_conveyance_claims;
+      const canView = !!req.body?.can_view_bill_claims;
 
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
@@ -1135,8 +1135,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: "Bill Claim access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_conveyance_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
-      res.json({ success: true, can_view_conveyance_claims: canView });
+      await queryDB("UPDATE users SET can_view_bill_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_bill_claims: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1856,7 +1856,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
-      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM duty_roster_department_access WHERE user_id = ?", [id]).catch(() => {});
       // A deleted user might still be linked from an Employees directory row
       // (all_employees.user_id — no FK/cascade on that column) — clear it so

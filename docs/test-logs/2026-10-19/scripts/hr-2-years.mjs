@@ -56,9 +56,9 @@ at('2024-10', 'Setup by Superadmin (once)');
 const SA = (await login('admin@credence.test', 'AdminPass123')).body.token;
 const mkUser = async (name, email, role) => (await step(`Account: ${name} (${role})`, api(SA, 'POST', '/api/users', { name, email, password: 'Pass12345', role }))).body.id;
 const nasrinId = await mkUser('Nasrin Sultana (HR Manager)', 'nasrin.hr@credence.test', 'admin');
-const HR_MODULES = ['employees', 'departments', 'branches', 'holidays', 'users', 'attendance', 'attendance_reports', 'office_attendance', 'leave_applications', 'recruitment', 'hr_operations', 'payroll', 'performance_management', 'grievance_disciplinary', 'exit_offboarding', 'document_vault', 'asset_management', 'vehicle_management', 'mobile_bill', 'notices', 'hr_analytics', 'task_management', 'target_reports', 'duty_roster', 'approvals', 'conveyance', 'claims', 'admin_dashboard'];
+const HR_MODULES = ['employees', 'departments', 'branches', 'holidays', 'users', 'attendance', 'attendance_reports', 'office_attendance', 'leave_applications', 'recruitment', 'hr_operations', 'payroll', 'performance_management', 'grievance_disciplinary', 'exit_offboarding', 'document_vault', 'asset_management', 'vehicle_management', 'mobile_bill', 'notices', 'hr_analytics', 'task_management', 'target_reports', 'duty_roster', 'approvals', 'bill_claim', 'claims', 'admin_dashboard'];
 await step('Nasrin gets the HR modules', api(SA, 'PUT', `/api/users/${nasrinId}/module-permissions`, { modules: HR_MODULES }));
-const LAYERS = { hr_operations: ['read', 'onboarding_create', 'onboarding_review', 'reminders_receive'], payroll: ['read', 'salary_bulk_upload', 'salary_hold', 'salary_month'], exit_offboarding: ['read', 'exit_dues', 'exit_pdf', 'exit_clearance_setup'], office_attendance: ['read', 'link_pins'], attendance_reports: ['read', 'late_list'], duty_roster: ['read', 'roster_manage'], document_vault: ['read', 'sign_request'], target_reports: ['read', 'target_export', 'target_cancel'], conveyance: ['read', 'on_behalf'], users: ['read', 'edit_add', 'block_account'], departments: ['read', 'edit_add'], approvals: ['read', 'edit_add'] };
+const LAYERS = { hr_operations: ['read', 'onboarding_create', 'onboarding_review', 'reminders_receive'], payroll: ['read', 'salary_bulk_upload', 'salary_hold', 'salary_month'], exit_offboarding: ['read', 'exit_dues', 'exit_pdf', 'exit_clearance_setup'], office_attendance: ['read', 'link_pins'], attendance_reports: ['read', 'late_list'], duty_roster: ['read', 'roster_manage'], document_vault: ['read', 'sign_request'], target_reports: ['read', 'target_export', 'target_cancel'], bill_claim: ['read', 'on_behalf'], users: ['read', 'edit_add', 'block_account'], departments: ['read', 'edit_add'], approvals: ['read', 'edit_add'] };
 for (const [module, layers] of Object.entries(LAYERS)) await step(`Nasrin's ${module} layers: ${layers.join(', ')}`, api(SA, 'PUT', `/api/users/${nasrinId}/module-permission-layers`, { module, layers }));
 await step('Nasrin may give Module Access to staff', api(SA, 'PUT', `/api/users/${nasrinId}/feature-permissions`, { can_grant_module_access: true }));
 await step('Nasrin manages leave', api(SA, 'PUT', `/api/users/${nasrinId}/leave-management-access`, { can_manage_leave: true }));
@@ -69,9 +69,9 @@ const mahbubId = await mkUser('Mahbub Alam (Audit)', 'mahbub.audit@credence.test
 await step('Mahbub: Payroll audit', api(SA, 'PUT', `/api/users/${mahbubId}/module-permissions`, { modules: ['payroll'] }));
 await step('Mahbub\'s layers: audit_approve', api(SA, 'PUT', `/api/users/${mahbubId}/module-permission-layers`, { module: 'payroll', layers: ['read', 'audit_approve'] }));
 const selinaId = await mkUser('Selina Parvin (Accounts)', 'selina.acc@credence.test', 'user');
-await step('Selina: Payroll pay + Disbursement', api(SA, 'PUT', `/api/users/${selinaId}/module-permissions`, { modules: ['payroll', 'disbursement', 'conveyance'] }));
+await step('Selina: Payroll pay + Disbursement', api(SA, 'PUT', `/api/users/${selinaId}/module-permissions`, { modules: ['payroll', 'disbursement', 'bill_claim'] }));
 await step('Selina\'s layers: accounts_pay', api(SA, 'PUT', `/api/users/${selinaId}/module-permission-layers`, { module: 'payroll', layers: ['read', 'accounts_pay'] }));
-await step('Approval template for conveyance claims (Superadmin-only job)', api(SA, 'POST', '/api/approval-templates', { name: 'Conveyance — HR then Accounts', request_type: 'conveyance', is_default: true, is_active: true, skip_auto_supervisor: false, steps: [{ approver_user_ids: [nasrinId], approver_type: 'admin', label: 'HR' }] }));
+await step('Approval template for conveyance claims (Superadmin-only job)', api(SA, 'POST', '/api/approval-templates', { name: 'Conveyance — HR then Accounts', request_type: 'bill_claim', is_default: true, is_active: true, skip_auto_supervisor: false, steps: [{ approver_user_ids: [nasrinId], approver_type: 'admin', label: 'HR' }] }));
 await step('Bill claim categories (Superadmin-only job)', api(SA, 'POST', '/api/bill-claim-categories', { name: 'Transport' }), (r) => ok2(r) || r.status === 409);
 note('Superadmin-only HR jobs', 'Approval templates / chains, bill-claim policy and categories, reminder run, company setup, role changes (user↔admin), devices and active sessions can only be done by the Superadmin; an HR Manager has to ask for them.');
 
@@ -251,7 +251,7 @@ for (const ym of months) {
     check(`${first} logs in with the new password`, !!TOK[first]);
     // Nasrin gives the Self Service switches by hand.
     let sw = 0;
-    for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['payslip-access', 'can_view_payslip'], ['loan-request-access', 'can_view_loan_request'], ['sign-documents-access', 'can_sign_documents'], ['tasks-access', 'can_view_tasks'], ['conveyance-claim-access', 'can_view_conveyance_claims'], ['movement-claim-access', 'can_view_movement_claims']]) if (ok2(await api(N, 'PUT', `/api/users/${uid}/${route}`, { [col]: true }))) sw++;
+    for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['payslip-access', 'can_view_payslip'], ['loan-request-access', 'can_view_loan_request'], ['sign-documents-access', 'can_sign_documents'], ['tasks-access', 'can_view_tasks'], ['bill-claim-access', 'can_view_bill_claims'], ['movement-claim-access', 'can_view_movement_claims']]) if (ok2(await api(N, 'PUT', `/api/users/${uid}/${route}`, { [col]: true }))) sw++;
     await api(N, 'PUT', `/api/users/${uid}/feature-permissions`, { can_use_attendance: true, can_view_leave_summary: true });
     check(`Nasrin turns on ${first}'s Self Service (${sw}/8)`, sw === 8);
     await step(`${first}'s device PIN`, api(N, 'PUT', `/api/employees/${eid}/zk-pin`, { zk_device_pin: pin }));
@@ -460,10 +460,10 @@ const team = await step('Chattogram site team (Rafiq supervises Tania)', api(N, 
 const sheet = await step('Rafiq marks the site sheet for today', api(TOK.Rafiq, 'POST', '/api/site-attendance/sheet', { team_id: team.body.id, date: today, entries: [{ employee_id: EMP.Tania.id, status: 'present', in_time: '09:05', out_time: '18:00' }] }));
 if (sheet.body.status === 'submitted') await step('Nasrin approves the site sheet', api(N, 'POST', `/api/site-attendance/sheets/${sheet.body.sheet_id}/review`, { decision: 'approve' }));
 const cat = listOf((await api(TOK.Tania, 'GET', '/api/bill-claim-categories')).body)[0];
-const cl = await step('Tania claims CNG fare for today', api(TOK.Tania, 'POST', '/api/user-claims', { from_date: today, to_date: today, items: [{ category_id: cat?.id, bill_date: today, amount: 420, description: 'Client visit' }] }), (r) => r.status === 201);
-const ca = await approveAs(TOK.Rafiq, 'user_claim', cl.body.id);
+const cl = await step('Tania claims CNG fare for today', api(TOK.Tania, 'POST', '/api/bill-claims', { from_date: today, to_date: today, items: [{ category_id: cat?.id, bill_date: today, amount: 420, description: 'Client visit' }] }), (r) => r.status === 201);
+const ca = await approveAs(TOK.Rafiq, 'bill_claim', cl.body.id);
 check('Rafiq (head of Sales) approves the claim', ok2(ca), J(ca));
-const cb = await approveAs(N, 'user_claim', cl.body.id);
+const cb = await approveAs(N, 'bill_claim', cl.body.id);
 check('Nasrin (template step: HR) approves it', ok2(cb), J(cb));
 const bill = sql(`SELECT IFNULL(MAX(id),0) FROM conveyance_bills`);
 const dis = await api(SELINA, 'POST', `/api/conveyance-bills/${bill}/disburse`, { voucher_no: 'CV-2610-01' });

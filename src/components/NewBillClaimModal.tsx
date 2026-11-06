@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, ShieldCheck } from 'lucide-react';
-import { ClaimRecord, MyBillClaimPolicy, UserClaim } from '../types';
+import { ClaimRecord, MyBillClaimPolicy, BillClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
@@ -15,9 +15,9 @@ import { readDraft, saveDraft, clearDraft } from '../lib/formDraft';
 
 // The unsent New Claim, kept on the phone (lib/formDraft.ts) so a reload or
 // the app being restarted (e.g. by Android while the camera is open) never
-// loses it. `open`: the form was open — ConveyanceClaimCard reopens it.
-export const CONVEYANCE_DRAFT = 'conveyance-claim';
-export interface ConveyanceClaimDraft {
+// loses it. `open`: the form was open — BillClaimCard reopens it.
+export const BILL_CLAIM_DRAFT = 'bill-claim';
+export interface BillClaimDraft {
   open: boolean;
   fromDate: string;
   toDate: string;
@@ -29,7 +29,7 @@ export interface ConveyanceClaimDraft {
 import { Spinner } from './Spinner';
 
 import { SearchSelect } from './Combobox';
-interface NewConveyanceClaimModalProps {
+interface NewBillClaimModalProps {
   token: string;
   onClose: () => void;
   onSubmitted: () => void;
@@ -38,7 +38,7 @@ interface NewConveyanceClaimModalProps {
   onBehalfOf?: { id: number; name: string } | null;
   // Edit (or correct & resubmit) this claim instead of filing a new one —
   // its bills, dates, check-in/outs and attachment are filled in.
-  editClaim?: UserClaim | null;
+  editClaim?: BillClaim | null;
   // "One new claim per day": a claim was already filed today — open that one
   // for editing instead.
   onEditExisting?: (claimId: number) => void;
@@ -47,7 +47,7 @@ interface NewConveyanceClaimModalProps {
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
 
-// "+ New Claim" submission form — opened from ConveyanceClaimCard as an inline
+// "+ New Claim" submission form — opened from BillClaimCard as an inline
 // modal (same pop-in treatment as the rest of the User Panel's forms). Every
 // field/validation rule here matches the spec: Claim Date required, From/To Date
 // range required with To >= From (covers multi-day tours), Category required,
@@ -88,8 +88,8 @@ const checkInDate = (v: string | null | undefined) => {
   if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf, editClaim, onEditExisting }) => {
-  const behalfBase = onBehalfOf ? `/api/user-claims/on-behalf/${onBehalfOf.id}` : null;
+export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf, editClaim, onEditExisting }) => {
+  const behalfBase = onBehalfOf ? `/api/bill-claims/on-behalf/${onBehalfOf.id}` : null;
   const editId = editClaim?.id ?? null;
   // Editing: the attachment already on the claim (kept unless replaced/removed).
   const hadFile = !!editClaim?.has_file;
@@ -155,7 +155,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           for (const r of editClaim.claim_refs || []) refs[r.claim_id] = String(r.amount);
           setSelectedRefs(refs);
         } else {
-          const d = useDraft ? readDraft<ConveyanceClaimDraft>(CONVEYANCE_DRAFT) : null;
+          const d = useDraft ? readDraft<BillClaimDraft>(BILL_CLAIM_DRAFT) : null;
           const hasContent = !!d && (d.description?.trim() || Object.keys(d.selectedRefs || {}).length || (d.bills || []).some((b) => b.amount || b.category_id || b.description));
           if (d && hasContent && Array.isArray(d.bills) && d.bills.length) {
             // Pick up where it was left.
@@ -186,8 +186,8 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   useEffect(() => {
     if (!useDraft || !draftReady) return;
     const t = setTimeout(() => {
-      const draft: ConveyanceClaimDraft = { open: true, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null };
-      saveDraft(CONVEYANCE_DRAFT, draft);
+      const draft: BillClaimDraft = { open: true, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null };
+      saveDraft(BILL_CLAIM_DRAFT, draft);
     }, 300);
     return () => clearTimeout(t);
   }, [useDraft, draftReady, fromDate, toDate, bills, description, selectedRefs, file, restored]);
@@ -196,14 +196,14 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const close = () => {
     if (useDraft && draftReady) {
       const started = description.trim() || Object.keys(selectedRefs).length || bills.some((b) => b.amount || b.category_id || b.description);
-      if (started) saveDraft(CONVEYANCE_DRAFT, { open: false, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null });
-      else clearDraft(CONVEYANCE_DRAFT);
+      if (started) saveDraft(BILL_CLAIM_DRAFT, { open: false, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null });
+      else clearDraft(BILL_CLAIM_DRAFT);
     }
     onClose();
   };
   closeRef.current = close;
   const startOver = () => {
-    clearDraft(CONVEYANCE_DRAFT);
+    clearDraft(BILL_CLAIM_DRAFT);
     const day = policy?.today || todayDateOnlyString();
     setFromDate(day);
     setToDate(day);
@@ -395,7 +395,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         });
       }
 
-      const res = await fetch(apiUrl(editId ? `/api/user-claims/${editId}/edit` : behalfBase || '/api/user-claims'), {
+      const res = await fetch(apiUrl(editId ? `/api/bill-claims/${editId}/edit` : behalfBase || '/api/bill-claims'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -418,7 +418,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to submit claim');
-      if (useDraft) clearDraft(CONVEYANCE_DRAFT);
+      if (useDraft) clearDraft(BILL_CLAIM_DRAFT);
       onSubmitted();
     } catch (err: any) {
       setError(err.message || 'Failed to submit claim');

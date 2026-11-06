@@ -20,7 +20,7 @@ import type { Express } from "express";
 import { leaveLabelFn, loadAttendanceData, computeAttendanceDays, summarizeDays } from "./HrOps360Routes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
-type DeptScopeKind = "attendance" | "leave" | "conveyance";
+type DeptScopeKind = "attendance" | "leave" | "bill_claim";
 
 interface ReportsInsightsDeps {
   authenticateToken: any;
@@ -365,10 +365,10 @@ const REPORTS: ReportDef[] = [
     category: "Bill",
     title: "Bill Claims",
     description: "Every bill claim with its period, categories, claimed and approved amount and review status.",
-    modules: ["conveyance"],
+    modules: ["bill_claim"],
     filters: ["date", "department", "employee", "status"],
     dateLabel: "Claim date",
-    deptScope: "conveyance",
+    deptScope: "bill_claim",
     statuses: [
       { value: "pending", label: "Pending" },
       { value: "approved", label: "Approved" },
@@ -377,13 +377,13 @@ const REPORTS: ReportDef[] = [
     async run({ from, to, queryDB, people, status }) {
       const [claims, items] = await Promise.all([
         queryDB(
-          "SELECT id, user_id, claim_date, from_date, to_date, category, amount, approved_amount, status, admin_remarks, reviewed_by, reviewed_at, created_at FROM user_claims"
+          "SELECT id, user_id, claim_date, from_date, to_date, category, amount, approved_amount, status, admin_remarks, reviewed_by, reviewed_at, created_at FROM bill_claims"
         ).catch(() => []),
-        queryDB("SELECT user_claim_id, category_name, amount FROM user_claim_items").catch(() => [])
+        queryDB("SELECT bill_claim_id, category_name, amount FROM bill_claim_items").catch(() => [])
       ]);
       const itemsBy = new Map<number, any[]>();
       for (const it of items) {
-        const k = Number(it.user_claim_id);
+        const k = Number(it.bill_claim_id);
         if (!itemsBy.has(k)) itemsBy.set(k, []);
         itemsBy.get(k)!.push(it);
       }
@@ -434,10 +434,10 @@ const REPORTS: ReportDef[] = [
     category: "Bill",
     title: "Bill Claim by Category",
     description: "Claimed amount per category (Food, Transport…) for the period — where the money goes.",
-    modules: ["conveyance"],
+    modules: ["bill_claim"],
     filters: ["date", "department", "employee", "status"],
     dateLabel: "Bill date",
-    deptScope: "conveyance",
+    deptScope: "bill_claim",
     statuses: [
       { value: "pending", label: "Pending" },
       { value: "approved", label: "Approved" },
@@ -445,16 +445,16 @@ const REPORTS: ReportDef[] = [
     ],
     async run({ from, to, queryDB, people, status }) {
       const [claims, items] = await Promise.all([
-        queryDB("SELECT id, user_id, claim_date, category, amount, status, created_at FROM user_claims").catch(() => []),
-        queryDB("SELECT user_claim_id, category_name, bill_date, amount FROM user_claim_items").catch(() => [])
+        queryDB("SELECT id, user_id, claim_date, category, amount, status, created_at FROM bill_claims").catch(() => []),
+        queryDB("SELECT bill_claim_id, category_name, bill_date, amount FROM bill_claim_items").catch(() => [])
       ]);
       const claimById = new Map<number, any>(claims.map((c: any) => [Number(c.id), c]));
-      const withItems = new Set(items.map((i: any) => Number(i.user_claim_id)));
+      const withItems = new Set(items.map((i: any) => Number(i.bill_claim_id)));
       // One line per bill: the claim's own bills, or the claim itself for an
       // older single-category claim.
       const lines: any[] = [];
       for (const it of items) {
-        const c = claimById.get(Number(it.user_claim_id));
+        const c = claimById.get(Number(it.bill_claim_id));
         if (c) lines.push({ c, category: it.category_name, date: d10(it.bill_date || c.claim_date), amount: num(it.amount) });
       }
       for (const c of claims) if (!withItems.has(Number(c.id))) lines.push({ c, category: c.category, date: d10(c.claim_date || c.created_at), amount: num(c.amount) });
@@ -489,7 +489,7 @@ const REPORTS: ReportDef[] = [
     category: "Bill",
     title: "Conveyance Bills",
     description: "Bills prepared from approved claims: items, distance, amount and whether each one is disbursed.",
-    modules: ["conveyance", "disbursement"],
+    modules: ["bill_claim", "disbursement"],
     filters: ["date", "department", "employee", "status"],
     dateLabel: "Bill date",
     statuses: [

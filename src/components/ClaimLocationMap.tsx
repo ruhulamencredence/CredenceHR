@@ -96,7 +96,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
   }, []);
 
   // Rendered via a portal straight onto document.body instead of in place —
-  // same reasoning as NewConveyanceClaimModal: one of this popup's callers
+  // same reasoning as NewBillClaimModal: one of this popup's callers
   // (MyClaimsCard.tsx's mobile "liquid glass" card) has a backdrop-blur-xl
   // ancestor, which the CSS spec makes a containing block for any
   // `position: fixed` descendant (same as `transform`/`filter`) — without

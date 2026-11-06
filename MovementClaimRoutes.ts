@@ -127,7 +127,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
   });
 
   // The calling user's own completed Check In/Out that haven't been referenced
-  // by a Bill Claim yet (user_claim_references) and haven't already
+  // by a Bill Claim yet (bill_claim_references) and haven't already
   // been pulled directly into an official Bill by an Admin either
   // (conveyance_bill_items.claim_id) — powers the "Reference Check In/Out" picker
   // in the New Bill Claim form. Each check-in/out can only ever be
@@ -138,7 +138,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         `SELECT c.* FROM claims c
           WHERE c.user_id = ? AND c.status = 'completed'
             AND NOT EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.claim_id = c.id)
-            AND NOT EXISTS (SELECT 1 FROM user_claim_references r WHERE r.claim_id = c.id)
+            AND NOT EXISTS (SELECT 1 FROM bill_claim_references r WHERE r.claim_id = c.id)
           ORDER BY c.check_in_at DESC`,
         [req.user.id]
       );

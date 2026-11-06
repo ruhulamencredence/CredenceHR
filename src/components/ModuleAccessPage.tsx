@@ -40,7 +40,7 @@ const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
   { key: 'pepm', label: 'PEPM', hint: 'Budgets, MPR entries, reports and material dispatch.' },
   { key: 'hr', label: 'HR', hint: 'Dashboard, approvals, notices, departments, tasks and targets.' },
   { key: 'attendance', label: 'Attendance & Leave', hint: 'Attendance, roster, leave applications and leave balances.' },
-  { key: 'claims', label: 'Claims & Bills', hint: 'Check In/Out and conveyance claims, disbursement and mobile bills.' },
+  { key: 'claims', label: 'Claims & Bills', hint: 'Check In/Out and bill claims, disbursement and mobile bills.' },
   { key: 'employees', label: 'Employees & Assets', hint: 'Employee records, tracking, assets and vehicles.' },
   { key: 'hrops', label: 'HR Operations', hint: 'Onboarding, exit, performance, recruitment and documents.' },
   { key: 'payroll', label: 'Payroll', hint: 'Salary, payslips and loans.' },
@@ -59,7 +59,7 @@ type FlagKey =
   | 'can_job_edit'
   | 'can_manage_leave'
   | 'can_view_movement_claims'
-  | 'can_view_conveyance_claims'
+  | 'can_view_bill_claims'
   | 'can_view_budget_module'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
@@ -139,7 +139,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 
   { key: 'can_view_movement_claims', label: 'Check In/Out', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
-  { key: 'can_view_conveyance_claims', label: 'Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
+  { key: 'can_view_bill_claims', label: 'Bill Claim', desc: 'Submit bill claims.', section: 'claims', endpoint: 'bill-claim-access' },
   { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
@@ -165,7 +165,7 @@ const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
   admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
-  claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
+  claims: 'claims', bill_claim: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
   hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', management_dashboard: 'hr', data_import: 'hr', document_vault: 'hrops',
   payroll: 'payroll',
@@ -188,7 +188,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   duty_roster: 'Shifts and who works when.',
   break_time: 'Who is on a break, daily totals, over-limit.',
   user_feedback: 'Ratings, problems and ideas people send about the app.',
-  conveyance: 'Review conveyance bills.',
+  bill_claim: 'Review bill claims and conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',
   mobile_bill: 'Company SIMs, limits and operator bills.',
   vehicle_maintainer: 'Direct Book a ride without approval.',
@@ -197,11 +197,11 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
 };
 
 const LAYER_MODULES = PERMISSION_LAYER_MODULES as readonly string[];
-type DeptKind = 'attendance_reports' | 'leave_applications' | 'conveyance' | 'duty_roster';
+type DeptKind = 'attendance_reports' | 'leave_applications' | 'bill_claim' | 'duty_roster';
 const DEPT_KINDS: { module: DeptKind; endpoint: string; title: string; hint: string; preTick: boolean }[] = [
   { module: 'attendance_reports', endpoint: 'attendance-report-departments', title: 'Departments on the Monthly Attendance Report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'leave_applications', endpoint: 'leave-application-departments', title: 'Departments on the Monthly Leave Application report', hint: 'Nothing ticked = every Department.', preTick: true },
-  { module: 'conveyance', endpoint: 'conveyance-claim-departments', title: 'Departments on Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
+  { module: 'bill_claim', endpoint: 'bill-claim-departments', title: 'Departments on Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'duty_roster', endpoint: 'roster-departments', title: 'Departments whose roster they set', hint: 'Nothing ticked = every Department and the shifts too (full setup, e.g. HR). Ticked = only those, shifts read only.', preTick: false }
 ];
 

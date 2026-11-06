@@ -920,7 +920,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   });
 
-  const MAX_ATTENDANCE_CORRECTION_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches user_claims' cap
+  const MAX_ATTENDANCE_CORRECTION_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches bill_claims' cap
 
   // Timesheet -> click any date's row -> "Correct Attendance" modal. Submits a
   // request to manually set that day's In Time/Out Time (e.g. the day shows
@@ -928,7 +928,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // an optional attachment. Never writes to `attendance` directly — see
   // finalizeAttendanceCorrection. If no global Approval Chain is configured yet,
   // auto-processes immediately (same backward-compatible convention as
-  // Bill Claims/POST /api/user-claims); otherwise it stays 'pending'
+  // Bill Claims/POST /api/bill-claims); otherwise it stays 'pending'
   // until the LAST step of the chain approves it from the existing Admin Panel
   // -> Approvals queue — no separate review page needed.
   app.post("/api/attendance/corrections", authenticateToken, requireAttendanceAccess, async (req: any, res) => {

@@ -125,7 +125,7 @@ check('Logs in with his email and new password', L.status === 200, J(L));
 R = L.body.token;
 
 // All Self Service switches on.
-const SWITCHES = [['leave-application-access', 'can_view_leave_application'], ['movement-claim-access', 'can_view_movement_claims'], ['conveyance-claim-access', 'can_view_conveyance_claims'], ['timesheet-access', 'can_view_timesheet'], ['tasks-access', 'can_view_tasks'], ['mobile-bill-access', 'can_view_mobile_bill'], ['service-book-access', 'can_view_service_book'], ['loan-request-access', 'can_view_loan_request'], ['targets-access', 'can_view_targets'], ['mail-access', 'can_use_mail'], ['sign-documents-access', 'can_sign_documents'], ['roster-access', 'can_view_roster'], ['calls-access', 'can_use_calls'], ['payslip-access', 'can_view_payslip']];
+const SWITCHES = [['leave-application-access', 'can_view_leave_application'], ['movement-claim-access', 'can_view_movement_claims'], ['bill-claim-access', 'can_view_bill_claims'], ['timesheet-access', 'can_view_timesheet'], ['tasks-access', 'can_view_tasks'], ['mobile-bill-access', 'can_view_mobile_bill'], ['service-book-access', 'can_view_service_book'], ['loan-request-access', 'can_view_loan_request'], ['targets-access', 'can_view_targets'], ['mail-access', 'can_use_mail'], ['sign-documents-access', 'can_sign_documents'], ['roster-access', 'can_view_roster'], ['calls-access', 'can_use_calls'], ['payslip-access', 'can_view_payslip']];
 for (const [route, col] of SWITCHES) await step(`Switch on ${col}`, api(SA, 'PUT', `/api/users/${ruhulUser}/${route}`, { [col]: true }));
 await step('Switch on attendance, tracking, leave summary; pinned to Head Office', api(SA, 'PUT', `/api/users/${ruhulUser}/feature-permissions`, { can_use_attendance: true, can_use_tracking: true, can_view_leave_summary: true, attendance_project_id: projectId }));
 const me = await step('Ruhul\'s session shows the switches', api(R, 'GET', '/api/auth/me'));
@@ -410,8 +410,8 @@ const mv = await step('Movement: client visit check-in', api(R, 'POST', '/api/cl
 await step('Movement: check-out', api(R, 'POST', `/api/claims/${mv.body.id}/check-out`, { latitude: 23.7806, longitude: 90.4074 }));
 if (cat) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
-  const cl = await step(`Conveyance claim for today (${cat.name || cat.label})`, api(R, 'POST', '/api/user-claims', { from_date: today, to_date: today, items: [{ category_id: cat.id, bill_date: today, amount: 350, description: 'CNG to Motijheel and back' }], description: 'Client visit' }), (r) => r.status === 201);
-  const cla = await approveAs(sup, 'user_claim', cl.body.id);
+  const cl = await step(`Conveyance claim for today (${cat.name || cat.label})`, api(R, 'POST', '/api/bill-claims', { from_date: today, to_date: today, items: [{ category_id: cat.id, bill_date: today, amount: 350, description: 'CNG to Motijheel and back' }], description: 'Client visit' }), (r) => r.status === 201);
+  const cla = await approveAs(sup, 'bill_claim', cl.body.id);
   check(`${supName} approves the claim (or it auto-approves)`, ok2(cla) || cla.status === 404, J(cla));
 } else gap('Conveyance claim', 'No bill claim categories are set up, so a claim cannot be filed.');
 const veh = await step('HR registers a pool car', api(SA, 'POST', '/api/vehicles', { vehicle_no: 'DHA-GA-11-2233', model: 'Toyota Axio', vehicle_type: 'car' }), (r) => r.status === 201 || r.status === 200);

@@ -21,7 +21,7 @@ import { AttendanceGauge, DayStatus, PeriodPill, PeriodSheet, PhoneDayCard, Stat
 interface TimesheetProps {
   token: string;
   // Kept for the caller's mobile tile-menu wiring, but no longer rendered as
-  // a Back button — matches ConveyanceClaimCard/ClaimCard, which accept this
+  // a Back button — matches BillClaimCard/ClaimCard, which accept this
   // same prop and rely on the bottom nav to leave the section instead.
   onBack?: () => void;
   // Superadmin/Admin-pinned Project for Remote Attendance (Admin Panel ->

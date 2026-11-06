@@ -1417,7 +1417,7 @@ Unique: `unique_user_company_module`(user_id,company_id,module_key)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `employee_user_id` | int(11) | না |  | FK → `users.id` |
-| `request_type` | enum('conveyance','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
+| `request_type` | enum('bill_claim','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
 | `template_id` | int(11) | না |  | FK → `approval_templates.id` |
 | `assigned_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
@@ -1686,7 +1686,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_access_user_panel` | tinyint(1) | না | default 0 | |
 | `can_manage_leave` | tinyint(1) | না | default 0 | |
 | `can_view_movement_claims` | tinyint(1) | না | default 0 | |
-| `can_view_conveyance_claims` | tinyint(1) | না | default 0 | |
+| `can_view_bill_claims` | tinyint(1) | না | default 0 | |
 | `can_save_ride_places` | tinyint(1) | না | default 0 | |
 | `chat_about` | varchar(140) | হ্যাঁ |  | |
 | `group_id` | int(11) | না | default 1 | |
@@ -2090,7 +2090,7 @@ Unique: `uq_mpr_po_line`(entry_id,po_no)
 
 ## F. Claims, Conveyance & Mobile Bill
 
-Movement claim, Bill Claim (bill ও লাইন), অনুমোদনকারীর স্বাক্ষর, ক্লেইম নীতি, মোবাইল SIM ও বিল।
+Movement claim, Conveyance Bill Claim (bill ও লাইন), অনুমোদনকারীর স্বাক্ষর, ক্লেইম নীতি, মোবাইল SIM ও বিল।
 
 ### `bill_claim_categories`
 
@@ -2108,6 +2108,44 @@ Movement claim, Bill Claim (bill ও লাইন), অনুমোদনকা�
 | `deleted_at` | timestamp | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+### `bill_claim_department_access`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `department` | varchar(150) | না |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_user_department`(user_id,department)
+
+### `bill_claim_history`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `bill_claim_id` | int(11) | না |  | FK → `bill_claims.id` |
+| `action` | varchar(20) | না |  | |
+| `actor_id` | int(11) | হ্যাঁ |  | |
+| `actor_name` | varchar(255) | হ্যাঁ |  | |
+| `reason` | text | হ্যাঁ |  | |
+| `version` | int(11) | না | default 1 | |
+| `snapshot_json` | mediumtext | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `bill_claim_items`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `bill_claim_id` | int(11) | না |  | FK → `bill_claims.id` |
+| `category_id` | int(11) | হ্যাঁ |  | logical → `leave_categories` |
+| `category_name` | varchar(100) | না |  | |
+| `bill_date` | date | না |  | |
+| `amount` | decimal(12,2) | না |  | |
+| `description` | varchar(500) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `bill_claim_policy_history`
 
@@ -2142,6 +2180,47 @@ Movement claim, Bill Claim (bill ও লাইন), অনুমোদনকা�
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 Unique: `uniq_bcp_company_key`(company_id,policy_key)
+
+### `bill_claim_references`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `bill_claim_id` | int(11) | না |  | FK → `bill_claims.id` |
+| `claim_id` | int(11) | না | UNI  | FK → `claims.id` |
+| `amount` | decimal(12,2) | না |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `claim_id`(claim_id)
+
+### `bill_claims`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `claim_date` | date | না |  | |
+| `from_date` | date | না |  | |
+| `to_date` | date | না |  | |
+| `category` | varchar(255) | না | default 'Others' | |
+| `amount` | decimal(12,2) | না |  | |
+| `description` | text | হ্যাঁ |  | |
+| `file_name` | varchar(255) | হ্যাঁ |  | |
+| `file_mimetype` | varchar(150) | হ্যাঁ |  | |
+| `file_data` | longblob | হ্যাঁ |  | |
+| `status` | enum('pending','approved','rejected') | না | default 'pending' | |
+| `admin_remarks` | text | হ্যাঁ |  | |
+| `reviewed_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
+| `reviewed_at` | timestamp | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `approved_amount` | decimal(12,2) | হ্যাঁ |  | |
+| `filed_by` | int(11) | হ্যাঁ |  | |
+| `first_submitted_at` | datetime | হ্যাঁ |  | |
+| `version` | int(11) | না | default 1 | |
+| `edit_state` | varchar(20) | হ্যাঁ |  | |
+| `return_reason` | text | হ্যাঁ |  | |
+| `reclaim_allowed` | tinyint(1) | না | default 0 | |
 
 ### `claim_approval_signatures`
 
@@ -2181,9 +2260,9 @@ Unique: `uniq_claim_sig`(approval_request_id,step_order,approver_user_id)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `bill_id` | int(11) | না |  | FK → `conveyance_bills.id` |
-| `source` | enum('movement_claim','manual','user_claim') | না | default 'manual' | |
+| `source` | enum('movement_claim','manual','bill_claim') | না | default 'manual' | |
 | `claim_id` | int(11) | হ্যাঁ | UNI  | FK → `claims.id` |
-| `user_claim_id` | int(11) | হ্যাঁ | UNI  | FK → `user_claims.id` |
+| `bill_claim_id` | int(11) | হ্যাঁ | UNI  | FK → `bill_claims.id` |
 | `entry_date` | date | না |  | |
 | `particulars` | varchar(255) | না |  | |
 | `from_location` | varchar(255) | হ্যাঁ |  | |
@@ -2194,7 +2273,7 @@ Unique: `uniq_claim_sig`(approval_request_id,step_order,approver_user_id)
 | `remarks` | text | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
-Unique: `claim_id`(claim_id), `user_claim_id`(user_claim_id)
+Unique: `bill_claim_id`(bill_claim_id), `claim_id`(claim_id)
 
 ### `conveyance_bills`
 
@@ -2211,17 +2290,6 @@ Unique: `claim_id`(claim_id), `user_claim_id`(user_claim_id)
 | `disbursed_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
-
-### `conveyance_claim_department_access`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `user_id` | int(11) | না |  | FK → `users.id` |
-| `department` | varchar(150) | না |  | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-Unique: `unique_user_department`(user_id,department)
 
 ### `mobile_bills`
 
@@ -2311,74 +2379,6 @@ Unique: `uniq_mobile_policy_type`(company_id,employee_type)
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 Unique: `uniq_mobile_sim_number`(company_id,phone_number)
-
-### `user_claim_history`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `user_claim_id` | int(11) | না |  | FK → `user_claims.id` |
-| `action` | varchar(20) | না |  | |
-| `actor_id` | int(11) | হ্যাঁ |  | |
-| `actor_name` | varchar(255) | হ্যাঁ |  | |
-| `reason` | text | হ্যাঁ |  | |
-| `version` | int(11) | না | default 1 | |
-| `snapshot_json` | mediumtext | হ্যাঁ |  | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-### `user_claim_items`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `user_claim_id` | int(11) | না |  | FK → `user_claims.id` |
-| `category_id` | int(11) | হ্যাঁ |  | logical → `leave_categories` |
-| `category_name` | varchar(100) | না |  | |
-| `bill_date` | date | না |  | |
-| `amount` | decimal(12,2) | না |  | |
-| `description` | varchar(500) | হ্যাঁ |  | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-### `user_claim_references`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `user_claim_id` | int(11) | না |  | FK → `user_claims.id` |
-| `claim_id` | int(11) | না | UNI  | FK → `claims.id` |
-| `amount` | decimal(12,2) | না |  | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-Unique: `claim_id`(claim_id)
-
-### `user_claims`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `user_id` | int(11) | না |  | FK → `users.id` |
-| `claim_date` | date | না |  | |
-| `from_date` | date | না |  | |
-| `to_date` | date | না |  | |
-| `category` | varchar(255) | না | default 'Others' | |
-| `amount` | decimal(12,2) | না |  | |
-| `description` | text | হ্যাঁ |  | |
-| `file_name` | varchar(255) | হ্যাঁ |  | |
-| `file_mimetype` | varchar(150) | হ্যাঁ |  | |
-| `file_data` | longblob | হ্যাঁ |  | |
-| `status` | enum('pending','approved','rejected') | না | default 'pending' | |
-| `admin_remarks` | text | হ্যাঁ |  | |
-| `reviewed_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
-| `reviewed_at` | timestamp | হ্যাঁ |  | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
-| `approved_amount` | decimal(12,2) | হ্যাঁ |  | |
-| `filed_by` | int(11) | হ্যাঁ |  | |
-| `first_submitted_at` | datetime | হ্যাঁ |  | |
-| `version` | int(11) | না | default 1 | |
-| `edit_state` | varchar(20) | হ্যাঁ |  | |
-| `return_reason` | text | হ্যাঁ |  | |
-| `reclaim_allowed` | tinyint(1) | না | default 0 | |
 
 ## B. Company, Organisation & Employees
 
@@ -3911,7 +3911,7 @@ Unique: `unique_step_order`(step_order)
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
-| `source_type` | enum('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') | না |  | |
+| `source_type` | enum('attendance','claim','bill_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') | না |  | |
 | `event_type` | enum('check_in','check_out','submit') | না |  | |
 | `source_id` | int(11) | না |  | |
 | `requested_by` | int(11) | না |  | FK → `users.id` |
@@ -3961,7 +3961,7 @@ Unique: `unique_template_step_order`(template_id,step_order)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `name` | varchar(150) | না |  | |
-| `request_type` | enum('conveyance','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
+| `request_type` | enum('bill_claim','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `is_active` | tinyint(1) | না | default 1 | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |

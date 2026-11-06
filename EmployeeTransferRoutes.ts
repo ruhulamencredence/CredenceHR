@@ -5,7 +5,7 @@
 
 // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
 // — kept in its own file, same reasoning as profileRoutes.ts /
-// ConveyanceBillClaimRoutes.ts / PayrollRoutes.ts / AssetManagementRoutes.ts:
+// BillClaimRoutes.ts / PayrollRoutes.ts / AssetManagementRoutes.ts:
 // server.ts is already huge, so new features go in their own module and are
 // registered from inside startServer() via registerEmployeeTransferRoutes(),
 // reusing that request's authenticateToken/requireAdmin/requireModule/queryDB

@@ -91,7 +91,7 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
   }
 
   // Rendered via a portal straight onto document.body — same reason as
-  // NewLeaveApplicationModal / NewConveyanceClaimModal: escapes the
+  // NewLeaveApplicationModal / NewBillClaimModal: escapes the
   // `overflow-hidden` dashboard ancestor that clips `position: fixed` on a
   // number of Android WebViews.
   return createPortal(

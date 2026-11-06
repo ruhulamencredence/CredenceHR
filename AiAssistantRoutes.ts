@@ -158,7 +158,7 @@ interface Answer {
 }
 
 const SELF_FLAGS = [
-  "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
+  "can_view_movement_claims", "can_view_bill_claims", "can_view_timesheet", "can_view_leave_application",
   "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book",
   "can_use_attendance"
 ] as const;
@@ -243,9 +243,9 @@ const HELP: HelpEntry[] = [
   { id: "movement_claim", title: "Check In/Out", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
     steps: "মেনু → Requests & Claims → **Check In/Out**। কাজে বের হওয়ার সময় Check In, ফেরার সময় Check Out দিন — লোকেশন নিজে থেকে বসে যায়।",
     nav: "claims:movementClaims", can: (c) => isSuper(c) || c.flags.can_view_movement_claims },
-  { id: "conveyance", title: "Bill Claim", keys: ["conveyance", "কনভেয়েন্স", "bill claim", "বিল জমা", "bill dibo", "যাতায়াত বিল", "transport bill"],
+  { id: "bill_claim", title: "Bill Claim", keys: ["conveyance", "কনভেয়েন্স", "bill claim", "বিল জমা", "bill dibo", "যাতায়াত বিল", "transport bill"],
     steps: "মেনু → Requests & Claims → **Bill Claim** → New Claim। তারিখ, খরচের ধরন, টাকা আর বিবরণ দিয়ে জমা দিন। Transport হলে আগের Movement check-in/out রেফারেন্স হিসেবে বেছে নিতে পারবেন।",
-    nav: "claims:conveyanceBill", can: (c) => isSuper(c) || c.flags.can_view_conveyance_claims || c.modules.includes("conveyance") },
+    nav: "claims:billClaim", can: (c) => isSuper(c) || c.flags.can_view_bill_claims || c.modules.includes("bill_claim") },
   { id: "timesheet", title: "Timesheet", keys: ["timesheet", "টাইমশিট"],
     steps: "মেনু → Leave & Attendance → **Timesheet**।", nav: "self:timesheet", can: (c) => isSuper(c) || c.flags.can_view_timesheet },
   { id: "asset", title: "Asset চাওয়া", keys: ["asset", "অ্যাসেট", "laptop", "ল্যাপটপ", "computer", "কম্পিউটার", "চেয়ার", "furniture"],
@@ -374,7 +374,7 @@ const HELP: HelpEntry[] = [
     nav: "admin:tracking", can: (c) => hasMod(c, "tracking") },
   { id: "claims_admin", title: "Claim অনুমোদন ও বিল পরিশোধ (HR / Accounts)", keys: ["claim approve", "bill approve", "bill disburse", "disbursement", "ডিসবার্সমেন্ট", "বিল পরিশোধ", "bill pay", "claim policy", "bill claim policy", "conveyance limit"],
     steps: "মেনু → Payroll & Claims:\n• **Check In/Out** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
-    nav: "admin:conveyance", can: (c) => ["claims", "conveyance", "disbursement"].some((k) => hasMod(c, k)) },
+    nav: "admin:bill_claim", can: (c) => ["claims", "bill_claim", "disbursement"].some((k) => hasMod(c, k)) },
   { id: "asset_admin", title: "Asset Management (HR / Store)", keys: ["asset management", "asset assign", "asset dibo", "asset return", "asset ferot", "অ্যাসেট দেওয়া", "asset inventory", "নতুন asset", "add asset", "asset claim"],
     steps: "মেনু → HR Operations → Facilities → **Asset Management**:\n• **Approvals** — কর্মীদের asset requisition অনুমোদন ও হাতে দেওয়া (Fulfill)।\n• **Claims** — কর্মী \"এটা আমার কাছে আছে\" দাবি করলে মিলিয়ে নিশ্চিত করা।\n• **Inventory** — asset যোগ, কাকে দেওয়া, ফেরত নেওয়া (Settings থেকে \"Show Inventory tab\" চালু থাকতে হয়)।",
     nav: "admin:asset_management", can: (c) => hasMod(c, "asset_management") },
@@ -450,7 +450,7 @@ function canNav(c: Ctx, nav: string): boolean {
       default: return true;
     }
   }
-  if (kind === "claims") return target === "movementClaims" ? f.can_view_movement_claims : f.can_view_conveyance_claims || c.modules.includes("conveyance");
+  if (kind === "claims") return target === "movementClaims" ? f.can_view_movement_claims : f.can_view_bill_claims || c.modules.includes("bill_claim");
   if (kind === "admin") return target === "dashboard" ? c.role === "admin" || c.modules.includes("admin_dashboard") : c.modules.includes(target);
   if (kind === "hrops") return c.modules.includes("hr_operations");
   return true; // home, profile, support:request
@@ -1031,10 +1031,10 @@ const TOOLS: Tool[] = [
   },
   {
     name: "my_claims",
-    description: "The asking employee's own movement claims and conveyance bill claims with status.",
-    available: (c) => isSuper(c) || c.flags.can_view_movement_claims || c.flags.can_view_conveyance_claims || c.modules.includes("conveyance"),
+    description: "The asking employee's own movement claims and bill claims with status.",
+    available: (c) => isSuper(c) || c.flags.can_view_movement_claims || c.flags.can_view_bill_claims || c.modules.includes("bill_claim"),
     run: async (c) => {
-      const [m, u] = await Promise.all([callApi(c.req, "/api/claims/mine"), callApi(c.req, "/api/user-claims/mine")]);
+      const [m, u] = await Promise.all([callApi(c.req, "/api/claims/mine"), callApi(c.req, "/api/bill-claims/mine")]);
       if (!m.ok && !u.ok) return fail(m.status === 403 && u.status === 403 ? 403 : 500);
       const parts: string[] = [];
       const data: any = {};
@@ -1044,9 +1044,9 @@ const TOOLS: Tool[] = [
         const pend = rows.filter((x) => x.status === "pending");
         data.bill_claims = { total: rows.length, pending: pend.length, pending_amount: pend.reduce((s, x) => s + (Number(x.amount) || 0), 0), recent: rows.slice(0, 5).map((x) => ({ date: x.claim_date, category: x.category, amount: x.amount, status: x.status })) };
         parts.push(rows.length
-          ? `**Conveyance / Bill claim:** মোট ${bn(rows.length)}টি, অপেক্ষমাণ ${bn(pend.length)}টি (${money(data.bill_claims.pending_amount)})\n` + rows.slice(0, 4).map((x) => `• ${bnDate(x.claim_date)} — ${x.category || "Bill"} ${money(x.amount)}: ${st(x.status)}`).join("\n")
-          : "**Conveyance / Bill claim:** কোনো claim নেই।");
-        actions.push({ label: "Conveyance Bill খুলুন", nav: "claims:conveyanceBill" });
+          ? `**Bill Claim:** মোট ${bn(rows.length)}টি, অপেক্ষমাণ ${bn(pend.length)}টি (${money(data.bill_claims.pending_amount)})\n` + rows.slice(0, 4).map((x) => `• ${bnDate(x.claim_date)} — ${x.category || "Bill"} ${money(x.amount)}: ${st(x.status)}`).join("\n")
+          : "**Bill Claim:** কোনো claim নেই।");
+        actions.push({ label: "Bill Claim খুলুন", nav: "claims:billClaim" });
       }
       if (m.ok) {
         const rows: any[] = Array.isArray(m.body) ? m.body : [];
@@ -1838,7 +1838,7 @@ const TOOLS: Tool[] = [
       const rows: any[] = Array.isArray(r.body) ? r.body : [];
       if (!rows.length) return { ok: true, text: "এই মুহূর্তে আপনার অনুমোদনের অপেক্ষায় কিছু নেই। 👍", data: { pending: 0 }, actions: [{ label: "Approve Application খুলুন", nav: "self:approveApplications" }] };
       const KIND: Record<string, string> = {
-        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Check in/out", user_claim: "Conveyance bill",
+        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Check in/out", bill_claim: "Conveyance bill",
         attendance: "হাজিরা", attendance_correction: "হাজিরা সংশোধন", asset_requisition: "Asset requisition", vehicle_requisition: "গাড়ির requisition",
         mobile_limit_request: "Mobile limit", advance_request: "Loan / advance", exit_clearance: "Exit clearance", hr_action: "Personnel action"
       };
@@ -3659,7 +3659,7 @@ const TRAINING: [string, string, Record<string, any>?][] = [
   ["appraisal er obostha", "performance_overview"], ["মূল্যায়ন কতদূর", "performance_overview"],
   ["ki ki kaj pending ache admin er", "admin_pending_work"], ["আমার টেবিলে কী কী বাকি", "admin_pending_work"],
   ["chuti nite chaile ki korte hobe", "help:leave_apply"], ["ছুটি নিতে হলে কী করব", "help:leave_apply"], ["how can i take leave", "help:leave_apply"],
-  ["bill kemne jomadibo", "help:conveyance"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:conveyance"], ["how to claim travel cost", "help:conveyance"],
+  ["bill kemne jomadibo", "help:bill_claim"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:bill_claim"], ["how to claim travel cost", "help:bill_claim"],
   ["field e jaoar somoy ki korbo", "help:movement_claim"], ["বাইরে কাজে গেলে চেক ইন কীভাবে", "help:movement_claim"],
   ["laptop lagbe ki korbo", "help:asset"], ["নতুন ল্যাপটপ চাইব কীভাবে", "help:asset"], ["how do i request a laptop", "help:asset"],
   ["gari lagbe kivabe chaibo", "help:vehicle"], ["অফিসের গাড়ি কীভাবে নেব", "help:vehicle"],

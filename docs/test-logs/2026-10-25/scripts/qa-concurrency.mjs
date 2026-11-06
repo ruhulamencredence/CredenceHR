@@ -21,7 +21,7 @@ const SA = await login('admin@credence.test', 'AdminPass123');
 async function person(name, email) {
   const e = await api(SA, 'POST', '/api/employees', { name, designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email, create_login: true, login_email: email, login_password: 'Pass12345' });
   const uid = Number(sql(`SELECT user_id FROM all_employees WHERE id=${e.body.id}`));
-  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['conveyance-claim-access', 'can_view_conveyance_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
+  for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['bill-claim-access', 'can_view_bill_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
   sql(`INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (${uid}, 10, 14, 0)`);
   return { emp: e.body.id, uid, token: await login(email, 'Pass12345') };
 }
@@ -30,7 +30,7 @@ const A = await person('Approver A', 'race.a@credence.test');
 const B = await person('Approver B', 'race.b@credence.test');
 const C = await person('Approver C', 'race.c@credence.test');
 await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0, reliever_required: false, max_consecutive_days: null, require_paid_leave_exhausted: false });
-for (const t of ['leave', 'conveyance']) await api(SA, 'POST', '/api/approval-templates', { name: `${t} race`, request_type: t, is_default: true, is_active: true, steps: [{ approver_user_ids: [A.uid, B.uid], approver_type: 'employee' }, { approver_user_ids: [C.uid], approver_type: 'employee' }] });
+for (const t of ['leave', 'bill_claim']) await api(SA, 'POST', '/api/approval-templates', { name: `${t} race`, request_type: t, is_default: true, is_active: true, steps: [{ approver_user_ids: [A.uid, B.uid], approver_type: 'employee' }, { approver_user_ids: [C.uid], approver_type: 'employee' }] });
 const queueRow = async (tok, type, id) => { const l = await api(tok, 'GET', '/api/my-approvals'); return (Array.isArray(l.body) ? l.body : l.body.items || []).find((r) => r.source_type === type && Number(r.source_id) === Number(id)); };
 
 // C1 — the same leave submitted 5 times at once.
@@ -71,17 +71,17 @@ T('C5', Number(recovered) === 2000 && paidEvents === 1, 'Pay pressed 3 times at 
 // C6 — two conveyance claims for the same day at once (one claim a day).
 const cats = (await api(E.token, 'GET', '/api/bill-claim-categories')).body;
 const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
-const claims = await burst(3, () => api(E.token, 'POST', '/api/user-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 300, description: 'race' }], description: 'race' }));
-const claimRows = Number(sql(`SELECT COUNT(*) FROM user_claims WHERE user_id=${E.uid}`));
+const claims = await burst(3, () => api(E.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 300, description: 'race' }], description: 'race' }));
+const claimRows = Number(sql(`SELECT COUNT(*) FROM bill_claims WHERE user_id=${E.uid}`));
 T('C6', claimRows === 1, 'Three Conveyance claims for today sent at once: one is kept (one claim a day)', `rows ${claimRows}; answers ${codes(claims)}`);
 
 // C7 — the approved claim's bill disbursed 3 times at once.
 const claimId = claims.find(ok)?.body?.id;
-for (const tok of [A.token, C.token]) { const r = await queueRow(tok, 'user_claim', claimId); if (r) await api(tok, 'POST', `/api/my-approvals/${r.id}/act`, { action: 'approved', remarks: 'ok' }); }
-const billId = sql(`SELECT IFNULL(MAX(bill_id),0) FROM conveyance_bill_items WHERE user_claim_id=${claimId}`).trim() || sql(`SELECT IFNULL(MAX(id),0) FROM conveyance_bills`);
+for (const tok of [A.token, C.token]) { const r = await queueRow(tok, 'bill_claim', claimId); if (r) await api(tok, 'POST', `/api/my-approvals/${r.id}/act`, { action: 'approved', remarks: 'ok' }); }
+const billId = sql(`SELECT IFNULL(MAX(bill_id),0) FROM conveyance_bill_items WHERE bill_claim_id=${claimId}`).trim() || sql(`SELECT IFNULL(MAX(id),0) FROM conveyance_bills`);
 const dis = await burst(3, () => api(SA, 'POST', `/api/conveyance-bills/${billId}/disburse`, {}));
 const vouchers = sql(`SELECT CONCAT(is_disbursed,' ',IFNULL(voucher_no,'')) FROM conveyance_bills WHERE id=${billId}`);
-T('C7', dis.filter(ok).length === 1, 'A bill disbursed 3 times at once is paid out once', `claim ${sql(`SELECT status FROM user_claims WHERE id=${claimId}`)}; bill #${billId}; answers ${codes(dis)}; bill now ${vouchers}`);
+T('C7', dis.filter(ok).length === 1, 'A bill disbursed 3 times at once is paid out once', `claim ${sql(`SELECT status FROM bill_claims WHERE id=${claimId}`)}; bill #${billId}; answers ${codes(dis)}; bill now ${vouchers}`);
 
 // C8 — a loan request sent 3 times at once, then approved 3 times at once.
 const L = await person('Loan Person', 'race.loan@credence.test');

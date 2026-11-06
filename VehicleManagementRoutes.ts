@@ -68,8 +68,8 @@ interface VehicleManagementRouteDeps {
   // through request_type 'vehicle' the same way Asset Requisition does. See
   // the design note above registerVehicleManagementRoutes.
   createTemplateApprovalRequest: (
-    requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
-    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
+    requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle",
+    sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
     sourceId: number,
     requestedBy: number,
     overrideSupervisorId?: number | null

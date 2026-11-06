@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 import { useScrolling } from '../lib/useScrolling';
 
-export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
+export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'billClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
 
 interface BottomNavProps {
   active: MobileSection;

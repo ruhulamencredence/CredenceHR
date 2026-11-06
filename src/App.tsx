@@ -1188,7 +1188,7 @@ export default function App() {
       case 'jobEdit': return 'jobEdit';
       case 'claim':
       case 'claims': return 'userMovementClaims';
-      case 'conveyanceClaim': return 'userConveyanceClaims';
+      case 'billClaim': return 'userBillClaims';
       case 'leave': return 'leaveApplication';
       case 'timesheet': return 'timesheet';
       case 'employeeDirectory': return 'employeeDirectory';
@@ -1203,7 +1203,7 @@ export default function App() {
   // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on
   // desktop these need to be checked first, before falling back to it.
   const CLAIMS_TYPE_SECTIONS = new Set([
-    'claim', 'claims', 'conveyanceClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
+    'claim', 'claims', 'billClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
   ]);
 
   // Which GlobalSidebar item currently matches what's actually on screen —
@@ -1271,7 +1271,7 @@ export default function App() {
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
-    onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => {
+    onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -1279,15 +1279,15 @@ export default function App() {
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
-    onGoToAdminClaims: (target: 'claims' | 'conveyance') => {
+    onGoToAdminClaims: (target: 'claims' | 'bill_claim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
       setViewMode('admin');
-      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
+      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'billClaim', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'bill_claim'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -1306,7 +1306,7 @@ export default function App() {
         // bottom nav already open, so there's exactly one Leave Application
         // interface regardless of entry point (see leaveNavRequest above and
         // LeaveNavRequest in types.ts). Switches into the User Panel first,
-        // same as onGoToJobsTab/onGoToUserClaims above.
+        // same as onGoToJobsTab/onGoToBillClaims above.
         setSelfServiceView(null);
         setViewMode('user');
         setLeaveNavRequest({ ts: Date.now() });
@@ -1430,12 +1430,12 @@ export default function App() {
           setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
-        onGoToConveyanceBillClaim={() => {
+        onGoToBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
-          setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
+          setClaimsNavRequest({ target: 'billClaim', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
           // Every "Jobs" menu target lives only in the User Panel — the mirror
@@ -1577,9 +1577,9 @@ export default function App() {
               requestQuickAccessTab('bookRide', target || 'status');
               sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
             }}
-            onOpenConveyanceClaim={() => {
+            onOpenBillClaim={() => {
               setShowAlertsPage(false);
-              sidebarNavProps.onGoToUserClaims('conveyanceBill');
+              sidebarNavProps.onGoToBillClaims('billClaim');
             }}
             onOpenMyAsset={(target) => {
               setShowAlertsPage(false);
@@ -1792,9 +1792,9 @@ export default function App() {
             return;
           }
           if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
-          if (kind === 'claims') return sidebarNavProps.onGoToUserClaims(target as 'movementClaims' | 'conveyanceBill');
+          if (kind === 'claims') return sidebarNavProps.onGoToBillClaims(target as 'movementClaims' | 'billClaim');
           if (kind === 'admin') {
-            if (target === 'claims' || target === 'conveyance') return sidebarNavProps.onGoToAdminClaims(target);
+            if (target === 'claims' || target === 'bill_claim') return sidebarNavProps.onGoToAdminClaims(target);
             return sidebarNavProps.onGoToAdminModule(target as Parameters<typeof sidebarNavProps.onGoToAdminModule>[0]);
           }
           if (kind === 'hrops') {

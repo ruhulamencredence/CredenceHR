@@ -20,7 +20,7 @@ export const TEMPLATE_FEATURE_COLUMNS: Record<string, string[]> = {
   can_edit_delivery_date: ["can_edit_delivery_date"],
   can_job_edit: ["can_job_edit"],
   can_view_movement_claims: ["can_view_movement_claims"],
-  can_view_conveyance_claims: ["can_view_conveyance_claims"],
+  can_view_bill_claims: ["can_view_bill_claims"],
   can_view_timesheet: ["can_view_timesheet"],
   // Leave Application and My Leave are one switch in Module Access.
   can_view_leave_application: ["can_view_leave_application", "can_view_my_leave"],
@@ -50,7 +50,7 @@ export const DEFAULT_USER_TEMPLATE = {
     "can_use_tracking",
     "can_view_leave_summary",
     "can_view_movement_claims",
-    "can_view_conveyance_claims",
+    "can_view_bill_claims",
     "can_view_timesheet",
     "can_view_leave_application",
     "can_view_tasks",

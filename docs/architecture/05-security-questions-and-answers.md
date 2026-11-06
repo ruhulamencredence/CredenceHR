@@ -150,3 +150,6 @@
 
 **প্রশ্ন: Claim-এর না পাঠানো খসড়া ফোনে থাকে — একই ফোনে অন্য কেউ login করলে কি তা দেখতে পায়?**
 উত্তর: না। খসড়া (`src/lib/formDraft.ts`) প্রতিটা account-এর আলাদা চাবিতে থাকে, তাই অন্য login সেটা পড়ে না; sign-out করলেই সব খসড়া মুছে যায়, পাঠালে বা ৩ দিন পরেও মুছে যায়। খসড়ায় শুধু নিজের লেখা থাকে (ফাইল নয়), আর পাঠানোর সময় server আগের মতোই সব অনুমতি ও হিসাব যাচাই করে — খসড়া কিছুই অনুমোদন করে না।
+
+**প্রশ্ন: "Conveyance Bill Claim" থেকে "Bill Claim" নাম বদলানোর পর কেউ কি অনুমতি হারায় বা বাড়তি পায়?**
+উত্তর: না। Server চালু হওয়ার সময় (`billClaimRename.ts`) আগে দেওয়া প্রতিটা অনুমতি একই মানুষের কাছে নতুন নামে সরে যায়: Admin module `conveyance` → `bill_claim`, তার layer, Data Import-এর `import_conveyance` → `import_bill_claims`, Self Service switch `can_view_conveyance_claims` → `can_view_bill_claims`, App access আর Access Template-এর টিক। নতুন কিছু দেওয়া হয় না। পুরনো API (`/api/user-claims`) আর নেই, নতুন `/api/bill-claims` আগের মতোই module / layer / switch যাচাই করে।

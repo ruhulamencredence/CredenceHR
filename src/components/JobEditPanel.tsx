@@ -1435,7 +1435,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
             // containing block for any `position: fixed` descendant (same as
             // `transform`/`filter`), which was pinning this popup to that
             // CARD's box instead of the viewport. A portal escapes that
-            // entirely, same pattern NewConveyanceClaimModal.tsx uses.
+            // entirely, same pattern NewBillClaimModal.tsx uses.
             return createPortal(
               <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true">
                 <div className="absolute inset-0 bg-black/40" onClick={() => setAddEditingItemUid(null)} />

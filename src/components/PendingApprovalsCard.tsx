@@ -7,7 +7,7 @@ import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
-import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
+import { BillClaimReference, BillClaimItem, ClaimRecord } from '../types';
 import { retryImport } from '../lib/chunkReload';
 // The map (Leaflet) is fetched when a location is opened, not with Home.
 const ClaimLocationMap = React.lazy(retryImport(() => import('./ClaimLocationMap')));
@@ -20,7 +20,7 @@ import { SearchSelect } from './Combobox';
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem extends ClaimReviewFields {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -29,13 +29,13 @@ interface MyApprovalItem extends ClaimReviewFields {
   current_step: number;
   total_steps: number;
   created_at: string;
-  // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
+  // Only present on a 'bill_claim' item — every Check In/Out (check-in/out)
   // this Bill Claim's Amount was built from, so the approver can
   // open the full check-in/check-out details (including location) before
   // deciding. See ApproveApplications.tsx for the original of this pattern.
-  claim_refs?: UserClaimReference[];
-  // Only on a 'user_claim' item — the claim's bills (category / date / amount).
-  claim_items?: UserClaimItem[];
+  claim_refs?: BillClaimReference[];
+  // Only on a 'bill_claim' item — the claim's bills (category / date / amount).
+  claim_items?: BillClaimItem[];
   source_approved_amount?: number | null;
   // Only present on an 'asset_requisition' item — see
   // ApproveApplications.tsx's identical field for the full shape.
@@ -74,7 +74,7 @@ interface DriverCandidate {
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
+  t === 'bill_claim'
     ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
@@ -139,7 +139,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [openCategory, setOpenCategory] = useState<MyApprovalItem['source_type'] | null>(null);
-  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
+  const [viewingRef, setViewingRef] = useState<{ ref: BillClaimReference; item: MyApprovalItem } | null>(null);
   // Same "tap the card for full details" modal as ApproveApplications.tsx's
   // full-page version of this list — the Dashboard card is often the first
   // (and for many approvers, only) place an Asset Requisition is seen, so it
@@ -175,7 +175,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, needsVehiclePicker]);
 
-  const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
+  const refToClaimRecord = (ref: BillClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
     user_id: item.requested_by,
     user_name: item.requested_by_name,
@@ -231,7 +231,7 @@ useLiveRefresh(() => load());
   const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const id = item.id;
     // Bill Claim: Return / Reject tell the employee why.
-    if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+    if (item.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
@@ -260,8 +260,8 @@ useLiveRefresh(() => load());
           remarks: remarksDraft[id] || undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
           voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[id] || undefined : undefined,
-          claim_version: item.source_type === 'user_claim' ? item.claim_version : undefined,
-          allow_reclaim: item.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
+          claim_version: item.source_type === 'bill_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'bill_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
         })
       });
       const data = await res.json();
@@ -316,10 +316,10 @@ useLiveRefresh(() => load());
   };
 
   // Same Approved Amount validation the full Approve Application page uses —
-  // relevant for a 'user_claim' item on ANY Layer; every other item type just
+  // relevant for a 'bill_claim' item on ANY Layer; every other item type just
   // approves as-is.
   const handleApprove = async (item: MyApprovalItem) => {
-    if (item.source_type === 'user_claim') {
+    if (item.source_type === 'bill_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
       const draft = approvedAmountDraft[item.id];
       const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
@@ -366,7 +366,7 @@ useLiveRefresh(() => load());
   // type, showing just the count, instead of every individual request as its
   // own card.
   const categoryOrder: MyApprovalItem['source_type'][] = [
-    'user_claim',
+    'bill_claim',
     'leave_application',
     'leave_reliever',
     'leave_direct',
@@ -437,7 +437,7 @@ useLiveRefresh(() => load());
                     ? 'Ride Request — Assign Vehicle'
                     : cat === 'asset_requisition' && list.every((i) => i.asset_fulfiller_bypass)
                       ? 'Asset Requisition — Fulfill'
-                      : cat === 'user_claim' && list.every((i) => i.conveyance_disburser_bypass)
+                      : cat === 'bill_claim' && list.every((i) => i.conveyance_disburser_bypass)
                         ? 'Conveyance — Disburse'
                         : sourceTitle(cat)}
                 </span>
@@ -456,7 +456,7 @@ useLiveRefresh(() => load());
           </button>
           <div className="divide-y divide-slate-100">
             {openItems.map((item) => {
-              const editable = item.source_type === 'user_claim';
+              const editable = item.source_type === 'bill_claim';
               const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
               const runningAmount = item.source_approved_amount != null ? Number(item.source_approved_amount) : claimAmount;
               const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
@@ -490,8 +490,8 @@ useLiveRefresh(() => load());
                       {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                     </div>
 
-                    {item.source_type === 'user_claim' && <ClaimBillLines items={item.claim_items} compact />}
-                    {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
+                    {item.source_type === 'bill_claim' && <ClaimBillLines items={item.claim_items} compact />}
+                    {item.source_type === 'bill_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {item.claim_refs.map((r) => (
                           <button
@@ -624,16 +624,16 @@ useLiveRefresh(() => load());
                           />
                         </>
                       )}
-                      {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mb-2" />}
+                      {item.source_type === 'bill_claim' && <ClaimChangesNotice item={item} className="mb-2" />}
                       <input
                         type="text"
                         aria-label="Remarks"
-                        placeholder={item.source_type === 'user_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
+                        placeholder={item.source_type === 'bill_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
                         value={remarksDraft[item.id] || ''}
                         onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                       />
-                      {item.source_type === 'user_claim' && (
+                      {item.source_type === 'bill_claim' && (
                         <ReclaimTick item={item} checked={!!reclaimDraft[item.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [item.id]: v }))} />
                       )}
                       <div className="flex gap-2 mt-2.5">
@@ -645,7 +645,7 @@ useLiveRefresh(() => load());
                         >
                           <XCircle className="w-3.5 h-3.5" /> Reject
                         </button>
-                        {item.source_type === 'user_claim' && (
+                        {item.source_type === 'bill_claim' && (
                           <ReturnButton item={item} disabled={actingId === item.id} onClick={() => handleAct(item, 'returned')} />
                         )}
                         <button

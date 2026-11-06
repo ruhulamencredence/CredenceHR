@@ -346,7 +346,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_access_user_panel: !!u.can_access_user_panel,
       can_manage_leave: !!u.can_manage_leave,
       can_view_movement_claims: !!u.can_view_movement_claims,
-      can_view_conveyance_claims: !!u.can_view_conveyance_claims,
+      can_view_bill_claims: !!u.can_view_bill_claims,
       can_view_budget_module: u.can_view_budget_module !== false,
       can_view_leave_summary: !!u.can_view_leave_summary,
       can_view_timesheet: !!u.can_view_timesheet,
@@ -378,7 +378,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_access_user_panel: rest.can_access_user_panel ? 1 : 0,
       can_manage_leave: rest.can_manage_leave ? 1 : 0,
       can_view_movement_claims: rest.can_view_movement_claims ? 1 : 0,
-      can_view_conveyance_claims: rest.can_view_conveyance_claims ? 1 : 0,
+      can_view_bill_claims: rest.can_view_bill_claims ? 1 : 0,
       can_view_budget_module: rest.can_view_budget_module !== false ? 1 : 0,
       can_view_leave_summary: rest.can_view_leave_summary ? 1 : 0,
       can_view_timesheet: rest.can_view_timesheet ? 1 : 0,
@@ -406,11 +406,11 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     if (!user) return [];
     return [{ can_view_movement_claims: user.can_view_movement_claims ? 1 : 0 }];
   }
-  if (lowerSql.startsWith("select can_view_conveyance_claims from users where id")) {
+  if (lowerSql.startsWith("select can_view_bill_claims from users where id")) {
     const id = Number(params[0]);
     const user = memoryDb.users.find(u => u.id === id);
     if (!user) return [];
-    return [{ can_view_conveyance_claims: user.can_view_conveyance_claims ? 1 : 0 }];
+    return [{ can_view_bill_claims: user.can_view_bill_claims ? 1 : 0 }];
   }
   if (lowerSql.startsWith("select can_view_timesheet from users where id")) {
     const id = Number(params[0]);
@@ -572,10 +572,10 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     if (user) user.can_view_movement_claims = !!Number(can_view_movement_claims);
     return { affectedRows: user ? 1 : 0 };
   }
-  if (lowerSql.startsWith("update users set can_view_conveyance_claims")) {
-    const [can_view_conveyance_claims, id] = params;
+  if (lowerSql.startsWith("update users set can_view_bill_claims")) {
+    const [can_view_bill_claims, id] = params;
     const user = memoryDb.users.find(u => u.id === Number(id));
-    if (user) user.can_view_conveyance_claims = !!Number(can_view_conveyance_claims);
+    if (user) user.can_view_bill_claims = !!Number(can_view_bill_claims);
     return { affectedRows: user ? 1 : 0 };
   }
   if (lowerSql.startsWith("update users set can_view_budget_module")) {
@@ -2040,10 +2040,10 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("select * from approval_requests where status = 'pending' order by id asc")) {
     return memoryDb.approvalRequests.filter((r: any) => r.status === "pending").sort((a: any, b: any) => a.id - b.id);
   }
-  if (lowerSql.startsWith("select id from approval_requests where source_type = 'user_claim' and source_id = ?")) {
+  if (lowerSql.startsWith("select id from approval_requests where source_type = 'bill_claim' and source_id = ?")) {
     const sourceId = Number(params[0]);
     return memoryDb.approvalRequests
-      .filter((r: any) => r.source_type === "user_claim" && Number(r.source_id) === sourceId)
+      .filter((r: any) => r.source_type === "bill_claim" && Number(r.source_id) === sourceId)
       .map((r: any) => ({ id: r.id }));
   }
   // VehicleManagementRoutes.ts's POST .../cancel — clears a still-pending

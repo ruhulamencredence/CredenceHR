@@ -6,7 +6,7 @@
 // Asset Management (Employee Profile -> "My Assets" / "New Requisition" /
 // "Requisition Status", plus Admin Panel -> Asset Management) — split into
 // its own file from day one, same reasoning as profileRoutes.ts /
-// ConveyanceBillClaimRoutes.ts / PayrollRoutes.ts: server.ts is already huge,
+// BillClaimRoutes.ts / PayrollRoutes.ts: server.ts is already huge,
 // so new features go in their own module and are registered from inside
 // startServer() via registerAssetManagementRoutes(), reusing that request's
 // authenticateToken/requireAdmin/requireModule/queryDB rather than a second
@@ -71,8 +71,8 @@ interface AssetManagementRouteDeps {
   // through request_type 'asset' the same way Conveyance/Leave/Timesheet
   // already do. See the design note above registerAssetManagementRoutes.
   createTemplateApprovalRequest: (
-    requestType: "conveyance" | "leave" | "timesheet" | "asset",
-    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
+    requestType: "bill_claim" | "leave" | "timesheet" | "asset",
+    sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
     sourceId: number,
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;

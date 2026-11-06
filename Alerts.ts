@@ -19,7 +19,7 @@
 // row in this account's inbox; the account only ever sees its OWN alerts.
 //
 // `type` is deliberately a plain string (not a DB enum) so more alert types
-// can be added later without an ALTER TABLE each time. 'conveyance_claim'
+// can be added later without an ALTER TABLE each time. 'bill_claim'
 // (Bill Claim submitted — the current-step approver is notified,
 // same idea as the Leave Application Reliever alert) was the second type
 // added, after 'leave_application'.
@@ -27,7 +27,7 @@
 import type { Express } from "express";
 import { sendPushToUserIds } from "./PushNotificationService";
 
-export type AlertType = "leave_application" | "leave_approval" | "conveyance_claim" | "conveyance_approval" | "conveyance_disbursed" | "asset_requisition" | "asset_approval" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary" | "resignation" | "exit_clearance" | "exit_offboarding" | "hr_action" | "hr_letter" | "hr_report" | "hr_request" | "site_attendance" | "zk_machine" | "device_request" | "task" | "mobile_bill" | "mobile_limit_approval" | "loan_request" | "loan_approval" | "payroll_approval" | "hr_reminder" | "assistant_support" | "target" | "mail" | "roster" | "document_sign" | "mpr_dispatch" | "password_request" | "profile_photo" | "notice_draft" | "requisition" | "interview";
+export type AlertType = "leave_application" | "leave_approval" | "bill_claim" | "bill_claim_approval" | "conveyance_disbursed" | "asset_requisition" | "asset_approval" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary" | "resignation" | "exit_clearance" | "exit_offboarding" | "hr_action" | "hr_letter" | "hr_report" | "hr_request" | "site_attendance" | "zk_machine" | "device_request" | "task" | "mobile_bill" | "mobile_limit_approval" | "loan_request" | "loan_approval" | "payroll_approval" | "hr_reminder" | "assistant_support" | "target" | "mail" | "roster" | "document_sign" | "mpr_dispatch" | "password_request" | "profile_photo" | "notice_draft" | "requisition" | "interview";
 
 export interface AlertRow {
   id: number;

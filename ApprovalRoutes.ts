@@ -29,7 +29,7 @@
 // rather than duplicated or re-imported directly.
 
 import { dhakaDate, loadPolicy } from "./BillClaimPolicy";
-import { claimChangesFor } from "./ConveyanceClaimHistory";
+import { claimChangesFor } from "./BillClaimHistory";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
@@ -51,10 +51,10 @@ interface ApprovalRouteDeps {
   getApprovalChain: () => Promise<any[]>;
   performApprovalAction: (...args: any[]) => Promise<any>;
   toDateOnlyString: (value: any) => string | null;
-  // Same helper ConveyanceBillClaimRoutes.ts uses to attach each Movement
+  // Same helper BillClaimRoutes.ts uses to attach each Movement
   // Claim's Approval Workflow status — reused here (GET /api/my-approvals)
   // to attach lat/lng + status onto every Check In/Out referenced by a
-  // 'user_claim' item, so an approver can open its location on a map without
+  // 'bill_claim' item, so an approver can open its location on a map without
   // a second permission-gated lookup.
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
   // Who's authorized to act on a request's CURRENT step (server.ts) — reused
@@ -117,7 +117,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // only by notifyNextStepApprovers below, so a step advance's notification
   // reads naturally regardless of which module the request belongs to.
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
-    user_claim: { type: "conveyance_approval", label: "Bill Claim" },
+    bill_claim: { type: "bill_claim_approval", label: "Bill Claim" },
     asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
     leave_application: { type: "leave_approval", label: "Leave Application" },
     // "… Awaiting Your Approval" titles open Approve Application (AlertsBell.tsx).
@@ -146,7 +146,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvers = await getCurrentStepApprovers(request);
       const assignOnly = request.source_type === "vehicle_requisition" && (await isVehicleMaintainerStep(request));
       const fulfillOnly = request.source_type === "asset_requisition" && (await isAssetFulfillerStep(request));
-      const disburseOnly = request.source_type === "user_claim" && (await isConveyanceDisburserStep(request));
+      const disburseOnly = request.source_type === "bill_claim" && (await isConveyanceDisburserStep(request));
       for (const approver of approvers) {
         await createAlert(queryDB, {
           userId: approver.user_id,
@@ -163,7 +163,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             : fulfillOnly
               ? `${actorName || "A previous approver"} approved this asset requisition — fulfill and hand over the items from Pending Approvals.`
               : disburseOnly
-                ? `${actorName || "A previous approver"} approved this conveyance claim — pay it out and record the voucher from Pending Approvals.`
+                ? `${actorName || "A previous approver"} approved this bill claim — pay it out and record the voucher from Pending Approvals.`
                 : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
           relatedType: request.source_type,
           relatedId: Number(request.source_id)
@@ -176,34 +176,34 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
 
   // Attaches a `claim_refs: [{ claim_id, amount, purpose, check_in_at,
   // check_out_at, distance_km, check_in_lat/lng, check_out_lat/lng, ... }]`
-  // array onto every 'user_claim' item in a GET /api/my-approvals list (every
+  // array onto every 'bill_claim' item in a GET /api/my-approvals list (every
   // other source_type is left untouched) — same shape/query as
-  // ConveyanceBillClaimRoutes.ts's own attachUserClaimRefs, duplicated here
+  // BillClaimRoutes.ts's own attachBillClaimRefs, duplicated here
   // rather than imported since that one is private to that module's route
   // factory. Lets the Approve Application page show a "View Location" button
   // for any Check In/Out a Bill Claim was built from, same as
   // the Admin Panel's own Bill Claim review already does.
   async function attachClaimRefsToMyApprovals(rows: any[]): Promise<any[]> {
-    const userClaimIds = rows.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
-    if (userClaimIds.length === 0) return rows;
+    const billClaimIds = rows.filter((r: any) => r.source_type === "bill_claim").map((r: any) => Number(r.source_id));
+    if (billClaimIds.length === 0) return rows;
     const refRows = await queryDB(
-      `SELECT r.user_claim_id, r.claim_id, r.amount, c.purpose, c.check_in_at, c.check_out_at, c.distance_km,
+      `SELECT r.bill_claim_id, r.claim_id, r.amount, c.purpose, c.check_in_at, c.check_out_at, c.distance_km,
               c.check_in_lat, c.check_in_lng, c.check_out_lat, c.check_out_lng
-         FROM user_claim_references r
+         FROM bill_claim_references r
          JOIN claims c ON c.id = r.claim_id
-        WHERE r.user_claim_id IN (${userClaimIds.map(() => "?").join(",")})
+        WHERE r.bill_claim_id IN (${billClaimIds.map(() => "?").join(",")})
         ORDER BY r.id ASC`,
-      userClaimIds
+      billClaimIds
     );
     const withApproval = await attachApprovalStatuses(
       "claim",
       refRows.map((rr: any) => ({ ...rr, id: rr.claim_id }))
     );
-    const byUserClaim: Record<number, any[]> = {};
+    const byBillClaim: Record<number, any[]> = {};
     for (const rr of withApproval) {
-      const key = Number(rr.user_claim_id);
-      if (!byUserClaim[key]) byUserClaim[key] = [];
-      byUserClaim[key].push({
+      const key = Number(rr.bill_claim_id);
+      if (!byBillClaim[key]) byBillClaim[key] = [];
+      byBillClaim[key].push({
         claim_id: Number(rr.claim_id),
         amount: Number(rr.amount),
         purpose: rr.purpose,
@@ -221,13 +221,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     // The claim's bills (category / date / amount) for the approver.
     const itemRows: any[] =
       (await queryDB(
-        `SELECT user_claim_id, category_name, bill_date, amount, description FROM user_claim_items
-          WHERE user_claim_id IN (${userClaimIds.map(() => "?").join(",")}) ORDER BY bill_date, id`,
-        userClaimIds
+        `SELECT bill_claim_id, category_name, bill_date, amount, description FROM bill_claim_items
+          WHERE bill_claim_id IN (${billClaimIds.map(() => "?").join(",")}) ORDER BY bill_date, id`,
+        billClaimIds
       ).catch(() => [])) || [];
     const itemsByClaim: Record<number, any[]> = {};
     for (const it of itemRows) {
-      (itemsByClaim[Number(it.user_claim_id)] ||= []).push({
+      (itemsByClaim[Number(it.bill_claim_id)] ||= []).push({
         category_name: it.category_name,
         bill_date: dhakaDate(it.bill_date),
         amount: Number(it.amount),
@@ -235,8 +235,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       });
     }
     return rows.map((r: any) =>
-      r.source_type === "user_claim"
-        ? { ...r, claim_refs: byUserClaim[Number(r.source_id)] || [], claim_items: itemsByClaim[Number(r.source_id)] || [] }
+      r.source_type === "bill_claim"
+        ? { ...r, claim_refs: byBillClaim[Number(r.source_id)] || [], claim_items: itemsByClaim[Number(r.source_id)] || [] }
         : r
     );
   }
@@ -311,7 +311,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // Only the source rows these requests point at, by id — this used to
       // read every row of every source table (the whole attendance history,
       // every claim with its attached file), which grows without end.
-      const KNOWN = ["attendance", "user_claim", "attendance_correction", "leave_application", "asset_requisition", "vehicle_requisition", "mobile_limit_request", "advance_request"];
+      const KNOWN = ["attendance", "bill_claim", "attendance_correction", "leave_application", "asset_requisition", "vehicle_requisition", "mobile_limit_request", "advance_request"];
       const idsOf = (type: string | null) => [
         ...new Set<number>(requests.filter((r: any) => (type ? r.source_type === type : !KNOWN.includes(r.source_type))).map((r: any) => Number(r.source_id)).filter((n: number) => n > 0))
       ];
@@ -323,10 +323,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         }
         return out;
       };
-      const [attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, mobileLimitRows, advanceRows] = await Promise.all([
+      const [attendanceRows, claimRows, billClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, mobileLimitRows, advanceRows] = await Promise.all([
         byIds("SELECT * FROM attendance", idsOf("attendance")),
         byIds("SELECT * FROM claims", idsOf(null)),
-        byIds("SELECT id, description, category, amount, approved_amount FROM user_claims", idsOf("user_claim")),
+        byIds("SELECT id, description, category, amount, approved_amount FROM bill_claims", idsOf("bill_claim")),
         byIds("SELECT * FROM attendance_corrections", idsOf("attendance_correction")),
         byIds("SELECT * FROM leave_applications", idsOf("leave_application")),
         byIds("SELECT * FROM asset_requisitions", idsOf("asset_requisition")),
@@ -336,7 +336,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       ]);
       const attendanceMap = new Map<number, any>(attendanceRows.map((a: any) => [Number(a.id), a]));
       const claimMap = new Map<number, any>(claimRows.map((c: any) => [Number(c.id), c]));
-      const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
+      const billClaimMap = new Map<number, any>(billClaimRows.map((c: any) => [Number(c.id), c]));
       const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
       const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
@@ -375,8 +375,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             const a = attendanceMap.get(Number(r.source_id));
             const proj = a ? projectMap.get(Number(a.project_id)) : null;
             sourceLabel = proj ? proj.project_name : "(project removed)";
-          } else if (r.source_type === "user_claim") {
-            const uc = userClaimMap.get(Number(r.source_id));
+          } else if (r.source_type === "bill_claim") {
+            const uc = billClaimMap.get(Number(r.source_id));
             sourceLabel = uc ? String(uc.description || `${uc.category} claim`) : "(claim removed)";
             sourceAmount = uc ? Number(uc.amount) : null;
             sourceCategory = uc ? uc.category : null;
@@ -453,7 +453,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             current_approver_ids: currentApprovers.map((a) => a.user_id),
             conveyance_disburser_step:
               r.status === "pending" &&
-              r.source_type === "user_claim" &&
+              r.source_type === "bill_claim" &&
               !!r.template_id &&
               Number(r.current_step) >= Number(r.total_steps) &&
               disburserSteps.has(`${r.template_id}:${r.supervisor_step_user_id ? Number(r.current_step) - 1 : Number(r.current_step)}`),
@@ -484,12 +484,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // (sent back with Approve/Return/Reject, so nothing is decided on a version
   // the approver hasn't seen) and, when the employee has edited it,
   // `claim_change_note` + `claim_changes` — what changed since the last
-  // Return/Reject or since it was first submitted (ConveyanceClaimHistory.ts).
+  // Return/Reject or since it was first submitted (BillClaimHistory.ts).
   async function attachClaimReview(list: any[]): Promise<any[]> {
-    const ids = [...new Set(list.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id)))];
+    const ids = [...new Set(list.filter((r: any) => r.source_type === "bill_claim").map((r: any) => Number(r.source_id)))];
     if (!ids.length) return list;
     const versions = new Map<number, number>(
-      ((await queryDB(`SELECT id, version FROM user_claims WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || []).map((x: any) => [
+      ((await queryDB(`SELECT id, version FROM bill_claims WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || []).map((x: any) => [
         Number(x.id),
         Number(x.version || 1)
       ])
@@ -497,7 +497,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     const changes = await claimChangesFor(queryDB, ids);
     const policy = await loadPolicy(queryDB);
     return list.map((r: any) => {
-      if (r.source_type !== "user_claim") return r;
+      if (r.source_type !== "bill_claim") return r;
       const c = changes.get(Number(r.source_id));
       return {
         ...r,
@@ -530,7 +530,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
       const billId = req.body?.bill_id ? Number(req.body.bill_id) : null;
-      // Approved Amount — only meaningful for a 'user_claim' Approve; ignored
+      // Approved Amount — only meaningful for a 'bill_claim' Approve; ignored
       // otherwise. Lets the approver approve for less than the Claim Amount.
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
@@ -773,7 +773,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         (ci: any) => Number(ci.approver_user_id) === myId && !Number(ci.is_cleared) && clearanceExitById.has(Number(ci.exit_id))
       );
 
-      // Phase 2 — only the specific user_claims/attendance_corrections/
+      // Phase 2 — only the specific bill_claims/attendance_corrections/
       // leave_applications/projects/users rows `mine` and relieverItems
       // actually reference, instead of every row in each of those tables
       // system-wide (the previous version's SELECT * FROM ... with no
@@ -781,7 +781,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // currently pending — not by how many claims/corrections/leave
       // applications have ever existed — so this scales with pending
       // workload rather than with total history.
-      const userClaimIds = mine.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
+      const billClaimIds = mine.filter((r: any) => r.source_type === "bill_claim").map((r: any) => Number(r.source_id));
       const attendanceCorrectionIds = mine
         .filter((r: any) => r.source_type === "attendance_correction")
         .map((r: any) => Number(r.source_id));
@@ -802,8 +802,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const fetchByIds = (table: string, ids: number[], columns = "*") =>
         ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${columns} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
 
-      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, assetRequisitionItemRows, vehicleRequisitionRows, mobileLimitRows, advanceRows, requesterRows] = await Promise.all([
-        fetchByIds("user_claims", userClaimIds),
+      const [billClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, assetRequisitionItemRows, vehicleRequisitionRows, mobileLimitRows, advanceRows, requesterRows] = await Promise.all([
+        fetchByIds("bill_claims", billClaimIds),
         fetchByIds("attendance_corrections", attendanceCorrectionIds),
         fetchByIds("leave_applications", leaveApplicationIds),
         fetchByIds("asset_requisitions", assetRequisitionIds),
@@ -834,7 +834,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       );
       const projects = await fetchByIds("projects", projectIds);
 
-      const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
+      const billClaimMap = new Map<number, any>(billClaimRows.map((c: any) => [Number(c.id), c]));
       const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
       const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
@@ -871,12 +871,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           let sourceAmount: number | null = null;
           // Running Approved Amount (Part 6b) — if an EARLIER Layer (e.g. the
           // Department/Direct Supervisor auto-layer, step 1) already edited the
-          // Approved Amount on a still-pending 'user_claim', this carries that
+          // Approved Amount on a still-pending 'bill_claim', this carries that
           // value forward as this Layer's pre-fill instead of the full Claim
-          // Amount — see updateUserClaimApprovedAmountDraft in server.ts.
+          // Amount — see updateBillClaimApprovedAmountDraft in server.ts.
           let sourceApprovedAmount: number | null = null;
-          if (r.source_type === "user_claim") {
-            const uc = userClaimMap.get(Number(r.source_id));
+          if (r.source_type === "bill_claim") {
+            const uc = billClaimMap.get(Number(r.source_id));
             sourceLabel = uc ? String(uc.description || `${uc.category} claim`) : "(claim removed)";
             sourceAmount = uc ? Number(uc.amount) : null;
             sourceApprovedAmount = uc && uc.approved_amount != null ? Number(uc.approved_amount) : null;
@@ -947,7 +947,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             assetFulfillerBypass = r.source_type === "asset_requisition" && stepType === "asset_fulfiller";
             // Conveyance Disburser Layer — Approve here also pays the claim
             // out (own Bill + voucher); see performApprovalAction.
-            conveyanceDisburserBypass = r.source_type === "user_claim" && stepType === "conveyance_disburser";
+            conveyanceDisburserBypass = r.source_type === "bill_claim" && stepType === "conveyance_disburser";
           }
           return {
             id: r.id,
@@ -1093,7 +1093,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const TYPE_TITLE: Record<string, string> = {
         attendance: "Remote Attendance",
         claim: "Check In/Out",
-        user_claim: "Bill Claim",
+        bill_claim: "Bill Claim",
         attendance_correction: "Timesheet Correction",
         leave_application: "Leave Application",
         asset_requisition: "Asset Requisition",
@@ -1105,7 +1105,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const fetchByIds = (table: string, ids: number[]) =>
         ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT * FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
       const [ucs, cls, las, ars, vrs, mls, ads] = await Promise.all([
-        fetchByIds("user_claims", idsOf("user_claim")),
+        fetchByIds("bill_claims", idsOf("bill_claim")),
         fetchByIds("claims", idsOf("claim")),
         fetchByIds("leave_applications", idsOf("leave_application")),
         fetchByIds("asset_requisitions", idsOf("asset_requisition")),
@@ -1117,7 +1117,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const ucMap = byId(ucs), clMap = byId(cls), laMap = byId(las), arMap = byId(ars), vrMap = byId(vrs), mlMap = byId(mls), adMap = byId(ads);
       const detailOf = (r: any): string => {
         const id = Number(r.source_id);
-        if (r.source_type === "user_claim") {
+        if (r.source_type === "bill_claim") {
           const x = ucMap.get(id);
           return x ? `${x.description || x.category} · ৳${Number(x.approved_amount ?? x.amount).toLocaleString("en-US")}` : "";
         }
@@ -1286,17 +1286,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // with Disbursement sees who it waits on.
   app.get("/api/disbursement/awaiting-claims", authenticateToken, requireAdmin, requireModule("disbursement"), async (req: any, res) => {
     try {
-      const requests: any[] = (await queryDB("SELECT * FROM approval_requests WHERE source_type = 'user_claim' AND status = 'pending'")) || [];
+      const requests: any[] = (await queryDB("SELECT * FROM approval_requests WHERE source_type = 'bill_claim' AND status = 'pending'")) || [];
       const out: any[] = [];
       for (const r of requests) {
         if (!(await isConveyanceDisburserStep(r).catch(() => false))) continue;
-        const uc: any = ((await queryDB("SELECT * FROM user_claims WHERE id = ?", [Number(r.source_id)])) || [])[0];
+        const uc: any = ((await queryDB("SELECT * FROM bill_claims WHERE id = ?", [Number(r.source_id)])) || [])[0];
         if (!uc || uc.status !== "pending") continue;
         const people = await getCurrentStepApprovers(r).catch(() => [] as { user_id: number; user_name: string | null }[]);
         const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
         out.push({
           approval_id: Number(r.id),
-          user_claim_id: Number(uc.id),
+          bill_claim_id: Number(uc.id),
           user_id: Number(uc.user_id),
           user_name: owner.name || null,
           employee_code: owner.employee_code || "",
@@ -1328,7 +1328,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
       const billId = req.body?.bill_id ? Number(req.body.bill_id) : null;
-      // Approved Amount — only meaningful for a 'user_claim' Approve; ignored
+      // Approved Amount — only meaningful for a 'bill_claim' Approve; ignored
       // otherwise. Lets the approver approve for less than the Claim Amount,
       // same as the Admin Panel's Approvals tab.
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
@@ -1451,7 +1451,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // Conveyance counterpart — the last Layer's approver pays the claim out
       // (Bill + voucher) as they approve it.
       if (step?.approver_type === "conveyance_disburser") {
-        if (requestType !== "conveyance") {
+        if (requestType !== "bill_claim") {
           throw new Error(`Layer ${idx + 1}: "Conveyance Disburser" is only available for Conveyance templates.`);
         }
         if (idx !== steps.length - 1) {
@@ -1537,7 +1537,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // instead of left as the default virtual Supervisor position.
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+      if (!["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       const steps = await validateTemplateSteps(req.body?.steps, requestType);
@@ -1593,7 +1593,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const isActive = req.body?.is_active === false ? false : true;
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+      if (!["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       if (requestType !== existing.request_type) {
@@ -1769,7 +1769,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   app.get("/api/template-assignments", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
       const requestType = req.query?.request_type ? String(req.query.request_type) : null;
-      if (!requestType || !["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+      if (!requestType || !["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
         return res.status(400).json({ error: "?request_type= is required (conveyance, leave, timesheet, asset, vehicle or mobile)." });
       }
       const users = await queryDB("SELECT id, name, email, username, role FROM users ORDER BY name ASC");
@@ -1825,7 +1825,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const ids: number[] = Array.from(new Set((Array.isArray(req.body?.employee_user_ids) ? req.body.employee_user_ids : []).map(Number).filter(Number.isFinite)));
       if (ids.length === 0) return res.status(400).json({ error: "Pick at least one employee." });
       if (ids.length > 5000) return res.status(400).json({ error: "Too many employees at once (max 5000)." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+      if (!["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile, loan." });
       }
       if (templateId !== null) {
@@ -1864,7 +1864,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const requestType = req.body?.request_type;
       const templateId = req.body?.template_id === null || req.body?.template_id === undefined ? null : Number(req.body.template_id);
       if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "employee_user_id is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
+      if (!["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       const userRows = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);

@@ -22,7 +22,7 @@ await api(SA, 'PUT', '/api/leave-policies/casual', { min_advance_notice_days: 0,
 const proj = await api(SA, 'POST', '/api/projects', { project_name: 'Head Office', location_lat: 23.78, location_lng: 90.4, location_radius: 200 });
 const e = await api(SA, 'POST', '/api/employees', { name: 'Date Person', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email: 'date.person@credence.test', create_login: true, login_email: 'date.person@credence.test', login_password: 'Pass12345' });
 const uid = Number(sql(`SELECT user_id FROM all_employees WHERE id=${e.body.id}`));
-for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['conveyance-claim-access', 'can_view_conveyance_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
+for (const [route, col] of [['leave-application-access', 'can_view_leave_application'], ['timesheet-access', 'can_view_timesheet'], ['bill-claim-access', 'can_view_bill_claims']]) await api(SA, 'PUT', `/api/users/${uid}/${route}`, { [col]: true });
 await api(SA, 'PUT', `/api/users/${uid}/feature-permissions`, { can_use_attendance: true });
 sql(`INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (${uid}, 30, 30, 0)`);
 const P = await login('date.person@credence.test', 'Pass12345');
@@ -80,10 +80,10 @@ const a13 = await api(SA, 'POST', '/api/employees', { name: 'One Day Short', des
 T('DT-15', ok(a14) && !ok(a13), 'Turning 14 today is allowed; one day short of 14 is refused', `${a14.status} / ${a13.status}`);
 const cats = (await api(P, 'GET', '/api/bill-claim-categories')).body;
 const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
-const cl = await api(P, 'POST', '/api/user-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 100, description: 'dates' }], description: 'dates' });
-const cd = sql(`SELECT DATE_FORMAT(claim_date,'%Y-%m-%d') FROM user_claims WHERE id=${cl.body.id || 0}`);
+const cl = await api(P, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 100, description: 'dates' }], description: 'dates' });
+const cd = sql(`SELECT DATE_FORMAT(claim_date,'%Y-%m-%d') FROM bill_claims WHERE id=${cl.body.id || 0}`);
 T('DT-16', ok(cl) && cd === day(0), `A claim filed now is dated with the Dhaka date (${day(0)}), whatever the server clock's zone`, `${J(cl)}; claim_date ${cd}; server UTC date ${new Date().toISOString().slice(0, 10)}`);
-const fb = await api(P, 'POST', '/api/user-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(3), amount: 100, description: 'future bill' }], description: 'future' });
+const fb = await api(P, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(3), amount: 100, description: 'future bill' }], description: 'future' });
 INFO('DT-17', 'A bill line dated 3 days in the future (claim for today already filed, so this also meets one-claim-a-day)', J(fb));
 
 const sum = { PASS: R.filter((r) => r.status === 'PASS').length, FAIL: R.filter((r) => r.status === 'FAIL').length, INFO: R.filter((r) => r.status === 'INFO').length };

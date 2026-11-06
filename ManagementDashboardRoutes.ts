@@ -59,7 +59,7 @@ const safe = async <T>(p: Promise<T>, fallback: T): Promise<T> => {
 
 const SOURCE_LABEL: Record<string, string> = {
   leave_application: "Leave Application",
-  user_claim: "Bill Claim",
+  bill_claim: "Bill Claim",
   claim: "Check In/Out",
   attendance_correction: "Timesheet correction",
   attendance: "Attendance",
@@ -296,7 +296,7 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
       const money = [
         { key: "salary", label: "Salary (Payroll)", source: salaryPaid ? "Run Payroll · paid" : "Run Payroll · net", amount: salaryNow, prev: salaryPrev },
         { key: "advance", label: "Loans / advance given", source: "Loan / Advance", amount: advFor(month), prev: advFor(prev) },
-        { key: "conveyance", label: "Bill claims", source: "Bill Claim · disbursed", amount: convFor(month), prev: convFor(prev) },
+        { key: "bill_claim", label: "Bill claims", source: "Bill Claim · disbursed", amount: convFor(month), prev: convFor(prev) },
         { key: "mobile", label: "Mobile bills", source: mobOver > 0 ? `Mobile Bill · ৳${Math.round(mobOver).toLocaleString("en-US")} over limit` : "Mobile Bill", amount: mobFor(month), prev: mobFor(prev) }
       ];
 

@@ -46,10 +46,10 @@ function calcDayCount(start: string, end: string, halfDay: boolean): number {
 // calendar (see LeaveDurationCalendar) in place of separate Start/End Date inputs,
 // then Purpose, and Apply Date (always today) in the footer next to Cancel/Submit
 // Application. Same portal/shell/close-button/footer treatment as
-// NewConveyanceClaimModal (fixed backdrop + centered rounded-2xl card rendered via
+// NewBillClaimModal (fixed backdrop + centered rounded-2xl card rendered via
 // createPortal, flex-col body that scrolls independently of the header/footer)
 // instead of the old sticky-header/sticky-footer scrolling div, so it behaves
-// identically on the same Android WebViews that clipped NewConveyanceClaimModal
+// identically on the same Android WebViews that clipped NewBillClaimModal
 // before that fix. See POST /api/leave-applications.
 //
 // Dynamic Approval Engine (Part 5) — this used to also have an Approver picker
@@ -276,7 +276,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
   };
 
   // Rendered via a portal straight onto document.body, same as
-  // NewConveyanceClaimModal — this modal gets mounted deep inside UserPanel's
+  // NewBillClaimModal — this modal gets mounted deep inside UserPanel's
   // dashboard tree, which has an `overflow-hidden` ancestor. On a number of
   // Android WebViews a `position: fixed` element nested inside `overflow:
   // hidden` doesn't truly pin to the full device screen — it gets clipped to

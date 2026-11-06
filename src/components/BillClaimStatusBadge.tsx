@@ -5,13 +5,13 @@
 
 import React from 'react';
 import { Clock, CheckCircle2, XCircle } from 'lucide-react';
-import { UserClaimStatus } from '../types';
+import { BillClaimStatus } from '../types';
 
 // Same tiny-pill visual treatment as ApprovalBadge.tsx (Attendance/Check In/Out
 // approval trail), reused here for a Bill Claim's simpler Pending /
 // Approved / Rejected status — this isn't a multi-step chain, just one Admin
 // decision, so it renders straight from `status` rather than an ApprovalStatusSummary.
-export const UserClaimStatusBadge: React.FC<{ status: UserClaimStatus }> = ({ status }) => {
+export const BillClaimStatusBadge: React.FC<{ status: BillClaimStatus }> = ({ status }) => {
   if (status === 'approved') {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">

@@ -11,7 +11,7 @@
 //                      in the sheet change)
 //   leave              leave_applications (history; no balance is touched)
 //   movement_claims    claims (Check In/Out check in / check out)
-//   bill_claims        user_claims (Bill Claim)
+//   bill_claims        bill_claims (Bill Claim)
 //   remote_attendance  attendance (Remote Attendance check in / check out)
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
 //                      inactive "Imported attendance" device so the ZKTeco
@@ -191,8 +191,8 @@ export const IMPORT_KINDS: Kind[] = [
     key: "bill_claims",
     title: "Bill Claim History",
     description: "Past Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
-    module: "conveyance",
-    importLayer: "import_conveyance",
+    module: "bill_claim",
+    importLayer: "import_bill_claims",
     fields: [
       EMP,
       { key: "claim_no", label: "Claim No.", type: "text", aliases: ["claim no", "claim number"], example: "087703", note: "Same Claim No. again is skipped" },
@@ -831,7 +831,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     // ---- Conveyance bill claims ----------------------------------------
     bill_claims: {
       prepare: async () => {
-        const existing: any[] = (await queryDB("SELECT user_id, claim_date, category, amount, admin_remarks FROM user_claims").catch(() => [])) || [];
+        const existing: any[] = (await queryDB("SELECT user_id, claim_date, category, amount, admin_remarks FROM bill_claims").catch(() => [])) || [];
         const cats: any[] = (await queryDB("SELECT id, name FROM bill_claim_categories").catch(() => [])) || [];
         // Bills earlier imports made for disbursed claims, one per employee per month.
         const bills: any[] = (await queryDB("SELECT id, user_id, remarks FROM conveyance_bills WHERE remarks LIKE 'Imported from Excel%'").catch(() => [])) || [];
@@ -872,7 +872,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const billKey = `${userId}|Imported from Excel — disbursed claims ${claimDate.slice(0, 7)}`;
         if (!ctx.dryRun) {
           const res = await queryDB(
-            `INSERT INTO user_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at, first_submitted_at)
+            `INSERT INTO bill_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at, first_submitted_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               userId, claimDate, from, to, category, amount, approved, str(v.description) || null, status,
@@ -882,7 +882,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           );
           const cat = prep.cats.get(norm(category));
           await queryDB(
-            "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO bill_claim_items (bill_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
             [res.insertId, cat ? Number(cat.id) : null, cat ? String(cat.name) : category, billDate, amount, str(v.description).slice(0, 500) || null]
           );
           if (disbursed) {
@@ -896,8 +896,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
               prep.bills.set(billKey, billId);
             }
             await queryDB(
-              `INSERT INTO conveyance_bill_items (bill_id, source, user_claim_id, entry_date, particulars, amount, remarks)
-               VALUES (?, 'user_claim', ?, ?, ?, ?, ?)`,
+              `INSERT INTO conveyance_bill_items (bill_id, source, bill_claim_id, entry_date, particulars, amount, remarks)
+               VALUES (?, 'bill_claim', ?, ?, ?, ?, ?)`,
               [billId, res.insertId, billDate, (str(v.description) || `${category} claim`).slice(0, 255), approved, claimNo ? `Claim No. ${claimNo}` : null]
             );
           }

@@ -315,7 +315,7 @@ flowchart TD
 **Conveyance Disburser (Pay Out) layer:** টেমপ্লেটের শেষ ধাপ এই ধরনের হলে, আগের সব layer approve করার পর claim-টা এখনও Bill হয়নি, কিন্তু Admin Panel → **Disbursement**-এ উপরে "Claims waiting to be paid out" অংশে **Pending** হিসেবে দেখায় (`GET /api/disbursement/awaiting-claims`, Disbursement module লাগে)। সেই layer-এর লোক (বা Superadmin) এখান থেকে বা Approve Application থেকে Voucher দিয়ে **Disburse** করেন — claim approved হয়, নিজের Bill পায় ও paid হয় (`POST /api/my-approvals/:id/act`)। Disbursement module-এর অন্যরা দেখেন কার অপেক্ষায় আছে, কিন্তু Disburse করতে পারেন না।
 
 **Check In/Out** আলাদা: কর্মী কোথাও গেলে GPS-সহ ক্লেইম, একই Approval engine (`MovementClaimRoutes.ts`)।
-ফাইল: `ConveyanceBillClaimRoutes.ts`, `BillClaimPolicy.ts`।
+ফাইল: `BillClaimRoutes.ts`, `BillClaimPolicy.ts`।
 
 ---
 
@@ -705,6 +705,17 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 আগের "Movement Claim" এখন সব জায়গায় **Check In/Out** — ফোনের নিচের menu-র বোতাম (আগে "Claim"), পাতার শিরোনাম (আগে "My Claims"), তালিকা খালি থাকার লেখা, popup-এর শিরোনাম, server-এর ভুলের বার্তা ("You are already checked in — check out first…") আর Assistant-এর উত্তর। অনুমতি, API (`/api/claims/*`) আর ডাটাবেস আগের মতোই; শুধু দেখানো নাম বদলেছে। Bill Claim আলাদা জিনিস, তার নাম বদলায়নি।
 
-## Bill Claim: আগের "Conveyance Bill Claim"
+## Bill Claim: আগের "Conveyance Bill Claim" — নাম, API আর ডাটাবেস
 
-"Conveyance Bill Claim"-এর নাম এখন সব জায়গায় **Bill Claim** — Dashboard-এর tile, পাতার শিরোনাম ("My Bill Claims"), "New Bill Claim" popup, পাশের menu, Module Access, Approval-এর ধরন, alert / notification-এর লেখা আর server-এর বার্তা। অনুমতি (`can_view_conveyance_claims`, module `conveyance`), API আর ডাটাবেস আগের মতোই; শুধু দেখানো নাম বদলেছে। আগে পাঠানো alert-এর লেখা (ডাটাবেসে জমা) আগের নামেই থাকে।
+"Conveyance Bill Claim" এখন সব জায়গায় **Bill Claim** — Dashboard-এর tile, পাতার শিরোনাম ("My Bill Claims"), "New Bill Claim" popup, পাশের menu, Module Access, Approval-এর ধরন, alert-এর লেখা, server-এর বার্তা, আর ভেতরের নামও:
+
+| কী | আগে | এখন |
+|---|---|---|
+| টেবিল | `user_claims`, `user_claim_items`, `user_claim_references`, `user_claim_history`, `conveyance_claim_department_access` | `bill_claims`, `bill_claim_items`, `bill_claim_references`, `bill_claim_history`, `bill_claim_department_access` |
+| কলাম | `*.user_claim_id`, `users.can_view_conveyance_claims` | `*.bill_claim_id`, `users.can_view_bill_claims` |
+| API | `/api/user-claims/*`, `/api/users/:id/conveyance-claim-access`, `…/conveyance-claim-departments` | `/api/bill-claims/*`, `/api/users/:id/bill-claim-access`, `…/bill-claim-departments` |
+| Admin module / URL | `conveyance`, `/admin/conveyance` | `bill_claim`, `/admin/bill-claim` (পুরনো link-ও এখানে খোলে) |
+| Approval | request type `conveyance`, source `user_claim`, alert `conveyance_claim` / `conveyance_approval` | `bill_claim`, `bill_claim`, `bill_claim` / `bill_claim_approval` |
+| Data Import layer | `import_conveyance` | `import_bill_claims` |
+
+পুরনো ডাটাবেস server চালু হওয়ার সময় নিজে বদলে যায় (`billClaimRename.ts`, base schema-র ঠিক পরে, বাকি migration-এর আগে): টেবিল / কলাম / index rename, ENUM-এর মান বদল, আর দেওয়া অনুমতি (module, layer, App access, Access Template) নতুন নামে সরানো — ডাটা হারায় না, আর আবার চালালে কিছু করে না। **Conveyance Bill** (`conveyance_bills`, `conveyance_bill_items`, `/api/conveyance-bills`, Disburser ধাপ) আলাদা জিনিস — claim approve হলে যে বিল তৈরি হয় — তার নাম আগের মতোই।

@@ -15,7 +15,7 @@ import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal
 import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { useIsPhone } from '../lib/useScrolling';
-import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
+import { BillClaimReference, BillClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
 import { formatDate } from '../lib/formatDate';
@@ -36,7 +36,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem extends ClaimReviewFields {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -49,17 +49,17 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Nobody active is on its current Layer any more — a Superadmin decides.
   layer_stuck?: boolean;
   created_at: string;
-  // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
+  // Only present on a 'bill_claim' item — every Check In/Out (check-in/out)
   // this Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
   // deciding. Empty/absent when the claim has no Check In/Out attached
   // (a plain hand-entered Amount).
-  claim_refs?: UserClaimReference[];
-  // Only on a 'user_claim' item — the claim's bills (category / date / amount).
-  claim_items?: UserClaimItem[];
+  claim_refs?: BillClaimReference[];
+  // Only on a 'bill_claim' item — the claim's bills (category / date / amount).
+  claim_items?: BillClaimItem[];
   // Running Approved Amount — set once an EARLIER Layer (e.g. the
   // Department/Direct Supervisor auto-layer at step 1) has already edited
-  // it on a still-pending 'user_claim'. Used as this Layer's pre-fill
+  // it on a still-pending 'bill_claim'. Used as this Layer's pre-fill
   // instead of the full Claim Amount, so a partial-approval edit carries
   // forward through the rest of the chain. Null until someone has edited it.
   source_approved_amount?: number | null;
@@ -152,7 +152,7 @@ const initialsOf = (name: string) => {
 };
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
+  t === 'bill_claim'
     ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
@@ -213,14 +213,14 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [actingKey, setActingKey] = useState<string | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  // Approved Amount draft for a 'user_claim' item — editable on EVERY Layer,
+  // Approved Amount draft for a 'bill_claim' item — editable on EVERY Layer,
   // not just the last one (so the Supervisor auto-layer, or any earlier
   // Template Layer, can partially-approve just like the final approver
   // always could). Pre-filled with source_approved_amount when an earlier
   // Layer already set one, otherwise the full Claim Amount (approve as
   // claimed by default). Remaining Amount is derived from this, never its
   // own state. Edits made on a non-final Layer are recorded as a running
-  // draft server-side (see updateUserClaimApprovedAmountDraft) and carry
+  // draft server-side (see updateBillClaimApprovedAmountDraft) and carry
   // forward as the next Layer's pre-fill.
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<string, string>>({});
   const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
@@ -228,9 +228,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
   // The referenced Check In/Out currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
-  // every other Bill Claim view (ConveyanceClaimCard, the Admin
+  // every other Bill Claim view (BillClaimCard, the Admin
   // Panel's Bill Claim tab) already reuses for this.
-  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
+  const [viewingRef, setViewingRef] = useState<{ ref: BillClaimReference; item: MyApprovalItem } | null>(null);
   // The Asset Requisition currently opened for full-details view — tapping
   // anywhere on that item's card (source_type === 'asset_requisition') opens
   // this, so the Supervisor/HR/Inventory approver can see every requested
@@ -264,7 +264,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
+  const refToClaimRecord = (ref: BillClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
     user_id: item.requested_by,
     user_name: item.requested_by_name,
@@ -308,7 +308,7 @@ useLiveRefresh(() => load(true));
   const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const key = keyFor(item);
     // Bill Claim: Return / Reject tell the employee why.
-    if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
+    if (item.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
@@ -333,8 +333,8 @@ useLiveRefresh(() => load(true));
           remarks: remarksDraft[key] || undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
           voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[key] || undefined : undefined,
-          claim_version: item.source_type === 'user_claim' ? item.claim_version : undefined,
-          allow_reclaim: item.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[key] : undefined
+          claim_version: item.source_type === 'bill_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'bill_claim' && action === 'rejected' ? !!reclaimDraft[key] : undefined
         })
       });
       const data = await res.json();
@@ -391,12 +391,12 @@ useLiveRefresh(() => load(true));
   };
 
   // Wraps handleAct('approved', ...) with the same Approved Amount validation
-  // the Admin Panel's Approvals tab uses — relevant for a 'user_claim' item
+  // the Admin Panel's Approvals tab uses — relevant for a 'bill_claim' item
   // on ANY Layer (Supervisor auto-layer included), not just the last one;
   // every other item just approves as-is.
   const handleApprove = async (item: MyApprovalItem) => {
     const key = keyFor(item);
-    if (item.source_type === 'user_claim') {
+    if (item.source_type === 'bill_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
       const draft = approvedAmountDraft[key];
       const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
@@ -528,7 +528,7 @@ useLiveRefresh(() => load(true));
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
                 // not just the last one — see the state comment above.
-                const editable = item.source_type === 'user_claim' && !item.adhoc;
+                const editable = item.source_type === 'bill_claim' && !item.adhoc;
                 const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
                 // Pre-fill: an earlier Layer's running draft if one exists,
                 // otherwise the full Claim Amount.
@@ -646,8 +646,8 @@ useLiveRefresh(() => load(true));
                           </div>
                         )}
 
-                        {item.source_type === 'user_claim' && <ClaimBillLines items={item.claim_items} compact />}
-                        {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
+                        {item.source_type === 'bill_claim' && <ClaimBillLines items={item.claim_items} compact />}
+                        {item.source_type === 'bill_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                           <div className="mt-2 space-y-1 max-w-md">
                             {item.claim_refs.map((r) => (
                               <button
@@ -759,7 +759,7 @@ useLiveRefresh(() => load(true));
                       </div>
                     ) : (
                       <>
-                      {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mt-3" />}
+                      {item.source_type === 'bill_claim' && <ClaimChangesNotice item={item} className="mt-3" />}
                       <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         {item.can_edit_asset_items && item.asset_requisition_details && (
                           <button
@@ -783,7 +783,7 @@ useLiveRefresh(() => load(true));
                         <input
                           type="text"
                           aria-label="Remarks"
-                          placeholder={item.source_type === 'user_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
+                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
                           value={remarksDraft[key] || ''}
                           onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                           className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -797,7 +797,7 @@ useLiveRefresh(() => load(true));
                           >
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
-                          {item.source_type === 'user_claim' && !item.adhoc && (
+                          {item.source_type === 'bill_claim' && !item.adhoc && (
                             <ReturnButton item={item} compact disabled={actingKey === key} onClick={() => handleAct(item, 'returned')} />
                           )}
                           {item.can_add_adhoc && (
@@ -828,7 +828,7 @@ useLiveRefresh(() => load(true));
                           </button>
                         </div>
                       </div>
-                      {item.source_type === 'user_claim' && (
+                      {item.source_type === 'bill_claim' && (
                         <div onClick={(e) => e.stopPropagation()}>
                           <ReclaimTick item={item} checked={!!reclaimDraft[key]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [key]: v }))} />
                         </div>

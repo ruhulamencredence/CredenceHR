@@ -16,7 +16,7 @@ interface MyApprovalsBellProps {
 }
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
-  user_claim: 'Bill Claim',
+  bill_claim: 'Bill Claim',
   leave: 'Leave Application',
   attendance_correction: 'Timesheet Edit',
   attendance: 'Attendance/Check In/Out'

@@ -87,9 +87,9 @@ CREATE TABLE IF NOT EXISTS users (
   -- and gated the same way every other module in this app is (nothing visible
   -- without an explicit Superadmin grant). OFF by default; a Superadmin always
   -- has both implicitly. PUT /api/users/:id/movement-claim-access and
-  -- PUT /api/users/:id/conveyance-claim-access.
+  -- PUT /api/users/:id/bill-claim-access.
   can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0,
-  can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0
+  can_view_bill_claims TINYINT(1) NOT NULL DEFAULT 0
 );
 
 -- Projects Table
@@ -894,10 +894,10 @@ CREATE TABLE IF NOT EXISTS claims (
 -- Conveyance Bill Claim (User Panel) — a User-submitted expense claim filled in by
 -- hand (optionally spanning several days for a multi-day tour, optionally with a
 -- receipt attachment), separate from the live GPS check-in/out `claims` table above.
--- Starts 'pending'; an Admin with the "conveyance" module Approves (which attaches
+-- Starts 'pending'; an Admin with the "bill_claim" module Approves (which attaches
 -- it onto a conveyance_bills row as a conveyance_bill_items line, source =
--- 'user_claim') or Rejects it with admin_remarks. See server.ts /api/user-claims*.
-CREATE TABLE IF NOT EXISTS user_claims (
+-- 'bill_claim') or Rejects it with admin_remarks. See server.ts /api/bill-claims*.
+CREATE TABLE IF NOT EXISTS bill_claims (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   claim_date DATE NOT NULL,
@@ -919,17 +919,17 @@ CREATE TABLE IF NOT EXISTS user_claims (
   FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- conveyance_bill_items also needs `source` widened to include 'user_claim' and a
--- new user_claim_id column (the server auto-migrates this on startup too):
+-- conveyance_bill_items also needs `source` widened to include 'bill_claim' and a
+-- new bill_claim_id column (the server auto-migrates this on startup too):
 -- ALTER TABLE conveyance_bill_items
---   MODIFY COLUMN source ENUM('movement_claim','manual','user_claim') NOT NULL DEFAULT 'manual',
---   ADD COLUMN user_claim_id INT NULL UNIQUE AFTER claim_id,
---   ADD FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE SET NULL;
+--   MODIFY COLUMN source ENUM('movement_claim','manual','bill_claim') NOT NULL DEFAULT 'manual',
+--   ADD COLUMN bill_claim_id INT NULL UNIQUE AFTER claim_id,
+--   ADD FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE SET NULL;
 
 -- Conveyance Disbursement (Admin Panel -> Conveyance Disbursement, its own
 -- "disbursement" AdminModuleKey) — records that a conveyance_bills row has
 -- actually been paid out, separately from the Bill/its items being built and
--- approved under the "conveyance" module. voucher_no is reprinted on the
+-- approved under the "bill_claim" module. voucher_no is reprinted on the
 -- Payment Voucher PDF every time it's re-opened. The server auto-migrates
 -- this on startup too (server.ts, right after the conveyance_bills table):
 -- ALTER TABLE conveyance_bills
@@ -939,26 +939,26 @@ CREATE TABLE IF NOT EXISTS user_claims (
 --   ADD COLUMN disbursed_by INT NULL,
 --   ADD FOREIGN KEY (disbursed_by) REFERENCES users(id) ON DELETE SET NULL;
 
--- Lets a User's Conveyance Bill Claim (user_claims, above) reference one or more
+-- Lets a User's Conveyance Bill Claim (bill_claims, above) reference one or more
 -- of their OWN completed Movement Claims (claims — a live GPS check-in/out), each
 -- with its own Amount, instead of only a single free-typed Claim Amount. A given
 -- check-in/out (claim_id) may be referenced by AT MOST ONE Conveyance Bill Claim
 -- ever (UNIQUE claim_id below) — once used it drops out of the "available to
 -- reference" picker (GET /api/claims/available) for good, whether the claim it
 -- was attached to is still pending, approved, or was rejected (rejection frees it
--- again — see POST /api/user-claims/:id/decision). Deleting the parent
--- user_claims row (a User withdrawing a still-pending claim) cascades here too,
--- immediately freeing every check-in/out it referenced. user_claims.amount is the
+-- again — see POST /api/bill-claims/:id/decision). Deleting the parent
+-- bill_claims row (a User withdrawing a still-pending claim) cascades here too,
+-- immediately freeing every check-in/out it referenced. bill_claims.amount is the
 -- SUM of these rows' amounts whenever any exist (computed server-side on submit —
--- see POST /api/user-claims), otherwise it's the User's own free-typed figure as
+-- see POST /api/bill-claims), otherwise it's the User's own free-typed figure as
 -- before.
-CREATE TABLE IF NOT EXISTS user_claim_references (
+CREATE TABLE IF NOT EXISTS bill_claim_references (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  user_claim_id INT NOT NULL,
+  bill_claim_id INT NOT NULL,
   claim_id INT NOT NULL UNIQUE,
   amount DECIMAL(12, 2) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE,
+  FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE,
   FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE
 );
 
@@ -974,7 +974,7 @@ CREATE TABLE IF NOT EXISTS user_claim_references (
 CREATE TABLE IF NOT EXISTS approval_templates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150) NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
+  request_type ENUM('bill_claim','leave','timesheet','asset') NOT NULL,
   -- Company-wide fallback for this request_type — used whenever a submitting
   -- Employee has no row in employee_template_assignments for this
   -- request_type. "At most one default per request_type" is enforced in the
@@ -1025,7 +1025,7 @@ CREATE TABLE IF NOT EXISTS approval_template_step_approvers (
 CREATE TABLE IF NOT EXISTS employee_template_assignments (
   id INT AUTO_INCREMENT PRIMARY KEY,
   employee_user_id INT NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
+  request_type ENUM('bill_claim','leave','timesheet','asset') NOT NULL,
   template_id INT NOT NULL,
   assigned_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1246,7 +1246,7 @@ CREATE TABLE IF NOT EXISTS approval_chain_steps (
 -- JSON array: [{step_order, approver_id, approver_name, action, remarks, acted_at}].
 CREATE TABLE IF NOT EXISTS approval_requests (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  source_type ENUM('attendance','claim','user_claim') NOT NULL,
+  source_type ENUM('attendance','claim','bill_claim') NOT NULL,
   event_type ENUM('check_in','check_out','submit') NOT NULL,
   source_id INT NOT NULL,
   requested_by INT NOT NULL,
@@ -1277,7 +1277,7 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 -- );
 -- CREATE TABLE IF NOT EXISTS approval_requests (
 --   id INT AUTO_INCREMENT PRIMARY KEY,
---   source_type ENUM('attendance','claim','user_claim') NOT NULL,
+--   source_type ENUM('attendance','claim','bill_claim') NOT NULL,
 --   event_type ENUM('check_in','check_out','submit') NOT NULL,
 --   source_id INT NOT NULL,
 --   requested_by INT NOT NULL,
@@ -1391,7 +1391,7 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 -- the User Panel per-account, the same way every other module already works —
 -- nothing shows to an Admin or User until the Superadmin explicitly grants it:
 -- ALTER TABLE users ADD COLUMN can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0;
--- ALTER TABLE users ADD COLUMN can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0;
+-- ALTER TABLE users ADD COLUMN can_view_bill_claims TINYINT(1) NOT NULL DEFAULT 0;
 
 -- Session security (SessionSecurity.ts; Admin Panel -> Active Users, Superadmin
 -- only): how long a sign-in lasts, plus what ends one early. The server

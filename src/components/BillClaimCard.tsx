@@ -7,18 +7,18 @@ import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Wallet, Plus, ChevronRight, Inbox, Paperclip } from 'lucide-react';
-import { UserClaim, UserClaimStatus } from '../types';
+import { BillClaim, BillClaimStatus } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import { SelfCard, toneOfStatus } from './SelfCard';
-import { NewConveyanceClaimModal, CONVEYANCE_DRAFT, type ConveyanceClaimDraft } from './NewConveyanceClaimModal';
+import { NewBillClaimModal, BILL_CLAIM_DRAFT, type BillClaimDraft } from './NewBillClaimModal';
 import { readDraft } from '../lib/formDraft';
-import { ConveyanceClaimDetailModal } from './ConveyanceClaimDetailModal';
+import { BillClaimDetailModal } from './BillClaimDetailModal';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 
-interface ConveyanceClaimCardProps {
+interface BillClaimCardProps {
   token: string;
   // Present only on mobile, where this card is one of the tile-menu sections
   // (alongside Budget/Jobs/Entries/Attendance/My Claims) — same "Back to Menu"
@@ -26,10 +26,10 @@ interface ConveyanceClaimCardProps {
   onBack?: () => void;
 }
 
-type ClaimTab = UserClaimStatus;
+type ClaimTab = BillClaimStatus;
 
 // One line under a claim in the list when it's back with the employee.
-const ClaimEditNote: React.FC<{ claim: UserClaim }> = ({ claim }) =>
+const ClaimEditNote: React.FC<{ claim: BillClaim }> = ({ claim }) =>
   claim.edit_mode === 'returned' ? (
     <div className="text-[11px] font-semibold text-amber-700 mt-0.5">Returned for correction — tap to edit</div>
   ) : claim.edit_mode === 'reclaim' ? (
@@ -48,20 +48,20 @@ const TABS: { key: ClaimTab; label: string }[] = [
 // optional Description/attachment) for Admin approval, and browse their own
 // submission history with status badges. Top header carries the "+ New Claim"
 // action; the body is the "My Bill Claims" history list.
-export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token, onBack }) => {
+export const BillClaimCard: React.FC<BillClaimCardProps> = ({ token, onBack }) => {
   // Same isNativeApp split as Timesheet.tsx/LeaveManage.tsx — the
   // "Main / Bill Claim" module-path breadcrumb is a web-only
   // affordance (native app users navigate this same page via the mobile
   // tile menu/bottom nav, so a breadcrumb trail above it is redundant there).
   const isNativeApp = Capacitor.isNativePlatform();
-  const [claims, setClaims] = useState<UserClaim[]>([]);
+  const [claims, setClaims] = useState<BillClaim[]>([]);
   const [loading, setLoading] = useState(true);
   // The New Claim form was open when the app reloaded / restarted: open it
-  // again (with what was typed, see NewConveyanceClaimModal's draft).
-  const [showNewClaim, setShowNewClaim] = useState(() => !!readDraft<ConveyanceClaimDraft>(CONVEYANCE_DRAFT)?.open);
-  const [viewingClaim, setViewingClaim] = useState<UserClaim | null>(null);
+  // again (with what was typed, see NewBillClaimModal's draft).
+  const [showNewClaim, setShowNewClaim] = useState(() => !!readDraft<BillClaimDraft>(BILL_CLAIM_DRAFT)?.open);
+  const [viewingClaim, setViewingClaim] = useState<BillClaim | null>(null);
   // The claim open in the form for editing / resubmitting.
-  const [editingClaim, setEditingClaim] = useState<UserClaim | null>(null);
+  const [editingClaim, setEditingClaim] = useState<BillClaim | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<ClaimTab>('pending');
   // In the phone app the server sends the last 3 months only (X-History-Limited).
@@ -72,7 +72,7 @@ useLiveRefresh(() => fetchClaims(true));
   const fetchClaims = async (silent?: unknown) => {
     if (silent !== true) setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/user-claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(apiUrl('/api/bill-claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         setLimited(res.headers.get('X-History-Limited') === '3-months');
         setClaims(await res.json());
@@ -264,7 +264,7 @@ useLiveRefresh(() => fetchClaims(true));
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-xs">
                       <div className="flex items-center gap-1.5">
-                        <UserClaimStatusBadge status={c.status} />
+                        <BillClaimStatusBadge status={c.status} />
                       </div>
                       <ClaimEditNote claim={c} />
                       {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
@@ -316,7 +316,7 @@ useLiveRefresh(() => fetchClaims(true));
       </button>
 
       {(showNewClaim || editingClaim) && (
-        <NewConveyanceClaimModal
+        <NewBillClaimModal
           key={editingClaim ? `edit-${editingClaim.id}` : 'new'}
           token={token}
           editClaim={editingClaim}
@@ -335,7 +335,7 @@ useLiveRefresh(() => fetchClaims(true));
         />
       )}
       {viewingClaim && (
-        <ConveyanceClaimDetailModal
+        <BillClaimDetailModal
           claim={viewingClaim}
           token={token}
           onClose={() => setViewingClaim(null)}
