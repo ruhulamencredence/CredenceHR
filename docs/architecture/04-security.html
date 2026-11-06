@@ -312,6 +312,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>screenCache.ts</code>, <code>App.tsx</code> (<code>clearScreenCache</code>)</td>
 </tr>
 <tr>
+<td>ফোন / ব্রাউজারে না পাঠানো form-এর খসড়া</td>
+<td>Conveyance Bill Claim-এর নতুন claim আর Check In/Out-এর Purpose লেখার মাঝে অ্যাপ reload / বন্ধ হলে লেখা যেন না হারায়, তাই নিজের লেখা অংশটুকু (তারিখ, bill-এর সারি, বিবরণ — ফাইল নয়) ডিভাইসের <code>localStorage</code>-এ থাকে (<code>src/lib/formDraft.ts</code>)। চাবি অ্যাকাউন্ট অনুযায়ী, অন্য login দেখে না; ৩ দিন পর বাদ; পাঠালে মুছে যায়; <strong>logout-এ সব খসড়া মুছে যায়</strong>। পাঠানোর সময় server আগের মতোই সব যাচাই করে — খসড়া কোনো অনুমতি দেয় না।</td>
+<td><code>formDraft.ts</code>, <code>App.tsx</code> (<code>clearAllDrafts</code>)</td>
+</tr>
+<tr>
 <td>AI Assistant</td>
 <td>আসল API-কে প্রশ্নকারীর <strong>নিজের token</strong> দিয়ে ডাকে, তাই অধিকারের বাইরে কিছু দেখায় না — সব রিপোর্টও সেই রিপোর্টের নিজের API দিয়ে, database সরাসরি কখনো নয়; যেখানে API পাতার চেয়ে ঢিলা (PEPM entries) সেখানে পাতার module + layer নিয়ম আগে যাচাই (<code>hasModuleLayer</code>); ৮ রকম অনুমতি-মিশ্রণে (module নেই, শুধু Claims, Payroll view-only / sheet+log, admin+Roster, Reports layer আছে/নেই, Superadmin) ২২টা রিপোর্ট-প্রশ্নে পরীক্ষিত; নিজে কিছু লেখে না — ছুটি, Book a Ride, হাজিরা ঠিক করা, Check In/Out-এর খসড়া কার্ড শুধু কর্মী নিজে বোতাম চাপলে পাতার একই API-তে যায় (একই যাচাই, একই অনুমোদন); Gemini চালু না থাকলে কোনো ডাটা বাইরে যায় না। Voice আলাদা সুইচ (<code>can_use_assistant_voice</code>, শুরুতে বন্ধ, server-এও যাচাই): কণ্ঠের রেকর্ড শুধু লিখে নেওয়ার জন্য Google-এ যায়, আমাদের সার্ভারে বা ডাটাবেসে জমা হয় না; সর্বোচ্চ ৪ MB, প্রশ্নের হার-সীমা একই</td>
 <td><code>AiAssistantRoutes.ts</code></td>

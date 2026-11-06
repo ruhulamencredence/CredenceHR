@@ -694,3 +694,9 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 ## IP দিয়ে খুললে domain-এ পাঠানো
 
 `.env`-এ `IP_REDIRECT_TO=https://hr.credencegroupbd.com` থাকলে, কেউ browser-এ server-এর IP দিয়ে অ্যাপ খুললে (যেমন `http://203.95.222.58:3000/login` বা `http://192.168.66.4:3000/...`) একই পাতা domain-এ খোলে (302 redirect, পথ আর `?…` একই থাকে)। যা redirect হয় না: `/api`, `/iclock` (ZKTeco push), `/socket.io`, `/downloads`, GET ছাড়া অন্য request, আর Android অ্যাপের WebView (পুরনো APK এখনো IP থেকে চলে)। `127.0.0.1` / `localhost` (nginx-এর proxy) কখনো redirect হয় না। খালি থাকলে কিছুই হয় না। IP দিয়ে port 80/443 (360 ERP) nginx নিজে `https://360.credencegroupbd.com`-এ পাঠায়।
+
+## Claim লেখার মাঝে পাতা নতুন করে শুরু না হওয়া
+
+- **নিচে টেনে refresh (pull-to-refresh):** শুধু পাতার একদম উপরে, পাতার নিজের অংশে টানলে reload হয়। Popup / form-এর ভেতরে, input বা textarea-তে, আলাদা scroll হওয়া বাক্সে, বা `.liquid-glass-backdrop` / `[role=dialog]` / fixed অংশে টানলে কিছুই হয় না (`src/lib/usePullToRefresh.ts`) — আগে Claim form-এর ভেতরে উপরে scroll করতে গেলে পুরো অ্যাপ reload হয়ে লেখা হারাত।
+- **না পাঠানো form-এর খসড়া:** Conveyance Bill Claim-এর নতুন claim (তারিখ, bill-এর সারি, বিবরণ, বাছাই করা ref) আর Check In/Out-এর Purpose লিখতে লিখতে এই ফোনে রেখে দেওয়া হয় (`src/lib/formDraft.ts`, key `chr_draft:<user id>:<form>`)। অ্যাপ reload / বন্ধ হয়ে আবার খুললে (যেমন camera বা file বাছতে গিয়ে Android অ্যাপ বন্ধ করে দিলে) form আবার খোলে, লেখা ফিরে আসে, উপরে সবুজ লেখা "Your unsent claim was brought back." আর "Start over" বোতাম। সংযুক্ত ফাইল রাখা যায় না — সেটা আবার দিতে বলা হয়।
+- খসড়া প্রতি account-এর আলাদা (একই ফোনে অন্য login দেখে না), ৩ দিন পর বাদ, claim পাঠালে বা Start over-এ মুছে যায়, Cancel করলে আর নিজে খোলে না, আর sign-out-এ সব খসড়া মুছে যায় (`App.tsx`)। অন্যের হয়ে বা পুরনো claim edit করলে খসড়া রাখা হয় না।

@@ -96,6 +96,7 @@ import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
 import { clearScreenCache } from './lib/screenCache';
+import { clearAllDrafts } from './lib/formDraft';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
@@ -496,8 +497,10 @@ export default function App() {
     void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
-    // The Dashboard's saved copy of this account's data (screenCache.ts).
+    // The Dashboard's saved copy of this account's data (screenCache.ts),
+    // and any unsent form drafts (formDraft.ts).
     clearScreenCache();
+    clearAllDrafts();
     refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);

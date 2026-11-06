@@ -11,6 +11,21 @@ import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { readDraft, saveDraft, clearDraft } from '../lib/formDraft';
+
+// The unsent New Claim, kept on the phone (lib/formDraft.ts) so a reload or
+// the app being restarted (e.g. by Android while the camera is open) never
+// loses it. `open`: the form was open — ConveyanceClaimCard reopens it.
+export const CONVEYANCE_DRAFT = 'conveyance-claim';
+export interface ConveyanceClaimDraft {
+  open: boolean;
+  fromDate: string;
+  toDate: string;
+  bills: { key: number; category_id: string; bill_date: string; amount: string; description: string }[];
+  description: string;
+  selectedRefs: Record<number, string>;
+  fileName: string | null;
+}
 import { Spinner } from './Spinner';
 
 import { SearchSelect } from './Combobox';
@@ -93,6 +108,12 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<() => void>(() => onClose());
+  // Only a brand-new claim of one's own keeps a draft (an edit starts from
+  // the saved claim; Claim on Behalf is someone else's).
+  const useDraft = !editClaim && !onBehalfOf;
+  const [draftReady, setDraftReady] = useState(false);
+  const [restored, setRestored] = useState<{ fileName: string | null } | null>(null);
 
   // Completed Check In/Out (check-in/out) the User can attach to this claim,
   // each with its own Amount — a check-in/out can only ever be referenced once,
@@ -103,7 +124,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const [loadingClaims, setLoadingClaims] = useState(true);
   const [selectedRefs, setSelectedRefs] = useState<Record<number, string>>({});
 
-  useBackButtonClose(true, submitting ? () => {} : onClose);
+  useBackButtonClose(true, submitting ? () => {} : () => closeRef.current());
   const keyboardInset = useKeyboardInset();
 
   useEffect(() => {
@@ -134,10 +155,24 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           for (const r of editClaim.claim_refs || []) refs[r.claim_id] = String(r.amount);
           setSelectedRefs(refs);
         } else {
-          setFromDate(data.today);
-          setToDate(data.today);
-          setBills([newBill(data.today)]);
+          const d = useDraft ? readDraft<ConveyanceClaimDraft>(CONVEYANCE_DRAFT) : null;
+          const hasContent = !!d && (d.description?.trim() || Object.keys(d.selectedRefs || {}).length || (d.bills || []).some((b) => b.amount || b.category_id || b.description));
+          if (d && hasContent && Array.isArray(d.bills) && d.bills.length) {
+            // Pick up where it was left.
+            nextBillKey = Math.max(nextBillKey, ...d.bills.map((b) => Number(b.key) + 1));
+            setFromDate(d.fromDate || data.today);
+            setToDate(d.toDate || data.today);
+            setBills(d.bills);
+            setDescription(d.description || '');
+            setSelectedRefs(d.selectedRefs || {});
+            setRestored({ fileName: d.fileName || null });
+          } else {
+            setFromDate(data.today);
+            setToDate(data.today);
+            setBills([newBill(data.today)]);
+          }
         }
+        setDraftReady(true);
       } catch (err: any) {
         if (!cancelled) setPolicyError(err.message || 'Could not load the Bill Claim Policy.');
       }
@@ -146,6 +181,38 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       cancelled = true;
     };
   }, [token, behalfBase]);
+
+  // Keep the draft up to date while the form is open.
+  useEffect(() => {
+    if (!useDraft || !draftReady) return;
+    const t = setTimeout(() => {
+      const draft: ConveyanceClaimDraft = { open: true, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null };
+      saveDraft(CONVEYANCE_DRAFT, draft);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [useDraft, draftReady, fromDate, toDate, bills, description, selectedRefs, file, restored]);
+  // Closing on purpose: an empty form leaves nothing behind; a started one
+  // stays as a draft for next time (not reopened by itself).
+  const close = () => {
+    if (useDraft && draftReady) {
+      const started = description.trim() || Object.keys(selectedRefs).length || bills.some((b) => b.amount || b.category_id || b.description);
+      if (started) saveDraft(CONVEYANCE_DRAFT, { open: false, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null });
+      else clearDraft(CONVEYANCE_DRAFT);
+    }
+    onClose();
+  };
+  closeRef.current = close;
+  const startOver = () => {
+    clearDraft(CONVEYANCE_DRAFT);
+    const day = policy?.today || todayDateOnlyString();
+    setFromDate(day);
+    setToDate(day);
+    setBills([newBill(day)]);
+    setDescription('');
+    setSelectedRefs({});
+    setFile(null);
+    setRestored(null);
+  };
 
   const locked = new Set(policy?.locked_dates || []);
   const minDate = policy?.min_date || today;
@@ -351,6 +418,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to submit claim');
+      if (useDraft) clearDraft(CONVEYANCE_DRAFT);
       onSubmitted();
     } catch (err: any) {
       setError(err.message || 'Failed to submit claim');
@@ -397,7 +465,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             disabled={submitting}
             className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-40"
           >
@@ -410,6 +478,17 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
             <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               <span>{policyError}</span>
+            </div>
+          )}
+          {restored && (
+            <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-100">
+              <span className="flex-1">
+                Your unsent claim was brought back.
+                {restored.fileName && !file ? ` Attach "${restored.fileName}" again before submitting.` : ''}
+              </span>
+              <button type="button" onClick={startOver} className="shrink-0 font-semibold text-emerald-700 hover:underline">
+                Start over
+              </button>
             </div>
           )}
           {!policy && !policyError && (
@@ -713,7 +792,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         <div className="p-5 border-t border-slate-200 flex justify-end gap-3 shrink-0">
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             disabled={submitting}
             className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
           >

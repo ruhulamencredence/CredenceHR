@@ -5,6 +5,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
+import { readDraft, saveDraft, clearDraft } from '../lib/formDraft';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { Route, LogIn, LogOut, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
@@ -72,7 +73,13 @@ export async function getCurrentCoords(): Promise<{ latitude: number; longitude:
 // straight-line distance travelled is then available to the Admin for TA/DA-style
 // reimbursement review. Shown near the top of the User Panel, same as Attendance.
 export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
-  const [purpose, setPurpose] = useState('');
+  // The Purpose being typed survives a reload / app restart (lib/formDraft.ts).
+  const [purpose, setPurposeState] = useState(() => readDraft<string>('checkinout-purpose') || '');
+  const setPurpose = (v: string) => {
+    setPurposeState(v);
+    if (v.trim()) saveDraft('checkinout-purpose', v);
+    else clearDraft('checkinout-purpose');
+  };
   const [openClaim, setOpenClaim] = useState<ClaimRecord | null>(null);
   // The most recently completed claim (if any), kept around purely so its
   // check-out Approval Workflow badge stays visible after checking out —

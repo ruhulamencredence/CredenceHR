@@ -12,7 +12,8 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import { SelfCard, toneOfStatus } from './SelfCard';
-import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
+import { NewConveyanceClaimModal, CONVEYANCE_DRAFT, type ConveyanceClaimDraft } from './NewConveyanceClaimModal';
+import { readDraft } from '../lib/formDraft';
 import { ConveyanceClaimDetailModal } from './ConveyanceClaimDetailModal';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
@@ -55,7 +56,9 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
   const isNativeApp = Capacitor.isNativePlatform();
   const [claims, setClaims] = useState<UserClaim[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showNewClaim, setShowNewClaim] = useState(false);
+  // The New Claim form was open when the app reloaded / restarted: open it
+  // again (with what was typed, see NewConveyanceClaimModal's draft).
+  const [showNewClaim, setShowNewClaim] = useState(() => !!readDraft<ConveyanceClaimDraft>(CONVEYANCE_DRAFT)?.open);
   const [viewingClaim, setViewingClaim] = useState<UserClaim | null>(null);
   // The claim open in the form for editing / resubmitting.
   const [editingClaim, setEditingClaim] = useState<UserClaim | null>(null);
