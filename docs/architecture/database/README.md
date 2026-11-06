@@ -130,7 +130,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 ### F. Claims, Conveyance & Mobile Bill (17টি টেবিল)
 
-Movement claim, Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।
+Movement claim, Conveyance Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।
 
 মূল টেবিল: `claims`, `user_claims`, `conveyance_bills`, `mobile_sims`, `bill_claim_*`
 

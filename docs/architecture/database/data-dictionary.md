@@ -2090,7 +2090,7 @@ Unique: `uq_mpr_po_line`(entry_id,po_no)
 
 ## F. Claims, Conveyance & Mobile Bill
 
-Movement claim, Bill Claim (bill ও লাইন), অনুমোদনকারীর স্বাক্ষর, ক্লেইম নীতি, মোবাইল SIM ও বিল।
+Movement claim, Conveyance Bill Claim (bill ও লাইন), অনুমোদনকারীর স্বাক্ষর, ক্লেইম নীতি, মোবাইল SIM ও বিল।
 
 ### `bill_claim_categories`
 
