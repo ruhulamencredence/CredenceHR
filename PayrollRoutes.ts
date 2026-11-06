@@ -2329,21 +2329,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // just uses the full figure. Local Y/M/D rather than toISOString(),
       // which is UTC and rolls back a day for timezones ahead of it (see the
       // same note on toDateOnly in server.ts).
-      // Today in Dhaka (the server's own clock may be UTC). Today itself
-      // counts only once it's attended (or on leave): the day isn't over, so
-      // not having checked in yet is not an absence — before this, every
-      // morning showed one "unexplained" Absent until the check-in.
+      // Today in Dhaka (the server's own clock may be UTC). A working day
+      // with no check-in — today included — counts as Absent.
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
       let workingDaysSoFar = workingDays;
       if (today >= monthStart && today <= monthEnd) {
         let elapsed = 0;
         for (const dateStr of period.dates) {
           if (dateStr > today) break;
-          if (!isWorkingDay(dateStr)) continue;
-          if (dateStr === today && !presentDays.has(dateStr) && !leaveDates.has(dateStr)) continue;
-          elapsed++;
+          if (isWorkingDay(dateStr)) elapsed++;
         }
-        workingDaysSoFar = elapsed;
+        workingDaysSoFar = joiningDate ? elapsed : Math.max(1, elapsed);
       }
 
       // Absence — working days elapsed so far, minus days actually present
