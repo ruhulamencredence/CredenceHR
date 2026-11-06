@@ -134,8 +134,10 @@ const DateCard: React.FC<{
   holiday?: HolidayEntry;
   late?: LateKind;
   leave?: string;
+  // Today: no check-in yet reads "Not checked in yet", not Absent.
+  isToday?: boolean;
   onClick: () => void;
-}> = ({ dateStr, records, correction, holiday, late, leave, onClick }) => {
+}> = ({ dateStr, records, correction, holiday, late, leave, isToday, onClick }) => {
   const present = records.length > 0;
   const projectNames = Array.from(new Set(records.map((r) => r.project_name).filter(Boolean))).join(', ');
   const checkIns = records.map((r) => r.check_in_at).filter(Boolean) as string[];
@@ -182,6 +184,10 @@ const DateCard: React.FC<{
               title={holiday.title}
             >
               <CheckCircle2 className="w-3 h-3" /> {holiday.day_type === 'weekend' ? 'Weekend' : 'Holiday'}
+            </span>
+          ) : isToday ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              <Clock className="w-3 h-3" /> Not checked in yet
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">
@@ -478,7 +484,8 @@ useLiveRefresh(() => loadData());
   const monthDatesDesc = useMemo(() => [...monthDates].reverse(), [monthDates]);
   const rangeDatesDesc = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
 
-  const isAbsent = (d: string) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d) && !leaveByDate.has(d);
+  // Today without a check-in isn't Absent yet — the day is still on.
+  const isAbsent = (d: string) => d !== today && (byDate.get(d) || []).length === 0 && !holidayByDate.has(d) && !leaveByDate.has(d);
   const countsFor = (dates: string[]) => ({
     present: dates.filter((d) => (byDate.get(d) || []).length > 0).length,
     absent: dates.filter(isAbsent).length,
@@ -495,7 +502,7 @@ useLiveRefresh(() => loadData());
     if (leaveByDate.has(d)) return 'leave';
     const h = holidayByDate.get(d);
     if (h) return h.day_type === 'weekend' ? 'weekend' : 'holiday';
-    return 'absent';
+    return d === today ? 'today' : 'absent';
   };
   const gaugeCounts = (dates: string[]) => {
     const c = { ontime: 0, delay: 0, extreme: 0, absent: 0, leave: 0 };
@@ -733,7 +740,7 @@ useLiveRefresh(() => loadData());
                   ) : (
                     <div className="space-y-3 md:space-y-1.5">
                       {monthDatesDesc.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} isToday={d === today} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}
@@ -859,7 +866,7 @@ useLiveRefresh(() => loadData());
                   ) : (
                     <div className="space-y-3 md:space-y-1.5">
                       {rangeDatesDesc.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} isToday={d === today} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}

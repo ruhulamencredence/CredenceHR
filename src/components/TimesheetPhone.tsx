@@ -15,7 +15,8 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { CardChip, CardTone, SelfCard } from './SelfCard';
 
 export type TimesheetMode = 'month' | 'day' | 'range';
-export type DayStatus = 'ontime' | 'delay' | 'extreme' | 'absent' | 'leave' | 'weekend' | 'holiday';
+// 'today': today, not checked in yet — not an absence while the day is on.
+export type DayStatus = 'ontime' | 'delay' | 'extreme' | 'absent' | 'leave' | 'weekend' | 'holiday' | 'today';
 export type StatusFilter = 'ontime' | 'delay' | 'extreme' | 'absent';
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -30,7 +31,8 @@ export const STATUS_STYLE: Record<DayStatus, { color: string; soft: string; fg: 
   absent: { color: '#e11d48', soft: '#ffe4e6', fg: '#9f1239', label: 'Absent' },
   leave: { color: '#6366f1', soft: '#e0e7ff', fg: '#3730a3', label: 'On leave' },
   weekend: { color: '#a1a1aa', soft: '#f4f4f5', fg: '#52525b', label: 'Weekend' },
-  holiday: { color: '#d97706', soft: '#fef3c7', fg: '#92400e', label: 'Holiday' }
+  holiday: { color: '#d97706', soft: '#fef3c7', fg: '#92400e', label: 'Holiday' },
+  today: { color: '#94a3b8', soft: '#f1f5f9', fg: '#475569', label: 'Not checked in yet' }
 };
 
 // True below Tailwind's md breakpoint — the width the mobile layout uses.
@@ -510,6 +512,7 @@ const DAY_TONE: Record<DayStatus, CardTone> = {
   extreme: 'amber',
   absent: 'rose',
   leave: 'violet',
+  today: 'slate',
   weekend: 'slate',
   holiday: 'slate'
 };
