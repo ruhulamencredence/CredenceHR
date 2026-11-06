@@ -532,6 +532,14 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 <li>পুরনো একক <code>users.attendance_project_id</code> প্রথম চালুতে একবার তালিকায় কপি হয়; এরপর তালিকায় ঠিক একটা project থাকলে সেটাই ওই ঘরে থাকে (পুরনো রিপোর্টের জন্য)।</li>
 <li>বদলাতে লাগে Users module + <code>edit_add</code> layer; সব বদল আগের মতো <code>user_access_audit</code>-এ।</li>
 </ul>
+<h2 id="_4">হাজিরা: সব জায়গায় একই হিসাব</h2>
+<p>My Attendance card, Timesheet, Monthly / Daily Attendance Report (Department Summary, Custom Report, Admin Dashboard ও Assistant-সহ, যারা <code>computeMonthlyReport</code> থেকে নেয়) আর Payroll একই নিয়মে দিন গোনে:</p>
+<ul>
+<li><strong>GPS + অফিস মেশিন একই দিনে:</strong> In = দুটোর মধ্যে আগেরটা, Out = সেই In-এর পরের <strong>শেষ punch</strong> (GPS Check Out বা মেশিনের যেকোনো punch)। আগে report ও Timesheet GPS-এর সারি থাকলে মেশিন দেখত না; এখন card-এর মতো (<code>dayPicture</code>)। Timesheet-এ সেদিন "Office Attendance" নামে একটা বাড়তি সারি আসে যা শুধু আগের In / পরের punch দেয়।</li>
+<li><strong>Site / Team Attendance (supervisor-এর team sheet):</strong> নিশ্চিত (confirmed) Present / Late এন্ট্রি = সেদিন Present (আগমনের সময় In), Leave এন্ট্রি = Leave — কিছু না থাকলে, আর Weekend / Holiday-তে নয়; payroll যেভাবে গোনে। Report-এ উৎস "Team", Timesheet-এ "Team Attendance"। শুধু যাঁদের login আছে তাঁরা Monthly report-এ আসেন (আগের মতো); login-হীন site কর্মী Site Attendance, Employee 360 আর Payroll-এ।</li>
+<li><strong>Timesheet-এর calendar</strong> (<code>GET /api/attendance/my-calendar</code>): কর্মীর নিজের Weekend / Holiday (Head Office বা Project site) তাঁর Duty Roster মিলিয়ে — roster-এর Off day ছুটি (Absent নয়), Holiday-তে shift থাকলে কাজের দিন; যোগদানের আগের দিন দেখায় না; team sheet-এর Leave দেখায় "Leave (team sheet)"।</li>
+<li><strong>বেতন বন্ধ হওয়া মাস:</strong> যে বেতন-মাসে কর্মীর payroll <strong>Processed বা Paid</strong>, সেই মাসের কোনো দিনের Timesheet সংশোধন (আর বাইরে থেকে দেওয়া হাজিরা) নেওয়া হয় না, আর আগে থেকে অপেক্ষায় থাকা সংশোধন approve করা যায় না (কিছু লেখার আগেই আটকায়, তাই অনুরোধ অর্ধেক approve হয়ে থাকে না; reject করা যায়) — <code>PayrollRoutes.ts</code> <code>closedPayMonthFor</code>। বেতন-মাস ধরা হয় Payroll-এর salary month setting অনুযায়ী।</li>
+</ul>
 <h2 id="office-attendance-zkteco">Office Attendance: একাধিক ZKTeco মেশিন</h2>
 <p>Office Attendance → <strong>Machines</strong> popup-এ প্রতিটা মেশিন: নাম, office / branch / site, সংযোগ, PIN-এর ধরন, অবস্থা (Online / Quiet / Offline / Not heard from yet), শেষ কবে শোনা গেছে আর আজকের punch সংখ্যা (<code>zkMachines.ts</code>, <code>ZkMachinesModal.tsx</code>)।</p>
 <ul>

@@ -27,7 +27,7 @@ import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerApkDownload } from "./AndroidApkRoute";
-import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave } from "./PayrollRoutes";
+import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave, closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { registerPayrollApprovalRoutes, ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
 import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
@@ -1395,6 +1395,14 @@ async function performApprovalAction(
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
+  // An attendance correction for a day whose salary is already processed /
+  // paid can't be approved (it would change a closed month) — checked before
+  // anything is recorded, so the request is never left half-approved.
+  if (request.source_type === "attendance_correction" && action === "approved") {
+    const c: any = ((await queryDB("SELECT user_id, attendance_date FROM attendance_corrections WHERE id = ?", [request.source_id])) || [])[0];
+    const closed = c ? await closedPayMonthFor(Number(c.user_id), String(c.attendance_date instanceof Date ? c.attendance_date.toLocaleDateString("en-CA") : c.attendance_date).slice(0, 10)) : null;
+    if (closed) throw new ApprovalActionError(400, `${closedPayMonthMessage(closed)} Reject this request instead.`);
+  }
 
   const currentApprovers = await getCurrentStepApprovers(request);
   const isAssignedApprover = currentApprovers.some((a) => Number(a.user_id) === Number(actorUser.id));
@@ -1845,6 +1853,10 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
   if (rows.length === 0) throw new Error("Correction request not found");
   const c = rows[0];
   if (c.status !== "pending") throw new Error("This request has already been reviewed.");
+  {
+    const closed = await closedPayMonthFor(Number(c.user_id), toDateOnlyString(c.attendance_date) || "");
+    if (closed) throw new Error(closedPayMonthMessage(closed));
+  }
 
   const existing = await queryDB("SELECT * FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ?", [
     c.user_id,

@@ -573,6 +573,15 @@ Admin Panel → Users → Module Access → **Allowed projects for check-in**-�
 - পুরনো একক `users.attendance_project_id` প্রথম চালুতে একবার তালিকায় কপি হয়; এরপর তালিকায় ঠিক একটা project থাকলে সেটাই ওই ঘরে থাকে (পুরনো রিপোর্টের জন্য)।
 - বদলাতে লাগে Users module + `edit_add` layer; সব বদল আগের মতো `user_access_audit`-এ।
 
+## হাজিরা: সব জায়গায় একই হিসাব
+
+My Attendance card, Timesheet, Monthly / Daily Attendance Report (Department Summary, Custom Report, Admin Dashboard ও Assistant-সহ, যারা `computeMonthlyReport` থেকে নেয়) আর Payroll একই নিয়মে দিন গোনে:
+
+- **GPS + অফিস মেশিন একই দিনে:** In = দুটোর মধ্যে আগেরটা, Out = সেই In-এর পরের **শেষ punch** (GPS Check Out বা মেশিনের যেকোনো punch)। আগে report ও Timesheet GPS-এর সারি থাকলে মেশিন দেখত না; এখন card-এর মতো (`dayPicture`)। Timesheet-এ সেদিন "Office Attendance" নামে একটা বাড়তি সারি আসে যা শুধু আগের In / পরের punch দেয়।
+- **Site / Team Attendance (supervisor-এর team sheet):** নিশ্চিত (confirmed) Present / Late এন্ট্রি = সেদিন Present (আগমনের সময় In), Leave এন্ট্রি = Leave — কিছু না থাকলে, আর Weekend / Holiday-তে নয়; payroll যেভাবে গোনে। Report-এ উৎস "Team", Timesheet-এ "Team Attendance"। শুধু যাঁদের login আছে তাঁরা Monthly report-এ আসেন (আগের মতো); login-হীন site কর্মী Site Attendance, Employee 360 আর Payroll-এ।
+- **Timesheet-এর calendar** (`GET /api/attendance/my-calendar`): কর্মীর নিজের Weekend / Holiday (Head Office বা Project site) তাঁর Duty Roster মিলিয়ে — roster-এর Off day ছুটি (Absent নয়), Holiday-তে shift থাকলে কাজের দিন; যোগদানের আগের দিন দেখায় না; team sheet-এর Leave দেখায় "Leave (team sheet)"।
+- **বেতন বন্ধ হওয়া মাস:** যে বেতন-মাসে কর্মীর payroll **Processed বা Paid**, সেই মাসের কোনো দিনের Timesheet সংশোধন (আর বাইরে থেকে দেওয়া হাজিরা) নেওয়া হয় না, আর আগে থেকে অপেক্ষায় থাকা সংশোধন approve করা যায় না (কিছু লেখার আগেই আটকায়, তাই অনুরোধ অর্ধেক approve হয়ে থাকে না; reject করা যায়) — `PayrollRoutes.ts` `closedPayMonthFor`। বেতন-মাস ধরা হয় Payroll-এর salary month setting অনুযায়ী।
+
 ## Office Attendance: একাধিক ZKTeco মেশিন
 
 Office Attendance → **Machines** popup-এ প্রতিটা মেশিন: নাম, office / branch / site, সংযোগ, PIN-এর ধরন, অবস্থা (Online / Quiet / Offline / Not heard from yet), শেষ কবে শোনা গেছে আর আজকের punch সংখ্যা (`zkMachines.ts`, `ZkMachinesModal.tsx`)।

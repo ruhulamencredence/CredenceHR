@@ -285,6 +285,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // module access (GET /api/holidays is open to every signed-in account), so
   // Weekend/Holiday dates never show as Absent below.
   const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
+  // From GET /api/attendance/my-calendar — the same rules as the Monthly
+  // Attendance Report and payroll: days before joining are never Absent,
+  // and Leave on a supervisor's team sheet is Leave.
+  const [joiningDate, setJoiningDate] = useState<string | null>(null);
+  const [siteLeaveDates, setSiteLeaveDates] = useState<string[]>([]);
   // "YYYY-MM-DD" -> Delay / Extreme Delay, from GET /api/my-late-days
   // (fetched per visible window below, merged as the window moves).
   const [lateDays, setLateDays] = useState<Record<string, LateKind>>({});
@@ -350,7 +355,20 @@ useLiveRefresh(() => loadData());
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })),
+        // This account's own calendar with its Duty Roster laid over it
+        // (an Off day is a Weekend, a rostered shift on a holiday a working
+        // day). The plain calendar of its group if that isn't available.
+        fetch(apiUrl('/api/attendance/my-calendar'), { headers: { Authorization: `Bearer ${token}` } })
+          .then(async (r) => {
+            if (!r.ok) throw new Error('no calendar');
+            const d = await r.json();
+            if (!cancelledRef?.cancelled) {
+              setJoiningDate(d.joining_date || null);
+              setSiteLeaveDates(Array.isArray(d.site_leave_dates) ? d.site_leave_dates : []);
+            }
+            return new Response(JSON.stringify(d.holidays || []), { status: 200 });
+          })
+          .catch(() => groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } }))),
         fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
@@ -446,11 +464,14 @@ useLiveRefresh(() => loadData());
         map.set(d, l.leave_type_label || l.leave_type || 'Leave');
       }
     }
+    for (const d of siteLeaveDates) if (!map.has(d)) map.set(d, 'Leave (team sheet)');
     return map;
-  }, [leaves]);
+  }, [leaves, siteLeaveDates]);
 
-  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
-  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Days before this person joined aren't shown (never Absent), as on the
+  // Monthly Attendance Report.
+  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today).filter((d) => !joiningDate || d >= joiningDate), [selYear, selMonth, today, joiningDate]);
+  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo).filter((d) => !joiningDate || d >= joiningDate), [rangeFrom, rangeTo, joiningDate]);
   // Newest-to-oldest for display (today/last date at top) — monthDates/
   // rangeDates themselves stay oldest-to-newest since buildRangeDates'
   // MAX_DAYS cap and the Present/Absent counts below don't care about order.

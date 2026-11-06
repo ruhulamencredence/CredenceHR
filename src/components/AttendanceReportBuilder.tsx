@@ -40,7 +40,7 @@ const FIELDS: { key: string; label: string; type: FieldType; values?: { v: strin
   { key: 'shift', label: 'Shift', type: 'text' },
   { key: 'shift_start', label: 'Shift start', type: 'time' },
   { key: 'shift_end', label: 'Shift end', type: 'time' },
-  { key: 'source', label: 'Source', type: 'enum', values: [{ v: 'remote', l: 'Remote (GPS)' }, { v: 'office', l: 'Office device' }] },
+  { key: 'source', label: 'Source', type: 'enum', values: [{ v: 'remote', l: 'Remote (GPS)' }, { v: 'office', l: 'Office device' }, { v: 'site', l: 'Team sheet (site)' }] },
   { key: 'project', label: 'Project', type: 'text' },
   { key: 'leave_type', label: 'Leave type', type: 'text' },
   { key: 'holiday', label: 'Holiday', type: 'text' }

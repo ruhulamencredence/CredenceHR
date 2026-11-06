@@ -29,7 +29,9 @@ import type { Express } from "express";
 // has no dependency back on this file.
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
 import { loadRoster } from "./RosterRoutes";
+import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { restrictedAttendanceProjects } from "./AttendanceProjects";
+import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -317,6 +319,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       ? `Outside every project area · ${fmt(nearestMine.d)} from ${nearestMine.p.project_name}`
       : "Outside every project area";
     const today = todayInDhaka();
+    const closedMonth = await closedPayMonthFor(Number(req.user.id), today);
+    if (closedMonth) {
+      res.status(400).json({ error: closedPayMonthMessage(closedMonth) });
+      return true;
+    }
     const label = kind === "in" ? "In" : "Out";
     const remarks = `[Off-site ${label}: ${place}] ${note}`;
     const dist = target.d ?? null;
@@ -798,7 +805,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // a day with only one punch so far has no Out Time yet.
           `SELECT DATE(punch_time) AS attendance_date,
                   MIN(punch_time) AS check_in_at,
-                  CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at
+                  CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at,
+                  MAX(punch_time) AS last_punch
            FROM zk_attendance_logs
            WHERE device_user_pin = ?
            GROUP BY DATE(punch_time)
@@ -806,9 +814,31 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
            LIMIT 200`,
           [emp[0].zk_device_pin]
         );
+        const t = (v: any) => (v ? new Date(v).getTime() : NaN);
         for (const o of officeRows) {
           const dateStr = String(o.attendance_date).slice(0, 10);
-          if (datesWithRemote.has(dateStr)) continue;
+          if (datesWithRemote.has(dateStr)) {
+            // GPS and office device the same day: the day is the earliest In
+            // and the last punch after it (Timesheet takes the earliest In
+            // and latest Out across a date's rows) — so the office row only
+            // brings an earlier In and / or a later punch, nothing else.
+            const ins = mapped.filter((r: any) => String(r.attendance_date).slice(0, 10) === dateStr && r.check_in_at).map((r: any) => t(r.check_in_at));
+            const firstIn = ins.length ? Math.min(...ins) : NaN;
+            const earlierIn = !(t(o.check_in_at) >= firstIn) ? o.check_in_at : null;
+            const dayIn = earlierIn ? t(earlierIn) : firstIn;
+            const laterPunch = [o.last_punch, o.check_in_at].find((p) => t(p) > dayIn) || null;
+            if (!earlierIn && !laterPunch) continue;
+            mapped.push({
+              id: -Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 1000),
+              user_id: req.user.id,
+              project_id: 0,
+              project_name: 'Office Attendance',
+              attendance_date: dateStr,
+              check_in_at: earlierIn,
+              check_out_at: laterPunch
+            });
+            continue;
+          }
           mapped.push({
             // Negative, date-derived id — keeps this synthetic row unique and
             // numeric like every real AttendanceRecord.id (real rows are
@@ -824,10 +854,67 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             check_out_at: o.check_out_at
           });
         }
-        mapped.sort((a: any, b: any) => String(b.attendance_date).localeCompare(String(a.attendance_date)));
       }
-
+      // Site Attendance (supervisor muster roll): a confirmed Present / Late
+      // day with nothing else on it shows as present, like payroll counts it.
+      const myEmp: any[] = (await queryDB("SELECT id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1", [req.user.id]).catch(() => [])) || [];
+      if (myEmp.length) {
+        const taken = new Set(mapped.map((r: any) => String(r.attendance_date).slice(0, 10)));
+        for (const e of await loadSiteEntries(queryDB, "2000-01-01", "2999-12-31", Number(myEmp[0].id))) {
+          const dateStr = String(e.attendance_date instanceof Date ? e.attendance_date.toLocaleDateString("en-CA") : e.attendance_date).slice(0, 10);
+          if (taken.has(dateStr) || (e.status !== "present" && e.status !== "late")) continue;
+          mapped.push({
+            // Negative like the office rows, one less so the two never clash.
+            id: -Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 1000) - 1,
+            user_id: req.user.id,
+            project_id: 0,
+            project_name: 'Team Attendance',
+            attendance_date: dateStr,
+            check_in_at: e.in_time ? `${dateStr} ${String(e.in_time).slice(0, 5)}:00` : null,
+            check_out_at: e.out_time ? `${dateStr} ${String(e.out_time).slice(0, 5)}:00` : null,
+            check_in_remarks: e.remarks || null
+          });
+        }
+      }
+      mapped.sort((a: any, b: any) => String(b.attendance_date).localeCompare(String(a.attendance_date)));
       res.json(mapped);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Timesheet's calendar, worked out the way the Monthly Attendance Report
+  // and payroll do it, so the three agree on every day:
+  //   holidays   — this account's own Weekend / Holiday calendar (Head Office
+  //                or Project site) with its Duty Roster laid over it (an
+  //                Off day is a Weekend, a rostered shift on a holiday is a
+  //                working day);
+  //   joining_date — days before it are never Absent;
+  //   site_leave_dates — Leave marked on a supervisor's team sheet.
+  app.get("/api/attendance/my-calendar", authenticateToken, requireTimesheetAccess, async (req: any, res) => {
+    try {
+      const today = todayInDhaka();
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : `${Number(today.slice(0, 4)) - 3}-01-01`;
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : `${Number(today.slice(0, 4)) + 1}-12-31`;
+      const emp: any = ((await queryDB("SELECT id, joining_date FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1", [req.user.id]).catch(() => [])) || [])[0];
+      const maps = await getHolidayMapsByGroup(queryDB, from, to);
+      const group = (await getEmployeeBranchTypeMap(queryDB, Number(req.user.id))).get(Number(req.user.id)) || "head_office";
+      let holidays: Map<string, any> = maps[group];
+      const siteLeave: string[] = [];
+      if (emp) {
+        const roster = await loadRoster(queryDB, from, to, [Number(emp.id)]);
+        holidays = roster.holidaysFor(Number(emp.id), holidays);
+        for (const e of await loadSiteEntries(queryDB, from, to, Number(emp.id))) {
+          if (e.status !== "leave") continue;
+          const d = String(e.attendance_date instanceof Date ? e.attendance_date.toLocaleDateString("en-CA") : e.attendance_date).slice(0, 10);
+          if (!holidays.get(d)) siteLeave.push(d);
+        }
+      }
+      res.json({
+        joining_date: emp?.joining_date ? (emp.joining_date instanceof Date ? emp.joining_date.toLocaleDateString("en-CA") : String(emp.joining_date).slice(0, 10)) : null,
+        holidays: [...holidays.entries()].map(([d, h]: [string, any]) => ({ entry_date: d, day_type: h.day_type, title: h.title, roster_off: !!h.roster_off })),
+        site_leave_dates: siteLeave
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -865,6 +952,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!projectId) return res.status(400).json({ error: "Project is required." });
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
+      // A day whose salary month is already processed / paid stays as it is.
+      const closedMonth = await closedPayMonthFor(Number(req.user.id), String(attendance_date).slice(0, 10));
+      if (closedMonth) return res.status(400).json({ error: closedPayMonthMessage(closedMonth), closed_month: closedMonth });
       if (!check_in_at && !check_out_at) return res.status(400).json({ error: "Enter an In Time or Out Time to correct." });
       // The In Time is on the day being corrected; the Out Time that day or,
       // for a night shift, the next morning — and never before the In Time
@@ -1306,7 +1396,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // check_out_at as NULL, not the same timestamp as check_in_at.
           `SELECT device_user_pin, DATE(punch_time) AS attendance_date,
                   MIN(punch_time) AS check_in_at,
-                  CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at
+                  CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at,
+                  MAX(punch_time) AS last_punch
            FROM zk_attendance_logs
            WHERE DATE(punch_time) BETWEEN ? AND ?
            GROUP BY device_user_pin, DATE(punch_time)`,
@@ -1338,6 +1429,25 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     // Duty Roster: an Off day counts like a Weekend, a rostered shift on a
     // Weekend/Holiday is a working day.
     const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
+
+    // Site Attendance (supervisor muster roll, SiteAttendanceRoutes.ts) —
+    // counted the way payroll counts it: a confirmed Present / Late entry is
+    // a present day (its arrival time as the In) when nothing else shows the
+    // person that day; a Leave entry is a leave day; never on a Weekend /
+    // Holiday. Skipped when filtering by Project, like the office device.
+    const siteByUserDate = new Map<string, any>();
+    if (!project_id && pageUserIds.size) {
+      const userIdByEmployeeId = new Map<number, number>();
+      for (const [uid, eid] of employeeIdByUserId) if (pageUserIds.has(uid)) userIdByEmployeeId.set(eid, uid);
+      if (userIdByEmployeeId.size) {
+        for (const r of await loadSiteEntries(queryDB, monthStart, monthEnd)) {
+          const uid = userIdByEmployeeId.get(Number(r.employee_id));
+          if (!uid) continue;
+          const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
+          siteByUserDate.set(`${uid}|${dateStr}`, r);
+        }
+      }
+    }
 
     // Approved leave: a working day on leave with no check-in is Leave,
     // not Absent.
@@ -1382,22 +1492,39 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         let checkInAt = rec?.check_in_at || null;
         let checkOutAt = rec?.check_out_at || null;
         let projectName = rec ? (projectMap.get(rec.project_id)?.project_name || null) : null;
-        let source: "remote" | "office" | null = rec ? "remote" : null;
+        let source: "remote" | "office" | "site" | null = rec ? "remote" : null;
         // Remote (GPS) check-in/out remarks — Office (ZKTeco) punches carry
         // no remarks field at all, so this stays null on an office-sourced day.
         let checkInRemarks: string | null = rec?.check_in_remarks || null;
         let checkOutRemarks: string | null = rec?.check_out_remarks || null;
 
-        // Fallback: no Remote attendance this day -> use Office Attendance if it exists.
-        if (!rec) {
-          const office = officeByUserDate.get(`${u.id}|${dateStr}`);
-          if (office) {
-            hasIn = true;
-            hasOut = !!office.check_out_at;
-            checkInAt = office.check_in_at;
-            checkOutAt = office.check_out_at;
-            projectName = null;
-            source = "office";
+        // Office Attendance (ZKTeco) on the same day: the day's In is the
+        // earliest of the GPS In and the first office punch, and its Out the
+        // LAST punch after that In — a GPS Check Out or any office punch,
+        // whichever came last. The same rule as the My Attendance card
+        // (dayPicture). With no GPS row the office punches are the day.
+        const office = officeByUserDate.get(`${u.id}|${dateStr}`);
+        if (office) {
+          const t = (v: any) => (v ? new Date(v).getTime() : NaN);
+          if (!rec || !rec.check_in_at) {
+            if (!hasIn) {
+              hasIn = true;
+              hasOut = !!office.check_out_at;
+              checkInAt = office.check_in_at;
+              checkOutAt = office.check_out_at;
+              projectName = rec ? projectName : null;
+              source = "office";
+            }
+          } else {
+            if (t(office.check_in_at) < t(checkInAt)) {
+              checkInAt = office.check_in_at;
+              source = "office";
+            }
+            const inT = t(checkInAt);
+            for (const p of [office.check_in_at, office.last_punch]) {
+              if (t(p) > inT && (!checkOutAt || t(p) > t(checkOutAt))) checkOutAt = p;
+            }
+            hasOut = !!checkOutAt;
           }
         }
 
@@ -1405,7 +1532,28 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         // neither presentDays nor absent_days below, even when the person
         // didn't check in; it's not a normal working day at all.
         const holiday = holidayMap.get(dateStr);
-        const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || null : null;
+
+        // Site Attendance (supervisor muster roll), as payroll counts it.
+        const site = !holiday ? siteByUserDate.get(`${u.id}|${dateStr}`) : null;
+        let siteLeave: string | null = null;
+        if (site && !hasIn) {
+          if ((site.status === "present" || site.status === "late") && site.in_time) {
+            hasIn = true;
+            checkInAt = `${dateStr} ${String(site.in_time).slice(0, 5)}:00`;
+            checkOutAt = site.out_time ? `${dateStr} ${String(site.out_time).slice(0, 5)}:00` : null;
+            hasOut = !!checkOutAt;
+            projectName = null;
+            source = "site";
+            checkInRemarks = site.remarks || null;
+          } else if (site.status === "present" || site.status === "late") {
+            hasIn = true;
+            projectName = null;
+            source = "site";
+          } else if (site.status === "leave") {
+            siteLeave = "Leave (team sheet)";
+          }
+        }
+        const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || siteLeave || null : null;
         if (holiday) holidayDays++;
         else if (leaveType) leaveDays++;
         else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
@@ -1547,7 +1695,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // Same single-punch guard — see the other zk_attendance_logs
           // queries above.
           `SELECT e.user_id, MIN(l.punch_time) AS check_in_at,
-                  CASE WHEN COUNT(*) > 1 THEN MAX(l.punch_time) ELSE NULL END AS check_out_at
+                  CASE WHEN COUNT(*) > 1 THEN MAX(l.punch_time) ELSE NULL END AS check_out_at,
+                  MAX(l.punch_time) AS last_punch
            FROM zk_attendance_logs l
            JOIN all_employees e ON e.zk_device_pin = l.device_user_pin
            WHERE DATE(l.punch_time) = ? AND e.user_id IS NOT NULL
@@ -1563,20 +1712,34 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           const r = byUserId.get(u.id);
           if (r) {
             const proj = projectMap.get(r.project_id);
+            // Office punches the same day: earliest In, last punch after it
+            // as the Out (same rule as the My Attendance card / monthly report).
+            let inAt = r.check_in_at || null;
+            let outAt = r.check_out_at || null;
+            let src: "remote" | "office" = "remote";
+            const o = officeByUserId.get(u.id);
+            if (o && inAt) {
+              const t = (v: any) => (v ? new Date(v).getTime() : NaN);
+              if (t(o.check_in_at) < t(inAt)) {
+                inAt = o.check_in_at;
+                src = "office";
+              }
+              for (const p of [o.check_in_at, o.last_punch]) if (t(p) > t(inAt) && (!outAt || t(p) > t(outAt))) outAt = p;
+            }
             return {
               user_id: u.id,
               user_name: u.name,
               department: departmentByUserId.get(u.id) || null,
               project_name: proj?.project_name || null,
-              check_in_at: r.check_in_at || null,
-              check_out_at: r.check_out_at || null,
+              check_in_at: inAt,
+              check_out_at: outAt,
               check_in_distance_m: r.check_in_distance_m ?? null,
               check_out_distance_m: r.check_out_distance_m ?? null,
               check_in_remarks: r.check_in_remarks || null,
               check_out_remarks: r.check_out_remarks || null,
               check_in_approval: r.check_in_approval || null,
               check_out_approval: r.check_out_approval || null,
-              source: "remote"
+              source: src
             };
           }
           const o = officeByUserId.get(u.id);
@@ -1611,6 +1774,37 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         const employeeId = employeeIdByUserIdToday.get(Number(userId));
         return !!(employeeId ? rosterToday.holidaysFor(employeeId, base) : base).get(date);
       };
+
+      // Site Attendance (supervisor muster roll): a confirmed Present / Late
+      // entry makes the day present for someone nothing else shows (as
+      // payroll counts it); not on their Weekend / Holiday.
+      if (!project_id) {
+        const userIdByEmployeeId = new Map<number, number>([...employeeIdByUserIdToday].map(([uid, eid]) => [eid, uid]));
+        const already = new Set(present.map((p: any) => p.user_id));
+        const relevantIds = new Set(relevantUsers.map((u: any) => Number(u.id)));
+        for (const e of await loadSiteEntries(queryDB, date, date)) {
+          const uid = userIdByEmployeeId.get(Number(e.employee_id));
+          if (!uid || already.has(uid) || !relevantIds.has(uid) || isHolidayForUser(uid)) continue;
+          if (e.status !== "present" && e.status !== "late") continue;
+          const u = relevantUsers.find((x: any) => Number(x.id) === uid);
+          present.push({
+            user_id: uid,
+            user_name: u?.name || "",
+            department: departmentByUserId.get(uid) || null,
+            project_name: null,
+            check_in_at: e.in_time ? `${date} ${String(e.in_time).slice(0, 5)}:00` : null,
+            check_out_at: e.out_time ? `${date} ${String(e.out_time).slice(0, 5)}:00` : null,
+            check_in_distance_m: null,
+            check_out_distance_m: null,
+            check_in_remarks: e.remarks || null,
+            check_out_remarks: null,
+            check_in_approval: null,
+            check_out_approval: null,
+            source: "site"
+          } as any);
+          already.add(uid);
+        }
+      }
 
       const presentIds = new Set(present.map((p: any) => p.user_id));
       const absentOrHoliday = relevantUsers

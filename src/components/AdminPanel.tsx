@@ -1348,7 +1348,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         p.project_name || '—',
         timeOnly(p.check_in_at),
         timeOnly(p.check_out_at),
-        p.source === 'office' ? 'ZKT' : 'GPS'
+        p.source === 'office' ? 'ZKT' : p.source === 'site' ? 'Team' : 'GPS'
       ]),
       ...dailyReport.absent.map((a: any) => ['Absent', a.user_name, a.department || '—', '—', '—', '—', '—']),
       ...dailyReport.on_holiday.map((h: any) => ['Holiday', h.user_name, h.department || '—', '—', '—', '—', '—'])
@@ -4476,7 +4476,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           const isHoliday = !!d.day_type;
                           const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '·';
                           const colorClass = d.present
-                            ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
+                            ? d.source === 'office' ? 'text-sky-600' : d.source === 'site' ? 'text-orange-600' : 'text-emerald-600'
                             : isHoliday
                               ? d.day_type === 'weekend' ? 'text-violet-500' : 'text-amber-500'
                               : d.leave_type ? 'text-teal-600' : 'text-slate-300';
@@ -4486,7 +4486,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           const remarksPart = [d.check_in_remarks && `In: ${d.check_in_remarks}`, d.check_out_remarks && `Out: ${d.check_out_remarks}`]
                             .filter(Boolean)
                             .join(' \u2022 ');
-                          const sourcePart = d.present ? (d.source === 'office' ? ' \u2014 ZKT' : ' \u2014 GPS') : '';
+                          const sourcePart = d.present ? (d.source === 'office' ? ' \u2014 ZKT' : d.source === 'site' ? ' \u2014 Team sheet' : ' \u2014 GPS') : '';
                           // Compact "8:58a"/"5:32p" — short enough to fit two
                           // stacked lines in a day column without wrapping.
                           const shortTime = (v: string | null) => {
@@ -4593,6 +4593,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
                                 ZKT
                               </span>
+                            ) : r.source === 'site' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
+                                Team
+                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
                                 GPS
@@ -4600,7 +4604,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             )}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
-                            {r.source === 'office' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
+                            {r.source === 'office' || r.source === 'site' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-xs">
                             {r.check_in_at ? (

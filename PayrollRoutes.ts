@@ -608,6 +608,22 @@ export async function arrearForLateLeave(leaveId: number, actorId: number | null
 }
 export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
 
+// A day whose salary month is already closed for this account's Employee —
+// its payroll run is Processed or Paid (the same "closed" a late leave
+// uses above). Attendance on such a day is no longer changed: Timesheet
+// corrections (and off-site punches) for it are refused, and an approver
+// can't approve one. Returns that salary month ("YYYY-MM") or null when the
+// day is still open. Set inside registerPayrollRoutes.
+let closedPayMonthImpl: ((userId: number, dateStr: string) => Promise<string | null>) | null = null;
+export async function closedPayMonthFor(userId: number, dateStr: string): Promise<string | null> {
+  return closedPayMonthImpl ? closedPayMonthImpl(userId, dateStr) : null;
+}
+export function closedPayMonthMessage(monthYear: string): string {
+  const [y, m] = monthYear.split("-").map(Number);
+  const name = new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return `The salary for ${name} has already been processed, so attendance in that salary month can't be changed any more. Ask Payroll if it really must be corrected.`;
+}
+
 const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
@@ -1796,6 +1812,18 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // Absent/LWP less what earlier late leaves already gave back, priced at
   // that run's own per-day gross. Settled in the first month after it that
   // has no Processed/Paid run yet, in one go.
+  closedPayMonthImpl = async (userId, dateStr) => {
+    const day = String(dateStr || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const emps: any[] = (await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [userId])) || [];
+    if (!emps.length) return null;
+    const m = await salaryMonthOf(day);
+    const ids = emps.map((e: any) => Number(e.id));
+    const runs: any[] =
+      (await queryDB(`SELECT payment_status FROM payrolls WHERE month_year = ? AND employee_id IN (${ids.map(() => "?").join(",")})`, [m, ...ids])) || [];
+    return runs.some((r: any) => r.payment_status === "processed" || r.payment_status === "paid") ? m : null;
+  };
+
   lateLeaveArrearImpl = async (leaveId, actorId) => {
     const rows: any[] = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
     const leave = rows.find((r: any) => Number(r.id) === leaveId);
