@@ -206,7 +206,7 @@ useLiveRefresh(() => load(true));
     <>
     {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
         big rounded corners) — same Dashboard mobile look as Select a
-        Budget/Jobs/My Claims/Conveyance Bill Claim. Desktop's md: overrides
+        Budget/Jobs/My Claims/Bill Claim. Desktop's md: overrides
         keep the original plain white panel untouched. */}
     <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
       {/* Back to Menu / Submit Leave — desktop only now. Mobile drops the
@@ -267,7 +267,7 @@ useLiveRefresh(() => load(true));
           Application" has no tabs either). Every submitted Leave Application
           lands in "Review" first; a decision (see Self Service -> Leave
           Approvals) moves it into Approved or Rejected and nowhere else.
-          Same rounded-pill segmented control as Conveyance Bill Claim's
+          Same rounded-pill segmented control as Bill Claim's
           Review/Approved/Rejected switcher (identical padding/height/colors)
           so the two pages read as the same component: a light slate-100
           track, the active pill fully filled with indigo-600 + white text +

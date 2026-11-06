@@ -45,7 +45,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'office_attendance', label: 'Office Attendance' },
   { key: 'tracking', label: 'Employee Tracking' },
   { key: 'claims', label: 'Check In/Out' },
-  { key: 'conveyance', label: 'Conveyance Bill Claim' },
+  { key: 'conveyance', label: 'Bill Claim' },
   { key: 'disbursement', label: 'Conveyance Disbursement' },
   { key: 'approvals', label: 'Approvals' },
   { key: 'notices', label: 'Notices' },
@@ -180,7 +180,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // Conveyance -> Claim on Behalf: file a claim for another employee (it goes
   // through that employee's approval chain). Explicit only.
   conveyance: [
-    { key: 'read', label: 'Conveyance Bill Claim' },
+    { key: 'read', label: 'Bill Claim' },
     { key: 'on_behalf', label: 'Claim on Behalf' }
   ],
   // HR Operations -> Onboarding -> New Joiners (self-service onboarding).
@@ -271,7 +271,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'import_employees', label: 'Import Employee Details' },
     { key: 'import_leave', label: 'Import Leave' },
     { key: 'import_movement_claims', label: 'Import Check In/Out' },
-    { key: 'import_conveyance', label: 'Import Conveyance Bill Claims' },
+    { key: 'import_conveyance', label: 'Import Bill Claims' },
     { key: 'import_attendance', label: 'Import Remote Attendance' },
     { key: 'import_office_attendance', label: 'Import Office Attendance' }
   ],
@@ -616,7 +616,7 @@ export interface ApprovalRequest {
   current_step: number;
   total_steps: number;
   actions: ApprovalAction[];
-  // Conveyance Bill Claims only (see ClaimReviewBits.tsx): the claim version
+  // Bill Claims only (see ClaimReviewBits.tsx): the claim version
   // to send back with a decision, what the employee changed since the last
   // Return/Reject, and whether Return / "Allow re-claim" are offered.
   claim_version?: number;
@@ -629,12 +629,12 @@ export interface ApprovalRequest {
   // Only present on rows from GET /api/approvals (joined server-side) — a short
   // human-readable label for what was checked in/out of (Project name for
   // Attendance, Purpose for a Check In/Out, Description/Category for a
-  // Conveyance Bill Claim, "Date — Project" for an Attendance Correction), and
+  // Bill Claim, "Date — Project" for an Attendance Correction), and
   // who's up next while still pending.
   source_label?: string;
   // GET /api/approvals: who can act on the current Layer now.
   current_approver_ids?: number[];
-  // Only present when source_type is 'user_claim' — the Conveyance Bill Claim's
+  // Only present when source_type is 'user_claim' — the Bill Claim's
   // Amount/Category, so the Approvals queue can show them without a second call.
   source_amount?: number | null;
   source_category?: string | null;
@@ -655,7 +655,7 @@ export interface ApprovalAction {
   step_order: number;
   approver_id: number;
   approver_name: string;
-  // 'returned' / 'resubmitted': Conveyance Bill Claims sent back for
+  // 'returned' / 'resubmitted': Bill Claims sent back for
   // correction, and the employee's resubmission.
   action: 'approved' | 'rejected' | 'returned' | 'resubmitted';
   remarks: string | null;
@@ -664,7 +664,7 @@ export interface ApprovalAction {
   // decided (whatever they submitted, or the running/original amount
   // carried forward if they left it untouched). amount_edited is true only
   // when this differs from whatever was on record just before this action,
-  // so the Admin's Conveyance Bill Claim history can tell "approved as-is"
+  // so the Admin's Bill Claim history can tell "approved as-is"
   // apart from "partially approved here" and count real edits across the
   // whole chain. See performApprovalAction server-side.
   approved_amount?: number | null;
@@ -789,7 +789,7 @@ export interface User {
   // switched on by the Superadmin (PUT /api/users/:id/leave-management-access).
   can_manage_leave?: boolean;
   // Superadmin-only grants: can this Admin or User account see/use the Movement
-  // Claim (GPS Check In/Out) and Conveyance Bill Claim sections on ITS OWN User
+  // Claim (GPS Check In/Out) and Bill Claim sections on ITS OWN User
   // Panel at all? Always true for role === 'superadmin'. OFF by default for
   // 'admin'/'user', switched on by the Superadmin (PUT
   // /api/users/:id/movement-claim-access and .../conveyance-claim-access) — the
@@ -1666,7 +1666,7 @@ export interface UserClaimReference {
   distance_km?: number | null;
   // Where the referenced Check In/Out's Check In/Out actually happened — lets
   // an Admin open the same read-only ClaimLocationMap while reviewing a
-  // Conveyance Bill Claim, without a second permission-gated lookup.
+  // Bill Claim, without a second permission-gated lookup.
   check_in_lat?: number | null;
   check_in_lng?: number | null;
   check_out_lat?: number | null;
@@ -1675,7 +1675,7 @@ export interface UserClaimReference {
   check_out_approval?: ApprovalStatusSummary | null;
 }
 
-// One bill inside a Conveyance Bill Claim. category_name is kept as it was
+// One bill inside a Bill Claim. category_name is kept as it was
 // when filed, so renaming/deleting the category later doesn't change it.
 export interface UserClaimItem {
   id?: number;
@@ -1709,7 +1709,7 @@ export interface BillClaimPolicyDef {
   unit?: string;
 }
 export type BillClaimPolicyValues = Record<string, number | boolean>;
-// GET /api/bill-claim-policy/mine — what the New Conveyance Claim form needs.
+// GET /api/bill-claim-policy/mine — what the New Bill Claim form needs.
 export interface MyBillClaimPolicy {
   today: string;
   min_date: string;
@@ -1887,7 +1887,7 @@ export type AlertType =
   // Layer) — opens Approve Application.
   | 'leave_approval'
   | 'conveyance_claim'
-  // A Conveyance Bill Claim waiting on this account's approval — opens
+  // A Bill Claim waiting on this account's approval — opens
   // Approve Application ('conveyance_claim' is the claimant's own updates).
   | 'conveyance_approval'
   | 'conveyance_disbursed'
@@ -2026,7 +2026,7 @@ export interface ClaimRecord {
   user_name?: string | null;
 }
 
-// One line item inside a Conveyance Bill (Admin Panel -> Conveyance Bill Claim,
+// One line item inside a Conveyance Bill (Admin Panel -> Bill Claim,
 // Superadmin + explicitly-granted Admins only) — either pulled in from that
 // Bill's User's own completed Check In/Out (source: 'movement_claim', claim_id
 // set) or entered fully by hand (source: 'manual', claim_id null). Every field
@@ -2093,7 +2093,7 @@ export interface ConveyanceBill {
 }
 
 // Fired by the Navbar's web-only "Claims" header menu (Check In/Out /
-// Conveyance Bill Claim) — App.tsx bumps `ts` on every click (even repeat
+// Bill Claim) — App.tsx bumps `ts` on every click (even repeat
 // clicks on the same target) so AdminPanel/UserPanel's effect always re-fires,
 // then hands this down to whichever of the two panels is currently mounted.
 export interface ClaimsNavRequest {
@@ -2122,7 +2122,7 @@ export interface AdminNavRequest {
 // Details / Job Edits) — same bump-`ts`-on-every-click pattern as
 // ClaimsNavRequest above. Consumed by UserPanel only: every one of these
 // targets is a User Panel section with no Admin Panel equivalent, unlike
-// Check In/Out/Conveyance Bill Claim which exist in both panels.
+// Check In/Out/Bill Claim which exist in both panels.
 export interface JobsNavRequest {
   target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit';
   ts: number;

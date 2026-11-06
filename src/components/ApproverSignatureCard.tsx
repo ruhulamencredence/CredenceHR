@@ -4,7 +4,7 @@
  */
 
 // Approve Application -> "My signature": the signature kept with every
-// Conveyance Bill Claim the person approves and printed under "Approved By" on
+// Bill Claim the person approves and printed under "Approved By" on
 // the Conveyance Bill and Payment Voucher (Bill Claim Policy -> "Put each
 // approver's signature on the Bill and Voucher"). Shown only while that rule is
 // on (GET /api/claim-signature says so); it is the same saved signature as

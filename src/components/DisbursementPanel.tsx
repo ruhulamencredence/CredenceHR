@@ -19,7 +19,7 @@ import { SearchSelect } from './Combobox';
 // The Payment Voucher groups a Bill's lines by category, each with the
 // columns it needs: travel categories (and Check In/Out / manual items,
 // which are trips) show From / To / Distance; any other category shows a
-// Description. An item from a Conveyance Bill Claim is split into that
+// Description. An item from a Bill Claim is split into that
 // claim's own category lines; if it was approved for less than those lines
 // add up to, the difference is an Adjustment line so the total is what was
 // paid.
@@ -96,7 +96,7 @@ const suggestVoucherNo = (billId: number) => {
 
 // Admin Panel -> Conveyance Disbursement (Superadmin + explicitly-granted
 // Admins only — see ADMIN_MODULES/'disbursement'). Sits one step downstream of
-// Conveyance Bill Claim: once a Bill's items have been approved and finalized
+// Bill Claim: once a Bill's items have been approved and finalized
 // there, this is where the money actually going out gets recorded (a Voucher
 // No + who/when) and a printable Payment Voucher is produced for the
 // claimant's signature. Kept as its own module so an Admin can be allowed to

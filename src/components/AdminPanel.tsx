@@ -102,7 +102,7 @@ interface AdminPanelProps {
   // (role promotion, Module Access) render in the Users tab.
   user: User;
   // Navbar's web-only "Claims" header menu — jumps this panel's activeTab to
-  // 'claims' (Check In/Out) or 'conveyance' (Conveyance Bill Claim). Ignored
+  // 'claims' (Check In/Out) or 'conveyance' (Bill Claim). Ignored
   // if this Admin hasn't been granted that module.
   claimsNavRequest?: ClaimsNavRequest | null;
   // Navbar's web-only "Budget" header menu — jumps this panel's activeTab to

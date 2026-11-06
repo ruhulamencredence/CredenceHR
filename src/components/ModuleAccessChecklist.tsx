@@ -5,7 +5,7 @@
 
 // Admin Panel -> Users -> Module Access: the multi-tick lists inside a module
 // (Department access for Monthly Attendance Report / Monthly Leave
-// Application / Conveyance Bill Claim, and Permission Layers) with a
+// Application / Bill Claim, and Permission Layers) with a
 // "Select all" box and, for longer lists, a search box. "Select all" acts on
 // what the search currently shows.
 

@@ -76,14 +76,14 @@ interface GlobalSidebarProps {
   // Edits) — every target here lives ONLY in the User Panel, so selecting any
   // of these also switches the account into the User Panel first.
   onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => void;
-  // The User Panel's OWN Check In/Out / Conveyance Bill Claim section
+  // The User Panel's OWN Check In/Out / Bill Claim section
   // (submitting a claim) — gated separately from the Admin Panel's review
   // tabs below by can_view_movement_claims / can_view_conveyance_claims.
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
   onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
-  // Admin Panel's own Check In/Out / Conveyance Bill Claim review tabs —
+  // Admin Panel's own Check In/Out / Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
   onGoToAdminClaims: (target: 'claims' | 'conveyance') => void;
@@ -243,7 +243,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Same Superadmin-gated pattern as canSeeModule below, but ON by default —
   // gates the Entry/Jobs/Entry Details items in jobEntryGroup just below (Job
   // Edits stays on its own separate user.can_job_edit gate, and the Movement/
-  // Conveyance Claims items further down (now in selfServiceItems) keep their
+  // Bill Claims items further down (now in selfServiceItems) keep their
   // own OFF-by-default gates).
   // PEPM exists only in the Credence workspace (user.pepm_enabled).
   const pepmOn = user.pepm_enabled !== false;
@@ -284,7 +284,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // "Self Service" — everyday employee items. Employee Directory stays
   // ungated for every account (company-wide roster); Timesheet/Leave
   // Application/My Leave are gated the same way as Check In/Out/
-  // Conveyance Bill Claim below — OFF by default, granted per account via
+  // Bill Claim below — OFF by default, granted per account via
   // Admin Panel -> Users -> Module Access.
   const canSeeTimesheet = isSuperAdmin || !!user.can_view_timesheet;
   const canSeeLeaveApplication = isSuperAdmin || !!user.can_view_leave_application;
@@ -305,10 +305,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Check In/Out', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
   }
   // Holding the Bill Claim ("conveyance") Admin module also brings your OWN
-  // claims here (it used to be a separate "My Conveyance Bill Claim" page
+  // claims here (it used to be a separate "My Bill Claim" page
   // under Claims/Bill/Disbursement).
   if ((hasUserPanel && user.can_view_conveyance_claims) || canSeeModule('conveyance')) {
-    hrmClaimGroup.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
+    hrmClaimGroup.push({ key: 'userConveyanceClaims', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
   }
   const hrmAttendanceGroup: NavItem[] = [];
   if (canSeeTimesheet) {
@@ -472,7 +472,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog'), href: adminHref('editlog') },
   ].filter((i) => pepmOn && canSeeModule(i.key as AdminModuleKey));
 
-  // "Claims" — Check In/Out, Conveyance Bill Claim, Conveyance
+  // "Claims" — Check In/Out, Bill Claim, Conveyance
   // Disbursement. No longer its own collapsible group — merged as flat
   // items into "HR" below.
   const claimsItems: NavItem[] = [
@@ -482,7 +482,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   if (canSeeModule('conveyance')) {
     // "Bill Claim Policy" — rules for Bill Claims (limits, receipts, deadlines…).
-    // Rides along with the 'conveyance' module like My Conveyance Bill Claim.
+    // Rides along with the 'conveyance' module like My Bill Claim.
     claimsItems.push({
       key: 'bill_claim_policy',
       label: 'Bill Claim Policy',
@@ -556,8 +556,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
   // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
-  // (Check In/Out, Conveyance Bill Claim, Conveyance Disbursement, My
-  // Conveyance Bill Claim), each independently collapsible, same 2-level
+  // (Check In/Out, Bill Claim, Conveyance Disbursement, My
+  // Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
   // World-class HRM extension modules (Exit/Offboarding, Performance,
   // Recruitment, Grievance & Disciplinary, HR Analytics, Document Vault) —

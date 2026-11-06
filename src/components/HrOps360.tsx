@@ -1149,7 +1149,7 @@ const ClaimsTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }> = (
           rows={data.monthly.map((m: any) => [monthLabel(m.month), taka(m.claimed), taka(m.approved), taka(m.billed), taka(m.paid)])}
         />
       </Card>
-      <Card title={`Conveyance claims (${data.claims.length})`}>
+      <Card title={`Bill claims (${data.claims.length})`}>
         <Table
           head={['Date', 'Category', 'Claimed', 'Approved', 'Status', 'Description']}
           rows={data.claims.map((c: any) => [

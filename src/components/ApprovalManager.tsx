@@ -52,8 +52,8 @@ const StatusPill: React.FC<{ status: ApprovalRequest['status'] }> = ({ status })
 // Admin/Superadmin approvers (this component's "Manage Chain" modal); every
 // Check In/Out a User records for Remote Attendance then routes through that
 // chain layer by layer, non-blocking (the check-in/out itself is already
-// recorded — this is purely the review trail). A Conveyance Bill Claim (User
-// Panel -> Conveyance Bill Claim) ALSO routes through this same chain, but is
+// recorded — this is purely the review trail). A Bill Claim (User
+// Panel -> Bill Claim) ALSO routes through this same chain, but is
 // NOT non-blocking: the claim only becomes a real Conveyance Bill line item the
 // moment the LAST step here Approves it (see the optional Bill picker below),
 // and is freed up again if Rejected at any step. Check In/Out (the live
@@ -133,7 +133,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   }, [view, statusFilter]);
 
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
-  // The three amount columns only mean anything for a Conveyance Bill Claim —
+  // The three amount columns only mean anything for a Bill Claim —
   // left out when none is listed, so Remote Attendance rows aren't squeezed.
   const hasClaims = requests.some((r) => r.source_type === 'user_claim');
   // Only Admins/Superadmins are eligible to be added to the chain.
@@ -199,7 +199,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
   const handleAct = async (id: number, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const target = requests.find((r) => r.id === id);
-    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    // Bill Claim: Return / Reject tell the employee why.
     if (target?.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
@@ -266,7 +266,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               The Global Chain below reviews Remote Attendance Check In / Check Out — each one is recorded
-              right away, this is a non-blocking review trail on top of that. Conveyance Bill Claim, Leave,
+              right away, this is a non-blocking review trail on top of that. Bill Claim, Leave,
               Timesheet, Asset and Vehicle requests follow their own Templates (Templates tab); they're
               listed here too under "All requests".
             </p>
@@ -389,7 +389,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         {r.source_type === 'attendance'
                           ? 'Remote Attendance'
                           : r.source_type === 'user_claim'
-                          ? 'Conveyance Bill Claim'
+                          ? 'Bill Claim'
                           : r.source_type === 'attendance_correction'
                           ? 'Attendance Correction'
                           : r.source_type === 'leave_application'

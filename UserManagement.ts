@@ -892,7 +892,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // same shape/rules as the 'attendance_report_departments'/'leave_
   // application_departments' pairs above, just backed by conveyance_claim_
   // department_access instead (Admin Panel -> Users -> Module Access ->
-  // "Conveyance Claim Departments", shown once 'conveyance' is ticked). No
+  // "Bill Claim Departments", shown once 'conveyance' is ticked). No
   // rows for a user means unrestricted — every Department's Conveyance Bill
   // Claims visible, exactly like granting the module alone. Applies equally
   // to role 'admin' and role 'user' accounts, and to accounts that supervise
@@ -920,7 +920,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Conveyance Claim Department access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Bill Claim Department access only applies to Admin and User accounts." });
       }
 
       // Only real Department names (Admin Panel -> Departments) can be scoped
@@ -1122,7 +1122,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use the Conveyance Bill Claim section on their own User Panel at all —
+  // see/use the Bill Claim section on their own User Panel at all —
   // same on/off switch pattern as movement-claim-access above.
   app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
@@ -1132,7 +1132,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Conveyance Bill Claim access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Bill Claim access only applies to Admin and User accounts." });
       }
 
       await queryDB("UPDATE users SET can_view_conveyance_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);

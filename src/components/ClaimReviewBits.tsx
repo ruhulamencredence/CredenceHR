@@ -4,7 +4,7 @@
  */
 
 // Pieces every approver screen (PendingApprovalsCard, ApproveApplications,
-// Admin Panel -> Approvals) shows on a Conveyance Bill Claim:
+// Admin Panel -> Approvals) shows on a Bill Claim:
 //   - what the employee changed since the last Return/Reject (or since they
 //     first submitted it), from claim_changes on the approvals list;
 //   - the "Allow re-claim" tick that goes with Reject;

@@ -68,7 +68,7 @@ const NO_APPROVER = 'No approver set yet — tell HR';
 
 // Dashboard "My Requests" — every request this account has submitted, across
 // all four workflows that have one (Leave Application, Check In/Out,
-// Conveyance Bill Claim, Timesheet Correction), in one list with its current
+// Bill Claim, Timesheet Correction), in one list with its current
 // status. Each of those already has its own page showing its own history;
 // what none of them could answer was the question an employee actually asks
 // ("I submitted things — where are they stuck?"), which meant opening four
@@ -160,7 +160,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           key: `conveyance-${c.id}`,
           target: 'conveyanceClaim' as const,
           icon: CreditCard,
-          title: 'Conveyance Bill Claim',
+          title: 'Bill Claim',
           detail: `${c.category} · ৳${Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`,
           date: c.claim_date,
           status: c.status,

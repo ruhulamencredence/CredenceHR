@@ -50,7 +50,7 @@ const blankItemDraft = () => ({
   remarks: ''
 });
 
-// Admin Panel -> Conveyance Bill Claim (Superadmin + explicitly-granted Admins
+// Admin Panel -> Bill Claim (Superadmin + explicitly-granted Admins
 // only — see ADMIN_MODULES/'conveyance'). A Bill groups several travel/conveyance
 // line items for ONE User into a single claim document; each item either gets
 // pulled in from that User's own completed Check In/Out (see the "Movement
@@ -339,7 +339,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     const items = bill.items || [];
 
     const letterheadOptions = {
-      reportTitle: 'Conveyance Bill Claim',
+      reportTitle: 'Bill Claim',
       filtersLabel: 'Bill Details:',
       filters: [
         ['User', bill.user_name || '—'],
@@ -481,7 +481,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-blue-600" /> Conveyance Bill Claim
+                <Wallet className="w-4 h-4 text-blue-600" /> Bill Claim
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 User Claims and Bills together, one row each — click a row to view its details.
@@ -716,7 +716,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Claim on Behalf</h3>
                   <p className="mt-1 text-xs text-slate-600 leading-relaxed">
-                    File a Conveyance Bill Claim for an employee. It goes through their approval chain; the bill is made when it is approved.
+                    File a Bill Claim for an employee. It goes through their approval chain; the bill is made when it is approved.
                   </p>
                 </div>
                 <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close">
@@ -734,7 +734,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
               </SearchSelect>
-              <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Conveyance Bill Claim.</p>
+              <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Bill Claim.</p>
               <div className="mt-5 flex gap-2.5">
                 <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
                   Cancel

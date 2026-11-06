@@ -56,7 +56,7 @@ interface UserPanelProps {
   token: string;
   user: User;
   // Navbar's web-only "Claims" header menu — scrolls this panel to the Movement
-  // Claim or Conveyance Bill Claim section (both already sit visible on desktop;
+  // Claim or Bill Claim section (both already sit visible on desktop;
   // this just brings them into view without changing any mobile tile state).
   claimsNavRequest?: ClaimsNavRequest | null;
   // Navbar's web-only "Jobs" header menu — switches this panel's desktop view
@@ -1082,7 +1082,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         : mobileActiveSection === 'claim' || mobileActiveSection === 'claims'
         ? 'Check In/Out'
         : mobileActiveSection === 'conveyanceClaim'
-        ? 'Conveyance Bill Claim'
+        ? 'Bill Claim'
         : mobileActiveSection === 'noticeBoard'
         ? 'Notice Board'
         : mobileActiveSection === 'employeeDirectory'
@@ -1155,7 +1155,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     mobileActiveSection === 'employeeDirectory' ||
     mobileActiveSection === 'noticeBoard';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
-  // sees Check In/Out / Conveyance Bill Claim once the Superadmin has granted
+  // sees Check In/Out / Bill Claim once the Superadmin has granted
   // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
   // -> Module Access). A Superadmin always sees both. Used to hide the mobile
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
@@ -1190,7 +1190,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application || !!user.can_view_my_leave;
 
   // Mobile More popup: every Self Service module that isn't a Dashboard tile
-  // (PEPM + Movement/Conveyance Claim, Employee Directory, Book a Ride,
+  // (PEPM + Movement/Bill Claim, Employee Directory, Book a Ride,
   // My Asset, Team Attendance stay on the Dashboard). Same permission rules
   // as GlobalSidebar's Self Service list.
   const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
@@ -3123,7 +3123,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       : []),
     ...(user.can_job_edit ? [{ key: 'jobEdit', label: 'Job Edit', icon: Edit2, tileBg: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => goToMobileSection('jobEdit') }] : []),
     ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Check In/Out', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
-    ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Conveyance Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
+    ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
     { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, tileBg: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => goToMobileSection('employeeDirectory') },
     ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
     ...(onOpenMyAsset ? [{ key: 'myAsset', label: 'My Asset', icon: Package, badge: assetSummary?.awaitingAck || 0, badgeBg: 'bg-green-600', tileBg: 'from-lime-100/70 via-white/50 to-green-50/40', iconBg: 'from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)]', onClick: () => onOpenMyAsset('my-assets') }] : []),
@@ -3336,7 +3336,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       </div>
       )}
 
-      {/* Conveyance Bill Claim — direct user-submitted expense claims (separate
+      {/* Bill Claim — direct user-submitted expense claims (separate
           from the GPS-based Check In/Out above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
@@ -3350,7 +3350,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
       {/* Leave Applications (Review/Approved/Rejected) — reachable by tapping
           the Leave Summary card above, on both mobile and desktop (same
-          dedicated-page pattern as Conveyance Bill Claim). Gated by
+          dedicated-page pattern as Bill Claim). Gated by
           can_view_leave_summary — see canSeeLeave above — same as the Leave
           Summary card itself and the BottomNav "Leave" tab that opens this. */}
       {canSeeLeave && seen('leave') && (
@@ -3553,7 +3553,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
       {/* Global Calendar (Admin Panel -> Holidays) — read-only "pocket
           calendar" of every set Weekend/Holiday date, same widget every role
-          sees. Sits right under the Conveyance Bill Claim/Job Entry/Job Edit
+          sees. Sits right under the Bill Claim/Job Entry/Job Edit
           tile menu above, Dashboard-only (mobileActiveSection === null) same
           as that tile menu. */}
       {mobileActiveSection === null && (
@@ -3563,7 +3563,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* Entry Form Grid — hides entirely on desktop while a Claims page (Movement
-          Claim/My Claims/Conveyance Bill Claim) is the active section, same as
+          Claim/My Claims/Bill Claim) is the active section, same as
           Check In/Check Out and Job Edit above/below it. On mobile this already
           shows nothing in that state since none of Budget/Jobs/Entries match
           mobileActiveSection either, so no extra class is needed there. */}
@@ -5606,7 +5606,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       />
 
       {/* Mobile (APK) bottom bar — trimmed to four everyday sections (Home,
-          Claim, Timesheet, Leave). My Bill (Conveyance Bill Claim) is
+          Claim, Timesheet, Leave). My Bill (Bill Claim) is
           reachable from the dashboard tile / GlobalSidebar instead, and
           Budget/Jobs/Entries/Job Edit stay GlobalSidebar-only too. Hidden
           on md+. */}

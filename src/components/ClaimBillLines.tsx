@@ -10,7 +10,7 @@ import { formatDate } from '../lib/formatDate';
 
 const money = (n: number) => `৳${Number(n).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// The bills inside a Conveyance Bill Claim (category / date / amount), shown
+// The bills inside a Bill Claim (category / date / amount), shown
 // wherever the claim is looked at — the claimant's own detail view, the Admin's
 // Bill Claim review and the approvers' screens. Category names are the ones
 // the bills were filed under.

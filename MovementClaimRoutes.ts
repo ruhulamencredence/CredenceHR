@@ -127,10 +127,10 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
   });
 
   // The calling user's own completed Check In/Out that haven't been referenced
-  // by a Conveyance Bill Claim yet (user_claim_references) and haven't already
+  // by a Bill Claim yet (user_claim_references) and haven't already
   // been pulled directly into an official Bill by an Admin either
   // (conveyance_bill_items.claim_id) — powers the "Reference Check In/Out" picker
-  // in the New Conveyance Claim form. Each check-in/out can only ever be
+  // in the New Bill Claim form. Each check-in/out can only ever be
   // referenced/billed ONCE.
   app.get("/api/claims/available", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
     try {

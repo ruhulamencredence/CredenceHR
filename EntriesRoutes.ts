@@ -9,7 +9,7 @@
 // the entry form's client-side checks. Split out of server.ts on purpose —
 // server.ts is already ~8,000 lines in one file, so this moves out as-is (no
 // logic changes) the same way Personal Data, Users, Holidays, Attendance,
-// and Conveyance Bill Claims already were.
+// and Bill Claims already were.
 //
 // Dependencies below are all defined elsewhere in server.ts (parseQtyNumber/
 // toDateOnlyString are plain top-level helpers there, not closures) and

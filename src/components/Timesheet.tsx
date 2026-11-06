@@ -640,7 +640,7 @@ useLiveRefresh(() => loadData());
           </div>
         )}
         {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
-            big rounded corners), same as Conveyance Bill Claim / My Claims /
+            big rounded corners), same as Bill Claim / My Claims /
             Leave Applications; the md: overrides keep the original plain
             white panel on desktop. */}
         {/* On a phone the cards (period button, gauge, days) sit straight on

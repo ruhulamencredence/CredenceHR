@@ -71,7 +71,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date' },
   { key: 'can_job_edit', label: 'Job Edit' },
   { key: 'can_view_movement_claims', label: 'Check In/Out', selfService: true },
-  { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', selfService: true },
+  { key: 'can_view_conveyance_claims', label: 'Bill Claim', selfService: true },
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_tasks', label: 'My Tasks', selfService: true },

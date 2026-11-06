@@ -4,7 +4,7 @@
  */
 
 // Bill Claim Policy (Admin Panel -> HRM -> Claims/Bill/Disbursement -> Bill
-// Claim Policy) — the rules a Conveyance Bill Claim is checked against, and the
+// Claim Policy) — the rules a Bill Claim is checked against, and the
 // list of bill categories, both kept in the database so the Superadmin changes
 // them from the screen, never in code.
 //
@@ -983,7 +983,7 @@ export function registerBillClaimPolicyRoutes(
     }
   });
 
-  // What the "New Conveyance Claim" form needs: rules, active categories,
+  // What the "New Bill Claim" form needs: rules, active categories,
   // allowed date window and the dates already closed for this user.
   app.get("/api/bill-claim-policy/mine", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
     try {

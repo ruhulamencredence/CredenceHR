@@ -29,7 +29,7 @@ interface AlertsBellProps {
   // 'assign' — a ride already approved that still needs a vehicle (or one
   // that expired): open where vehicles are assigned instead of Approvals.
   onOpenVehicleManagement?: (target?: 'status' | 'assign' | 'trips') => void;
-  // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
+  // The claimant's own Bill Claim updates -> Bill Claim.
   onOpenConveyanceClaim?: () => void;
   // The requester's own Asset Requisition updates -> My Asset (Status for
   // the requisition's approval updates, My Assets for handed-over items).

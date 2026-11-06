@@ -29,7 +29,7 @@ interface LeaveSummaryCardProps {
 // LeaveReviewPage (opened via onOpen), so this card doesn't need its own
 // "Submit Leave" button or <NewLeaveApplicationModal> anymore. The
 // Review/Approved/Rejected tabs + list that used to sit inline here also
-// live in LeaveReviewPage — mirrors how the Conveyance Bill Claim tile
+// live in LeaveReviewPage — mirrors how the Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
   const beachAnimation = useLottieJson(loadBeachAnimation);

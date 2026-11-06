@@ -19,7 +19,7 @@ interface UserClaimsReviewPanelProps {
   token: string;
 }
 
-// Admin Panel -> Conveyance Bill Claim -> "User Claims" (source: user_claim) —
+// Admin Panel -> Bill Claim -> "User Claims" (source: user_claim) —
 // direct User-submitted claims (ConveyanceClaimCard on the User Panel), separate
 // from the Bills table below it which is built from completed Check In/Out /
 // manual entries. This panel is READ-ONLY on status: it only shows where each

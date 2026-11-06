@@ -642,7 +642,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   }
   try {
     // Superadmin-only grants: whether this Admin or User account can see/use the
-    // Check In/Out (GPS Check In/Out) and Conveyance Bill Claim sections on their
+    // Check In/Out (GPS Check In/Out) and Bill Claim sections on their
     // own User Panel at all — same on/off pattern as can_manage_leave above, gated
     // for BOTH 'admin' and 'user' roles. OFF by default; a Superadmin always has
     // both implicitly.
@@ -1082,9 +1082,9 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // Department-wise scoping for the 'conveyance' module only — identical
   // design to attendance_report_department_access/leave_application_
   // department_access above, just for the Admin Panel's "Conveyance Bill
-  // Claim" tab (Admin Panel -> Users -> Module Access -> "Conveyance Claim
+  // Claim" tab (Admin Panel -> Users -> Module Access -> "Bill Claim
   // Departments", shown once 'conveyance' itself is checked). A row here
-  // means the account may ONLY see Conveyance Bill Claims submitted by users
+  // means the account may ONLY see Bill Claims submitted by users
   // whose linked Employee Directory row has that one Department —
   // GET /api/user-claims in ConveyanceBillClaimRoutes.ts filters on it via
   // getConveyanceClaimDeptScope() below. No rows at all for a user means
@@ -1507,7 +1507,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure claims table exists: " + err.message);
   }
-  // "Conveyance Bill Claim" — Admin Panel tab restricted to the Superadmin and any
+  // "Bill Claim" — Admin Panel tab restricted to the Superadmin and any
   // Admin the Superadmin explicitly grants the "conveyance" module to (see
   // ADMIN_MODULE_KEYS). One BILL groups several conveyance/travel line ITEMS for a
   // single User into one claim document. Each item is either pulled in from that
@@ -1588,7 +1588,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   try {
     await dbPool.query(`ALTER TABLE conveyance_bills ADD FOREIGN KEY (disbursed_by) REFERENCES users(id) ON DELETE SET NULL`);
   } catch (err: any) {}
-  // "Conveyance Bill Claim" (User Panel) — a User-submitted expense claim filled
+  // "Bill Claim" (User Panel) — a User-submitted expense claim filled
   // in by hand (unlike the live GPS check-in/out `claims` table above), optionally
   // spanning several days (a multi-day tour) and optionally carrying a receipt/
   // attachment (same FileReader/Base64 -> LONGBLOB pattern as budgets.file_data —
@@ -1707,10 +1707,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure user_claim_history table: " + err.message);
   }
-  // Lets a Conveyance Bill Claim reference one or more of the User's own completed
+  // Lets a Bill Claim reference one or more of the User's own completed
   // Check In/Out (check-in/out), each with its own Amount — see the long
   // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
-  // out can only ever be referenced by ONE Conveyance Bill Claim.
+  // out can only ever be referenced by ONE Bill Claim.
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS user_claim_references (
@@ -1756,14 +1756,14 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
-    // Widen the ENUMs for existing databases created before Conveyance Bill Claims /
+    // Widen the ENUMs for existing databases created before Bill Claims /
     // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
         MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
-    // 'returned': a Conveyance Bill Claim sent back to the employee to fix
+    // 'returned': a Bill Claim sent back to the employee to fix
     // (it leaves every queue until they resubmit; the chain then restarts at
     // Layer 1). Only user_claim requests use it.
     await dbPool.query(`ALTER TABLE approval_requests MODIFY COLUMN status ENUM('pending','approved','rejected','returned') NOT NULL DEFAULT 'pending'`);
@@ -1783,7 +1783,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // ============================================================================
   // Approval Workflow TEMPLATES (Dynamic Approval Engine — Part 1 of 5).
   // Superadmin can pre-build any number of named templates, each an ORDERED list
-  // of Layers/Steps, one per request_type (Conveyance Bill Claim / Leave
+  // of Layers/Steps, one per request_type (Bill Claim / Leave
   // Application / Timesheet=Attendance Correction). See the long design comment
   // above approval_chain_steps for the OLD single-global-chain engine this is
   // replacing — that table/engine is left untouched here; Part 5 migrates it
@@ -2003,7 +2003,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // Submitting one NEVER touches the `attendance` table directly — it only
   // records the REQUEST here, 'pending' until an Admin reviews it. Routed
   // through the exact same global Approval Workflow chain as Attendance Check
-  // In/Out and Conveyance Bill Claims (see createApprovalRequest/
+  // In/Out and Bill Claims (see createApprovalRequest/
   // POST /api/approvals/:id/act) — no separate review page needed, it already
   // shows up in the existing Admin Panel -> Approvals queue. Only on the LAST
   // step's Approve does finalizeAttendanceCorrection actually write the
@@ -2452,7 +2452,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     const chain = Number(anyTemplate?.[0]?.n || 0) > 0 ? [] : await getApprovalChain();
     if (chain.length > 0) {
       const requestTypes: { key: "conveyance" | "leave" | "timesheet"; label: string }[] = [
-        { key: "conveyance", label: "Conveyance Bill Claim" },
+        { key: "conveyance", label: "Bill Claim" },
         { key: "leave", label: "Leave Application" },
         { key: "timesheet", label: "Timesheet" }
       ];

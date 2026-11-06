@@ -8,7 +8,7 @@
 // Attendance Reports (daily/monthly/department-wise). Split out of server.ts
 // on purpose — server.ts is already ~9,900 lines in one file, so this moves
 // out as-is (no logic changes) the same way Personal Data, Users, Holidays,
-// and Conveyance Bill Claims already were. Registered from inside
+// and Bill Claims already were. Registered from inside
 // startServer() via registerAttendanceRoutes(), reusing that same request's
 // `app`/`authenticateToken`/`queryDB`/etc. rather than creating a second
 // Express app or a second DB connection.
@@ -422,7 +422,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       correctionId = r.insertId;
     }
     // The same approval chain as Timesheet -> Correct Attendance (and a
-    // Conveyance claim): the employee's Supervisor, then their Approval
+    // Bill claim): the employee's Supervisor, then their Approval
     // Template's layers. With neither it waits as "no approver yet" — a
     // Superadmin may decide it, and it moves to a Supervisor / Template the
     // moment one is set. An off-site punch is NEVER approved on its own:
@@ -928,7 +928,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // an optional attachment. Never writes to `attendance` directly — see
   // finalizeAttendanceCorrection. If no global Approval Chain is configured yet,
   // auto-processes immediately (same backward-compatible convention as
-  // Conveyance Bill Claims/POST /api/user-claims); otherwise it stays 'pending'
+  // Bill Claims/POST /api/user-claims); otherwise it stays 'pending'
   // until the LAST step of the chain approves it from the existing Admin Panel
   // -> Approvals queue — no separate review page needed.
   app.post("/api/attendance/corrections", authenticateToken, requireAttendanceAccess, async (req: any, res) => {

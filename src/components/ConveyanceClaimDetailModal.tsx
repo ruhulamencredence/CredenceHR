@@ -38,7 +38,7 @@ const HISTORY_LABEL: Record<ClaimHistoryRow['action'], string> = {
   rejected: 'Rejected'
 };
 
-// Opened by tapping a row in "My Conveyance Claims" — shows everything the
+// Opened by tapping a row in "My Bill Claims" — shows everything the
 // compact history row doesn't have room for: Description, Date Range, a File
 // Preview/Download link (if an attachment was uploaded), and Admin Remarks
 // whenever the claim has been reviewed (always shown on Rejected, optionally

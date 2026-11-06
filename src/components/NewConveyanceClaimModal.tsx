@@ -452,7 +452,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-slate-900">
-              {editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Conveyance Claim'}
+              {editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Bill Claim'}
             </h3>
             {editClaim?.edit_mode === 'returned' && editClaim.return_reason && (
               <p className="text-xs text-amber-700 mt-0.5">Returned: {editClaim.return_reason}</p>

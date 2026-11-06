@@ -10,7 +10,7 @@
 // route through a Template's per-step approvers instead of the old single
 // global chain). Split out of server.ts on purpose — server.ts is already
 // ~9,000+ lines in one file, so this moves out as-is (no logic changes) the
-// same way Personal Data, Users, Holidays, Conveyance Bill Claims, and
+// same way Personal Data, Users, Holidays, Bill Claims, and
 // Attendance already were. Registered from inside startServer() via
 // registerApprovalRoutes(), reusing that same request's
 // `app`/`authenticateToken`/`queryDB`/etc. rather than creating a second
@@ -117,7 +117,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // only by notifyNextStepApprovers below, so a step advance's notification
   // reads naturally regardless of which module the request belongs to.
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
-    user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
+    user_claim: { type: "conveyance_approval", label: "Bill Claim" },
     asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
     leave_application: { type: "leave_approval", label: "Leave Application" },
     // "… Awaiting Your Approval" titles open Approve Application (AlertsBell.tsx).
@@ -156,7 +156,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             : fulfillOnly
               ? "Asset Requisition Awaiting Fulfillment"
               : disburseOnly
-                ? "Conveyance Claim Awaiting Disbursement"
+                ? "Bill Claim Awaiting Disbursement"
                 : `${mapping.label} Awaiting Your Approval`,
           message: assignOnly
             ? `${actorName || "A previous approver"} approved this ride request — assign a vehicle and driver to confirm it.`
@@ -181,8 +181,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // ConveyanceBillClaimRoutes.ts's own attachUserClaimRefs, duplicated here
   // rather than imported since that one is private to that module's route
   // factory. Lets the Approve Application page show a "View Location" button
-  // for any Check In/Out a Conveyance Bill Claim was built from, same as
-  // the Admin Panel's own Conveyance Bill Claim review already does.
+  // for any Check In/Out a Bill Claim was built from, same as
+  // the Admin Panel's own Bill Claim review already does.
   async function attachClaimRefsToMyApprovals(rows: any[]): Promise<any[]> {
     const userClaimIds = rows.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
     if (userClaimIds.length === 0) return rows;
@@ -480,7 +480,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // Approve on the LAST step marks the whole request 'approved'; otherwise it just
   // advances current_step to the next layer. A Reject is terminal — the chain stops
   // there regardless of which step it happened at.
-  // Conveyance Bill Claims in an approvals list also carry `claim_version`
+  // Bill Claims in an approvals list also carry `claim_version`
   // (sent back with Approve/Return/Reject, so nothing is decided on a version
   // the approver hasn't seen) and, when the employee has edited it,
   // `claim_change_note` + `claim_changes` — what changed since the last
@@ -1093,7 +1093,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const TYPE_TITLE: Record<string, string> = {
         attendance: "Remote Attendance",
         claim: "Check In/Out",
-        user_claim: "Conveyance Bill Claim",
+        user_claim: "Bill Claim",
         attendance_correction: "Timesheet Correction",
         leave_application: "Leave Application",
         asset_requisition: "Asset Requisition",
@@ -1277,7 +1277,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // Admin Panel module gate. Still 403s if the caller isn't actually one of
   // the current step's approvers.
   // GET /api/disbursement/awaiting-claims — Admin Panel -> Disbursement:
-  // Conveyance Bill Claims that every approver has passed and that now wait
+  // Bill Claims that every approver has passed and that now wait
   // on a "Conveyance Disburser (Pay Out)" Layer. They have no Bill yet (the
   // Disburse action makes one and pays it), so they are listed here as
   // Pending beside the Bills. can_disburse: this account is one of that

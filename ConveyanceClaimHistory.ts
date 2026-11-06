@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Conveyance Bill Claim edit trail (user_claim_history, see server.ts).
+// Bill Claim edit trail (user_claim_history, see server.ts).
 //
 // A claim can be edited until its lock Layer approves it, and again after a
 // Return or a Reject with "Allow re-claim" (ConveyanceBillClaimRoutes.ts). Each
@@ -66,7 +66,7 @@ export async function recordClaimHistory(
     );
   } catch (err: any) {
     // The trail is a review aid; never fail the action because of it.
-    console.warn(`⚠️ Could not record history for Conveyance Bill Claim #${claimId}: ${err.message}`);
+    console.warn(`⚠️ Could not record history for Bill Claim #${claimId}: ${err.message}`);
   }
 }
 

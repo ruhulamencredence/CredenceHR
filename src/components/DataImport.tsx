@@ -4,7 +4,7 @@
  */
 
 // Admin Panel -> HR Data Import (DataImportRoutes.ts): bring Employee Details,
-// Leave history, Movement / Conveyance Bill Claim history, Check In / Check
+// Leave history, Movement / Bill Claim history, Check In / Check
 // Out and office Attendance in from an Excel or CSV sheet.
 //
 // 1. Pick what to import and download its template (headers on the Data
@@ -246,7 +246,7 @@ function checkInOutSheetRows(grid: any[][]): Record<string, any>[] | null {
   return out.sort((a, b) => a.__row - b.__row);
 }
 
-// Conveyance Bill Claim History can also come as the "Claim Report": title
+// Bill Claim History can also come as the "Claim Report": title
 // lines, then "Serial | Employee | Designation | Department | Claim No. |
 // Created Date | Categories | Description | Claim Date | Status | ... | Claim
 // Amount | Approved Amount | Sanctioned / Disbursed Amount | ...", one line per

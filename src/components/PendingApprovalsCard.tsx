@@ -30,7 +30,7 @@ interface MyApprovalItem extends ClaimReviewFields {
   total_steps: number;
   created_at: string;
   // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
-  // this Conveyance Bill Claim's Amount was built from, so the approver can
+  // this Bill Claim's Amount was built from, so the approver can
   // open the full check-in/check-out details (including location) before
   // deciding. See ApproveApplications.tsx for the original of this pattern.
   claim_refs?: UserClaimReference[];
@@ -55,7 +55,7 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
   // approver gets Fulfill & Hand Over instead of Approve/Reject.
   asset_fulfiller_bypass?: boolean;
-  // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
+  // Bill claim on its Template's 'conveyance_disburser' Layer — Approve
   // here also pays it out (own Bill + voucher no).
   conveyance_disburser_bypass?: boolean;
   // Requester's Supervisor Layer — may edit the items before approving.
@@ -75,7 +75,7 @@ interface DriverCandidate {
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'
@@ -121,7 +121,7 @@ interface PendingApprovalsCardProps {
 // request cards: a category card shows just the type + how many are waiting,
 // and tapping it opens that category's own list right here (no navigation
 // away from the Dashboard) — the same per-item Approve/Reject UI, including
-// the Conveyance Bill Claim's Check In/Out (check-in/out) location viewer,
+// the Bill Claim's Check In/Out (check-in/out) location viewer,
 // as the full "Approve Application" page (ApproveApplications.tsx).
 export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token, className = '' }) => {
   // Shown at once from this device's last copy (screenCache.ts) and refreshed
@@ -230,7 +230,7 @@ useLiveRefresh(() => load());
 
   const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const id = item.id;
-    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    // Bill Claim: Return / Reject tell the employee why.
     if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;

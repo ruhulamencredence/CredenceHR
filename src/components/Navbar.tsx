@@ -60,7 +60,7 @@ interface NavbarProps {
   // GlobalSidebar's onGoToDashboard exactly.
   onGoToDashboard: () => void;
   // Web-only "Claims" menu (see the dropdown below) — jumps straight to Movement
-  // Claims or Conveyance Bill Claim on whichever panel is currently showing
+  // Claims or Bill Claim on whichever panel is currently showing
   // (the Admin's own tab there, or the User's own section). Hidden on the
   // Android APK / narrow screens, where the existing tile menu / bottom nav
   // already covers this.

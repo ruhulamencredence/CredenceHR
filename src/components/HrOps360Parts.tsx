@@ -740,7 +740,7 @@ function dossierTables(d: DossierData, picked: Set<string>): { title: string; he
   }
   if (want('claims') && d.claims) {
     out.push({
-      title: `Conveyance Claims ${d.year}`,
+      title: `Bill Claims ${d.year}`,
       head: ['Date', 'Category', 'Claimed', 'Approved', 'Status', 'Description'],
       rows: d.claims.claims.map((c: any) => [fmtDate(c.claim_date), c.category, n(c.amount), n(c.approved_amount ?? (c.status === 'approved' ? c.amount : null)), c.status, c.description || ''])
     });

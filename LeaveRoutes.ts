@@ -8,7 +8,7 @@
 // mine, submit, reliever decision, Admin/Leave-Manager list, and decision).
 // Split out of server.ts on purpose — server.ts is already ~8,300 lines in
 // one file, so this moves out as-is (no logic changes) the same way Personal
-// Data, Users, Holidays, Conveyance Bill Claims, Attendance, and Approvals
+// Data, Users, Holidays, Bill Claims, Attendance, and Approvals
 // already were. Registered from inside startServer() via
 // registerLeaveRoutes(), reusing that same request's
 // `app`/`authenticateToken`/`queryDB`/etc. rather than creating a second
@@ -16,7 +16,7 @@
 //
 // Dependencies below are all defined elsewhere in server.ts and shared with
 // other modules (e.g. getCurrentStepApprovers also backs the Approval
-// Workflow/Conveyance Bill Claims, createAlert is the general notification
+// Workflow/Bill Claims, createAlert is the general notification
 // helper from Alerts.ts), so they're threaded through as deps rather than
 // duplicated or re-imported directly.
 

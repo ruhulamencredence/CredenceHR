@@ -37,7 +37,7 @@ interface ApproveApplicationPageProps {
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'

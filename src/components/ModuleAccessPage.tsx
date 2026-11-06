@@ -139,7 +139,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 
   { key: 'can_view_movement_claims', label: 'Check In/Out', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
-  { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
+  { key: 'can_view_conveyance_claims', label: 'Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
   { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
@@ -201,7 +201,7 @@ type DeptKind = 'attendance_reports' | 'leave_applications' | 'conveyance' | 'du
 const DEPT_KINDS: { module: DeptKind; endpoint: string; title: string; hint: string; preTick: boolean }[] = [
   { module: 'attendance_reports', endpoint: 'attendance-report-departments', title: 'Departments on the Monthly Attendance Report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'leave_applications', endpoint: 'leave-application-departments', title: 'Departments on the Monthly Leave Application report', hint: 'Nothing ticked = every Department.', preTick: true },
-  { module: 'conveyance', endpoint: 'conveyance-claim-departments', title: 'Departments on Conveyance Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
+  { module: 'conveyance', endpoint: 'conveyance-claim-departments', title: 'Departments on Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'duty_roster', endpoint: 'roster-departments', title: 'Departments whose roster they set', hint: 'Nothing ticked = every Department and the shifts too (full setup, e.g. HR). Ticked = only those, shifts read only.', preTick: false }
 ];
 

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Conveyance Bill Claim (Admin Panel -> Conveyance, Conveyance Disbursement,
-// and the User Panel's own "Conveyance Bill Claim" self-service card) routes,
+// Bill Claim (Admin Panel -> Conveyance, Conveyance Disbursement,
+// and the User Panel's own "Bill Claim" self-service card) routes,
 // split out of server.ts on purpose — same convention as
 // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts: server.ts is
 // already huge, so this module goes in its own file instead of growing it
@@ -16,12 +16,12 @@
 // rather than creating a second Express app, a second DB connection, or a
 // second copy of any of that shared logic.
 //
-// Extracted as-is from server.ts's "---- Conveyance Bill Claim (Superadmin +
+// Extracted as-is from server.ts's "---- Bill Claim (Superadmin +
 // explicitly-granted Admins only) ----", "---- Conveyance Disbursement
 // (Superadmin + explicitly-granted Admins only) ----" (kept alongside it —
 // disbursement is one step downstream of the same conveyance_bills/
 // conveyance_bill_items data model and its routes are interleaved with the
-// Bill/Items routes below), and "---- Conveyance Bill Claim (User Panel —
+// Bill/Items routes below), and "---- Bill Claim (User Panel —
 // direct user-submitted claims) ----" sections — no logic changed, only
 // moved. conveyance_bills/conveyance_bill_items table creation stays behind
 // in server.ts's ensureSchemaMigrations(), same as every other table.
@@ -41,11 +41,11 @@ interface ConveyanceBillClaimRouteDeps {
   // one.
   requireModule: (moduleKey: "conveyance" | "disbursement") => any;
   // Same as requireModule, but passes if the account has ANY of the given
-  // modules — Conveyance Bill Claim and Conveyance Disbursement both need to
+  // modules — Bill Claim and Conveyance Disbursement both need to
   // read conveyance_bills, without forcing an Admin who only has one of the
   // two to also be granted the other.
   requireAnyModule: (moduleKeys: ("conveyance" | "disbursement")[]) => any;
-  // Conveyance Bill Claim self-service routes (User Panel) gate — a
+  // Bill Claim self-service routes (User Panel) gate — a
   // Superadmin always passes; an Admin/User passes only once granted
   // can_view_conveyance_claims.
   requireConveyanceClaimAccess: any;
@@ -80,7 +80,7 @@ interface ConveyanceBillClaimRouteDeps {
   toDateOnlyString: (value: any) => string | null;
   todayInDhaka: () => string;
   // Department-wise scope for the 'conveyance' module (Admin Panel -> Users
-  // -> Module Access -> "Conveyance Claim Departments") — same
+  // -> Module Access -> "Bill Claim Departments") — same
   // getAttendanceReportDeptScope/getLeaveApplicationDeptScope convention
   // used by AttendanceRoutes.ts/LeaveRoutes.ts. Returns null for
   // unrestricted (every Department's claims visible); see the
@@ -203,7 +203,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     return reqs.every((r: any) => r.status === "approved");
   };
 
-  // ---- Conveyance Bill Claim (Superadmin + explicitly-granted Admins only) ----
+  // ---- Bill Claim (Superadmin + explicitly-granted Admins only) ----
   // See the conveyance_bills/conveyance_bill_items table comments above for the
   // data model. Every route here is gated behind the "conveyance" Admin Panel
   // module — requireModule already lets a Superadmin through unconditionally and
@@ -300,7 +300,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  // The Conveyance Bill Claim table: Bills and the Claims not yet in a Bill, one row each,
+  // The Bill Claim table: Bills and the Claims not yet in a Bill, one row each,
   // newest date first — ONE PAGE at a time (?page=&limit=&user_id=&from=&to=). Each Bill
   // comes with its items' particulars, so the screen needs no request per Bill.
   // Claims are included only for an account with the "conveyance" module and inside its
@@ -444,7 +444,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       // The claimant's Employee record — the Payment Voucher prints their
       // code, designation and department.
       const emp: any[] = (await queryDB("SELECT employee_id, designation, department FROM all_employees WHERE user_id = ?", [bills[0].user_id])) || [];
-      // An item that came from a Conveyance Bill Claim carries that claim's
+      // An item that came from a Bill Claim carries that claim's
       // category lines (user_claim_items: category, date, amount,
       // description) so the voucher can group the bill by category.
       const ucIds = items.map((it: any) => Number(it.user_claim_id)).filter((v: number) => v > 0);
@@ -527,13 +527,13 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  // "New Bill" is gone: a bill is made only when a Conveyance Bill Claim is
+  // "New Bill" is gone: a bill is made only when a Bill Claim is
   // approved through its chain. To claim for someone else, use
   // POST /api/user-claims/on-behalf/:userId (that claim gets approved like
   // any other). Kept as a clear refusal for older app versions.
   app.post("/api/conveyance-bills", authenticateToken, requireAdmin, requireModule("conveyance"), async (_req: any, res) => {
     res.status(410).json({
-      error: "Bills can't be created by hand any more. File a Conveyance Bill Claim (Claim on Behalf) — the bill is made when it is approved."
+      error: "Bills can't be created by hand any more. File a Bill Claim (Claim on Behalf) — the bill is made when it is approved."
     });
   });
 
@@ -579,7 +579,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   });
 
   // ---- Conveyance Disbursement (Superadmin + explicitly-granted Admins only) ----
-  // One step downstream of Conveyance Bill Claim above: once a Bill's items have
+  // One step downstream of Bill Claim above: once a Bill's items have
   // been approved/finalized there, this is where the money actually going out
   // gets recorded — a Voucher No + who/when — so a Payment Voucher can be
   // printed for the claimant's signature. Kept behind its own "disbursement"
@@ -695,7 +695,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
       // Hand-typed lines are off: every amount on a bill comes from an
       // approved claim or an approved check-in/out.
-      return res.status(403).json({ error: "Manual lines can't be added. File a Conveyance Bill Claim for it instead." });
+      return res.status(403).json({ error: "Manual lines can't be added. File a Bill Claim for it instead." });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to add item" });
     }
@@ -757,7 +757,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  // ---- Conveyance Bill Claim (User Panel — direct user-submitted claims) ----
+  // ---- Bill Claim (User Panel — direct user-submitted claims) ----
   // A User fills this in by hand (Claim Date, an optional From/To Date range for
   // multi-day tours, Category, Amount, optional Description/attachment) instead
   // of going through a live GPS check-in/out. Starts 'pending'; only the Admin
@@ -770,7 +770,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   // check_out_at, distance_km }]` array onto each row (empty array when a claim
   // has none) — used by both /api/user-claims/mine and the Admin's
   // /api/user-claims list so the UI can show exactly which check-in/out(s) a
-  // Conveyance Bill Claim's Amount was built from.
+  // Bill Claim's Amount was built from.
   async function attachUserClaimRefs(rows: any[]): Promise<any[]> {
     if (rows.length === 0) return rows;
     const ids = rows.map((r: any) => Number(r.id));
@@ -909,20 +909,20 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           await createAlert(queryDB, {
             userId: approver.user_id,
             type: "conveyance_approval",
-            title: mode === "pending" ? "Conveyance Bill Claim Edited" : "Conveyance Bill Claim Resubmitted",
-            message: `${actor.name} ${mode === "pending" ? "edited" : "resubmitted"} Conveyance Bill Claim #${id} (now \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). Please review the changes.`,
+            title: mode === "pending" ? "Bill Claim Edited" : "Bill Claim Resubmitted",
+            message: `${actor.name} ${mode === "pending" ? "edited" : "resubmitted"} Bill Claim #${id} (now \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). Please review the changes.`,
             relatedType: "user_claim",
             relatedId: id
           });
         }
       } catch (alertErr: any) {
-        console.warn("⚠️ Could not notify the approver about edited Conveyance Bill Claim #" + id + ": " + alertErr.message);
+        console.warn("⚠️ Could not notify the approver about edited Bill Claim #" + id + ": " + alertErr.message);
       }
     }
     return res.json({ success: true, id });
   }
 
-  // Files a Conveyance Bill Claim for `claimant` — the employee's own
+  // Files a Bill Claim for `claimant` — the employee's own
   // (filedBy null) or one an Admin files for them (Claim on Behalf). Either
   // way it is checked against the claimant's Bill Claim Policy and goes
   // through the claimant's approval chain; nothing skips approval.
@@ -978,7 +978,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
       // Optional Check In/Out references — each one is a completed Check In/Out
       // (claims table) the User owns, carrying its OWN Amount. A given check-in/
-      // out can be referenced on at most one Conveyance Bill Claim ever, so every
+      // out can be referenced on at most one Bill Claim ever, so every
       // id here must still show up in GET /api/claims/available at submit time.
       const refs: { claim_id: number; amount: number }[] = [];
       if (Array.isArray(claim_refs) && claim_refs.length > 0) {
@@ -1155,7 +1155,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       await queryDB("UPDATE user_claims SET first_submitted_at = NOW() WHERE id = ?", [result.insertId]);
       await recordClaimHistory(queryDB, result.insertId, "submitted", filedBy || claimant, null);
 
-      // Dynamic Approval Engine (Part 3) — Conveyance Bill Claims are routed
+      // Dynamic Approval Engine (Part 3) — Bill Claims are routed
       // through this Employee's assigned Template for request_type
       // 'conveyance' (falling back to that request_type's default, and to a
       // straight auto-approve if neither exists). This REPLACES the old
@@ -1166,7 +1166,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         try {
           await finalizeUserClaimApproval(result.insertId, claimant.id, null, null);
         } catch (finalizeErr: any) {
-          console.warn("⚠️ Could not auto-process Conveyance Bill Claim #" + result.insertId + ": " + finalizeErr.message);
+          console.warn("⚠️ Could not auto-process Bill Claim #" + result.insertId + ": " + finalizeErr.message);
         }
       } else {
         // Notify whoever the request is actually sitting with first — same
@@ -1188,7 +1188,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
               await createAlert(queryDB, {
                 userId: approver.user_id,
                 type: "conveyance_approval",
-                title: "New Conveyance Bill Claim Awaiting Your Approval",
+                title: "New Bill Claim Awaiting Your Approval",
                 message: `${filedBy ? `${filedBy.name} filed (for ${claimant.name})` : claimant.name} submitted a ${claimCategory} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${today}). Please review it.`,
                 relatedType: "user_claim",
                 relatedId: result.insertId
@@ -1196,7 +1196,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
             }
           }
         } catch (alertErr: any) {
-          console.warn("⚠️ Could not notify the current-step approver for Conveyance Bill Claim #" + result.insertId + ": " + alertErr.message);
+          console.warn("⚠️ Could not notify the current-step approver for Bill Claim #" + result.insertId + ": " + alertErr.message);
         }
       }
 
@@ -1210,7 +1210,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     await submitUserClaim(req, res, { id: Number(req.user.id), name: req.user.name }, null);
   });
 
-  // Self-service Conveyance Bill Claim access (same rule as
+  // Self-service Bill Claim access (same rule as
   // requireConveyanceClaimAccess in server.ts), as a yes/no.
   const hasConveyanceClaimAccess = async (user: any): Promise<boolean> => {
     if (user.role === "superadmin") return true;
@@ -1230,7 +1230,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       const me = { id: Number(req.user.id), name: String(req.user.name || "") };
       if (Number(uc.user_id) === me.id) {
         if (!(await hasConveyanceClaimAccess(req.user))) {
-          return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
+          return res.status(403).json({ error: "You don't have access to Bill Claim. Ask your Superadmin to grant it." });
         }
       } else if (!(Number(uc.filed_by) === me.id && (await hasModuleLayer(req.user, "conveyance", "on_behalf")))) {
         return res.status(403).json({ error: "Only the employee, or whoever filed it for them, can edit this claim." });
@@ -1299,7 +1299,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       return null;
     }
     if (userId === Number(req.user.id)) {
-      res.status(403).json({ error: "You can't file a claim on behalf of yourself. Use your own Conveyance Bill Claim." });
+      res.status(403).json({ error: "You can't file a claim on behalf of yourself. Use your own Bill Claim." });
       return null;
     }
     const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [userId]);
@@ -1407,7 +1407,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   }
 
   // The calling user's own submission history, most recent first — powers the
-  // "My Conveyance Claims" list on the Conveyance Bill Claim card. In the phone
+  // "My Bill Claims" list on the Bill Claim card. In the phone
   // app only the last 3 months are sent (plus any claim not yet settled, whatever
   // its age); the website gets the whole history.
   app.get("/api/user-claims/mine", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
@@ -1436,7 +1436,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
-  // System-wide list for the Admin Panel's Conveyance Bill Claim tab (source
+  // System-wide list for the Admin Panel's Bill Claim tab (source
   // "user_claim"), filterable by status/user — pending ones are what need
   // review. Visibility is also narrowed by the 'conveyance' module's own
   // Department scope (Admin Panel -> Users -> Module Access -> "Conveyance

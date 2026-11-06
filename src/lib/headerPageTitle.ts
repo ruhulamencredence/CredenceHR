@@ -54,7 +54,7 @@ export const BLENDED_HEADER_TITLES = new Set([
   'Documents to Sign',
   'My Duty Roster',
   'Break Time',
-  'Conveyance Bill Claim',
+  'Bill Claim',
   'My Loan / Advance',
   'My Payslip',
   'My Asset',

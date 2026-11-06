@@ -42,15 +42,15 @@ const TABS: { key: ClaimTab; label: string }[] = [
   { key: 'rejected', label: 'Rejected' }
 ];
 
-// User Panel -> "Conveyance Bill Claim" — a dedicated card (Wallet icon, same
+// User Panel -> "Bill Claim" — a dedicated card (Wallet icon, same
 // visual treatment as ClaimCard/MyClaimsCard) that lets a User submit a direct
 // expense claim (Claim Date, optional multi-day From/To range, Category, Amount,
 // optional Description/attachment) for Admin approval, and browse their own
 // submission history with status badges. Top header carries the "+ New Claim"
-// action; the body is the "My Conveyance Claims" history list.
+// action; the body is the "My Bill Claims" history list.
 export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token, onBack }) => {
   // Same isNativeApp split as Timesheet.tsx/LeaveManage.tsx — the
-  // "Main / Conveyance Bill Claim" module-path breadcrumb is a web-only
+  // "Main / Bill Claim" module-path breadcrumb is a web-only
   // affordance (native app users navigate this same page via the mobile
   // tile menu/bottom nav, so a breadcrumb trail above it is redundant there).
   const isNativeApp = Capacitor.isNativePlatform();
@@ -110,12 +110,12 @@ useLiveRefresh(() => fetchClaims(true));
       {/* Desktop only — on a phone the blended header has the title and Back. */}
       {!isNativeApp && (
         <div className="hidden md:block px-2 sm:px-0">
-          <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Conveyance Bill Claim']} onBack={onBack} />
+          <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Bill Claim']} onBack={onBack} />
         </div>
       )}
     <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
       {/* Top Header — hidden on mobile: the mobile header now shows this
-          page's own "Conveyance Bill Claim" title in the logo's place (see
+          page's own "Bill Claim" title in the logo's place (see
           headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
           a redundant duplicate, and "+ New Claim" already lives in the
           floating pill button at the bottom of the page on mobile. Desktop
@@ -125,7 +125,7 @@ useLiveRefresh(() => fetchClaims(true));
           <Wallet className="w-4 h-4 text-indigo-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-slate-900">Conveyance Bill Claim</div>
+          <div className="text-sm font-medium text-slate-900">Bill Claim</div>
           <div className="text-xs text-slate-400">Submit an expense claim for approval</div>
         </div>
         <button
@@ -139,11 +139,11 @@ useLiveRefresh(() => fetchClaims(true));
 
       {message && <div className="mx-4 mt-2 text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700">{message}</div>}
 
-      {/* Bottom Content — My Conveyance Claims history. Extra top padding on
+      {/* Bottom Content — My Bill Claims history. Extra top padding on
           mobile since the header row above is hidden there (see above),
           so this doesn't sit flush against the card's rounded top edge. */}
       <div className="px-4 pt-5 md:pt-2 pb-1">
-        <div className="text-xs font-semibold text-slate-500">My Conveyance Claims</div>
+        <div className="text-xs font-semibold text-slate-500">My Bill Claims</div>
         {limited && <p className="mt-0.5 text-[11px] text-slate-400">Showing the last 3 months here. Open CredenceHR on the website to see everything.</p>}
       </div>
 

@@ -68,10 +68,10 @@ function toTimeInputValue(value?: string | null): string {
 // (e.g. only the Out Time was missed). Never applied immediately: this always
 // submits a request (POST /api/attendance/corrections) that goes through the
 // same global Approval Workflow chain as Attendance Check In/Out and
-// Conveyance Bill Claims, so it shows up in the existing Admin Panel ->
+// Bill Claims, so it shows up in the existing Admin Panel ->
 // Approvals queue — no separate review page. An optional reason for the edit
 // and an optional Image/PDF attachment (5MB cap, same FileReader/Base64
-// pattern as the Conveyance Bill Claim form).
+// pattern as the Bill Claim form).
 export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps> = ({
   token,
   dateStr,

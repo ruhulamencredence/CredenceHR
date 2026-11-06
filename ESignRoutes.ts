@@ -171,7 +171,7 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
       FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
     )`
   );
-  // Conveyance Bill Claim: the approver's signature as it was when they approved
+  // Bill Claim: the approver's signature as it was when they approved
   // (Bill Claim Policy -> "Put each approver's signature on the Bill and Voucher").
   await run(
     "claim_approval_signatures",
@@ -1087,7 +1087,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (buf.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw bad("The signature must be a PNG image.");
     return buf;
   };
-  // Conveyance Bill Claim approvers' own signature (Approve Application ->
+  // Bill Claim approvers' own signature (Approve Application ->
   // "My signature"): the same saved signature as Documents to Sign, but open to
   // any approver — and only while the Bill Claim Policy has "Put each
   // approver's signature on the Bill and Voucher" on.

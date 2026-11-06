@@ -11,7 +11,7 @@
 //                      in the sheet change)
 //   leave              leave_applications (history; no balance is touched)
 //   movement_claims    claims (Check In/Out check in / check out)
-//   bill_claims        user_claims (Conveyance Bill Claim)
+//   bill_claims        user_claims (Bill Claim)
 //   remote_attendance  attendance (Remote Attendance check in / check out)
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
 //                      inactive "Imported attendance" device so the ZKTeco
@@ -189,8 +189,8 @@ export const IMPORT_KINDS: Kind[] = [
   },
   {
     key: "bill_claims",
-    title: "Conveyance Bill Claim History",
-    description: "Past Conveyance Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
+    title: "Bill Claim History",
+    description: "Past Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
     module: "conveyance",
     importLayer: "import_conveyance",
     fields: [

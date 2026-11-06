@@ -50,7 +50,7 @@ interface MyApprovalItem extends ClaimReviewFields {
   layer_stuck?: boolean;
   created_at: string;
   // Only present on a 'user_claim' item — every Check In/Out (check-in/out)
-  // this Conveyance Bill Claim's Amount was built from, each with its own
+  // this Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
   // deciding. Empty/absent when the claim has no Check In/Out attached
   // (a plain hand-entered Amount).
@@ -96,7 +96,7 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
   // approver gets Fulfill & Hand Over instead of Approve/Reject.
   asset_fulfiller_bypass?: boolean;
-  // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
+  // Bill claim on its Template's 'conveyance_disburser' Layer — Approve
   // here also pays it out (own Bill + voucher no).
   conveyance_disburser_bypass?: boolean;
   // This account was asked in as an ad-hoc approver: who asked, and why.
@@ -153,7 +153,7 @@ const initialsOf = (name: string) => {
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'
@@ -186,7 +186,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // instead of a small card), because a Template Layer or a Leave Application's
 // Reliever can be ANY account, role='user' included. Pulls every request
 // currently waiting on this account across every workflow (Remote Attendance,
-// Conveyance Bill Claim, Timesheet Correction, Leave Application, and Leave
+// Bill Claim, Timesheet Correction, Leave Application, and Leave
 // Application Reliever review, and Exit/Offboarding Clearance) from GET
 // /api/my-approvals and lets them Approve/Reject right here. A
 // 'leave_reliever' item is routed to its own POST
@@ -228,8 +228,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
   // The referenced Check In/Out currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
-  // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
-  // Panel's Conveyance Bill Claim tab) already reuses for this.
+  // every other Bill Claim view (ConveyanceClaimCard, the Admin
+  // Panel's Bill Claim tab) already reuses for this.
   const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
   // The Asset Requisition currently opened for full-details view — tapping
   // anywhere on that item's card (source_type === 'asset_requisition') opens
@@ -307,7 +307,7 @@ useLiveRefresh(() => load(true));
 
   const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const key = keyFor(item);
-    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    // Bill Claim: Return / Reject tell the employee why.
     if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;

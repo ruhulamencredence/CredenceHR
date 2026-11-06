@@ -978,7 +978,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
 
   // POST /api/assets/requisitions — New Requisition tab: submit a request
   // for a new/replacement asset. Attachment is optional, same base64 ->
-  // LONGBLOB pattern already used for Conveyance Bill Claim attachments and
+  // LONGBLOB pattern already used for Bill Claim attachments and
   // the Profile photo upload (profileRoutes.ts) — no multipart/multer
   // anywhere else in this app, so this doesn't introduce a second upload
   // mechanism. Routing (who has to approve it) is entirely the Dynamic
@@ -1061,7 +1061,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         }
       } else {
         // Notify whoever the request is actually sitting with first — same
-        // idea as Conveyance Bill Claim's own submit route.
+        // idea as Bill Claim's own submit route.
         try {
           const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
           const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));

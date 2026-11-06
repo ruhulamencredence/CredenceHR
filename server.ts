@@ -436,8 +436,8 @@ const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
 // (using one from it only needs the module) — all only when ticked
 // (EXPLICIT_ONLY_LAYERS in src/types.ts).
 const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice_animations"] as const;
-// Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
-// Conveyance Bill Claim for another employee (it goes through that
+// Bill Claim: "read" = the module as it was; "on_behalf" = file a
+// Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
 const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
 // HR Operations: "read" = the module as it was; New Joiner Onboarding
@@ -741,7 +741,7 @@ async function createApprovalRequest(
 
 // ============================================================================
 // Dynamic Approval Engine (Part 3 of 5) — reads the Templates built in Part 2
-// to route a freshly-submitted Conveyance Bill Claim / Timesheet (Attendance
+// to route a freshly-submitted Bill Claim / Timesheet (Attendance
 // Correction) request. (Leave Application is intentionally NOT wired to this
 // yet — see the Leave Balance + migration work grouped into Part 5.) Remote
 // Attendance / Check In/Out ('attendance'/'claim' source types) are also
@@ -992,7 +992,7 @@ const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet"
   advance_request: "loan"
 };
 const APPROVAL_ALERT: Record<string, { type: AlertType; label: string }> = {
-  user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
+  user_claim: { type: "conveyance_approval", label: "Bill Claim" },
   attendance_correction: { type: "hr_action", label: "Attendance Correction" },
   leave_application: { type: "leave_approval", label: "Leave Application" },
   asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
@@ -1376,7 +1376,7 @@ async function performApprovalAction(
   billId: number | null,
   approvedAmount?: number | null,
   voucherNo?: string | null,
-  // Conveyance Bill Claims only: `claimVersion` = the claim version the
+  // Bill Claims only: `claimVersion` = the claim version the
   // approver looked at (refused if the employee has edited it since);
   // `allowReclaim` = Reject, but let the employee edit and resubmit it.
   claimOpts: { claimVersion?: number | null; allowReclaim?: boolean } = {}
@@ -1444,7 +1444,7 @@ async function performApprovalAction(
     }
   }
 
-  // Conveyance Bill Claim review rules (Bill Claim Policy -> Editing & review).
+  // Bill Claim review rules (Bill Claim Policy -> Editing & review).
   let claimPolicy: any = null;
   if (request.source_type === "user_claim") {
     claimPolicy = await loadBillClaimPolicy(queryDB);
@@ -1461,7 +1461,7 @@ async function performApprovalAction(
       throw new ApprovalActionError(400, "Returning claims is turned off in the Bill Claim Policy.");
     }
   } else if (action === "returned") {
-    throw new ApprovalActionError(400, "Only a Conveyance Bill Claim can be returned for correction.");
+    throw new ApprovalActionError(400, "Only a Bill Claim can be returned for correction.");
   }
 
   // Return for correction: the claim goes back to the employee (out of every
@@ -1496,14 +1496,14 @@ async function performApprovalAction(
         await createAlert(queryDB, {
           userId: uid,
           type: "conveyance_claim",
-          title: "Conveyance Bill Claim Returned",
-          message: `${actorUser.name} returned Conveyance Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
+          title: "Bill Claim Returned",
+          message: `${actorUser.name} returned Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
           relatedType: "user_claim",
           relatedId: Number(request.source_id)
         });
       }
     } catch (alertErr: any) {
-      console.warn("⚠️ Could not notify about returned Conveyance Bill Claim #" + request.source_id + ": " + alertErr.message);
+      console.warn("⚠️ Could not notify about returned Bill Claim #" + request.source_id + ": " + alertErr.message);
     }
     return { status: "returned", current_step: 1, billInfo: null };
   }
@@ -1523,7 +1523,7 @@ async function performApprovalAction(
     actions = [];
   }
 
-  // Approved Amount history (for the Admin's Conveyance Bill Claim "History" —
+  // Approved Amount history (for the Admin's Bill Claim "History" —
   // ConveyanceBillPanel.tsx's UserClaimDetailModal): only meaningful for a
   // 'user_claim' Approve. Records the amount THIS Layer actually decided
   // (whatever was submitted, or whatever was already on record if they left
@@ -1586,7 +1586,7 @@ async function performApprovalAction(
     Number(request.current_step)
   ]);
   if (moved && moved.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
-  // Conveyance Bill Claim: keep this approver's signature with this approval
+  // Bill Claim: keep this approver's signature with this approval
   // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
   if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
     try {
@@ -1606,7 +1606,7 @@ async function performApprovalAction(
   notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
 
   // Only a 'user_claim' request actually gates something further — a
-  // Conveyance Bill Claim only becomes a real Bill line item the moment its
+  // Bill Claim only becomes a real Bill line item the moment its
   // request finishes 'approved' here (the LAST step), and is freed up again
   // the moment it's 'rejected' (at any step). Attendance/Check In/Out are
   // already recorded regardless — this Approval Workflow is purely their
@@ -1756,7 +1756,7 @@ async function attachApprovalStatuses(sourceType: "attendance" | "claim", rows: 
 // Also resolves current_approver_name (who the request is sitting with right
 // now, while still 'pending') and the request's actions trail — same
 // enrichment attachAttendanceCorrectionApproval does for Timesheet — so a User
-// can tell exactly which Layer their Conveyance Bill Claim is waiting on.
+// can tell exactly which Layer their Bill Claim is waiting on.
 async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
   if (rows.length === 0) return rows;
   let requests: any[] = [];
@@ -2124,7 +2124,7 @@ async function finalizeUserClaimApproval(
   } else {
     const created = await queryDB(
       "INSERT INTO conveyance_bills (user_id, bill_date, remarks, created_by) VALUES (?, CURDATE(), ?, ?)",
-      [uc.user_id, "Auto-created from an approved Conveyance Bill Claim", approvedBy]
+      [uc.user_id, "Auto-created from an approved Bill Claim", approvedBy]
     );
     targetBillId = created.insertId;
   }
@@ -2154,14 +2154,14 @@ async function finalizeUserClaimApproval(
   return { bill_id: Number(targetBillId), bill_item_id: Number(item.insertId) };
 }
 
-// Tells the claimant their Conveyance Bill Claim was approved or rejected.
+// Tells the claimant their Bill Claim was approved or rejected.
 async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
   try {
     const amt = amount != null ? `\u09f3${Number(amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
     await createAlert(queryDB, {
       userId: Number(uc.user_id),
       type: "conveyance_claim",
-      title: decision === "approved" ? "Conveyance Bill Claim Approved" : "Conveyance Bill Claim Rejected",
+      title: decision === "approved" ? "Bill Claim Approved" : "Bill Claim Rejected",
       message:
         decision === "approved"
           ? `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) has been approved${amt ? ` for ${amt}` : ""}.${remarks ? ` Remarks: ${remarks}` : ""}`
@@ -2170,7 +2170,7 @@ async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected
       relatedId: Number(uc.id)
     });
   } catch (err: any) {
-    console.warn("⚠️ Could not notify the claimant for Conveyance Bill Claim #" + uc.id + ": " + err.message);
+    console.warn("⚠️ Could not notify the claimant for Bill Claim #" + uc.id + ": " + err.message);
   }
 }
 
@@ -2456,7 +2456,7 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
 // assigned, otherwise leaving it 'pending' on the Template's first Layer.
 // Tells whoever a just-routed Leave Application is now sitting with (the
 // Supervisor, or the Template's first Layer) that it's waiting on them —
-// same idea as the Conveyance Bill Claim submit alert. Best-effort.
+// same idea as the Bill Claim submit alert. Best-effort.
 async function notifyLeaveFirstApprovers(leaveId: number) {
   try {
     const [appRows, requestRows] = await Promise.all([
@@ -3010,7 +3010,7 @@ async function startServer() {
 
   // Same as requireModule, but passes if the account has ANY of the given
   // modules — used where two separate Admin Panel tabs legitimately need to
-  // read the same underlying data (e.g. Conveyance Bill Claim and Conveyance
+  // read the same underlying data (e.g. Bill Claim and Conveyance
   // Disbursement both list conveyance_bills), without forcing an Admin who
   // only has one of the two to also be granted the other.
   const requireAnyModule = (moduleKeys: AdminModuleKey[]) => async (req: any, res: any, next: any) => {
@@ -3177,7 +3177,7 @@ async function startServer() {
     }
   };
 
-  // Conveyance Bill Claim self-service routes — same pattern as
+  // Bill Claim self-service routes — same pattern as
   // requireMovementClaimAccess above, gated by can_view_conveyance_claims.
   // Anyone holding the Bill Claim ("conveyance") Admin module also passes, so
   // they file / see their own claims from Self Service like everyone else.
@@ -3189,7 +3189,7 @@ async function startServer() {
       const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return next();
       if ((await getAdminModules(req.user.id)).includes("conveyance")) return next();
-      return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
+      return res.status(403).json({ error: "You don't have access to Bill Claim. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3564,7 +3564,7 @@ async function startServer() {
     queryDB
   });
 
-  // Conveyance Bill Claim (Admin Panel -> Conveyance, Conveyance
+  // Bill Claim (Admin Panel -> Conveyance, Conveyance
   // Disbursement, and the User Panel's own self-service card) — kept in its
   // own file (ConveyanceBillClaimRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts above.

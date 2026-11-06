@@ -45,7 +45,7 @@ interface PersonalData {
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 // Converts a File to a base64 string (no "data:...;base64," prefix), the same
-// FileReader -> base64 approach already used for Conveyance Bill Claim
+// FileReader -> base64 approach already used for Bill Claim
 // attachments and Budget Excel imports elsewhere in this app.
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

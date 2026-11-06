@@ -20,7 +20,7 @@
 //
 // `type` is deliberately a plain string (not a DB enum) so more alert types
 // can be added later without an ALTER TABLE each time. 'conveyance_claim'
-// (Conveyance Bill Claim submitted — the current-step approver is notified,
+// (Bill Claim submitted — the current-step approver is notified,
 // same idea as the Leave Application Reliever alert) was the second type
 // added, after 'leave_application'.
 
