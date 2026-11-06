@@ -414,18 +414,15 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       );
       correctionId = r.insertId;
     }
-    // The same approval chain as Timesheet -> Correct Attendance.
-    const { autoApproved } = await createTemplateApprovalRequest("timesheet", "attendance_correction", correctionId, req.user.id);
-    if (autoApproved) {
-      try {
-        await finalizeAttendanceCorrection(correctionId, req.user.id, "Auto-approved (no Approval Template configured for Timesheet).");
-      } catch (e: any) {
-        console.warn("⚠️ Could not auto-process off-site attendance #" + correctionId + ": " + e.message);
-      }
-    } else {
-      await notifyAttendanceCorrectionFirstApprovers(correctionId);
-    }
-    res.json({ success: true, pending: !autoApproved, place, project_name: target.p.project_name });
+    // The same approval chain as Timesheet -> Correct Attendance (and a
+    // Conveyance claim): the employee's Supervisor, then their Approval
+    // Template's layers. With neither it waits as "no approver yet" — a
+    // Superadmin may decide it, and it moves to a Supervisor / Template the
+    // moment one is set. An off-site punch is NEVER approved on its own:
+    // only finalizeAttendanceCorrection, run by the last approver, writes it.
+    await createTemplateApprovalRequest("timesheet", "attendance_correction", correctionId, req.user.id);
+    await notifyAttendanceCorrectionFirstApprovers(correctionId);
+    res.json({ success: true, pending: true, place, project_name: target.p.project_name });
     return true;
   }
 
