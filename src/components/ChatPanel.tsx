@@ -299,6 +299,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearch, setMsgSearch] = useState('');
   const [msgResults, setMsgResults] = useState<ChatMessage[] | null>(null);
+  // A group call on in the open chat (GroupCallRoutes.ts gcall:room).
+  const [groupCall, setGroupCall] = useState<{ callId: string; kind: 'audio' | 'video'; count: number } | null>(null);
+  useEffect(() => {
+    setGroupCall(null);
+    if (!activeRoomId || !canCall) return;
+    const roomId = activeRoomId;
+    getChatSocket()?.emit('gcall:active', { roomId }, (r: any) => {
+      if (activeRoomIdRef.current === roomId) setGroupCall(r?.callId ? { callId: r.callId, kind: r.kind, count: Number(r.count || 0) } : null);
+    });
+  }, [activeRoomId, canCall]);
   // Join a group with an invite link — opened from the list, or by a link
   // (…/chat?invite=CODE) this page was opened with.
   const [joinCode, setJoinCode] = useState<string | null>(() => {
@@ -465,6 +475,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       if (roomId === activeRoomIdRef.current) setProfileTick((t) => t + 1);
     };
     socket.on('room_updated', onRoomUpdated);
+    const onGroupCall = (d: { roomId: number; callId: string | null; kind?: 'audio' | 'video'; count?: number }) => {
+      if (d.roomId !== activeRoomIdRef.current) return;
+      setGroupCall(d.callId ? { callId: d.callId, kind: d.kind || 'audio', count: d.count || 0 } : null);
+    };
+    socket.on('gcall:room', onGroupCall);
 
     const onReactions = ({ roomId, messageId, reactions }: { roomId: number; messageId: number; reactions: ChatReaction[] }) => {
       if (roomId === activeRoomIdRef.current) patchMessage(messageId, { reactions });
@@ -506,6 +521,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
       socket.off('room_updated', onRoomUpdated);
+      socket.off('gcall:room', onGroupCall);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchRooms, fetchMembers, user.id, patchMessage, fetchPins]);
@@ -1320,6 +1336,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </button>
               {/* Audio / video call (CallLayer.tsx) — one-to-one chats, for
                   accounts with Calls access. */}
+              {/* Group call (GroupCallLayer.tsx) — groups / communities, same Calls access. */}
+              {activeRoom.type !== 'direct' && canCall && !cannotSend && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          groupCall?.callId
+                            ? new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                            : new CustomEvent('credence:start-group-call', { detail: { roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: k } })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                      title={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
               {activeRoom.type === 'direct' && activeRoom.other_participant && (user.role === 'superadmin' || user.can_use_calls) && (
                 <div className="flex items-center gap-1 shrink-0">
                   {(['audio', 'video'] as const).map((k) => (
@@ -1348,6 +1387,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
+            {groupCall?.callId && activeRoom.type !== 'direct' && canCall && (
+              <div className="px-3 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="flex-1 min-w-0 truncate text-emerald-800">
+                  Group {groupCall.kind === 'video' ? 'video' : 'audio'} call on · {groupCall.count} joined
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                    )
+                  }
+                  className="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5"
+                >
+                  Join
+                </button>
+              </div>
+            )}
             {msgSearchOpen && (
               <div className="relative px-3 py-2 bg-white border-b border-slate-200">
                 <div className="relative">

@@ -61,7 +61,8 @@ import { registerHrReminderRoutes } from "./HrRemindersRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
-import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
+import { registerCallRoutes, setupCallSocket, callAccess } from "./CallRoutes";
+import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
@@ -3780,6 +3781,8 @@ async function startServer() {
   // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
   registerCallRoutes(app, { authenticateToken, queryDB });
   setupCallSocket(io, { queryDB });
+  // Group audio / video calls from a Group / Community chat (same Calls access).
+  setupGroupCallSocket(io, { queryDB, callAccess: (userId: number) => callAccess(queryDB, userId) });
   // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).

@@ -86,6 +86,7 @@ import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
+import { GroupCallLayer } from './components/GroupCallLayer';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
 import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { requestQuickAccessTab } from './lib/quickAccess';
@@ -1809,6 +1810,7 @@ export default function App() {
       {/* Chat audio/video calls — rings on any page; only for accounts with
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />
