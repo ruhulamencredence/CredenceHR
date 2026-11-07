@@ -84,7 +84,11 @@ Login ID: কর্মীর **Employee ID** (যেমন `CPL-0201`, ছোট
 flowchart TD
   S([ব্যবহারকারী লগইন ID + পাসওয়ার্ড দেয়]) --> W{"ওয়ার্কস্পেস (কোম্পানি-গ্রুপ) ঠিক?"}
   W -- না --> X1["প্রত্যাখ্যান"]
-  W -- হ্যাঁ --> L{"LoginGuard: ৫ বার ভুল?<br/>বা এক IP থেকে ৩০ বার?"}
+  W -- হ্যাঁ --> TD{"চেনা ডিভাইস?<br/>(সই করা trusted device token)"}
+  TD -- হ্যাঁ --> LD{"এই ডিভাইসে ১৫ মিনিটে<br/>১০ বার ভুল?"}
+  LD -- হ্যাঁ --> X2
+  LD -- না --> P
+  TD -- না --> L{"LoginGuard: ৫ বার ভুল?<br/>বা এক IP থেকে ৩০ বার?"}
   L -- হ্যাঁ --> X2["429: ১৫ মিনিট অপেক্ষা<br/>সঠিক পাসওয়ার্ডও তখন চলে না"]
   L -- না --> P{"পাসওয়ার্ড ঠিক? bcrypt"}
   P -- না --> X3["400: একই বার্তা<br/>ভুল ID বা ভুল পাসওয়ার্ড দুটোতেই<br/>+ login_attempts-এ লেখা"]
@@ -105,7 +109,9 @@ flowchart TD
 ```
 
 **বিকল্প প্রবেশ:** (ক) **Forgot password:** ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা "HR-কে বলুন" (HR একটি অস্থায়ী পাসওয়ার্ড দেয়)। (খ) **Fingerprint/Passkey:** অ্যাপে ফোনের Keystore/Keychain-এর সিক্রেট, ওয়েবে WebAuthn passkey। দুটোই পাসওয়ার্ডের একই নিয়ম (ব্লক, ডিভাইস, কোম্পানি) মানে। অ্যাপে লগইন পাতায় fingerprint-এর জানালা নিজে একবার খোলে — অ্যাপ পুরো পর্দায় আসার পরে; আগে আঙুল, তারপর লোকেশন, তারপর সার্ভার। জানালা না খুললে বা সেন্সর ব্যস্ত থাকলে চালু করা fingerprint মুছে যায় না, "Sign in with fingerprint" চাপলেই আবার চেষ্টা হয়; শুধু ফোনের সংরক্ষিত চাবি সত্যিই না থাকলে (fingerprint বদলানো/মোছা) আবার চালু করতে বলে (`src/lib/fingerprint.ts`, টেস্ট `npm run test:fingerprint`)।
-ফাইল: `AuthRoutes.ts`, `LoginGuard.ts`, `PasswordResetRoutes.ts`, `FingerprintRoutes.ts`, `SessionSecurity.ts`।
+**চেনা ডিভাইস (trusted device):** পাসওয়ার্ড দিয়ে সফল login-এর পর সার্ভার ওই ফোন / browser-কে ওই account-এর জন্য একটা সই করা token দেয় (`trusted_device`; ফোনে `chr_login_devices`-এ থাকে, sign-out-এ মোছে না)। পরের login-এ token পাঠালে account-এর ৫-বার আর network-এর ৩০-বার আটকানো ওই ডিভাইসে খাটে না — তাই অন্য কেউ আপনার ID-তে ভুল password দিলে, বা পুরো অফিস একই IP থেকে আটকে গেলেও, আপনি নিজের ডিভাইস থেকে ঢুকতে পারেন। ডিভাইসের নিজের সীমা: ১৫ মিনিটে ১০ বার ভুল হলে ওই ডিভাইস ১৫ মিনিট আটকায়। চেনা ডিভাইসের ভুল account বা network-এর গোনায় যায় না। Token account-এ বাঁধা, ১৮০ দিন ব্যবহার না হলে বাতিল, প্রতি login-এ নতুন হয়, আর password বদলালে / reset হলে / সব জায়গা থেকে sign out হলে (`sessions_valid_after`) আর চলে না (`LoginGuard.ts`, `src/lib/trustedDevices.ts`)। Fingerprint / passkey login-এর নিয়ম আগের মতোই।
+
+ফাইল: `AuthRoutes.ts`, `LoginGuard.ts`, `PasswordResetRoutes.ts`, `FingerprintRoutes.ts`, `SessionSecurity.ts`, `src/lib/trustedDevices.ts`।
 
 **সেশন শেষ হয় যখন:** ওয়েবে ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয়; অ্যাপে ৭ দিন বা ৩ দিন না খুললে (Superadmin বদলাতে পারে); Logout; Superadmin কাউকে বের করে দিলে; পাসওয়ার্ড বদলালে (বাকি সব সেশন); অ্যাকাউন্ট ব্লক হলে।
 

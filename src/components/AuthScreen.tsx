@@ -11,6 +11,7 @@ import { fingerprintLogin, fingerprintSupported, savedFingerprint } from '../lib
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
 import { PasswordInput } from './PasswordInput';
+import { saveTrustedDevice, trustedDeviceTokens } from '../lib/trustedDevices';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -319,8 +320,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
-            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }) }
+            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}), trusted_devices: trustedDeviceTokens() }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens() }
         ),
       });
 
@@ -329,6 +330,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         throw new Error(data.error || 'Authentication failed');
       }
 
+      // This device is now trusted for the account (src/lib/trustedDevices.ts).
+      saveTrustedDevice(data.user?.id, data.trusted_device);
       // Multi-company: start in the account's default company.
       setActiveCompanyId(data.active_company_id || null);
       onLoginSuccess(data.token, data.user);

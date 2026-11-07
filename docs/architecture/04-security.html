@@ -125,8 +125,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>ভুল পাসওয়ার্ড</td>
-<td>অ্যাকাউন্টে ৫ বার ভুলে ১৫ মিনিট লক (সঠিক পাসওয়ার্ডও তখন চলে না); এক IP-তে ৩০ বার ভুলে অপেক্ষা; অচেনা ID-ও একইভাবে গোনা হয়</td>
-<td><code>LoginGuard.ts</code>, টেস্ট (২৫ ভুলের পর আটকায়)</td>
+<td>অ্যাকাউন্টে ৫ বার ভুলে ১৫ মিনিট লক (সঠিক পাসওয়ার্ডও তখন চলে না); এক IP-তে ৩০ বার ভুলে অপেক্ষা; অচেনা ID-ও একইভাবে গোনা হয়। <strong>চেনা ডিভাইস:</strong> আগে সফল login হওয়া ফোন / browser-এর সই করা token (HMAC, account-এ বাঁধা, ১৮০ দিন, password বদলালে বাতিল) থাকলে এই দুই লক তাকে আটকায় না — তার নিজের সীমা ১৫ মিনিটে ১০ বার ভুল। তাই অন্য কেউ ভুল password দিয়ে কাউকে বা পুরো অফিসকে আটকে রাখতে পারে না</td>
+<td><code>LoginGuard.ts</code>, টেস্ট (২৫ ভুলের পর আটকায়; trusted device ১৫টি case — <code>docs/test-logs/2026-11-07/scripts/trusted-device-login.mts</code>)</td>
 </tr>
 <tr>
 <td>অ্যাকাউন্ট আন্দাজ</td>
@@ -538,9 +538,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>১৬</td>
-<td>৫ বার ভুল password-এ account ১৫ মিনিট বন্ধ — কারো ID জানলে যে কেউ তাঁকে কিছুক্ষণ আটকে রাখতে পারে; এক network থেকে ৩০ বার ভুলে পুরো network আটকায়</td>
+<td>চেনা ডিভাইসের token ফোন / browser-এর localStorage-এ থাকে; কেউ সেটা চুরি করলে ওই account-এ ১৫ মিনিটে ১০ বার পর্যন্ত password চেষ্টা করতে পারে (account-এর ৫-বার লক তাকে আটকায় না)। নতুন ফোনে প্রথম login আর বন্ধ account আগের মতোই অন্য কেউ ১৫ মিনিট আটকাতে পারে</td>
 <td>নিম্ন</td>
-<td>পরিকল্পনা L4: আগে-সফল network থেকে সঠিক password চালু রাখা, অফিসের IP-র সীমা <code>.env</code>-এ</td>
+<td>XSS রোধ কড়া রাখা (token-এর মতোই); password বদলালে সব token বাতিল হয় (আগে অফিস-জুড়ে ১৫ মিনিট আটকে যাওয়ার সমস্যা ছিল — ৭ নভেম্বর ঠিক করা)</td>
 </tr>
 <tr>
 <td>১৭</td>

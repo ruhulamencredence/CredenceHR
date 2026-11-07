@@ -81,7 +81,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <pre class="mermaid">flowchart TD
   S([ব্যবহারকারী লগইন ID + পাসওয়ার্ড দেয়]) --&gt; W{&quot;ওয়ার্কস্পেস (কোম্পানি-গ্রুপ) ঠিক?&quot;}
   W -- না --&gt; X1[&quot;প্রত্যাখ্যান&quot;]
-  W -- হ্যাঁ --&gt; L{&quot;LoginGuard: ৫ বার ভুল?&lt;br/&gt;বা এক IP থেকে ৩০ বার?&quot;}
+  W -- হ্যাঁ --&gt; TD{&quot;চেনা ডিভাইস?&lt;br/&gt;(সই করা trusted device token)&quot;}
+  TD -- হ্যাঁ --&gt; LD{&quot;এই ডিভাইসে ১৫ মিনিটে&lt;br/&gt;১০ বার ভুল?&quot;}
+  LD -- হ্যাঁ --&gt; X2
+  LD -- না --&gt; P
+  TD -- না --&gt; L{&quot;LoginGuard: ৫ বার ভুল?&lt;br/&gt;বা এক IP থেকে ৩০ বার?&quot;}
   L -- হ্যাঁ --&gt; X2[&quot;429: ১৫ মিনিট অপেক্ষা&lt;br/&gt;সঠিক পাসওয়ার্ডও তখন চলে না&quot;]
   L -- না --&gt; P{&quot;পাসওয়ার্ড ঠিক? bcrypt&quot;}
   P -- না --&gt; X3[&quot;400: একই বার্তা&lt;br/&gt;ভুল ID বা ভুল পাসওয়ার্ড দুটোতেই&lt;br/&gt;+ login_attempts-এ লেখা&quot;]
@@ -101,7 +105,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
   C --&gt; D
 </pre>
 <p><strong>বিকল্প প্রবেশ:</strong> (ক) <strong>Forgot password:</strong> ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা "HR-কে বলুন" (HR একটি অস্থায়ী পাসওয়ার্ড দেয়)। (খ) <strong>Fingerprint/Passkey:</strong> অ্যাপে ফোনের Keystore/Keychain-এর সিক্রেট, ওয়েবে WebAuthn passkey। দুটোই পাসওয়ার্ডের একই নিয়ম (ব্লক, ডিভাইস, কোম্পানি) মানে। অ্যাপে লগইন পাতায় fingerprint-এর জানালা নিজে একবার খোলে — অ্যাপ পুরো পর্দায় আসার পরে; আগে আঙুল, তারপর লোকেশন, তারপর সার্ভার। জানালা না খুললে বা সেন্সর ব্যস্ত থাকলে চালু করা fingerprint মুছে যায় না, "Sign in with fingerprint" চাপলেই আবার চেষ্টা হয়; শুধু ফোনের সংরক্ষিত চাবি সত্যিই না থাকলে (fingerprint বদলানো/মোছা) আবার চালু করতে বলে (<code>src/lib/fingerprint.ts</code>, টেস্ট <code>npm run test:fingerprint</code>)।
-ফাইল: <code>AuthRoutes.ts</code>, <code>LoginGuard.ts</code>, <code>PasswordResetRoutes.ts</code>, <code>FingerprintRoutes.ts</code>, <code>SessionSecurity.ts</code>।</p>
+<strong>চেনা ডিভাইস (trusted device):</strong> পাসওয়ার্ড দিয়ে সফল login-এর পর সার্ভার ওই ফোন / browser-কে ওই account-এর জন্য একটা সই করা token দেয় (<code>trusted_device</code>; ফোনে <code>chr_login_devices</code>-এ থাকে, sign-out-এ মোছে না)। পরের login-এ token পাঠালে account-এর ৫-বার আর network-এর ৩০-বার আটকানো ওই ডিভাইসে খাটে না — তাই অন্য কেউ আপনার ID-তে ভুল password দিলে, বা পুরো অফিস একই IP থেকে আটকে গেলেও, আপনি নিজের ডিভাইস থেকে ঢুকতে পারেন। ডিভাইসের নিজের সীমা: ১৫ মিনিটে ১০ বার ভুল হলে ওই ডিভাইস ১৫ মিনিট আটকায়। চেনা ডিভাইসের ভুল account বা network-এর গোনায় যায় না। Token account-এ বাঁধা, ১৮০ দিন ব্যবহার না হলে বাতিল, প্রতি login-এ নতুন হয়, আর password বদলালে / reset হলে / সব জায়গা থেকে sign out হলে (<code>sessions_valid_after</code>) আর চলে না (<code>LoginGuard.ts</code>, <code>src/lib/trustedDevices.ts</code>)। Fingerprint / passkey login-এর নিয়ম আগের মতোই।</p>
+<p>ফাইল: <code>AuthRoutes.ts</code>, <code>LoginGuard.ts</code>, <code>PasswordResetRoutes.ts</code>, <code>FingerprintRoutes.ts</code>, <code>SessionSecurity.ts</code>, <code>src/lib/trustedDevices.ts</code>।</p>
 <p><strong>সেশন শেষ হয় যখন:</strong> ওয়েবে ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয়; অ্যাপে ৭ দিন বা ৩ দিন না খুললে (Superadmin বদলাতে পারে); Logout; Superadmin কাউকে বের করে দিলে; পাসওয়ার্ড বদলালে (বাকি সব সেশন); অ্যাকাউন্ট ব্লক হলে।</p>
 <hr />
 <h2 id="_1">৪. কে কী দেখবে: অনুমতির সিদ্ধান্ত</h2>

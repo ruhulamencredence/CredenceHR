@@ -13,7 +13,7 @@ import { resolveCompanyContext } from "./CompanyRoutes";
 import { workspaceStartCompany } from "./CompanyRoutes";
 import { checkAppDevice } from "./DeviceRoutes";
 import { APP_FLAG_KEYS, APP_OFF_MESSAGE, appAccessFor, appMaskStore } from "./AppAccess";
-import { loginBlocked, recordLogin } from "./LoginGuard";
+import { loginBlocked, recordLogin, trustedDeviceFor, trustedDeviceToken } from "./LoginGuard";
 import { clientIp } from "./ActiveUsersRoutes";
 import { activeCompanyId } from "./companyContext";
 import { activeGroupId } from "./companyContext";
@@ -77,7 +77,10 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       // login IDs are counted the same way, so nothing tells them apart.
       const ip = clientIp(req);
       const knownId = users.length ? Number(users[0].id) : null;
-      const blocked = await loginBlocked(queryDB, ip, identifier, knownId);
+      // A phone / browser this account signed in on before (LoginGuard.ts
+      // trusted devices): only that device's own limit applies to it.
+      const deviceId = users.length ? trustedDeviceFor(JWT_SECRET, req.body?.trusted_devices, users[0]) : null;
+      const blocked = await loginBlocked(queryDB, ip, identifier, knownId, deviceId);
       if (blocked) return res.status(429).json({ error: blocked, code: "LOGIN_LOCKED" });
       if (users.length === 0) {
         await recordLogin(queryDB, ip, identifier, null, false);
@@ -87,11 +90,12 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       const user = users[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
-        await recordLogin(queryDB, ip, identifier, knownId, false);
+        await recordLogin(queryDB, ip, identifier, knownId, false, deviceId);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
-      await recordLogin(queryDB, ip, identifier, knownId, true);
-      await finishLogin(deps, req, res, user);
+      await recordLogin(queryDB, ip, identifier, knownId, true, deviceId);
+      // Refreshed on every sign-in (same device id), so a device in use stays trusted.
+      await finishLogin(deps, req, res, user, { trusted_device: trustedDeviceToken(JWT_SECRET, Number(user.id), deviceId) });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Login failed" });
     }
