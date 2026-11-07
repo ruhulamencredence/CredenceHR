@@ -1,0 +1,117 @@
+{
+ "when": "2026-11-07T09:04:31.221Z",
+ "summary": {
+  "PASS": 18,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "CO-00",
+   "status": "PASS",
+   "name": "Superadmin creates a second company (CBL)",
+   "detail": "200 {\"success\":true,\"id\":2}"
+  },
+  {
+   "id": "CO-01",
+   "status": "PASS",
+   "name": "An employee added while in CBL belongs to CBL",
+   "detail": "201 {\"id\":1,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}; company 2"
+  },
+  {
+   "id": "CO-02",
+   "status": "PASS",
+   "name": "HR of company 1 does not get CBL in the company switcher",
+   "detail": "{\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"group_id\":1,\"name\":\"Credence Housing Limited\",\"short_code\":\"CHL\",\"is_mother\":true,\"a"
+  },
+  {
+   "id": "CO-03",
+   "status": "PASS",
+   "name": "Employee list (company 1) has no CBL employee",
+   "detail": "200 []"
+  },
+  {
+   "id": "CO-04",
+   "status": "PASS",
+   "name": "Sending CBL's X-Company-Id does not open CBL for this HR",
+   "detail": "200 []"
+  },
+  {
+   "id": "CO-05",
+   "status": "PASS",
+   "name": "Employee Directory has no CBL employee",
+   "detail": ""
+  },
+  {
+   "id": "CO-06",
+   "status": "PASS",
+   "name": "CBL employee's bank account cannot be read by id",
+   "detail": "200 []"
+  },
+  {
+   "id": "CO-07",
+   "status": "PASS",
+   "name": "CBL employee cannot be edited by id",
+   "detail": "404 {\"error\":\"Employee not found\"}; name now Bina Builders"
+  },
+  {
+   "id": "CO-08",
+   "status": "PASS",
+   "name": "CBL employee cannot be deleted by id",
+   "detail": "403 {\"error\":\"You don't have permission to do this. Ask your Superadmin to grant it.\"}"
+  },
+  {
+   "id": "CO-09",
+   "status": "PASS",
+   "name": "CBL salary run cannot be opened by id",
+   "detail": "404 {\"error\":\"Payroll record not found.\"}"
+  },
+  {
+   "id": "CO-10",
+   "status": "PASS",
+   "name": "CBL salary run cannot be changed by id",
+   "detail": "404 {\"error\":\"Payroll record not found.\"}; bonus now 0.00"
+  },
+  {
+   "id": "CO-11",
+   "status": "PASS",
+   "name": "Payroll list (company 1) has no CBL salary",
+   "detail": "200 []"
+  },
+  {
+   "id": "CO-12",
+   "status": "PASS",
+   "name": "Company 1 HR cannot run payroll for a CBL employee",
+   "detail": "404 {\"error\":\"Employee not found.\"}"
+  },
+  {
+   "id": "CO-13",
+   "status": "PASS",
+   "name": "Company 1 HR cannot change a CBL employee's salary",
+   "detail": "404 {\"error\":\"Employee not found.\"}"
+  },
+  {
+   "id": "CO-14",
+   "status": "PASS",
+   "name": "Superadmin sees CBL's employee only when working in CBL",
+   "detail": "in company 1: false; in CBL: true"
+  },
+  {
+   "id": "CO-14b",
+   "status": "PASS",
+   "name": "In CBL the Supervisor can be someone assigned to CBL, not just anyone from company 1",
+   "detail": "assign 200; set 201; unassigned person 400"
+  },
+  {
+   "id": "CO-15",
+   "status": "PASS",
+   "name": "A Supervisor in company 1 still approves a CBL employee's leave from My Approvals",
+   "detail": "apply 200; in queue true; act 200; leave approved"
+  },
+  {
+   "id": "CO-16",
+   "status": "PASS",
+   "name": "Someone working in two companies sees their own leave from either",
+   "detail": "assignment 200; leave 200; seen from CBL: true"
+  }
+ ]
+}

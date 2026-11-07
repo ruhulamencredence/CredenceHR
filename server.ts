@@ -3220,6 +3220,26 @@ async function startServer() {
     }
   };
 
+  // Reading PEPM data (Budgets, their items, MPR Nos, Jobs): the same people
+  // the menu shows it to — the account's Budget switch, Job Edit, or an Admin
+  // holding a PEPM module that lists Budgets / MPR Nos (Imports, MPR Nos,
+  // Reports, Projects). Before this, any signed-in account could list them
+  // even with the Budget switch off.
+  const PEPM_READ_MODULES = ["imports", "mprs", "reports", "projects"];
+  const requireBudgetRead = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const rows: any = await queryDB("SELECT can_view_budget_module, can_job_edit FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && (!!Number(rows[0].can_view_budget_module) || !!Number(rows[0].can_job_edit))) return next();
+      if (req.user.role === "admin" && (await getAdminModules(req.user.id)).some((m) => PEPM_READ_MODULES.includes(m))) return next();
+      return res.status(403).json({ error: "You don't have access to Budget/Jobs. Ask your Superadmin to grant it." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   // Gate for PUT /api/leave-balances/:userId — editing ANOTHER account's Leave
   // balances (a plain account with no grant can only ever read its own, via the
   // GET route's own-branch below, never write).
@@ -3648,7 +3668,7 @@ async function startServer() {
   registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, runJobs: runsBackgroundJobs() });
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
-  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
+  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireBudgetRead, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/
@@ -3661,6 +3681,7 @@ async function startServer() {
     getAdminModules,
     requireModuleLayer,
     requireBudgetModuleAccess,
+    requireBudgetRead,
     queryDB,
     todayInDhaka,
     parseQtyNumber,

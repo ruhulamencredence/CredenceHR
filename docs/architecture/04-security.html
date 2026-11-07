@@ -524,11 +524,35 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>নিম্ন–মাঝারি (ভুয়া punch)</td>
 <td>সাইটের fixed IP "Only from this internet address"-এ দিন; HTTPS চালু রাখুন; Machines-এ আজকের punch সংখ্যা নজরে রাখুন</td>
 </tr>
+<tr>
+<td>১৪</td>
+<td>Bill Claim-এর সংযুক্তি ফাইলের ভেতর যাচাই হয় না (HTML-কে "PDF" নাম দিলে জমা হয়; ফেরত দেয় PDF হিসেবে, <code>nosniff</code> সহ)</td>
+<td>নিম্ন</td>
+<td>পরিকল্পনা L1: payroll ফাইলের মতো <code>looksLikeType</code> বসানো (<code>docs/test-logs/2026-11-07/</code>)</td>
+</tr>
+<tr>
+<td>১৫</td>
+<td>এক বিলের কোনো সাধারণ সর্বোচ্চ সীমা নেই (category-তে না দিলে)</td>
+<td>নিম্ন (approval লাগে)</td>
+<td>পরিকল্পনা L2: Bill Claim Policy-তে কোম্পানি-জুড়ে সীমা</td>
+</tr>
+<tr>
+<td>১৬</td>
+<td>৫ বার ভুল password-এ account ১৫ মিনিট বন্ধ — কারো ID জানলে যে কেউ তাঁকে কিছুক্ষণ আটকে রাখতে পারে; এক network থেকে ৩০ বার ভুলে পুরো network আটকায়</td>
+<td>নিম্ন</td>
+<td>পরিকল্পনা L4: আগে-সফল network থেকে সঠিক password চালু রাখা, অফিসের IP-র সীমা <code>.env</code>-এ</td>
+</tr>
+<tr>
+<td>১৭</td>
+<td>Mail template editor-এ HTML পরিষ্কার না করে দেখায় (template শুধু নিজের)</td>
+<td>খুব নিম্ন</td>
+<td>পরিকল্পনা L7: <code>sanitizeMailHtml</code></td>
+</tr>
 </tbody>
 </table>
 <hr />
 <h2 id="_4">১১. আমাদের নিজস্ব টেস্ট (প্রমাণ হিসেবে দেখানো যায়)</h2>
-<p>লগ: <code>docs/test-logs/2026-10-19/</code> ও <code>2026-10-25/</code>।</p>
+<p>লগ: <code>docs/test-logs/2026-10-19/</code>, <code>2026-10-25/</code> ও <code>2026-11-07/</code> (পুরো অ্যাপ: ১৩টা QA suite ২৬৯ check পাস, ৯৬৪টা API-র অনুমতি sweep, ৪ রকম user-এর ৫৫২ বার পাতা খোলা — JS/server error ০)।</p>
 <table>
 <thead>
 <tr>
@@ -588,6 +612,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>এই টেস্টগুলো প্রতি push-এ GitHub-এ নিজে চলে: <strong>QA tests</strong> workflow (<code>.github/workflows/qa-tests.yml</code>, <code>tests/qa/run-all.sh</code>) — প্রতিটা টেস্ট নতুন খালি ডাটাবেসে; ফল Actions-এর "qa-results"-এ।</p>
+<p>৭ নভেম্বরের টেস্টে ধরা এবং <strong>ঠিক হওয়া</strong>: PEPM Budget / item / MPR No / Job-এর API Budget switch দেখত না (এখন <code>requireBudgetRead</code>), Admin Dashboard অনুমতি-ছাড়া module-এর tile দেখাত ও আটকানো request পাঠাত।</p>
 <p>২৫ অক্টোবরের আগে ধরা এবং এখন <strong>ঠিক হওয়া</strong> জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।</p>
 <hr />
 <h2 id="_5">১২. দুর্ঘটনা ঘটলে কী করা যায় (প্রযুক্তিগত হাতিয়ার)</h2>

@@ -719,3 +719,8 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 | Data Import layer | `import_conveyance` | `import_bill_claims` |
 
 পুরনো ডাটাবেস server চালু হওয়ার সময় নিজে বদলে যায় (`billClaimRename.ts`, base schema-র ঠিক পরে, বাকি migration-এর আগে): টেবিল / কলাম / index rename, ENUM-এর মান বদল, আর দেওয়া অনুমতি (module, layer, App access, Access Template) নতুন নামে সরানো — ডাটা হারায় না, আর আবার চালালে কিছু করে না। **Conveyance Bill** (`conveyance_bills`, `conveyance_bill_items`, `/api/conveyance-bills`, Disburser ধাপ) আলাদা জিনিস — claim approve হলে যে বিল তৈরি হয় — তার নাম আগের মতোই।
+
+## Admin Dashboard ও PEPM: যা অনুমতি আছে শুধু তাই
+
+- **Admin Dashboard** (`AdminDashboard.tsx`, `AdminDashboardWatch.tsx`): প্রতিটা tile, card আর তার request নিজের module থাকলে তবেই — ছুটির tile / Leave Balance / Leave Calendar `leave_applications`, Quick View / Attendance Summary / Attendance Missed `attendance_reports`, Claim Amount `bill_claim`, Disburse ও Claim chart `bill_claim` বা `disbursement`, Advance `payroll`, Asset `asset_management`, Birthdays `employees`, Attendance Approval / Recon. `attendance`, Status / Document `hr_operations`; New Joiners, Offboarding, Loans & Mobile Bill, Recruitment-ও নিজের module-এ। Superadmin সব দেখেন। Task Status Overview-এর Bill Claim সারি এখন `bill_claim` module-এর (আগে ভুল করে "Check in/out" নামে Check In/Out module-এ ছিল)।
+- **PEPM ডাটা পড়া** (Budget, item, MPR No, Job, delivery lead time): Superadmin, Budget switch চালু, Job Edit, বা Imports / MPR Nos / Reports / Projects module থাকা Admin (`requireBudgetRead`, server.ts)। Admin Panel Budget ও MPR তালিকা শুধু Imports, MPR Nos, Reports tab-এ আনে।

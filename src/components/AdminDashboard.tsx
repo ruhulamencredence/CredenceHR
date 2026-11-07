@@ -89,6 +89,9 @@ function inDays(n: number): string {
 // "no data", not a broken page. Distinct from a truly comingSoon tile (this
 // app has no feature at all for it) — this is "the feature exists, but this
 // account/browser couldn't read it right now".
+// A request only for a module the account holds; otherwise null, as if it had failed.
+const when = <T,>(allowed: boolean, load: () => Promise<T | null>): Promise<T | null> => (allowed ? load() : Promise.resolve(null));
+
 async function safeGet<T>(path: string, headers: Record<string, string>): Promise<T | null> {
   try {
     const res = await fetch(apiUrl(path), { headers });
@@ -259,6 +262,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     const active = myCompanies.companies.find((c) => c.id === myCompanies.active_company_id);
     return active && !active.is_mother ? active.id : null;
   }, [myCompanies]);
+  // Only what this account was granted (CLAUDE.md: hide the UI and block the
+  // API): a tile, card or request for a module it doesn't hold is neither
+  // shown nor sent (each API still checks on its own).
+  const isSuper = user.role === 'superadmin';
+  const myModules: string[] = (user.module_permissions as string[] | undefined) || [];
+  const has = (...keys: string[]) => isSuper || keys.some((k) => myModules.includes(k));
+  const showLeave = has('leave_applications');
+  const showAttendanceReport = has('attendance_reports');
+  const showQuickView = showAttendanceReport;
+  const showAttendanceSummary = showAttendanceReport;
+  const showAttendanceMissed = showAttendanceReport;
+  const showClaimChart = has('bill_claim', 'disbursement');
+  const showLeaveBalance = showLeave;
+  const showLeaveCalendar = showLeave;
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [quickViewDetail, setQuickViewDetail] = useState<QuickViewFilter | null>(null);
@@ -304,20 +321,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         // report is the one already gated by the grantable 'leave_applications'
         // module, so an account granted Admin Dashboard + Monthly Leave
         // Application sees real figures here too, not just a Superadmin.
-        safeGet<any[]>(`/api/leave-applications/report?since=${leaveSince}&slim=1`, groupHeaders),
-        safeGet<any[]>('/api/leave-balances', authHeaders),
-        safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
-        safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
-        safeGet<any[]>(`/api/bill-claims?since=${claimsSince}&slim=1`, authHeaders),
-        safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders),
+        when(showLeave, () => safeGet<any[]>(`/api/leave-applications/report?since=${leaveSince}&slim=1`, groupHeaders)),
+        when(showLeave, () => safeGet<any[]>('/api/leave-balances', authHeaders)),
+        when(has('payroll'), () => safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders)),
+        when(has('asset_management'), () => safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders)),
+        when(has('bill_claim'), () => safeGet<any[]>(`/api/bill-claims?since=${claimsSince}&slim=1`, authHeaders)),
+        when(has('bill_claim', 'disbursement'), () => safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders)),
         safeGet<any[]>('/api/notices/active', authHeaders),
-        safeGet<any[]>('/api/employee-directory', groupHeaders),
-        safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
-          `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}&slim=dashboard`,
-          groupHeaders
+        when(showAttendanceReport, () => safeGet<any[]>('/api/employee-directory', groupHeaders)),
+        when(showAttendanceReport, () =>
+          safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
+            `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}&slim=dashboard`,
+            groupHeaders
+          )
         ),
-        safeGet<any[]>('/api/holidays', authHeaders),
-        safeGet<any[]>('/api/payroll/late-policy', authHeaders),
+        when(showLeave || showAttendanceReport, () => safeGet<any[]>('/api/holidays', authHeaders)),
+        when(has('payroll'), () => safeGet<any[]>('/api/payroll/late-policy', authHeaders)),
         safeGet<Extras>('/api/admin-dashboard/extras', authHeaders),
       ]);
       if (cancelled) return;
@@ -653,7 +672,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     return out;
   }, [quickViewRows, attendanceReport, employees]);
 
-  const statTiles: StatTile[] = [
+  // Which module each tile needs (same modules as its API / extras part).
+  const TILE_ALLOWED: Record<string, boolean> = {
+    leave_today: showLeave,
+    leave_tomorrow: showLeave,
+    pending_leave: showLeave,
+    birthdays: has('employees'),
+    attendance_approval: has('attendance'),
+    claim_amount: has('bill_claim'),
+    disburse_amount: has('bill_claim', 'disbursement'),
+    attendance_recon: has('attendance'),
+    status_effective: has('hr_operations'),
+    advance_salary: has('payroll'),
+    asset_requisition: has('asset_management'),
+    document_request: has('hr_operations')
+  };
+  const statTiles: StatTile[] = ([
     {
       key: 'leave_today', label: 'On Leave Today', icon: CalendarClock, value: onLeaveTodayCount != null ? String(onLeaveTodayCount) : null,
       onClick: onLeaveTodayEntries && onLeaveTodayEntries.length > 0
@@ -681,7 +715,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     listTile('attendance_approval', 'Pending Attendance Approval', Fingerprint, extras?.attendance_approvals, (a) => ({
       key: `a-${a.id}`, name: a.name, sub: personSub(a), right: shortDate(a.date),
     }), 'Remote check-in/out waiting for approval', 'approvals'),
-    { key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null, onClick: go('claims') },
+    { key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null, onClick: go('bill_claim') },
     { key: 'disburse_amount', label: 'Monthly Disburse Amount', icon: Banknote, value: monthlyDisburseAmount != null ? formatMoney(monthlyDisburseAmount) : null, onClick: go('disbursement') },
     listTile('attendance_recon', 'Pending Attendance Recon.', ShieldAlert, extras?.attendance_corrections, (c) => ({
       key: `c-${c.id}`, name: c.name, sub: personSub(c), right: shortDate(c.date),
@@ -694,7 +728,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     listTile('document_request', 'Pending Document Request', ClipboardList, extras?.documents, (d) => ({
       key: d.id, name: d.name, sub: `${d.kind} · ${d.detail}`, right: shortDate(d.date),
     }), 'Document requests', 'hr_operations'),
-  ];
+  ] as StatTile[]).filter((t) => TILE_ALLOWED[t.key] !== false);
 
   const maxAttendanceCount = attendanceSummary ? Math.max(1, attendanceSummary.headcount) : 1;
   const maxClaimChart = Math.max(1, ...claimChartData.map((d) => Math.max(d.claimSum, d.disbursedSum)));
@@ -895,11 +929,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
           )}
 
           {/* Waiting on someone: stuck approvals, joiners, exits, loans / mobile, recruitment */}
-          <AdminDashboardWatch token={token} onNavigate={onNavigate} />
+          <AdminDashboardWatch token={token} onNavigate={onNavigate} modules={isSuper ? null : myModules} />
 
           {/* Quick View + Claim Amount chart */}
+          {(showQuickView || showClaimChart) && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]">
+            {showQuickView && (
+            <div className={`${showClaimChart ? 'lg:col-span-2' : 'lg:col-span-3'} bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]`}>
               <div className="flex items-center justify-between gap-3 mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 whitespace-nowrap">
                   <Users className="w-4 h-4 text-blue-600" /> Quick View
@@ -995,8 +1031,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 </div>
               )}
             </div>
+            )}
 
-            <div className="bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]">
+            {showClaimChart && (
+            <div className={`${showQuickView ? '' : 'lg:col-span-3 '}bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]`}>
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5">
                   <span className="w-8 h-8 rounded-full flex items-center justify-center bg-pink-100 text-pink-600">
@@ -1034,11 +1072,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e4d4ff] inline-block" /> Disbursed</span>
               </div>
             </div>
+            )}
           </div>
+          )}
 
           {/* Attendance Summary + Notice */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            {showAttendanceSummary && (
+            <div className={`${true ? 'lg:col-span-2' : 'lg:col-span-3'} bg-white border border-slate-200 rounded-2xl p-5 shadow-sm`}>
               <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Fingerprint className="w-4 h-4 text-blue-600" /> Attendance Summary (This Month)
               </h3>
@@ -1068,8 +1109,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 </>
               )}
             </div>
+            )}
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <div className={`${showAttendanceSummary ? '' : 'lg:col-span-3 '}bg-white border border-slate-200 rounded-2xl p-5 shadow-sm`}>
               <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Bell className="w-4 h-4 text-blue-600" /> Notice
               </h3>
@@ -1088,8 +1130,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
           </div>
 
           {/* Current Leave Balance + Coming Soon: Attendance Missed */}
+          {(showLeaveBalance || showAttendanceMissed) && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            {showLeaveBalance && (
+            <div className={`${showAttendanceMissed ? 'lg:col-span-2' : 'lg:col-span-3'} bg-white border border-slate-200 rounded-2xl p-5 shadow-sm`}>
               <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <ListChecks className="w-4 h-4 text-blue-600" /> Current Leave Balance
               </h3>
@@ -1121,8 +1165,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 </div>
               )}
             </div>
+            )}
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col">
+            {showAttendanceMissed && (
+            <div className={`${showLeaveBalance ? '' : 'lg:col-span-3 '}bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-blue-600" /> Attendance Missed
@@ -1155,11 +1201,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 </button>
               )}
             </div>
+            )}
           </div>
+          )}
 
           {/* Leave Calendar (now real, wired to leave applications + holidays) + Coming Soon: Task Status Overview */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            {showLeaveCalendar && (
+            <div className={`${true ? 'lg:col-span-2' : 'lg:col-span-3'} bg-white border border-slate-200 rounded-2xl p-5 shadow-sm`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <CalendarDays className="w-4 h-4 text-blue-600" /> Leave Calendar
@@ -1234,8 +1283,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 </>
               )}
             </div>
+            )}
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <div className={`${showLeaveCalendar ? '' : 'lg:col-span-3 '}bg-white border border-slate-200 rounded-2xl p-5 shadow-sm`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <ClipboardList className="w-4 h-4 text-blue-600" /> Task Status Overview

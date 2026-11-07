@@ -98,7 +98,11 @@ interface Stuck {
   items: { kind: string; label: string; tab: string; id: number; requester: string; detail: string | null; layer: string; step: number | null; total_steps: number | null; approvers: string[]; since: string; days_waiting: number }[];
 }
 
-export const AdminDashboardWatch: React.FC<{ token: string; onNavigate?: (tab: string) => void }> = ({ token, onNavigate }) => {
+// modules: the account's Admin modules (null = Superadmin, everything) — a
+// box is only asked for when its module is held, so no refused requests.
+export const AdminDashboardWatch: React.FC<{ token: string; onNavigate?: (tab: string) => void; modules?: string[] | null }> = ({ token, onNavigate, modules = null }) => {
+  const has = (k: string) => modules === null || modules.includes(k);
+  const ask = <T,>(k: string, path: string) => (has(k) ? get<T>(path, token) : Promise.resolve(null));
   const [stuck, setStuck] = useState<Stuck | null>(null);
   const [joiners, setJoiners] = useState<any[] | null>(null);
   const [exits, setExits] = useState<any | null>(null);
@@ -116,13 +120,13 @@ export const AdminDashboardWatch: React.FC<{ token: string; onNavigate?: (tab: s
       const month = today().slice(0, 7);
       const [s, j, e, l, mr, mb, p, c] = await Promise.all([
         get<Stuck>('/api/admin-dashboard/stuck?days=3', token),
-        get<any[]>('/api/hr-ops/joiner-onboarding', token),
-        get<any>('/api/exit-requests/pending', token),
-        get<any[]>('/api/payroll/advance-requests?status=pending', token),
-        get<any[]>('/api/mobile-bill/requests', token),
-        get<{ month: string; rows: any[] }>(`/api/mobile-bill/bills?month=${month}`, token),
-        get<any[]>('/api/job-postings', token),
-        get<any[]>('/api/job-candidates', token)
+        ask<any[]>('hr_operations', '/api/hr-ops/joiner-onboarding'),
+        ask<any>('exit_offboarding', '/api/exit-requests/pending'),
+        ask<any[]>('payroll', '/api/payroll/advance-requests?status=pending'),
+        ask<any[]>('mobile_bill', '/api/mobile-bill/requests'),
+        ask<{ month: string; rows: any[] }>('mobile_bill', `/api/mobile-bill/bills?month=${month}`),
+        ask<any[]>('recruitment', '/api/job-postings'),
+        ask<any[]>('recruitment', '/api/job-candidates')
       ]);
       // No bill imported for this month yet: show last month's.
       let bills = mb;

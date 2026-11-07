@@ -1751,11 +1751,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const PEOPLE_TABS = new Set<string>([
     'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'bill_claim', 'disbursement', 'approvals'
   ]);
+  const PEPM_LIST_TABS = new Set<string>(['imports', 'mprs', 'reports']);
   const sharedFor = (tab: string): SharedKey[] =>
     SELF_CONTAINED_TABS.has(tab)
       ? []
       : ALL_SHARED.filter(
-          (k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || tab === 'users') && (k !== 'people' || PEOPLE_TABS.has(tab))
+          (k) =>
+            (k !== 'entries' || tab === 'reports') &&
+            (k !== 'users' || tab === 'users') &&
+            (k !== 'people' || PEOPLE_TABS.has(tab)) &&
+            // Budgets / MPR Nos: only the PEPM tabs that show them (the
+            // server lets only PEPM accounts read them — requireBudgetRead).
+            ((k !== 'budgets' && k !== 'mprNumbers') || PEPM_LIST_TABS.has(tab))
         );
 
   useEffect(() => {

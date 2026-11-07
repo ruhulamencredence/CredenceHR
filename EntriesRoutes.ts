@@ -28,6 +28,7 @@ interface EntriesRouteDeps {
   // delete_trash / permanent_delete.
   requireModuleLayer: (moduleKey: any, layer: any) => any;
   requireBudgetModuleAccess: any;
+  requireBudgetRead: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   todayInDhaka: () => string;
   parseQtyNumber: (value: any) => number | null;
@@ -43,6 +44,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     requireModule,
     getAdminModules,
     requireBudgetModuleAccess,
+    requireBudgetRead,
     queryDB,
     todayInDhaka,
     parseQtyNumber,
@@ -219,10 +221,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   });
 
   // Minimal, system-wide "is this MPR No already used, and under which Job" lookup —
-  // available to every authenticated user (not just Admin), since a User needs this to
+  // available to every PEPM account (requireBudgetRead, not just Admin), since a User needs this to
   // avoid picking an MPR No someone else already entered. Deliberately leaves out
   // created_by / user_name so it doesn't turn into a way to browse other users' entries.
-  app.get("/api/jobs/next-no", authenticateToken, async (req: any, res) => {
+  app.get("/api/jobs/next-no", authenticateToken, requireBudgetRead, async (req: any, res) => {
     try {
       const budgetId = Number(req.query.budget_id);
       if (!budgetId) return res.status(400).json({ error: "budget_id is required." });

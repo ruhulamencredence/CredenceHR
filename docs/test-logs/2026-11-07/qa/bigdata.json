@@ -1,0 +1,106 @@
+{
+ "when": "2026-11-07T09:07:34.611Z",
+ "N": 2000,
+ "seeded": {
+  "employees": "2000",
+  "users": "668",
+  "attendance": "17342",
+  "leave": "167"
+ },
+ "summary": {
+  "PASS": 15,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "BD-01",
+   "status": "PASS",
+   "name": "Employees list (2000 employees)",
+   "detail": "median 68 ms, 2026 KB, status 200"
+  },
+  {
+   "id": "BD-02",
+   "status": "PASS",
+   "name": "Employee Directory (2000 employees)",
+   "detail": "median 14 ms, 748 KB, status 200"
+  },
+  {
+   "id": "BD-03",
+   "status": "PASS",
+   "name": "Payroll: employee picker (2000 employees)",
+   "detail": "median 13 ms, 211 KB, status 200"
+  },
+  {
+   "id": "BD-04",
+   "status": "PASS",
+   "name": "Payroll: Salary Structures (2000 employees)",
+   "detail": "median 24 ms, 835 KB, status 200"
+  },
+  {
+   "id": "BD-05",
+   "status": "PASS",
+   "name": "Payroll wizard: attendance summary for 2026-10 (2000 employees)",
+   "detail": "median 195 ms, 843 KB, status 200"
+  },
+  {
+   "id": "BD-06",
+   "status": "PASS",
+   "name": "Leave applications (2000 employees)",
+   "detail": "median 12 ms, 119 KB, status 200"
+  },
+  {
+   "id": "BD-07",
+   "status": "PASS",
+   "name": "Admin Dashboard extras (2000 employees)",
+   "detail": "median 15 ms, 1 KB, status 200"
+  },
+  {
+   "id": "BD-08",
+   "status": "PASS",
+   "name": "Approvals (2000 employees)",
+   "detail": "median 11 ms, 0 KB, status 200"
+  },
+  {
+   "id": "BD-09",
+   "status": "PASS",
+   "name": "Payroll for the whole month (2000 employees) in one run",
+   "detail": "2000/2000 made in 5 s (3 ms each)"
+  },
+  {
+   "id": "BD-10",
+   "status": "PASS",
+   "name": "Total net salary of the month adds up",
+   "detail": "123500000 vs expected 123500000"
+  },
+  {
+   "id": "BD-11",
+   "status": "PASS",
+   "name": "Payroll list for 2026-10 (2000 employees)",
+   "detail": "median 72 ms, 2052 KB, status 200"
+  },
+  {
+   "id": "BD-11b",
+   "status": "PASS",
+   "name": "Payroll: Employee Salary Profiles for 2026-10 (2000 employees)",
+   "detail": "median 45 ms, 858 KB, status 200"
+  },
+  {
+   "id": "BD-12",
+   "status": "PASS",
+   "name": "Payroll dashboard summary (2000 employees)",
+   "detail": "median 18 ms, 1 KB, status 200"
+  },
+  {
+   "id": "BD-13",
+   "status": "PASS",
+   "name": "/admin/employees opens with 2000 employees and search narrows the list",
+   "detail": "shown in 912 ms; search 893 ms"
+  },
+  {
+   "id": "BD-14",
+   "status": "PASS",
+   "name": "/admin/payroll opens with 2000 employees",
+   "detail": "shown in 289 ms"
+  }
+ ]
+}

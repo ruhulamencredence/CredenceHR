@@ -1,0 +1,23 @@
+import { execFileSync } from 'child_process';
+const BASE = 'http://localhost:3300';
+async function api(t, m, p, b) { const r = await fetch(BASE + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }, body: b === undefined ? undefined : JSON.stringify(b) }); const x = await r.text(); let j; try { j = JSON.parse(x); } catch { j = x; } return { s: r.status, b: j }; }
+const sql = (q) => execFileSync('mysql', ['-N', 'sweep_db', '-e', q]).toString().trim();
+const login = async (i, p) => (await api(null, 'POST', '/api/auth/login', { identifier: i, password: p })).b.token;
+const SA = await login('admin@credence.test', 'AdminPass123');
+for (const id of [137, 139]) await api(SA, 'PUT', `/api/users/${id}/bill-claim-access`, { can_view_bill_claims: true });
+sql("UPDATE users SET password_hash=(SELECT p FROM (SELECT password_hash p FROM users WHERE id=135) x), must_change_password=0 WHERE id IN (137,139)");
+const SADIA = await login('sadia.karim@credence.test', 'Credence@2026'); const NAS = await login('nasrin.sultana@credence.test', 'Credence@2026');
+const q = await api(NAS, 'GET', '/api/my-approvals'); console.log('Nasrin queue size', (Array.isArray(q.b) ? q.b : q.b.items || []).length);
+const h = await api(NAS, 'GET', '/api/bill-claims/1/history'); console.log((h.s === 403 ? 'PASS' : 'FAIL'), 'P1b unrelated employee reads another\'s claim history ->', h.s);
+const reqClaim = sql("SELECT id FROM approval_requests WHERE source_type='bill_claim' AND source_id=1");
+const a = await api(NAS, 'POST', `/api/my-approvals/${reqClaim}/act`, { action: 'approved' }); console.log((a.s >= 400 ? 'PASS' : 'FAIL'), 'P9b unrelated employee approves someone else\'s request ->', a.s, JSON.stringify(a.b).slice(0, 100));
+const today = sql("SELECT DATE(CONVERT_TZ(NOW(),'+00:00','+06:00'))");
+const cat = (await api(SADIA, 'GET', '/api/bill-claim-categories')).b?.[0]?.id;
+const neg = await api(SADIA, 'POST', '/api/bill-claims', { claim_date: today, from_date: today, to_date: today, items: [{ category_id: cat, bill_date: today, amount: -500 }] });
+console.log((neg.s >= 400 ? 'PASS' : 'FAIL'), 'P13b negative amount ->', neg.s, JSON.stringify(neg.b).slice(0, 120));
+const zero = await api(SADIA, 'POST', '/api/bill-claims', { claim_date: today, from_date: today, to_date: today, items: [{ category_id: cat, bill_date: today, amount: 0 }] });
+console.log((zero.s >= 400 ? 'PASS' : 'FAIL'), 'P13c zero amount ->', zero.s, JSON.stringify(zero.b).slice(0, 120));
+const big = await api(SADIA, 'POST', '/api/bill-claims', { claim_date: today, from_date: today, to_date: today, items: [{ category_id: cat, bill_date: today, amount: 99999999 }] });
+console.log((big.s >= 400 ? 'PASS' : 'INFO'), 'P13d 9,99,99,999 Tk bill ->', big.s, JSON.stringify(big.b).slice(0, 140));
+const fut = await api(NAS, 'POST', '/api/bill-claims', { claim_date: today, from_date: today, to_date: today, items: [{ category_id: cat, bill_date: '2027-01-01', amount: 100 }] });
+console.log((fut.s >= 400 ? 'PASS' : 'FAIL'), 'P13e bill dated in the future ->', fut.s, JSON.stringify(fut.b).slice(0, 120));
