@@ -61,12 +61,18 @@ const runs = Number(sql(`SELECT COUNT(*) FROM payrolls WHERE employee_id=${E.emp
 T('C4', runs === 1 && gens.every((g) => g.status < 500), 'Payroll run 5 times at once makes one salary (others refused, no server error)', `rows ${runs}; answers ${codes(gens)}`);
 
 // C5 — Accounts presses Pay twice at the same moment.
-await api(SA, 'POST', '/api/payroll/approval/2026-09/submit', {});
-await api(SA, 'POST', '/api/payroll/approval/2026-09/approve', {});
+// Payroll review v2: HR -> HR Director -> MD (paper copy back) -> Accounts.
+const flow = [];
+flow.push((await api(SA, 'POST', '/api/payroll/approval/2026-09/submit', {})).status);
+flow.push((await api(SA, 'POST', '/api/payroll/approval/2026-09/hrd-done', { note: 'race' })).status);
+const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+flow.push((await fetch(BASE + '/api/payroll/approval/2026-09/files?stage=md&name=md.pdf', { method: 'POST', headers: { authorization: `Bearer ${SA}`, 'content-type': 'application/pdf' }, body: pdf })).status);
+flow.push((await api(SA, 'POST', '/api/payroll/approval/2026-09/md-back', { changes: false, signed: true, received_date: '2026-10-05' })).status);
+const sheet = sql(`SELECT status FROM payroll_batches WHERE month_year='2026-09'`);
 const pays = await burst(3, () => api(SA, 'POST', '/api/payroll/approval/2026-09/pay', { payment_date: '2026-09-30', payment_method: 'Bank Transfer', payment_reference: 'RACE' }));
 const recovered = sql(`SELECT paid_amount FROM employee_advances WHERE employee_id=${E.emp}`);
 const paidEvents = Number(sql(`SELECT COUNT(*) FROM payroll_batch_events e JOIN payroll_batches b ON b.id=e.batch_id WHERE b.month_year='2026-09' AND e.action='paid'`));
-T('C5', Number(recovered) === 2000 && paidEvents === 1, 'Pay pressed 3 times at once: paid once, the loan installment recovered once', `answers ${codes(pays)}; loan recovered ${recovered} (should be 2000); 'paid' events ${paidEvents}`);
+T('C5', Number(recovered) === 2000 && paidEvents === 1, 'Pay pressed 3 times at once: paid once, the loan installment recovered once', `sheet steps ${flow.join(',')} -> ${sheet}; answers ${codes(pays)}; loan recovered ${recovered} (should be 2000); 'paid' events ${paidEvents}`);
 
 // C6 — two conveyance claims for the same day at once (one claim a day).
 const cats = (await api(E.token, 'GET', '/api/bill-claim-categories')).body;
