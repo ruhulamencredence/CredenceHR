@@ -21,6 +21,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { JobEditPanel } from './JobEditPanel';
 import { AttendanceCard } from './AttendanceCard';
@@ -1103,6 +1104,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   }, [mobileActiveSection, selectedBudget]);
   useEffect(() => {
     return () => setHeaderPageTitle(null);
+  }, []);
+  // Phone app: a few seconds after Home is up, fetch the bottom bar's pages'
+  // code (Check In/Out, Timesheet, Leave) in the background, so the first tap
+  // opens them without waiting for a download. Code only — no data is
+  // fetched and nothing is shown; each page still checks access when opened.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const t = setTimeout(() => {
+      void import('./Timesheet').catch(() => undefined);
+      void import('./LeaveReviewPage').catch(() => undefined);
+      void import('./MyClaimsCard').catch(() => undefined);
+    }, 3000);
+    return () => clearTimeout(t);
   }, []);
   // Switching mobile "pages" (tile taps, the bottom nav bar, etc.) only ever
   // toggles which section is display:block vs hidden — it never remounts or
@@ -3298,7 +3312,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           without access every page asked and got 403s). */}
       {canSeeMovementClaim && seen('claim') && (
       <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         {isDesktop ? (
         <div className="hidden md:block">
           {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Check In/Out']} onBack={() => goToMobileSection(null)} />}
@@ -3327,7 +3341,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           from this list too, without bouncing back to the Check In/Out page. */}
       {canSeeMovementClaim && seen('claims') && (
       <div className={mobileActiveSection === 'claims' ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <MyClaimsCard
           token={token}
           onBack={() => goToMobileSection(null)}
@@ -3344,7 +3358,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           (see claimsNavRequest above) — either way now its own dedicated page. */}
       {canSeeBillClaim && seen('billClaim') && (
       <div className={mobileActiveSection === 'billClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <BillClaimCard token={token} onBack={() => goToMobileSection(null)} />
         </React.Suspense>
       </div>
@@ -3362,7 +3376,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} onBack={() => goToMobileSection(null)} />
           </div>
         )}
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape={isDesktop ? 'list' : 'leave'} className="px-3 pt-3" />}>
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} active={mobileActiveSection === 'leave'} />
         </React.Suspense>
       </div>
@@ -3375,7 +3389,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Home. */}
       {seen('employeeDirectory') && (
       <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <EmployeeDirectory
           token={token}
           user={user}
@@ -3391,7 +3405,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           ungated for every account, same as Employee Directory above. */}
       {seen('noticeBoard') && (
       <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <NoticeBoard token={token} onBack={() => goToMobileSection(null)} />
         </React.Suspense>
       </div>
@@ -3407,7 +3421,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           (Timesheet's `active`), which keeps a Check In made meanwhile. */}
       {seen('timesheet') && (
         <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-          <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+          <React.Suspense fallback={<SelfBodySkeleton shape={isDesktop ? 'list' : 'timesheet'} className="px-3 pt-3" />}>
           <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} active={mobileActiveSection === 'timesheet'} />
           </React.Suspense>
         </div>

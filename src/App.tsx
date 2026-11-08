@@ -96,6 +96,7 @@ import { preloadPdfCompany } from './lib/pdfStandard';
 import { setReportEmailAccess } from './lib/reportEmail';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
+import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
@@ -1546,7 +1547,8 @@ export default function App() {
             never a blank page: the User Dashboard its own layout
             (UserDashboardSkeleton), HR Operations its page skeleton, any
             other Admin Panel tab AdminPageSkeleton, Chat / Alerts a list
-            skeleton, every other page the generic loader. An error on a
+            skeleton, a Self Service page its own shape (SelfPageSkeleton),
+            every other page the generic loader. An error on a
             page (or its code failing to download after a deploy) shows a
             card instead of a white screen (AppErrorBoundary). */}
         <AppErrorBoundary resetKey={`${isAdminView}|${selfServiceView}|${showChat}|${showAlertsPage}|${showProfilePage}|${adminActiveTab}`}>
@@ -1560,6 +1562,9 @@ export default function App() {
               <AdminPageSkeleton />
             ) : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
+            ) : !showProfilePage && selfServiceView ? (
+              // A Self Service page: its own shape and phone-header name.
+              <SelfPageSkeleton view={selfServiceView} />
             ) : (
               <AppLoader />
             )

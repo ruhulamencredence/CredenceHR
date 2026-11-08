@@ -41,6 +41,7 @@ import { PayrollApprovalPanel } from './PayrollApprovalPanel';
 import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 
 import { STD_STYLES, STD_HEAD, STD_FOOT } from '../lib/pdfStandard';
 interface PayrollModuleProps {
@@ -591,7 +592,9 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   });
   const [monthYear, setMonthYear] = useState(currentMonthYear());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(false);
+  // true from the start: fetchSummary runs on open and always ends it — no
+  // empty dashboard drawn for a frame before its loading placeholder.
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [forbidden, setForbidden] = useState(false);
 
@@ -840,7 +843,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <p className="text-xs text-slate-400 mt-1">Ask an Admin to grant Payroll access from Admin Panel → Users → Module Access.</p>
           </div>
         ) : loading && !summary ? (
-          <LoadingBlock />
+          <SelfBodySkeleton shape="payroll" />
         ) : loadError ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <p className="text-sm text-rose-600">{loadError}</p>

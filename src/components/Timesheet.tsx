@@ -15,6 +15,7 @@ import { AttendanceCorrectionModal } from './AttendanceCorrectionModal';
 import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusModal';
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { LoadingBlock } from './LoadingBlock';
 import { AttendanceGauge, DayStatus, PeriodPill, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, TodayCheckInPill, periodLabel, useIsPhone } from './TimesheetPhone';
 
@@ -704,7 +705,8 @@ useLiveRefresh(() => loadData());
             </div>
           )}
           {loading ? (
-            <LoadingBlock />
+            // Phone: the gauge and day cards' shape (SelfPageSkeleton).
+            isPhone ? <SelfBodySkeleton shape="timesheetDays" className="px-3 pt-3 pb-5" /> : <LoadingBlock />
           ) : (
             <div className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
               {/* Month Wise */}
