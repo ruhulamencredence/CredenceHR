@@ -32,8 +32,17 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // The live server answers on its domain through a reverse proxy; when
+      // the app runs on the Vite dev server (npm run dev) Vite refuses any
+      // Host it doesn't know, so the domain is listed here. (No effect on a
+      // production build — npm run build / npm start.)
+      allowedHosts: [
+        'hr.credencegroupbd.com',
+        'localhost',
+        '127.0.0.1',
+      ],
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modify — file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
