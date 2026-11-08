@@ -705,6 +705,14 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureOnboardingSchema(dbPool);
   await ensureHrReminderSchema(dbPool);
   try {
+    // Chat -> Disappearing messages (ChatRoutes.ts): turning them ON in a
+    // chat needs this switch — OFF until given in Module Access, because the
+    // messages and files are then deleted for good (no record is kept).
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_disappearing TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_disappearing column: " + err.message);
+  }
+  try {
     // Chat audio/video calls (CallRoutes.ts) — a Self Service switch, OFF
     // until a Superadmin turns it on per account in Module Access.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_calls TINYINT(1) NOT NULL DEFAULT 0`);

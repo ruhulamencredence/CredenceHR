@@ -130,6 +130,8 @@
 - **ফোনের কল-পর্দা থেকে Decline:** `POST /api/calls/push-decline` sign-in ছাড়া চলে, কিন্তু শুধু সেই কলের ৪৮-অক্ষরের এলোমেলো চাবি দিলে — চাবিটা শুধু callee-র নিজের ফোনের push-এ যায়, আর কাজ করে শুধু কল বাজতে থাকা অবস্থায়, শুধু Decline-এর জন্য (`CallRoutes.ts`)।
 - **কল আবার জোড়া লাগা:** নেট কাটার পর `call:rejoin` শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (`CallRoutes.ts`)।
 
+- **Disappearing messages:** চালু করা আলাদা switch (`users.can_use_disappearing`, শুরুতে বন্ধ) ছাড়া হয় না — server নিজে যাচাই করে; কারণ সেই message চিরতরে মুছে যায়, কোম্পানি চাইলে কাউকেই না দিয়ে chat-এর রেকর্ড রাখতে পারে।
+
 ## ৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা
 
 (`ESignRoutes.ts`, `ESignCertificate.ts`, `DocumentVaultRoutes.ts`)

@@ -115,13 +115,14 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
 // office device), each with where it was given.
 interface DayStatus {
   check_in_at: string | null;
-  check_in_source: 'remote' | 'office' | null;
+  // 'offsite': an approved off-site punch — the place is where it was really given.
+  check_in_source: 'remote' | 'office' | 'offsite' | null;
   check_in_place: string | null;
   check_in_distance_m: number | null;
   check_in_remarks: string | null;
   check_in_approval: any;
   check_out_at: string | null;
-  check_out_source: 'remote' | 'office' | null;
+  check_out_source: 'remote' | 'office' | 'offsite' | null;
   check_out_place: string | null;
   check_out_distance_m: number | null;
   check_out_remarks: string | null;
@@ -135,7 +136,8 @@ interface DayStatus {
 
 // "at Project X" / "Office device · Head Office" under a time.
 const placeLine = (source: string | null | undefined, place: string | null | undefined) => {
-  const text = source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : place ? `at ${place}` : '';
+  const text =
+    source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : source === 'offsite' ? `Off-site · ${place || 'outside the project area'}` : place ? `at ${place}` : '';
   return text ? (
     <div className="mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
       {text}
@@ -501,7 +503,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             <MapPin className="w-3 h-3" />
             {status?.check_in_at ? (
               <span>
-                {status?.check_in_distance_m != null ? `In ${status.check_in_distance_m}m from site` : 'Checked in'}
+                {status?.check_in_source === 'offsite'
+                  ? 'In: off-site (approved)'
+                  : status?.check_in_distance_m != null
+                  ? `In ${status.check_in_distance_m}m from site`
+                  : 'Checked in'}
                 {status?.check_out_distance_m != null && status?.check_out_source === 'remote' ? ` · Out ${status.check_out_distance_m}m` : ''}
               </span>
             ) : waiting ? null : (

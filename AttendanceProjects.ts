@@ -65,6 +65,11 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
     // Several check-in Projects: Out given at another Project than the In
     // (the day stays one row, on the In's Project; this says where Out was).
     "ALTER TABLE attendance ADD COLUMN check_out_project_id INT NULL DEFAULT NULL",
+    // An approved off-site In / Out: where it was really given ("Outside every
+    // project area · 9.9 km from …"), shown instead of the row's Project.
+    // Cleared by an ordinary punch.
+    "ALTER TABLE attendance ADD COLUMN check_in_place VARCHAR(255) NULL DEFAULT NULL",
+    "ALTER TABLE attendance ADD COLUMN check_out_place VARCHAR(255) NULL DEFAULT NULL",
     // Off-site attendance: an In / Out given outside the account's own
     // check-in Projects goes to the Timesheet approval chain as an
     // attendance correction, with where it was given (AttendanceRoutes.ts).

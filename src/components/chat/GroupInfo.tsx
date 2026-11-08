@@ -437,11 +437,15 @@ const DISAPPEAR_OPTIONS: [number, string][] = [
 ];
 export const disappearLabel = (secs?: number) => (DISAPPEAR_OPTIONS.find(([s]) => s === Number(secs || 0)) || DISAPPEAR_OPTIONS[0])[1];
 
-export const DisappearRow: React.FC<{ token: string; roomId: number; value: number; canEdit: boolean; onChanged: () => void }> = ({ token, roomId, value, canEdit, onChanged }) => {
+// allowOn: this account may turn them ON (users.can_use_disappearing); without
+// it the row only shows while they're already on, and only "Off" can be picked.
+export const DisappearRow: React.FC<{ token: string; roomId: number; value: number; canEdit: boolean; allowOn: boolean; onChanged: () => void }> = ({ token, roomId, value, canEdit, allowOn, onChanged }) => {
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState(value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Not allowed to turn them on and they're off: nothing to show.
+  if (!allowOn && !Number(value)) return null;
   return (
     <>
       <button
@@ -496,13 +500,14 @@ export const DisappearRow: React.FC<{ token: string; roomId: number; value: numb
         >
           <p className="text-xs text-slate-500 mb-3">New messages in this chat will disappear for everyone after the time you choose. Messages sent before this stay.</p>
           <div className="liquid-glass-inset rounded-[20px] overflow-hidden divide-y divide-slate-200/60">
-            {DISAPPEAR_OPTIONS.map(([secs, label]) => (
+            {DISAPPEAR_OPTIONS.filter(([secs]) => allowOn || secs === 0 || secs === Number(value)).map(([secs, label]) => (
               <label key={secs} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer">
                 <input type="radio" name="disappear" checked={choice === secs} onChange={() => setChoice(secs)} className="accent-violet-600" />
                 {label}
               </label>
             ))}
           </div>
+          {!allowOn && <p className="mt-2 text-[11px] text-slate-500">You can turn them off. Turning them on isn't allowed for your account.</p>}
           {error && <div className="mt-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
         </Popup>
       )}

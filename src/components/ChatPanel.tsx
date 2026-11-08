@@ -1874,6 +1874,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 roomId={activeRoom.id}
                 value={Number(profile?.room.disappear_seconds ?? activeRoom.disappear_seconds ?? 0)}
                 canEdit={activeRoom.type === 'direct' || canEditGroupInfo}
+                allowOn={user.role === 'superadmin' || !!user.can_use_disappearing}
                 onChanged={() => {
                   fetchRooms();
                   setProfileTick((t) => t + 1);

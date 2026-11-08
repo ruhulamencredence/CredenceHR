@@ -36,7 +36,7 @@ export const APP_FLAG_KEYS = [
   "can_job_edit", "can_manage_leave", "can_view_movement_claims", "can_view_bill_claims", "can_view_budget_module",
   "can_view_timesheet", "can_view_leave_application", "can_view_group_dashboard", "can_view_tasks", "can_view_mobile_bill",
   "can_view_service_book", "can_view_loan_request", "can_view_targets", "can_use_ai_assistant", "can_export_assistant_reports",
-  "can_handle_assistant_support", "can_use_calls", "can_use_chat", "can_use_mail", "can_view_mail_directory",
+  "can_handle_assistant_support", "can_use_calls", "can_use_disappearing", "can_use_chat", "can_use_mail", "can_view_mail_directory",
   "can_use_mail_groups", "can_receive_material", "can_return_dispatch", "can_give_feedback", "can_use_fingerprint",
   "can_view_roster", "can_take_break", "can_save_ride_places", "can_update_check_out", "can_add_adhoc_approver",
   "can_use_assistant_voice", "can_sign_documents", "can_view_payslip", "can_request_items", "can_email_reports",

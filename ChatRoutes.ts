@@ -1239,6 +1239,15 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         const secs = Number(b.disappear_seconds);
         if (secs !== 0 && !DISAPPEAR_LABEL[secs]) return res.status(400).json({ error: "Choose off, 24 hours, 7 days or 90 days." });
         if (!direct && !rules.canEditInfo) return res.status(403).json({ error: "Only group admins can change disappearing messages." });
+        // Turning them ON needs its own switch (users.can_use_disappearing,
+        // Module Access; off by default) — those messages are deleted for
+        // good. Turning them off is always allowed.
+        if (secs !== 0 && req.user.role !== "superadmin") {
+          const me: any[] = (await queryDB("SELECT can_use_disappearing FROM users WHERE id = ?", [req.user.id])) || [];
+          if (!Number(me[0]?.can_use_disappearing)) {
+            return res.status(403).json({ error: "Disappearing messages aren't turned on for your account. Ask your Superadmin." });
+          }
+        }
         sets.push("disappear_seconds = ?");
         vals.push(secs);
         notes.push(

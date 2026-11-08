@@ -233,13 +233,17 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         )
       : [];
     const t = (v: any) => (v ? new Date(v).getTime() : NaN);
-    type Side = { at: any; source: "remote" | "office"; place: string | null; project_id: number | null; row: any | null };
+    // "offsite": an approved off-site punch — `place` is where it was really given.
+    type Side = { at: any; source: "remote" | "office" | "offsite"; place: string | null; project_id: number | null; row: any | null };
     let inS: Side | null = null;
     // A row's check_in_at copied from an office punch (Check Out with only an
     // office In) has no GPS fix — that In is the office punch itself.
     for (const r of rows) {
       if (!r.check_in_at || r.check_in_lat == null) continue;
-      if (!inS || t(r.check_in_at) < t(inS.at)) inS = { at: r.check_in_at, source: "remote", place: r.project_name || null, project_id: Number(r.project_id), row: r };
+      if (!inS || t(r.check_in_at) < t(inS.at))
+        inS = r.check_in_place
+          ? { at: r.check_in_at, source: "offsite", place: r.check_in_place, project_id: Number(r.project_id), row: r }
+          : { at: r.check_in_at, source: "remote", place: r.project_name || null, project_id: Number(r.project_id), row: r };
     }
     if (punches[0] && (!inS || t(punches[0].punch_time) < t(inS.at))) {
       inS = { at: punches[0].punch_time, source: "office", place: punches[0].device_name || null, project_id: null, row: null };
@@ -252,7 +256,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         if (!r.check_out_at || !(t(r.check_out_at) >= inT)) continue;
         if (!outS || t(r.check_out_at) > t(outS.at)) {
           const pid = r.check_out_project_id != null ? Number(r.check_out_project_id) : Number(r.project_id);
-          outS = { at: r.check_out_at, source: "remote", place: (r.check_out_project_id != null ? r.check_out_project_name : r.project_name) || null, project_id: pid, row: r };
+          outS = r.check_out_place
+            ? { at: r.check_out_at, source: "offsite", place: r.check_out_place, project_id: pid, row: r }
+            : { at: r.check_out_at, source: "remote", place: (r.check_out_project_id != null ? r.check_out_project_name : r.project_name) || null, project_id: pid, row: r };
         }
       }
       for (const pu of punches) {
@@ -490,7 +496,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (existing.length > 0) {
         attendanceId = existing[0].id;
         await queryDB(
-          "UPDATE attendance SET check_in_at = NOW(), check_in_lat = ?, check_in_lng = ?, check_in_distance_m = ?, check_in_remarks = ? WHERE id = ?",
+          "UPDATE attendance SET check_in_at = NOW(), check_in_lat = ?, check_in_lng = ?, check_in_distance_m = ?, check_in_remarks = ?, check_in_place = NULL WHERE id = ?",
           [lat, lng, distance, remarks, existing[0].id]
         );
       } else {
@@ -604,7 +610,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         }
         await queryDB(
           `UPDATE attendance SET check_out_first_at = COALESCE(check_out_first_at, check_out_at), check_out_update_count = check_out_update_count + 1,
-                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ? WHERE id = ?`,
+                  check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ?, check_out_place = NULL WHERE id = ?`,
           [lat, lng, distance, remarks, outProject, existing[0].id]
         );
         await queryDB("DELETE FROM approval_requests WHERE source_type = 'attendance' AND event_type = 'check_out' AND source_id = ?", [existing[0].id]);
@@ -614,7 +620,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       if (existing.length > 0) {
         await queryDB(
-          "UPDATE attendance SET check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ? WHERE id = ?",
+          "UPDATE attendance SET check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ?, check_out_place = NULL WHERE id = ?",
           [lat, lng, distance, remarks, outProject, existing[0].id]
         );
         await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);

@@ -1875,22 +1875,34 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
   const outGeo = offOut ? [c.out_lat, c.out_lng, c.out_distance_m] : [null, null, null];
   const inNote = offIn ? `Off-site: ${c.in_place || "outside the project area"} (approved)` : null;
   const outNote = offOut ? `Off-site: ${c.out_place || "outside the project area"} (approved)` : null;
+  const inPlace = offIn ? String(c.in_place || "Outside the project area").slice(0, 255) : null;
+  const outPlace = offOut ? String(c.out_place || "Outside the project area").slice(0, 255) : null;
   if (existing.length > 0) {
     await queryDB(
       `UPDATE attendance SET check_in_at = COALESCE(?, check_in_at), check_out_at = COALESCE(?, check_out_at),
               check_in_lat = COALESCE(?, check_in_lat), check_in_lng = COALESCE(?, check_in_lng), check_in_distance_m = COALESCE(?, check_in_distance_m),
               check_in_remarks = COALESCE(?, check_in_remarks),
               check_out_lat = COALESCE(?, check_out_lat), check_out_lng = COALESCE(?, check_out_lng), check_out_distance_m = COALESCE(?, check_out_distance_m),
-              check_out_remarks = COALESCE(?, check_out_remarks)
+              check_out_remarks = COALESCE(?, check_out_remarks),
+              check_in_place = CASE WHEN ? THEN ? WHEN ? IS NOT NULL THEN NULL ELSE check_in_place END,
+              check_out_place = CASE WHEN ? THEN ? WHEN ? IS NOT NULL THEN NULL ELSE check_out_place END,
+              check_out_project_id = CASE WHEN ? THEN NULL ELSE check_out_project_id END
         WHERE id = ?`,
-      [c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote, existing[0].id]
+      // Off-site: the real place (and no other Project's name for the Out);
+      // an ordinary correction of that time drops an old off-site place.
+      [c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote,
+        offIn ? 1 : 0, inPlace, c.requested_check_in_at,
+        offOut ? 1 : 0, outPlace, c.requested_check_out_at,
+        offOut ? 1 : 0,
+        existing[0].id]
     );
   } else {
     await queryDB(
       `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at,
-                               check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote]
+                               check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks,
+                               check_in_place, check_out_place)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote, inPlace, outPlace]
     );
   }
 
