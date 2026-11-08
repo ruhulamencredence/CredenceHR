@@ -1,3 +1,6 @@
+-- NOTE: an early design, NOT used by CredenceHR — the chat in the app keeps
+-- its own tables (chat_rooms, chat_room_members, chat_messages …, created by
+-- ChatRoutes.ts). Kept for reference only; there is no need to import it.
 -- =====================================================================
 -- Phase 1 — Database Architecture Setup
 -- WhatsApp-style Messaging: One-to-One, Group & Community
@@ -61,12 +64,11 @@ CREATE TABLE chats (
   KEY idx_chats_created_by (created_by),
 
   CONSTRAINT fk_chats_community
-    FOREIGN KEY (community_id) REFERENCES chats(id) ON DELETE SET NULL,
+    FOREIGN KEY (community_id) REFERENCES chats(id) ON DELETE SET NULL
 
-  -- Only a 'group' may point at a community; a 'direct' or 'community'
-  -- row itself never has a parent. (MySQL 8.0.16+ enforces CHECK.)
-  CONSTRAINT chk_chats_community_only_on_group
-    CHECK (community_id IS NULL OR type = 'group')
+  -- (Only a 'group' may point at a community — checked by the application:
+  -- MySQL 8 refuses a CHECK on a column used by a foreign key's ON DELETE
+  -- action, error 3823.)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

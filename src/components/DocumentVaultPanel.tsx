@@ -1,8 +1,15 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
-import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck } from 'lucide-react';
+import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck, PenLine, Settings2 } from 'lucide-react';
+import { DocumentSignaturesPopup } from './DocumentSignaturesPopup';
+import { ESignSettingsPopup } from './ESignSettingsPopup';
+import { esignFetch, STATUS_LABEL, STATUS_CLS, type SignStatus } from '../lib/esign';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface DocumentVaultPanelProps {
   token: string;
 }
@@ -13,8 +20,13 @@ interface VaultDocument {
   user_name: string | null;
   doc_type: string;
   file_name: string;
+  file_mimetype?: string | null;
   requires_signature: boolean;
   is_signed: boolean;
+  // E-Signature (ESignRoutes.ts)
+  sign_status?: SignStatus;
+  signers_total?: number;
+  signers_done?: number;
   expiry_date: string | null;
   uploaded_at: string;
 }
@@ -42,18 +54,18 @@ function expiryBadge(expiry: string | null): { text: string; className: string }
 }
 
 // Admin Panel -> HR Advanced -> "Document Vault" — upload documents against
-// an employee (Appointment Letter, contract, certificates…), track
-// signature status and expiry (visa/license style dates), and download/view
-// the stored file. Management-only view — the backend's
-// POST /api/employee-documents/:id/sign already lets the document's own
-// employee e-sign it (typed name + timestamp), just not wired into a
-// self-service page yet, same "layer on later" note as the other 5 HR
-// Advanced panels.
+// an employee (Appointment Letter, contract, certificates…), track expiry
+// (visa/license style dates), and download/view the stored file.
+// E-Signature (DocumentSignaturesPopup.tsx, ESignRoutes.ts): send a PDF /
+// JPG / PNG for signing — the employee, or several people in order — and
+// follow it; signers sign in Self Service -> Documents to Sign.
+const signable = (d: { file_mimetype?: string | null; file_name: string }) =>
+  /pdf|png|jpe?g/i.test(String(d.file_mimetype || '')) || /\.(pdf|png|jpe?g)$/i.test(d.file_name);
 export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token }) => {
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   const [documents, setDocuments] = useState<VaultDocument[]>([]);
-  const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: number; name: string; employee_code?: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -66,6 +78,15 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [signDoc, setSignDoc] = useState<VaultDocument | null>(null);
+  // E-Signature settings — the button only for the "E-Signature settings" layer.
+  const [canEsignSettings, setCanEsignSettings] = useState(false);
+  const [showEsignSettings, setShowEsignSettings] = useState(false);
+  useEffect(() => {
+    esignFetch<{ can_edit: boolean }>(token, '/api/esign/settings')
+      .then((r) => setCanEsignSettings(!!r.can_edit))
+      .catch(() => setCanEsignSettings(false));
+  }, [token]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -73,13 +94,13 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
     try {
       const [docsRes, usersRes] = await Promise.all([
         fetch(apiUrl('/api/employee-documents'), { headers: authHeaders }),
-        fetch(apiUrl('/api/users'), { headers: authHeaders })
+        fetch(apiUrl('/api/employee-documents/people'), { headers: authHeaders })
       ]);
       const docsData = await docsRes.json();
       if (!docsRes.ok) throw new Error(docsData.error || 'Failed to load documents');
       setDocuments(Array.isArray(docsData) ? docsData : []);
       const usersData = await usersRes.json();
-      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load documents');
     } finally {
@@ -118,6 +139,15 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to upload document');
       setDocuments((prev) => [data, ...prev]);
+      // "Requires employee signature": send it to the employee to sign.
+      if (uploadRequiresSig) {
+        try {
+          await esignFetch(token, `/api/esign/documents/${data.id}/request`, { method: 'POST', body: { signers: [{ user_id: data.user_id, label: 'Employee' }], placement: 'page' } });
+          void fetchAll();
+        } catch (e: any) {
+          setError(`Uploaded, but not sent for signing: ${e.message}`);
+        }
+      }
       setShowUpload(false);
       setUploadUserId('');
       setUploadRequiresSig(false);
@@ -132,7 +162,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
   };
 
   const deleteDocument = async (id: number) => {
-    if (!window.confirm('Delete this document? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this document? This cannot be undone.'))) return;
     setDeletingId(id);
     setError('');
     try {
@@ -159,6 +189,12 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
             <p className="text-xs text-slate-500 mt-0.5 max-w-md">Store employee documents, track e-signature and expiry status.</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+        {canEsignSettings && (
+          <button type="button" onClick={() => setShowEsignSettings(true)} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl">
+            <Settings2 className="w-3.5 h-3.5" /> E-Signature settings
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowUpload((v) => !v)}
@@ -166,20 +202,22 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
         >
           <Plus className="w-3.5 h-3.5" /> Upload Document
         </button>
+        </div>
       </div>
 
       {showUpload && (
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/60 flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
-            <select value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
+            <SearchSelect value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
               <option value="">Select…</option>
-              {users.map((u) => (
+              {activePeople(users, uploadUserId).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
+                  {u.employee_code ? ` (${u.employee_code})` : ''}
                 </option>
               ))}
-            </select>
+            </SearchSelect>
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Document Type</label>
@@ -234,10 +272,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2">
           {documents.map((d) => {
@@ -254,7 +289,12 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {d.requires_signature && (
+                  {d.sign_status && d.sign_status !== 'none' ? (
+                    <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_CLS[d.sign_status]}`}>
+                      <ShieldCheck className="w-3 h-3" /> {STATUS_LABEL[d.sign_status]}
+                      {d.sign_status === 'pending' && d.signers_total ? ` ${d.signers_done}/${d.signers_total}` : ''}
+                    </span>
+                  ) : d.requires_signature && (
                     <span
                       className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                         d.is_signed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
@@ -285,6 +325,11 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
                   >
                     <Download className="w-3.5 h-3.5" />
                   </a>
+                  {signable(d) && (
+                    <button type="button" onClick={() => setSignDoc(d)} className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50" title="Signatures" aria-label={`Signatures for ${d.doc_type}`}>
+                      <PenLine className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => deleteDocument(d.id)}
@@ -300,6 +345,19 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
           })}
           {documents.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No documents uploaded yet.</p>}
         </div>
+      )}
+      {showEsignSettings && (
+        <ESignSettingsPopup
+          token={token}
+          onClose={() => setShowEsignSettings(false)}
+          onSaved={(m) => {
+            setShowEsignSettings(false);
+            setSuccess(m);
+          }}
+        />
+      )}
+      {signDoc && (
+        <DocumentSignaturesPopup token={token} docId={signDoc.id} ownerId={signDoc.user_id} ownerName={signDoc.user_name} onClose={() => setSignDoc(null)} onChanged={() => void fetchAll()} />
       )}
     </div>
   );

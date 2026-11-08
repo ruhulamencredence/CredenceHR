@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Target, Plus, X, AlertTriangle, CheckCircle2, Save } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface PerformanceManagementPanelProps {
   token: string;
 }
@@ -337,10 +338,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-6">
           <div className="flex flex-wrap gap-2 mb-5">
@@ -393,14 +391,14 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
                   </div>
                   {showNewGoal && (
                     <div className="rounded-xl border border-dashed border-blue-300 p-3 mb-3 space-y-2">
-                      <select value={newGoalUserId} onChange={(e) => setNewGoalUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
+                      <SearchSelect value={newGoalUserId} onChange={(e) => setNewGoalUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                         <option value="">Select employee…</option>
                         {users.map((u) => (
                           <option key={u.id} value={u.id}>
                             {u.name}
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       <input
                         type="text"
                         value={newGoalTitle}
@@ -462,14 +460,14 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
                   </div>
                   {showNewReview && (
                     <div className="rounded-xl border border-dashed border-blue-300 p-3 mb-3 space-y-2">
-                      <select value={newReviewUserId} onChange={(e) => setNewReviewUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
+                      <SearchSelect value={newReviewUserId} onChange={(e) => setNewReviewUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                         <option value="">Select employee…</option>
                         {users.map((u) => (
                           <option key={u.id} value={u.id}>
                             {u.name}
                           </option>
                         ))}
-                      </select>
+                      </SearchSelect>
                       <button type="button" onClick={addReview} className="w-full py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg">
                         Start
                       </button>

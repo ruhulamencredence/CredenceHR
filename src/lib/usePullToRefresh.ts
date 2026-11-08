@@ -41,8 +41,25 @@ export function usePullToRefresh(threshold = 80) {
   useEffect(() => {
     const atTop = () => (document.scrollingElement?.scrollTop ?? window.scrollY) <= 0;
 
+    // A pull that starts inside a popup / sheet / form, a text field, or any
+    // box that scrolls on its own is that box's scroll, never "reload the
+    // app" — pulling down to scroll a long claim form back up used to reload
+    // everything and lose what was typed. Only a pull on the page itself
+    // (with the page at its top) reloads.
+    const insideOwnScroll = (target: EventTarget | null): boolean => {
+      let el = target instanceof Element ? target : null;
+      while (el && el !== document.body && el !== document.documentElement) {
+        if (el.matches('input, textarea, select, [contenteditable="true"], [role="dialog"], [aria-modal="true"], .liquid-glass-backdrop, [data-no-pull-refresh]')) return true;
+        const st = window.getComputedStyle(el);
+        if (st.position === 'fixed') return true;
+        if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 1) return true;
+        el = el.parentElement;
+      }
+      return false;
+    };
+
     const onTouchStart = (e: TouchEvent) => {
-      if (!atTop()) {
+      if (!atTop() || insideOwnScroll(e.target)) {
         startYRef.current = null;
         return;
       }

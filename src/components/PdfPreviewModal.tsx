@@ -5,17 +5,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { X, FileDown, ZoomIn, ZoomOut, RotateCcw, ListChecks, FileStack } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie, useLottieJson } from './LazyLottie';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Entry } from '../types';
-import * as pdfjsLib from 'pdfjs-dist';
-// Vite-specific import: resolves to the actual URL of pdf.js's worker script
-// so it can run PDF parsing off the main thread. Without this pdf.js can't
-// find its worker at runtime and silently fails to render.
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import businessPlanAnimation from '../assets/business-plan.json';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// pdf.js and its worker are fetched when a PDF is first shown (lib/pdfjs.ts).
+import { loadPdfjs } from '../lib/pdfjs';
+const loadBusinessPlanAnimation = () => import('../assets/business-plan.json');
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.5;
@@ -74,6 +69,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
   entries,
   renderEntry
 }) => {
+  const businessPlanAnimation = useLottieJson(loadBusinessPlanAnimation, isOpen);
   useBackButtonClose(isOpen, onClose);
 
   // previewAreaRef: the fixed-size viewport the user sees (overflow-hidden — no
@@ -279,6 +275,8 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
         // pdf.js detaches/transfers the buffer it's given, so hand it a copy —
         // otherwise a second preview of the same doc (e.g. reopening after
         // Download) would fail with an already-detached-buffer error.
+        const pdfjsLib = await loadPdfjs();
+        if (cancelled) return;
         const loadingTask = pdfjsLib.getDocument({ data: pdfBytes.slice() });
         const pdf = await loadingTask.promise;
         if (cancelled || !pageStackRef.current) return;
@@ -429,7 +427,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
             {rendering && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400 text-sm">
                 <div className="w-28 h-28 sm:w-36 sm:h-36 pointer-events-none">
-                  <Lottie src={businessPlanAnimation} autoplay loop className="w-full h-full" />
+                  {businessPlanAnimation && <Lottie src={businessPlanAnimation} autoplay loop className="w-full h-full" />}
                 </div>
                 Rendering preview…
               </div>

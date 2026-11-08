@@ -14,16 +14,24 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { UserAvatar } from './UserAvatar';
+import { MultiSelectFilter } from './MultiSelectFilter';
+import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer
 } from 'lucide-react';
-import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
+import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
+import { formatDate } from '../lib/formatDate';
+import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ChatPanelProps {
   token: string;
@@ -43,7 +51,15 @@ interface ChatPanelProps {
   // whole screen, so the fixed positioning/visualViewport tracking below is
   // skipped entirely in this mode.
   variant?: 'fullscreen' | 'modal';
+  // Phone bottom bar's avatar -> the Profile page (App.tsx).
+  onOpenProfile?: () => void;
 }
+
+// Phone bottom bar: the signed-in account's own photo (initials until /
+// unless one loads).
+const MyAvatar: React.FC<{ token: string; user: User }> = ({ token, user }) => (
+  <UserAvatar userId={user.id} name={user.name} token={token} className="w-8 h-8 text-[11px] ring-2 ring-white" />
+);
 
 function timeOnly(iso: string): string {
   const d = new Date(iso);
@@ -72,7 +88,7 @@ function initialsOf(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
 }
 
-const AVATAR_PALETTE = ['#7F00FF', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
 function avatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -169,11 +185,17 @@ const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token
   return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen' }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen', onOpenProfile }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roomSearch, setRoomSearch] = useState('');
+  // Chat list: only one-to-one chats with people of these Departments (empty = all).
+  const [roomDepts, setRoomDepts] = useState<string[]>([]);
+  // Phone bottom bar: which list the room column shows, and the "+" menu.
+  const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const canCall = user.role === 'superadmin' || !!user.can_use_calls;
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -190,11 +212,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // the most recent unclosed "@" before the cursor, or null when not
   // currently mid-mention. See handleTyping/insertMention below.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  // Voice message recording — MediaRecorder over getUserMedia({audio:true}).
-  // Requires RECORD_AUDIO in AndroidManifest.xml (Capacitor's default
-  // WebChromeClient then handles the runtime permission prompt itself, no
-  // custom native code needed). Falls back to a plain alert() if denied/
-  // unavailable — text/image/file messages are unaffected either way.
+  // Voice message recording. On the native Android app this goes through
+  // the capacitor-voice-recorder plugin (native mic APIs) rather than the
+  // browser's getUserMedia — getUserMedia is gated behind a secure-context
+  // check (https:// or localhost) that a plain LAN/IP http:// origin never
+  // satisfies, so it failed with a generic "no permission" error regardless
+  // of what AndroidManifest.xml declared (the APK now only opens the https
+  // domain — see capacitor.config.ts — so calls get the secure address they
+  // need). The native plugin talks to Android's mic APIs directly and
+  // isn't subject to that browser restriction. getUserMedia + MediaRecorder
+  // is kept as the path for the web build (desktop/mobile browsers, usually
+  // served over a real https:// domain where the secure-context check
+  // passes fine). Falls back to a plain alert() if denied/unavailable
+  // either way — text/image/file messages are unaffected.
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -202,8 +232,94 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  // Swipe-to-reply on a phone: the message being pulled and how far.
+  const swipeRef = useRef<{ id: number; x: number; y: number; dx: number; el: HTMLElement | null } | null>(null);
+  // WhatsApp-style message menu / who reacted / own About (chat/ChatExtras.tsx).
+  const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
+  // Editing one of your own text messages (menu -> Edit): the box below
+  // holds its text and Send saves the change instead of sending a new one.
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  const [editError, setEditError] = useState('');
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  // Pinned messages of the open chat (bar under the header) and the pin popup.
+  const [pins, setPins] = useState<ChatPin[]>([]);
+  const [pinIndex, setPinIndex] = useState(0);
+  const [pinMsg, setPinMsg] = useState<ChatMessage | null>(null);
+  const fetchPins = useCallback(
+    async (roomId: number) => {
+      try {
+        const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/pins`), { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && roomId === activeRoomIdRef.current) setPins(await res.json());
+      } catch {
+        // Offline — the bar keeps what it showed.
+      }
+    },
+    [token]
+  );
+  const [toast, setToast] = useState('');
+  const [whoMsg, setWhoMsg] = useState<ChatMessage | null>(null);
+  const [showMyAbout, setShowMyAbout] = useState(false);
+  const [profileTick, setProfileTick] = useState(0);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const patchMessage = useCallback((id: number, patch: Partial<ChatMessage>) => setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m))), []);
+  const unsentPatch: Partial<ChatMessage> = { unsent_at: new Date().toISOString(), content: null, has_attachment: false, attachment_filename: null, reactions: [] };
+  const openAttachment = async (id: number) => {
+    const res = await fetch(apiUrl(`/api/chat/messages/${id}/attachment`), { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    window.open(URL.createObjectURL(await res.blob()), '_blank');
+  };
+  // Brings a quoted message into view (tapping a reply's quote) and flashes it.
+  const jumpToMessage = async (id: number) => {
+    // Not loaded yet (older than what is on screen): load earlier pages until it is.
+    let have = messages;
+    for (let i = 0; i < 10 && activeRoomId && !have.some((m) => m.id === id) && have.length; i++) {
+      const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?limit=100&beforeId=${have[0].id}`), { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      const older: ChatMessage[] = res && res.ok ? await res.json() : [];
+      if (!older.length) break;
+      have = [...older, ...have];
+      setMessages(have);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    const el = messagesContainerRef.current?.querySelector(`[data-msg-id="${id}"]`) as HTMLElement | null;
+    if (!el || !messagesContainerRef.current) {
+      setToast('That message is no longer in this chat.');
+      setTimeout(() => setToast(''), 2500);
+      return;
+    }
+    messagesContainerRef.current.scrollTop = el.offsetTop - messagesContainerRef.current.clientHeight / 3;
+    el.classList.add('chat-flash');
+    setTimeout(() => el.classList.remove('chat-flash'), 1200);
+  };
+  // Latest jumpToMessage (it reads `messages`), for a jump after a room opens.
+  const jumpToMessageRef = useRef(jumpToMessage);
+  jumpToMessageRef.current = jumpToMessage;
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [members, setMembers] = useState<ChatRoomMember[]>([]);
+  // Starred messages: this chat's (info panel) or every chat's (list menu).
+  const [starredFor, setStarredFor] = useState<{ roomId: number | null } | null>(null);
+  // Search inside the open chat.
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearch, setMsgSearch] = useState('');
+  const [msgResults, setMsgResults] = useState<ChatMessage[] | null>(null);
+  // A group call on in the open chat (GroupCallRoutes.ts gcall:room).
+  const [groupCall, setGroupCall] = useState<{ callId: string; kind: 'audio' | 'video'; count: number } | null>(null);
+  useEffect(() => {
+    setGroupCall(null);
+    if (!activeRoomId || !canCall) return;
+    const roomId = activeRoomId;
+    getChatSocket()?.emit('gcall:active', { roomId }, (r: any) => {
+      if (activeRoomIdRef.current === roomId) setGroupCall(r?.callId ? { callId: r.callId, kind: r.kind, count: Number(r.count || 0) } : null);
+    });
+  }, [activeRoomId, canCall]);
+  // Join a group with an invite link — opened from the list, or by a link
+  // (…/chat?invite=CODE) this page was opened with.
+  const [joinCode, setJoinCode] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('invite');
+    } catch {
+      return null;
+    }
+  });
   const [showNewChatModal, setShowNewChatModal] = useState<'direct' | 'group' | 'community' | null>(null);
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [showLinkGroup, setShowLinkGroup] = useState(false);
@@ -244,8 +360,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   useBackButtonClose(!!showNewChatModal, () => setShowNewChatModal(null));
   useBackButtonClose(showInfoPanel, () => setShowInfoPanel(false));
+  useBackButtonClose(!!menuMsg, () => setMenuMsg(null));
 
   const activeRoom = useMemo(() => rooms.find((r) => r.id === activeRoomId) || null, [rooms, activeRoomId]);
+  // Contact / group info page: About, work details, shared media, common groups.
+  const profile = useChatProfile(token, showInfoPanel ? activeRoomId : null, profileTick);
 
   const fetchRooms = useCallback(async () => {
     try {
@@ -311,7 +430,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           last_message_type: msg.message_type,
           last_message_sender_id: msg.sender_id,
           last_message_at: msg.created_at,
-          unread_count: isActive || msg.sender_id === user.id ? next[idx].unread_count : next[idx].unread_count + 1
+          unread_count: isActive || msg.sender_id === user.id || msg.message_type === 'system' ? next[idx].unread_count : next[idx].unread_count + 1
         };
         const [room] = next.splice(idx, 1);
         next.unshift(room);
@@ -352,31 +471,77 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       if (roomId === activeRoomIdRef.current) fetchMembers(roomId);
       fetchRooms();
     };
+    // Group name / photo / description / settings changed.
+    const onRoomUpdated = ({ roomId }: { roomId: number }) => {
+      fetchRooms();
+      if (roomId === activeRoomIdRef.current) setProfileTick((t) => t + 1);
+    };
+    socket.on('room_updated', onRoomUpdated);
+    const onGroupCall = (d: { roomId: number; callId: string | null; kind?: 'audio' | 'video'; count?: number }) => {
+      if (d.roomId !== activeRoomIdRef.current) return;
+      setGroupCall(d.callId ? { callId: d.callId, kind: d.kind || 'audio', count: d.count || 0 } : null);
+    };
+    socket.on('gcall:room', onGroupCall);
 
+    const onReactions = ({ roomId, messageId, reactions }: { roomId: number; messageId: number; reactions: ChatReaction[] }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { reactions });
+    };
+    const onUnsent = ({ roomId, messageId }: { roomId: number; messageId: number }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { unsent_at: new Date().toISOString(), content: null, has_attachment: false, attachment_filename: null, reactions: [] });
+      setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: 'This message was deleted', last_message_type: 'text' } : r)));
+    };
     socket.on('receive_message', onReceive);
+    const onEdited = ({ roomId, messageId, content, edited_at }: { roomId: number; messageId: number; content: string; edited_at: string }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { content, edited_at });
+      setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: content } : r)));
+    };
+    const onPins = ({ roomId }: { roomId: number }) => {
+      if (roomId === activeRoomIdRef.current) void fetchPins(roomId);
+    };
+    socket.on('pins_changed', onPins);
+    socket.on('message_reactions', onReactions);
+    socket.on('message_edited', onEdited);
+    socket.on('message_unsent', onUnsent);
     socket.on('user_typing', onTyping);
     socket.on('message_read', onRead);
     socket.on('presence_change', onPresence);
     socket.on('members_changed', onMembersChanged);
+    // Who is online right now — presence_change only reports changes, and
+    // the socket is usually connected (for calls) before Chat opens.
+    const askPresence = () => socket.emit('presence_list', (ids: number[]) => Array.isArray(ids) && setOnlineUserIds(new Set(ids.map(Number))));
+    askPresence();
+    socket.on('connect', askPresence);
     return () => {
+      socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
+      socket.off('pins_changed', onPins);
+      socket.off('message_reactions', onReactions);
+      socket.off('message_edited', onEdited);
+      socket.off('message_unsent', onUnsent);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
+      socket.off('room_updated', onRoomUpdated);
+      socket.off('gcall:room', onGroupCall);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchRooms, fetchMembers, user.id]);
+  }, [fetchRooms, fetchMembers, user.id, patchMessage, fetchPins]);
 
   const openRoom = useCallback(
     async (roomId: number) => {
       setActiveRoomId(roomId);
       setShowInfoPanel(false);
       setReplyTo(null);
+      setEditing(null);
+      setPins([]);
+      setPinIndex(0);
       setOtherReadMessageId(null);
       setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
+      activeRoomIdRef.current = roomId;
+      void fetchPins(roomId);
       // Members are needed up-front for @mention autocomplete in a group/
       // community, not just when the info panel is opened — see
       // handleTyping/mentionCandidates below.
@@ -421,7 +586,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const lastOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].sender_id === user.id) return messages[i].id;
+      if (messages[i].sender_id === user.id && messages[i].message_type !== 'system') return messages[i].id;
     }
     return null;
   }, [messages, user.id]);
@@ -580,6 +745,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const content = messageInput.trim();
     if (!content || !activeRoomId || sending) return;
     setSending(true);
+    if (editing) {
+      setEditError('');
+      fetch(apiUrl(`/api/chat/messages/${editing.id}/edit`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content })
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not edit the message');
+          if (!data.unchanged) setMessages((prev) => prev.map((m) => (m.id === editing.id ? { ...m, content: data.content, edited_at: data.edited_at } : m)));
+          setEditing(null);
+          setMessageInput('');
+        })
+        .catch((e) => setEditError(e.message))
+        .finally(() => setSending(false));
+      return;
+    }
     const socket = getChatSocket();
     const payload = { roomId: activeRoomId, content, replyToId: replyTo?.id || null };
     const finish = () => {
@@ -608,7 +791,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         })
         .catch(() => finish());
     }
-  }, [messageInput, activeRoomId, sending, replyTo, token]);
+  }, [messageInput, activeRoomId, sending, replyTo, token, editing]);
 
   // Message box grows with its content (now a <textarea>, so Enter can make
   // a new line instead of always sending — see the onKeyDown below) up to a
@@ -629,30 +812,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const uploadAttachmentMessage = useCallback(
     async (params: { blob: Blob; messageType: 'image' | 'file' | 'audio'; filename: string; mimetype: string }) => {
       if (!activeRoomId) return;
-      if (params.blob.size > 5 * 1024 * 1024) {
-        alert('Attachment must be less than 5MB.');
+      if (params.blob.size > 50 * 1024 * 1024) {
+        alert('Attachment must be 50 MB or less.');
         return;
       }
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = reject;
-        reader.readAsDataURL(params.blob);
-      });
       try {
-        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages`), {
+        // The file itself is the body (no base64) — up to 50 MB.
+        const qs = new URLSearchParams({ messageType: params.messageType, filename: params.filename, mimetype: params.mimetype || 'application/octet-stream' });
+        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?${qs}`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            messageType: params.messageType,
-            attachment_base64: base64,
-            attachment_mimetype: params.mimetype,
-            attachment_filename: params.filename
-          })
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+          body: params.blob
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
-          setMessages((prev) => [...prev, message]);
+          // The server also broadcasts this new message over the socket's
+          // 'receive_message' event (see the onReceive handler above) to
+          // every room member, sender included — whichever of the two
+          // arrives second needs to no-op instead of adding a duplicate.
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+        } else {
+          const d = await res.json().catch(() => ({}));
+          alert(d.error || (res.status === 413 ? 'Attachment must be 50 MB or less.' : 'Could not send the attachment.'));
         }
       } catch {
         alert('Could not send — check your connection and try again.');
@@ -673,17 +854,51 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 
   const sendAudioMessage = useCallback(
-    (blob: Blob) =>
-      uploadAttachmentMessage({
+    (blob: Blob) => {
+      // Native recordings come back as audio/aac; web recordings as
+      // audio/webm — match the filename extension to whichever this is so
+      // it at least previews sensibly if ever downloaded/opened directly.
+      const ext = blob.type.includes('aac') ? 'aac' : 'webm';
+      return uploadAttachmentMessage({
         blob,
         messageType: 'audio',
-        filename: 'voice-message.webm',
+        filename: `voice-message.${ext}`,
         mimetype: blob.type || 'audio/webm'
-      }),
+      });
+    },
     [uploadAttachmentMessage]
   );
 
+  // Converts the plugin's base64 recording (no data: prefix) into a Blob,
+  // the same shape sendAudioMessage/uploadAttachmentMessage already expect
+  // from the web MediaRecorder path.
+  function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    return new Blob([bytes], { type: mimeType });
+  }
+
   const startRecording = useCallback(async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { value: canRecord } = await VoiceRecorder.canDeviceVoiceRecord();
+        if (!canRecord) throw new Error('Device cannot record audio');
+        let { value: hasPermission } = await VoiceRecorder.hasAudioRecordingPermission();
+        if (!hasPermission) {
+          ({ value: hasPermission } = await VoiceRecorder.requestAudioRecordingPermission());
+        }
+        if (!hasPermission) throw new Error('Microphone permission denied');
+        await VoiceRecorder.startRecording();
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      } catch {
+        alert('Could not access the microphone — check that this app has microphone permission.');
+      }
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
@@ -706,6 +921,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // send=false discards the recording (mic X button); send=true uploads it.
   const stopRecording = useCallback(
     (send: boolean) => {
+      if (Capacitor.isNativePlatform()) {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        void (async () => {
+          try {
+            const result = await VoiceRecorder.stopRecording();
+            if (send && result.value?.recordDataBase64) {
+              const blob = base64ToBlob(result.value.recordDataBase64, result.value.mimeType || 'audio/aac');
+              void sendAudioMessage(blob);
+            }
+          } catch {
+            // Discarded (send=false) or nothing was actually recorded —
+            // nothing to send either way.
+          }
+        })();
+        return;
+      }
+
       const recorder = mediaRecorderRef.current;
       if (!recorder) return;
       recorder.onstop = () => {
@@ -734,6 +970,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (Capacitor.isNativePlatform()) {
+        VoiceRecorder.stopRecording().catch(() => {
+          // Nothing was recording — expected the vast majority of the time.
+        });
+      }
     };
   }, []);
 
@@ -760,11 +1001,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const filteredRooms = useMemo(() => {
     const q = roomSearch.trim().toLowerCase();
-    if (!q) return rooms;
-    return rooms.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id]);
+    // Groups: groups and communities; Calls: one-to-one chats (each with
+    // call buttons). Chats shows everything.
+    const byTab = rooms.filter((r) =>
+      listTab === 'groups' ? r.type !== 'direct' : listTab === 'calls' ? r.type === 'direct' && !!r.other_participant : true
+    );
+    const deptOf = new Map(directory.map((d) => [d.id, (d.department || '').trim()]));
+    const byDept = roomDepts.length
+      ? byTab.filter((r) => r.type === 'direct' && !!r.other_participant && roomDepts.includes(deptOf.get(r.other_participant.id) || ''))
+      : byTab;
+    if (!q) return byDept;
+    return byDept.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
+  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory]);
+  const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
+    window.dispatchEvent(
+      new CustomEvent('credence:start-call', {
+        detail: { roomId: room.id, peer: { id: room.other_participant!.id, name: roomDisplayName(room, user.id) }, kind }
+      })
+    );
 
   const isRoomAdmin = activeRoom?.my_role === 'admin';
+  // "Only admins can send messages" (group setting) — the server refuses it too.
+  const cannotSend = !!activeRoom && activeRoom.type !== 'direct' && !!Number(activeRoom.send_admins_only) && !isRoomAdmin && user.role !== 'superadmin';
+  const canEditGroupInfo = !!activeRoom && activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin' || !Number(activeRoom.info_admins_only));
   const typingNamesInActiveRoom = activeRoomId ? [...(typingByRoom[activeRoomId] || [])] : [];
   const isTypingInActiveRoom = typingNamesInActiveRoom.length > 0;
 
@@ -781,13 +1040,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       }
     >
       {/* Sidebar: room list */}
-      <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-bold text-slate-900 text-lg flex-1">Chats</h2>
-          <div className="relative group">
+          <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
+          <button type="button" onClick={() => setStarredFor({ roomId: null })} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full" title="Starred messages" aria-label="Starred messages">
+            <Star className="w-5 h-5" />
+          </button>
+          <button type="button" onClick={() => setShowMyAbout(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full" title="My chat profile (About)" aria-label="My chat profile">
+            <UserRound className="w-5 h-5" />
+          </button>
+          <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
             <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
             </button>
@@ -800,6 +1065,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </button>
               <button type="button" onClick={() => setShowNewChatModal('community')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-slate-400" /> New Community
+              </button>
+              <button type="button" onClick={() => setJoinCode('')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
+                <LinkIcon className="w-4 h-4 text-slate-400" /> Join with a link
               </button>
             </div>
           </div>
@@ -815,15 +1083,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          {listTab !== 'groups' && directory.some((d) => d.department) && (
+            <div className="mt-2 flex items-center gap-2">
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={roomDepts} onChange={setRoomDepts} width={260} />
+              {roomDepts.length > 0 && (
+                <button type="button" onClick={() => setRoomDepts([])} className="text-xs font-semibold text-slate-500 hover:underline">
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {filteredRooms.length === 0 && (
-            <div className="p-8 text-center text-sm text-slate-400">No chats yet — tap + to start one.</div>
+            <div className="p-8 text-center text-sm text-slate-400">
+              {roomDepts.length > 0
+                ? 'No chat with anyone in these departments yet — tap + to start one.'
+                : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+            </div>
           )}
           {filteredRooms.map((room) => {
             const name = roomDisplayName(room, user.id);
             const isOnline = room.type === 'direct' && room.other_participant && onlineUserIds.has(room.other_participant.id);
-            const previewPrefix = room.last_message_sender_id === user.id ? 'You: ' : '';
+            const previewPrefix = room.last_message_sender_id === user.id && room.last_message_type !== 'system' ? 'You: ' : '';
             const previewText =
               room.last_message_type === 'image'
                 ? '📷 Photo'
@@ -842,14 +1124,42 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }`}
               >
                 <div className="relative shrink-0">
-                  <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-                    style={{ background: avatarColor(name) }}
-                  >
-                    {room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(name)}
-                  </div>
+                  {room.type !== 'direct' && !!Number(room.has_avatar) ? (
+                    <GroupAvatar token={token} room={room} color={avatarColor(name)} className="w-11 h-11" />
+                  ) : (
+                  <UserAvatar
+                    userId={room.type === 'direct' ? room.other_participant?.id : null}
+                    name={name}
+                    token={token}
+                    className="w-11 h-11 text-sm"
+                    fallback={room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                  />
+                  )}
                   {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
                 </div>
+                {listTab === 'calls' && canCall ? (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <span className="block font-semibold text-sm text-slate-900 truncate">{name}</span>
+                      <span className="text-xs text-slate-500">{isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    {(['audio', 'video'] as const).map((k) => (
+                      <span
+                        key={k}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startCall(room, k);
+                        }}
+                        className="p-2 rounded-full text-violet-600 bg-violet-50 active:bg-violet-100"
+                        aria-label={k === 'audio' ? `Audio call ${name}` : `Video call ${name}`}
+                      >
+                        {k === 'audio' ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                      </span>
+                    ))}
+                  </>
+                ) : (
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline gap-2">
                     <span className="font-semibold text-sm text-slate-900 truncate">{name}</span>
@@ -857,21 +1167,116 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </div>
                   <div className="flex justify-between items-center gap-2">
                     <span className="text-xs text-slate-500 truncate">{previewPrefix}{previewText}</span>
-                    {room.unread_count > 0 && (
-                      <span className="shrink-0 bg-emerald-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                        {room.unread_count > 99 ? '99+' : room.unread_count}
-                      </span>
-                    )}
+                    <span className="shrink-0 flex items-center gap-1">
+                      {isMuted(room) && <BellOff className="w-3.5 h-3.5 text-slate-400" aria-label="Muted" />}
+                      {room.unread_count > 0 && (
+                        <span className={`${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1`}>
+                          {room.unread_count > 99 ? '99+' : room.unread_count}
+                        </span>
+                      )}
+                    </span>
                   </div>
                 </div>
+                )}
               </button>
             );
           })}
         </div>
+
+        {/* Phone bottom bar (full-screen Chat only): a floating glass pill
+            with Chats / Groups / Calls / your photo — the active one widens
+            into a labelled pill — and a round "+" beside it for a new chat,
+            group or community. */}
+        {variant === 'fullscreen' && (
+          <div className="md:hidden absolute left-0 right-0 bottom-0 px-4 pb-[calc(1rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] pt-2 flex items-center gap-3 pointer-events-none">
+            <div className="pointer-events-auto flex-1 flex items-center justify-between gap-1 p-1.5 rounded-full bg-white/75 backdrop-blur-xl border border-white shadow-[0_10px_30px_-10px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.9)]">
+              {([
+                ['chats', 'Chats', MessageSquare],
+                ['groups', 'Groups', Users],
+                ...(canCall ? [['calls', 'Calls', Phone]] : [])
+              ] as [typeof listTab, string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => {
+                const on = listTab === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setListTab(k)}
+                    aria-label={label}
+                    aria-pressed={on}
+                    className={`flex items-center justify-center gap-2 h-11 rounded-full transition-all ${
+                      on ? 'px-4 bg-slate-900/[0.06] text-slate-900 font-semibold text-sm' : 'w-12 text-slate-400'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 ${on ? 'text-slate-900' : ''}`} />
+                    {on && <span>{label}</span>}
+                  </button>
+                );
+              })}
+              {onOpenProfile && (
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  aria-label="My profile"
+                  className="w-12 h-11 flex items-center justify-center rounded-full"
+                >
+                  <MyAvatar token={token} user={user} />
+                </button>
+              )}
+            </div>
+            <div className="pointer-events-auto relative shrink-0">
+              {newMenuOpen && (
+                <>
+                  <div className="fixed inset-0" onClick={() => setNewMenuOpen(false)} />
+                  {/* .liquid-glass sets position: relative, so a wrapper places it. */}
+                  <div className="absolute right-0 bottom-full mb-3 w-48">
+                  <div className="liquid-glass liquid-glass-in rounded-3xl p-1.5">
+                    {([
+                      ['direct', 'New Chat', MessageSquare],
+                      ['group', 'New Group', Users],
+                      ['community', 'New Community', Shield]
+                    ] as ['direct' | 'group' | 'community', string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => {
+                          setNewMenuOpen(false);
+                          setShowNewChatModal(k);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                      >
+                        <Icon className="w-4 h-4 text-violet-600" /> {label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewMenuOpen(false);
+                        setJoinCode('');
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                    >
+                      <LinkIcon className="w-4 h-4 text-violet-600" /> Join with a link
+                    </button>
+                  </div>
+                  </div>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewMenuOpen((v) => !v)}
+                aria-label="New chat"
+                aria-expanded={newMenuOpen}
+                className="liquid-glass-button w-14 h-14 rounded-full flex items-center justify-center"
+              >
+                <Plus className={`w-6 h-6 transition-transform ${newMenuOpen ? 'rotate-45' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main chat window */}
-      <div className={`flex-1 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
+      <div className={`flex-1 min-w-0 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
         {!activeRoom ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-2">
             <MessageSquare className="w-12 h-12" />
@@ -879,26 +1284,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           </div>
         ) : (
           <>
-            <div className="p-3 bg-white border-b border-slate-200 flex items-center gap-3">
+            {/* In the docked popup (variant 'modal') its own close button sits
+                over the top-right corner, so the header keeps clear of it. */}
+            <div className={`p-3 bg-white/85 border-b border-violet-100/70 flex items-center gap-3 ${variant === 'modal' ? 'pr-12' : ''}`}>
               <button type="button" onClick={() => setActiveRoomId(null)} className="p-1.5 -ml-1 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (activeRoom.type !== 'direct') {
-                    setShowInfoPanel((v) => !v);
-                    fetchMembers(activeRoom.id);
-                  }
+                  setShowInfoPanel((v) => !v);
+                  setProfileTick((t) => t + 1);
+                  if (activeRoom.type !== 'direct') fetchMembers(activeRoom.id);
                 }}
                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
               >
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0"
-                  style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
-                >
-                  {activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(roomDisplayName(activeRoom, user.id))}
-                </div>
+                {activeRoom.type !== 'direct' && !!Number(activeRoom.has_avatar) ? (
+                  <GroupAvatar token={token} room={activeRoom} color={avatarColor(roomDisplayName(activeRoom, user.id))} className="w-10 h-10" />
+                ) : (
+                <UserAvatar
+                  userId={activeRoom.type === 'direct' ? activeRoom.other_participant?.id : null}
+                  name={roomDisplayName(activeRoom, user.id)}
+                  token={token}
+                  className="w-10 h-10 text-sm"
+                  fallback={activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                />
+                )}
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-slate-900 truncate">{roomDisplayName(activeRoom, user.id)}</h3>
                   <span className="text-xs text-slate-500">
@@ -907,68 +1318,327 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       : activeRoom.type === 'direct'
                       ? activeRoom.other_participant && onlineUserIds.has(activeRoom.other_participant.id)
                         ? 'Online'
-                        : 'Offline'
+                        : 'Tap for contact info'
                       : 'Tap for group info'}
                   </span>
                 </div>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMsgSearchOpen((v) => !v);
+                  setMsgSearch('');
+                  setMsgResults(null);
+                }}
+                className="p-2 rounded-full text-slate-500 hover:bg-slate-100 shrink-0"
+                aria-label="Search in this chat"
+                title="Search in this chat"
+              >
+                <Search className="w-5 h-5" />
+              </button>
+              {/* Audio / video call (CallLayer.tsx) — one-to-one chats, for
+                  accounts with Calls access. */}
+              {/* Group call (GroupCallLayer.tsx) — groups / communities, same Calls access. */}
+              {activeRoom.type !== 'direct' && canCall && !cannotSend && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          groupCall?.callId
+                            ? new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                            : new CustomEvent('credence:start-group-call', { detail: { roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: k } })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                      title={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {activeRoom.type === 'direct' && activeRoom.other_participant && (user.role === 'superadmin' || user.can_use_calls) && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent('credence:start-call', {
+                            detail: {
+                              roomId: activeRoom.id,
+                              peer: { id: activeRoom.other_participant!.id, name: roomDisplayName(activeRoom, user.id) },
+                              kind: k,
+                            },
+                          })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Audio call' : 'Video call'}
+                      title={k === 'audio' ? 'Audio call' : 'Video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
+            {groupCall?.callId && activeRoom.type !== 'direct' && canCall && (
+              <div className="px-3 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="flex-1 min-w-0 truncate text-emerald-800">
+                  Group {groupCall.kind === 'video' ? 'video' : 'audio'} call on · {groupCall.count} joined
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                    )
+                  }
+                  className="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5"
+                >
+                  Join
+                </button>
+              </div>
+            )}
+            {msgSearchOpen && (
+              <div className="relative px-3 py-2 bg-white border-b border-slate-200">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    autoFocus
+                    value={msgSearch}
+                    onChange={(e) => {
+                      const q = e.target.value;
+                      setMsgSearch(q);
+                      if (q.trim().length < 2) return setMsgResults(null);
+                      const roomId = activeRoom.id;
+                      fetch(apiUrl(`/api/chat/rooms/${roomId}/search?q=${encodeURIComponent(q.trim())}`), { headers: { Authorization: `Bearer ${token}` } })
+                        .then((r) => (r.ok ? r.json() : []))
+                        .then((rows) => activeRoomIdRef.current === roomId && setMsgResults(Array.isArray(rows) ? rows : []))
+                        .catch(() => {});
+                    }}
+                    placeholder="Search messages and files…"
+                    aria-label="Search messages in this chat"
+                    className="w-full pl-8 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                  <button type="button" onClick={() => setMsgSearchOpen(false)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400" aria-label="Close search">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                {msgResults && (
+                  <div className="absolute left-3 right-3 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-72 overflow-y-auto divide-y divide-slate-100">
+                    {msgResults.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-slate-400">No messages found.</div>
+                    ) : (
+                      msgResults.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setMsgResults(null);
+                            void jumpToMessage(m.id);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50"
+                        >
+                          <div className="flex justify-between gap-2 text-[11px] text-slate-500">
+                            <span className="font-semibold truncate">{m.sender_id === user.id ? 'You' : m.sender_name}</span>
+                            <span className="shrink-0">{formatDate(m.created_at)} {timeOnly(m.created_at)}</span>
+                          </div>
+                          <div className="text-sm text-slate-800 line-clamp-2 break-words">{m.content || `📎 ${m.attachment_filename || 'File'}`}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <PinnedBar
+              pins={pins}
+              index={pinIndex}
+              meId={user.id}
+              onTap={() => {
+                const p = pins[pinIndex % pins.length];
+                if (p) void jumpToMessage(p.message.id);
+                setPinIndex((i) => (i + 1) % Math.max(1, pins.length));
+              }}
+            />
+            {/* The account's wallpaper for this chat (Contact / Group info ->
+                Chat wallpaper); "Soft" — a soft lavender wash — when none is
+                picked. */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-2"
+              style={{ background: wallpaperCss(activeRoom.wallpaper) }}
+            >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
+                // "Rahim added Karim", "… changed the group name": a centred note.
+                if (msg.message_type === 'system')
+                  return (
+                    <div key={msg.id} data-msg-id={msg.id} className="flex justify-center py-1">
+                      <span className="max-w-[85%] text-center text-[11px] leading-snug text-slate-600 bg-white/85 border border-white rounded-xl px-3 py-1.5 shadow-sm">
+                        {msg.content}
+                      </span>
+                    </div>
+                  );
                 const isMe = msg.sender_id === user.id;
                 const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
+                const unsent = !!msg.unsent_at;
+                // Long-press (phone) or right-click / the ⌄ button (computer)
+                // opens the message menu: react, reply, copy, delete.
+                const openMenu = () => setMenuMsg(msg);
+                const cancelPress = () => {
+                  if (longPressRef.current) clearTimeout(longPressRef.current);
+                  longPressRef.current = null;
+                };
+                // Not in a group where only admins may send (the box is hidden there).
+                const startReply = () => {
+                  if (cannotSend) return;
+                  setEditing(null);
+                  setReplyTo(msg);
+                  messageInputRef.current?.focus();
+                };
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className="max-w-[75%] md:max-w-md">
+                  <div
+                    key={msg.id}
+                    data-msg-id={msg.id}
+                    className={`group/row flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}
+                    // Phone: pull a message to the right to reply (like WhatsApp).
+                    onTouchStart={(e) => {
+                      if (unsent) return;
+                      swipeRef.current = { id: msg.id, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, el: e.currentTarget.querySelector('[data-swipe]') as HTMLElement | null };
+                    }}
+                    onTouchMove={(e) => {
+                      const sw = swipeRef.current;
+                      if (!sw || sw.id !== msg.id) return;
+                      const dx = e.touches[0].clientX - sw.x;
+                      const dy = Math.abs(e.touches[0].clientY - sw.y);
+                      if (dy > 30 && Math.abs(dx) < dy) {
+                        swipeRef.current = null;
+                        if (sw.el) sw.el.style.transform = '';
+                        return;
+                      }
+                      sw.dx = Math.max(0, Math.min(80, dx));
+                      if (sw.el) sw.el.style.transform = sw.dx ? `translateX(${sw.dx}px)` : '';
+                    }}
+                    onTouchEnd={() => {
+                      const sw = swipeRef.current;
+                      swipeRef.current = null;
+                      if (!sw || sw.id !== msg.id) return;
+                      if (sw.el) {
+                        sw.el.style.transition = 'transform 160ms ease-out';
+                        sw.el.style.transform = '';
+                        setTimeout(() => sw.el && (sw.el.style.transition = ''), 180);
+                      }
+                      if (sw.dx >= 56) {
+                        navigator.vibrate?.(10);
+                        startReply();
+                      }
+                    }}
+                  >
+                    {/* Computer: Reply / Forward beside your own message. */}
+                    {isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
+                    <div data-swipe className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       {!isMe && activeRoom.type !== 'direct' && (
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
                       <div
-                        className={`px-3 py-2 rounded-2xl text-sm shadow-sm ${
-                          isMe ? 'bg-[#D9FDD3] text-slate-800 rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm'
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          openMenu();
+                        }}
+                        onTouchStart={() => {
+                          cancelPress();
+                          longPressRef.current = setTimeout(() => {
+                            longPressRef.current = null;
+                            navigator.vibrate?.(15);
+                            openMenu();
+                          }, 450);
+                        }}
+                        onTouchEnd={cancelPress}
+                        onTouchMove={cancelPress}
+                        className={`group relative px-3 py-2 rounded-[18px] text-sm text-slate-800 border select-none md:select-text ${
+                          isMe
+                            ? 'border-[rgba(var(--g-accent-rgb,127,0,255),0.12)] rounded-br-[4px] shadow-[0_2px_8px_-5px_rgba(31,38,135,0.2)]'
+                            : 'bg-white/90 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
+                        // Own bubbles: the accent tint over white, so a patterned wallpaper doesn't show through.
+                        style={isMe ? { background: 'linear-gradient(rgba(var(--g-accent-rgb,127,0,255),0.11), rgba(var(--g-accent-rgb,127,0,255),0.11)), rgba(255,255,255,0.94)' } : undefined}
                       >
-                        {msg.reply_to_id && (
-                          <div className="mb-1.5 pl-2 border-l-2 border-slate-300 text-xs text-slate-500">
-                            <div className="font-semibold">{msg.reply_to_sender_name}</div>
-                            <div className="truncate">{msg.reply_to_content}</div>
-                          </div>
+                        <button
+                          type="button"
+                          onClick={openMenu}
+                          className="hidden md:flex absolute top-1 right-1 w-6 h-6 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          aria-label="Message menu"
+                          title="React, reply, delete"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                        {unsent ? (
+                          <p className="italic text-slate-400 flex items-center gap-1.5 pr-2">
+                            <Ban className="w-3.5 h-3.5" /> {isMe ? 'You deleted this message' : 'This message was deleted'}
+                          </p>
+                        ) : (
+                          <>
+                            {!!msg.is_forwarded && (
+                              <div className="flex items-center gap-1 text-[11px] italic text-slate-400 mb-0.5">
+                                <Forward className="w-3 h-3" /> Forwarded
+                              </div>
+                            )}
+                            {msg.reply_to_id && (
+                              <button
+                                type="button"
+                                onClick={() => jumpToMessage(msg.reply_to_id!)}
+                                className="block w-full text-left mb-1.5 pl-2 pr-1 py-1 border-l-[3px] border-[rgba(var(--g-accent-rgb,127,0,255),0.55)] rounded-md bg-black/[0.04] text-xs text-slate-500"
+                              >
+                                <div className="font-semibold text-[rgb(var(--g-accent-rgb,127,0,255))]">{msg.reply_to_sender_name}</div>
+                                <div className="truncate">{msg.reply_to_content}</div>
+                              </button>
+                            )}
+                            {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
+                            {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
+                            {msg.message_type === 'file' && msg.has_attachment && (
+                              <a
+                                href="#"
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  await openAttachment(msg.id);
+                                }}
+                                className="flex items-center gap-2 text-blue-700 underline"
+                              >
+                                <Paperclip className="w-4 h-4" /> {msg.attachment_filename || 'Attachment'}
+                              </a>
+                            )}
+                            {msg.content && <p className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content, members)}</p>}
+                          </>
                         )}
-                        {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
-                        {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
-                        {msg.message_type === 'file' && msg.has_attachment && (
-                          <a
-                            href="#"
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              const res = await fetch(apiUrl(`/api/chat/messages/${msg.id}/attachment`), {
-                                headers: { Authorization: `Bearer ${token}` }
-                              });
-                              if (!res.ok) return;
-                              const blob = await res.blob();
-                              window.open(URL.createObjectURL(blob), '_blank');
-                            }}
-                            className="flex items-center gap-2 text-blue-700 underline"
-                          >
-                            <Paperclip className="w-4 h-4" /> {msg.attachment_filename || 'Attachment'}
-                          </a>
-                        )}
-                        {msg.content && <p className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content, members)}</p>}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
-                          <button
-                            type="button"
-                            onClick={() => setReplyTo(msg)}
-                            className="opacity-0 hover:opacity-100 focus:opacity-100 mr-1 text-slate-400 hover:text-slate-600"
-                            title="Reply"
-                          >
-                            Reply
-                          </button>
+                          {msg.expires_at && !unsent && <Timer className="w-3 h-3" aria-label="Disappearing message" />}
+                          {msg.starred && !unsent && <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
+                          {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && (isRead ? <CheckCheck size={14} className="text-blue-500" /> : <Check size={14} />)}
+                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
                         </div>
                       </div>
+                      <ReactionChips reactions={msg.reactions} meId={user.id} mine={isMe} onOpen={() => setWhoMsg(msg)} />
                       {isMe && activeRoom.type !== 'direct' && msg.id === lastOwnMessageId && seenByLastOwnMessage.length > 0 && (
                         <div className="text-[10px] text-slate-400 text-right mr-1 mt-0.5 truncate">
                           Seen by {seenByLastOwnMessage.slice(0, 3).map((r) => r.name.split(' ')[0]).join(', ')}
@@ -976,15 +1646,48 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         </div>
                       )}
                     </div>
+                    {/* Computer: Reply / Forward beside someone else's message. */}
+                    {!isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {replyTo && (
-              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
-                <div className="text-xs text-slate-600 truncate">
-                  Replying to <span className="font-semibold">{replyTo.sender_name}</span>: {replyTo.content || 'attachment'}
+            {editing && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-600 min-w-0">
+                  <span className="font-semibold text-amber-800">Editing message</span>
+                  <span className="block truncate">{editing.content}</span>
+                  {editError && <span className="block text-rose-700">{editError}</span>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(null);
+                    setEditError('');
+                    setMessageInput('');
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-700"
+                  aria-label="Cancel editing"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {replyTo && !editing && (
+              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between gap-2 min-w-0">
+                <div className="text-xs text-slate-600 truncate min-w-0 flex-1">
+                  Replying to <span className="font-semibold">{replyTo.sender_id === user.id ? 'yourself' : replyTo.sender_name}</span>:{' '}
+                  {replyTo.content || (replyTo.message_type === 'image' ? '📷 Photo' : replyTo.message_type === 'audio' ? '🎤 Voice message' : `📎 ${replyTo.attachment_filename || 'File'}`)}
                 </div>
                 <button type="button" onClick={() => setReplyTo(null)} className="p-1 text-slate-400 hover:text-slate-700">
                   <X className="w-4 h-4" />
@@ -992,7 +1695,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
 
-            <div className="relative p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+            {cannotSend && (
+              <div className="p-3 bg-white/85 border-t border-violet-100/70 text-center text-xs text-slate-500">
+                Only <span className="font-semibold">group admins</span> can send messages.
+              </div>
+            )}
+            <div className={`relative p-3 bg-white/85 border-t border-violet-100/70 items-center gap-2 ${cannotSend ? 'hidden' : 'flex'}`}>
               {mentionQuery !== null && activeRoom.type !== 'direct' && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
                   {mentionCandidates.map((m) => (
@@ -1002,12 +1710,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       onClick={() => insertMention(m.name)}
                       className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
                     >
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-                        style={{ background: avatarColor(m.name) }}
-                      >
-                        {initialsOf(m.name)}
-                      </div>
+                      <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-6 h-6 text-[10px]" />
                       {m.name}
                     </button>
                   ))}
@@ -1030,7 +1733,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   <button
                     type="button"
                     onClick={() => stopRecording(true)}
-                    className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                    className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                     title="Send voice message"
                   >
                     <Send className="w-4 h-4" />
@@ -1070,22 +1773,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     }}
                     placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
                     rows={1}
-                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-2xl border-none resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                    className="flex-1 py-2.5 px-4 bg-white/90 border border-violet-100 rounded-2xl resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-violet-400 text-sm"
                   />
                   {messageInput.trim() ? (
                     <button
                       type="button"
                       onClick={sendTextMessage}
                       disabled={sending}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-40 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 disabled:opacity-40 shrink-0"
+                      aria-label={editing ? 'Save edit' : 'Send'}
                     >
-                      <Send className="w-4 h-4" />
+                      {editing ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={startRecording}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                       title="Record a voice message"
                     >
                       <Mic className="w-4 h-4" />
@@ -1098,106 +1802,336 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         )}
       </div>
 
-      {/* Group/Community info panel */}
+      {/* Contact info (a direct chat) / Group & Community info */}
       {showInfoPanel && activeRoom && (
-        <div className="w-full md:w-[320px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-0 md:inset-auto z-10">
+        // Phone: covers the conversation, but inside .chat-shell's safe-area
+        // padding — `inset-0` would put its header under the status bar.
+        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-x-0 top-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] bottom-[var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))] md:inset-auto z-10">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2">
             <button type="button" onClick={() => setShowInfoPanel(false)} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h3 className="font-bold text-slate-900">{activeRoom.type === 'community' ? 'Community Info' : 'Group Info'}</h3>
+            <h3 className="font-bold text-slate-900">{activeRoom.type === 'direct' ? 'Contact info' : activeRoom.type === 'community' ? 'Community Info' : 'Group Info'}</h3>
           </div>
-          <div className="p-4 border-b border-slate-100 text-center">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-lg mx-auto mb-2"
-              style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
-            >
-              {activeRoom.type === 'community' ? <Shield className="w-7 h-7" /> : <Users className="w-7 h-7" />}
-            </div>
-            <div className="font-semibold text-slate-900">{roomDisplayName(activeRoom, user.id)}</div>
-            <div className="text-xs text-slate-400">{members.length} members</div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase text-slate-400">Members</span>
-              {isRoomAdmin && (
-                <button type="button" onClick={() => setShowAddMembers(true)} className="text-xs font-semibold text-blue-600 flex items-center gap-1">
-                  <UserPlus className="w-3.5 h-3.5" /> Add
-                </button>
+          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+            {activeRoom.type !== 'direct' ? (
+              <GroupHeader
+                token={token}
+                room={activeRoom}
+                color={avatarColor(roomDisplayName(activeRoom, user.id))}
+                memberCount={members.length}
+                canEditInfo={canEditGroupInfo}
+                description={profile?.room.description || activeRoom.description || ''}
+                createdBy={profile?.room.created_by_name}
+                createdAt={profile?.room.created_at}
+                confirm={(m) => confirmDialog(m, { tone: 'danger' })}
+                onChanged={() => {
+                  fetchRooms();
+                  setProfileTick((t) => t + 1);
+                }}
+              />
+            ) : (
+            <div className="p-5 text-center">
+              {activeRoom.type === 'direct' ? (
+                <UserAvatar userId={activeRoom.other_participant?.id} name={roomDisplayName(activeRoom, user.id)} token={token} className="w-24 h-24 text-2xl mx-auto mb-3" />
+              ) : (
+                <div
+                  className="w-20 h-20 rounded-full flex items-center justify-center text-white font-bold text-lg mx-auto mb-3"
+                  style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
+                >
+                  {activeRoom.type === 'community' ? <Shield className="w-8 h-8" /> : <Users className="w-8 h-8" />}
+                </div>
+              )}
+              <div className="font-semibold text-lg text-slate-900">{roomDisplayName(activeRoom, user.id)}</div>
+              {activeRoom.type === 'direct' ? (
+                <div className="text-xs text-slate-500">
+                  {activeRoom.other_participant && onlineUserIds.has(activeRoom.other_participant.id) ? 'Online' : profile?.person?.username ? `@${profile.person.username}` : 'Offline'}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400">{activeRoom.type === 'community' ? 'Community' : 'Group'} · {members.length} members</div>
+              )}
+              {activeRoom.type === 'direct' && activeRoom.other_participant && canCall && (
+                <div className="mt-3 flex justify-center gap-3">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => startCall(activeRoom, k)}
+                      className="flex flex-col items-center gap-1 px-4 py-2 rounded-2xl border border-slate-200 text-violet-600 hover:bg-violet-50 text-xs font-medium"
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />} {k === 'audio' ? 'Audio' : 'Video'}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-            {members.map((m) => (
-              <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(m.name) }}>
-                  {initialsOf(m.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
-                  {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
-                </div>
-                {isRoomAdmin && m.user_id !== user.id && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      title={m.role === 'admin' ? 'Demote to member' : 'Make admin'}
-                      onClick={async () => {
-                        await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ role: m.role === 'admin' ? 'member' : 'admin' })
-                        });
-                        fetchMembers(activeRoom.id);
-                      }}
-                      className="p-1 text-slate-400 hover:text-blue-600"
-                    >
-                      <Shield className="w-3.5 h-3.5" />
+            )}
+            {/* Mute, starred messages, and (admins) the group settings. */}
+            <div className="divide-y divide-slate-100">
+              <MuteRow token={token} room={activeRoom} onChanged={fetchRooms} />
+              <DisappearRow
+                token={token}
+                roomId={activeRoom.id}
+                value={Number(profile?.room.disappear_seconds ?? activeRoom.disappear_seconds ?? 0)}
+                canEdit={activeRoom.type === 'direct' || canEditGroupInfo}
+                allowOn={user.role === 'superadmin' || !!user.can_use_disappearing}
+                onChanged={() => {
+                  fetchRooms();
+                  setProfileTick((t) => t + 1);
+                }}
+              />
+              {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && (
+                <InviteLinkRow token={token} roomId={activeRoom.id} code={profile?.room.invite_code} onChanged={() => setProfileTick((t) => t + 1)} confirm={(m) => confirmDialog(m, { tone: 'danger' })} />
+              )}
+              <button type="button" onClick={() => setStarredFor({ roomId: activeRoom.id })} className="w-full px-4 py-3 flex items-center gap-3 text-sm text-slate-800 hover:bg-slate-50 text-left">
+                <Star className="w-4 h-4 text-slate-500" />
+                <span className="flex-1">Starred messages</span>
+                {!!profile?.starredCount && <span className="text-xs text-slate-400">{profile.starredCount}</span>}
+              </button>
+              {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && profile && (
+                <GroupSettings
+                  token={token}
+                  roomId={activeRoom.id}
+                  infoAdminsOnly={!!profile.room.info_admins_only}
+                  sendAdminsOnly={!!profile.room.send_admins_only}
+                  onChanged={() => {
+                    fetchRooms();
+                    setProfileTick((t) => t + 1);
+                  }}
+                />
+              )}
+            </div>
+            {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
+            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {activeRoom.type === 'direct' && profile && (
+              <CommonGroups
+                groups={profile.commonGroups}
+                onOpen={(id) => {
+                  setShowInfoPanel(false);
+                  void openRoom(id);
+                }}
+              />
+            )}
+            <WallpaperPicker token={token} roomId={activeRoom.id} current={activeRoom.wallpaper} onChanged={fetchRooms} />
+            {activeRoom.type !== 'direct' && (
+              <div>
+                <div className="px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400">Members</span>
+                  {isRoomAdmin && (
+                    <button type="button" onClick={() => setShowAddMembers(true)} className="text-xs font-semibold text-blue-600 flex items-center gap-1">
+                      <UserPlus className="w-3.5 h-3.5" /> Add
                     </button>
-                    <button
-                      type="button"
-                      title="Remove"
-                      onClick={async () => {
-                        await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
-                          method: 'DELETE',
-                          headers: { Authorization: `Bearer ${token}` }
-                        });
-                        fetchMembers(activeRoom.id);
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  )}
+                </div>
+                {members.map((m) => (
+                  <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
+                    <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-9 h-9 text-xs" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
+                      {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
+                    </div>
+                    {isRoomAdmin && m.user_id !== user.id && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title={m.role === 'admin' ? 'Demote to member' : 'Make admin'}
+                          onClick={async () => {
+                            await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ role: m.role === 'admin' ? 'member' : 'admin' })
+                            });
+                            fetchMembers(activeRoom.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-blue-600"
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Remove"
+                          onClick={async () => {
+                            if (!(await confirmDialog(`Remove ${m.name} from this ${activeRoom.type === 'community' ? 'community' : 'group'}?`, { tone: 'danger' }))) return;
+                            await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${m.user_id}`), {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${token}` }
+                            });
+                            fetchMembers(activeRoom.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
+                ))}
+                {activeRoom.type === 'community' && isRoomAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLinkGroup(true)}
+                    className="w-full mt-2 px-4 py-2.5 flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    <LinkIcon className="w-4 h-4" /> Link an existing group
+                  </button>
                 )}
               </div>
-            ))}
-            {activeRoom.type === 'community' && isRoomAdmin && (
-              <button
-                type="button"
-                onClick={() => setShowLinkGroup(true)}
-                className="w-full mt-2 px-4 py-2.5 flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
-              >
-                <LinkIcon className="w-4 h-4" /> Link an existing group
-              </button>
             )}
           </div>
           <button
             type="button"
             onClick={async () => {
-              if (!confirm('Leave this chat?')) return;
-              await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` }
+              if (!(await confirmDialog('Clear this chat? Its messages are removed for you only (starred ones are kept). Others still see them.', { tone: 'danger' }))) return;
+              const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/clear`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ keepStarred: true })
               });
-              setShowInfoPanel(false);
-              setActiveRoomId(null);
-              fetchRooms();
+              if (res.ok) {
+                setMessages((prev) => prev.filter((m) => m.starred));
+                fetchRooms();
+              }
             }}
             className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
           >
-            <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
+            <Eraser className="w-4 h-4" /> Clear chat
           </button>
+          {activeRoom.type !== 'direct' && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!(await confirmDialog('Leave this chat?', { tone: 'danger' }))) return;
+                await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
+                  method: 'DELETE',
+                  headers: { Authorization: `Bearer ${token}` }
+                });
+                setShowInfoPanel(false);
+                setActiveRoomId(null);
+                fetchRooms();
+              }}
+              className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+            >
+              <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
+            </button>
+          )}
         </div>
       )}
+
+      {joinCode !== null && (
+        <JoinInvitePopup
+          token={token}
+          initialCode={joinCode}
+          onClose={() => {
+            setJoinCode(null);
+            try {
+              const u = new URL(window.location.href);
+              if (u.searchParams.has('invite')) {
+                u.searchParams.delete('invite');
+                window.history.replaceState(null, '', u.toString());
+              }
+            } catch {
+              // nothing to tidy
+            }
+          }}
+          onJoined={async (roomId) => {
+            setJoinCode(null);
+            await fetchRooms();
+            void openRoom(roomId);
+          }}
+        />
+      )}
+
+      {starredFor && (
+        <StarredPopup
+          token={token}
+          roomId={starredFor.roomId}
+          meId={user.id}
+          roomName={(id) => {
+            const r = rooms.find((x) => x.id === id);
+            return r ? roomDisplayName(r, user.id) : 'Chat';
+          }}
+          onClose={() => setStarredFor(null)}
+          onOpen={async (m) => {
+            setStarredFor(null);
+            setShowInfoPanel(false);
+            if (activeRoomIdRef.current !== m.room_id) {
+              await openRoom(m.room_id);
+              setTimeout(() => void jumpToMessageRef.current(m.id), 400);
+            } else void jumpToMessage(m.id);
+          }}
+        />
+      )}
+
+      {/* Message menu: react, reply, copy, delete for me / for everyone. */}
+      {menuMsg && activeRoom && (
+        <MessageMenu
+          token={token}
+          msg={menuMsg}
+          meId={user.id}
+          isRoomAdmin={activeRoom.type !== 'direct' && isRoomAdmin}
+          confirm={(m) => confirmDialog(m, { tone: 'danger' })}
+          onClose={() => setMenuMsg(null)}
+          onReply={() => {
+            setEditing(null);
+            setReplyTo(menuMsg);
+            messageInputRef.current?.focus();
+          }}
+          onForward={() => setForwardMsg(menuMsg)}
+          isPinned={pins.some((p) => p.message.id === menuMsg.id)}
+          onPin={() => setPinMsg(menuMsg)}
+          onUnpin={() => activeRoom && void fetchPins(activeRoom.id)}
+          onStarred={(starred) => patchMessage(menuMsg.id, { starred })}
+          onEdit={() => {
+            setReplyTo(null);
+            setEditError('');
+            setEditing(menuMsg);
+            setMessageInput(menuMsg.content || '');
+            setTimeout(() => messageInputRef.current?.focus(), 50);
+          }}
+          onReacted={(reactions) => patchMessage(menuMsg.id, { reactions })}
+          onHidden={() => setMessages((prev) => prev.filter((m) => m.id !== menuMsg.id))}
+          onUnsent={() => patchMessage(menuMsg.id, unsentPatch)}
+        />
+      )}
+      {whoMsg && (
+        <ReactionsWho token={token} msg={whoMsg} meId={user.id} onClose={() => setWhoMsg(null)} onReacted={(reactions) => patchMessage(whoMsg.id, { reactions })} />
+      )}
+      {pinMsg && activeRoom && (
+        <PinPopup
+          token={token}
+          msg={pinMsg}
+          pinnedCount={pins.length}
+          onClose={() => setPinMsg(null)}
+          onDone={(text) => {
+            setPinMsg(null);
+            setPinIndex(0);
+            void fetchPins(activeRoom.id);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+          }}
+        />
+      )}
+      {forwardMsg && (
+        <ForwardPopup
+          token={token}
+          msg={forwardMsg}
+          meId={user.id}
+          rooms={rooms}
+          directory={directory}
+          roomName={(r) => roomDisplayName(r, user.id)}
+          onClose={() => setForwardMsg(null)}
+          onDone={(text) => {
+            setForwardMsg(null);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+            fetchRooms();
+          }}
+        />
+      )}
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-[80] px-4 py-2 rounded-full bg-slate-900/85 text-white text-xs shadow-lg">{toast}</div>
+      )}
+      {showMyAbout && <MyAboutPopup token={token} onClose={() => setShowMyAbout(false)} />}
 
       {/* New Chat / Group / Community modal */}
       {showNewChatModal && (
@@ -1247,43 +2181,94 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 };
 
+// Departments in the chat directory, with how many people each — the options
+// of the Department filters below.
+const deptOptionsOf = (people: ChatDirectoryUser[]) => {
+  const n = new Map<string, number>();
+  for (const d of people) {
+    const k = (d.department || '').trim();
+    if (k) n.set(k, (n.get(k) || 0) + 1);
+  }
+  return [...n.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count }));
+};
+
 // Shared "pick people from the directory" list used by both the New Chat/
 // Group/Community modal and the Add Members modal below.
 const MemberPickerModal: React.FC<{
   directory: ChatDirectoryUser[];
   title: string;
   confirmLabel?: string;
+  // New Chat picks one person; groups / communities / Add Members pick many.
+  single?: boolean;
   onClose: () => void;
   onConfirm: (ids: number[]) => void;
-}> = ({ directory, title, confirmLabel = 'Add', onClose, onConfirm }) => {
+}> = ({ directory, title, confirmLabel = 'Add', single = false, onClose, onConfirm }) => {
   const [search, setSearch] = useState('');
+  const [depts, setDepts] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
+  // Phone keyboard: lift the sheet above it (the fixed backdrop doesn't
+  // shrink when the keyboard opens, so the list ended up underneath it).
+  const keyboardInset = useKeyboardInset();
 
-  const filtered = directory.filter((d) => d.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const q = search.trim().toLowerCase();
+  const filtered = directory.filter(
+    (d) =>
+      (!depts.length || depts.includes((d.department || '').trim())) &&
+      `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
+  );
+  const allShownOn = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
+  const toggleAllShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const d of filtered) {
+        if (allShownOn) next.delete(d.id);
+        else next.add(d.id);
+      }
+      return next;
+    });
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="bg-white w-full md:w-96 md:rounded-2xl rounded-t-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+    <div
+      className="fixed inset-0 liquid-glass-backdrop z-30 flex items-end md:items-center justify-center p-2 md:p-4"
+      style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
+      onClick={onClose}
+    >
+      <div
+        className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
+        style={{ maxHeight: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : '80dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between">
           <h3 className="font-bold text-slate-900">{title}</h3>
-          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-600">
+            <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-3 border-b border-slate-100">
+        <div className="px-3 pb-3">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search people..."
+              placeholder="Search name or department..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          <div className="mt-2 flex items-center gap-2">
+            {directory.some((d) => d.department) && (
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={depts} onChange={setDepts} width={260} />
+            )}
+            {!single && filtered.length > 0 && (
+              <button type="button" onClick={toggleAllShown} className="ml-auto text-xs font-semibold text-emerald-700 hover:underline">
+                {allShownOn ? 'Unselect all shown' : `Select all shown (${filtered.length})`}
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="liquid-glass-inset mx-3 rounded-2xl flex-1 min-h-0 overflow-y-auto">
+            {filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
           {filtered.map((d) => {
             const isSelected = selected.has(d.id);
             return (
@@ -1292,18 +2277,21 @@ const MemberPickerModal: React.FC<{
                 type="button"
                 onClick={() =>
                   setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(d.id)) next.delete(d.id);
+                    const next = new Set(single ? [] : prev);
+                    if (prev.has(d.id)) next.delete(d.id);
                     else next.add(d.id);
                     return next;
                   })
                 }
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/50"
               >
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(d.name) }}>
-                  {initialsOf(d.name)}
-                </div>
-                <span className="flex-1 text-left text-sm text-slate-900 truncate">{d.name}</span>
+                <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-sm text-slate-900 truncate">{d.name}</span>
+                  {(d.designation || d.department) && (
+                    <span className="block text-[11px] text-slate-500 truncate">{[d.designation, d.department].filter(Boolean).join(' · ')}</span>
+                  )}
+                </span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                   {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
                 </div>
@@ -1311,12 +2299,12 @@ const MemberPickerModal: React.FC<{
             );
           })}
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3">
           <button
             type="button"
             disabled={selected.size === 0}
             onClick={() => onConfirm([...selected])}
-            className="w-full py-2.5 bg-emerald-600 text-white font-semibold rounded-xl disabled:opacity-40"
+            className="liquid-glass-button rounded-full w-full py-2.5 bg-emerald-600 text-white font-semibold disabled:opacity-40"
           >
             {confirmLabel} ({selected.size})
           </button>
@@ -1342,6 +2330,7 @@ const NewRoomModal: React.FC<{
         directory={directory}
         title="New Chat"
         confirmLabel="Start Chat"
+        single
         onClose={onClose}
         onConfirm={(ids) => ids[0] && onCreate('direct', '', [ids[0]])}
       />

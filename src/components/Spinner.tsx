@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import infinityLoaderAnimation from '../assets/infinity-loader.json';
 
 interface SpinnerProps {

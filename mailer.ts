@@ -32,7 +32,9 @@ async function getTransporter(): Promise<any> {
     cachedTransporter = factory.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 587,
-      secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+      // Port 465 is SSL from the first byte (Gmail, most hosts); with
+      // SMTP_SECURE left unset it would hang and fail, so it is turned on.
+      secure: process.env.SMTP_SECURE ? String(process.env.SMTP_SECURE).toLowerCase() === "true" : Number(process.env.SMTP_PORT) === 465,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
@@ -50,7 +52,13 @@ export function isMailerConfigured(): boolean {
   return smtpConfigured();
 }
 
-export async function sendMail(opts: { to: string; subject: string; html: string }): Promise<{ success: boolean; error?: string }> {
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
+export async function sendMail(opts: { to: string; subject: string; html: string; attachments?: MailAttachment[] }): Promise<{ success: boolean; error?: string }> {
   const transporter = await getTransporter();
   if (!transporter) {
     return {
@@ -63,7 +71,8 @@ export async function sendMail(opts: { to: string; subject: string; html: string
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: opts.to,
       subject: opts.subject,
-      html: opts.html
+      html: opts.html,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {})
     });
     return { success: true };
   } catch (err: any) {

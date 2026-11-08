@@ -61,7 +61,10 @@ export function registerHRAnalyticsRoutes(app: Express, deps: HRAnalyticsRouteDe
         queryDB("SELECT * FROM exit_requests"),
         queryDB("SELECT * FROM grievances"),
         queryDB("SELECT * FROM leave_applications"),
-        queryDB("SELECT * FROM attendance")
+        // Only this month is used below (attendance rate) — not the whole history.
+        queryDB("SELECT * FROM attendance WHERE attendance_date >= ?", [
+          `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`
+        ])
       ]);
       const users = allUsers.filter((u: any) => u.role === "admin" || u.role === "user");
 

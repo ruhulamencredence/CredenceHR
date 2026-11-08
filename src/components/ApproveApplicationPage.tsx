@@ -3,17 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ShieldCheck, CheckCircle2, XCircle, AlertCircle, Inbox, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, same
 // shape PendingApprovalsCard.tsx (the Dashboard card version of this) uses.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -34,15 +36,15 @@ interface ApproveApplicationPageProps {
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+  t === 'bill_claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'
     ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 // Self Service -> "Approve Application" — a dedicated, always-reachable page
 // for exactly the same personal approval queue PendingApprovalsCard.tsx shows
@@ -66,8 +68,10 @@ export const ApproveApplicationPage: React.FC<ApproveApplicationPageProps> = ({ 
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/my-approvals'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setItems(await res.json());
@@ -151,9 +155,7 @@ export const ApproveApplicationPage: React.FC<ApproveApplicationPageProps> = ({ 
 
       <div className="px-5 sm:px-6 py-4">
         {loading && items.length === 0 ? (
-          <div className="p-8 flex justify-center">
-            <Spinner size={18} className="text-slate-400" />
-          </div>
+          <LoadingBlock />
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
             <Inbox className="w-6 h-6 text-slate-300" />
@@ -179,6 +181,7 @@ export const ApproveApplicationPage: React.FC<ApproveApplicationPageProps> = ({ 
                 </div>
                 <input
                   type="text"
+                  aria-label="Remarks"
                   placeholder="Remarks (optional)"
                   value={remarksDraft[item.id] || ''}
                   onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}

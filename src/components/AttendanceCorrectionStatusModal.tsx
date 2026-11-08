@@ -38,7 +38,7 @@ function formatRequestedTime(value?: string | null): string {
 // sitting Pending or Rejected — shows exactly where that request stands: which
 // link of the global Approval Chain it's currently waiting on (Pending), or
 // who rejected it and why (Rejected), same as the Admin Panel's own Approvals
-// queue but from the requester's side. Mirrors ConveyanceClaimDetailModal's
+// queue but from the requester's side. Mirrors BillClaimDetailModal's
 // look for the requested time/reason/attachment section.
 export const AttendanceCorrectionStatusModal: React.FC<AttendanceCorrectionStatusModalProps> = ({
   correction,
@@ -54,7 +54,7 @@ export const AttendanceCorrectionStatusModal: React.FC<AttendanceCorrectionStatu
   const approveActions = (approval?.actions || []).filter((a) => a.action === 'approved');
 
   // Rendered via a portal straight onto document.body — same reasoning as
-  // ConveyanceClaimDetailModal/AttendanceCorrectionModal: opened from deep
+  // BillClaimDetailModal/AttendanceCorrectionModal: opened from deep
   // inside Timesheet's tree, and a `position: fixed` element nested inside an
   // `overflow-hidden` ancestor doesn't reliably pin to the full screen on
   // Android WebViews otherwise.
@@ -172,9 +172,9 @@ export const AttendanceCorrectionStatusModal: React.FC<AttendanceCorrectionStatu
                             action ? 'text-emerald-700' : isCurrent ? 'text-amber-700' : 'text-slate-400'
                           }`}
                         >
-                          {action ? action.approver_name : isCurrent ? approval!.current_approver_name || `Step ${step}` : `Step ${step}`}
+                          {action ? action.approver_name : isCurrent ? (approval!.no_approver ? 'No approver set yet' : approval!.current_approver_name || `Step ${step}`) : `Step ${step}`}
                         </p>
-                        {isCurrent && <p className="text-[10px] text-amber-600">Waiting for review</p>}
+                        {isCurrent && <p className="text-[10px] text-amber-600">{approval!.no_approver ? 'Tell HR — it moves on once a Supervisor or Template is set' : 'Waiting for review'}</p>}
                       </div>
                     </div>
                   );

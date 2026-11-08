@@ -37,6 +37,7 @@
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { apiUrl } from './api';
+import { getLocationConsent } from './locationDisclosure';
 
 interface BGLocation {
   latitude: number;
@@ -85,14 +86,47 @@ const IDLE_DISTANCE_FILTER_M = 120;
 const IDLE_PING_INTERVAL_MS = 10 * 60 * 1000;
 const IDLE_AFTER_MS = 15 * 60 * 1000;
 
+// "Live" settings — only while an Admin has this person open in Live Follow
+// or they are on an ongoing Book a Ride ride (the server says until when, via
+// the "tracking:live" socket event or the reply to a ping). A fresh fix is
+// sent at once (at most every LIVE_MIN_GAP_MS) plus a heartbeat every
+// LIVE_PING_INTERVAL_MS, so the Admin's map moves like Google Maps. Drops back
+// to active mode by itself when the time runs out.
+const LIVE_DISTANCE_FILTER_M = 5;
+const LIVE_PING_INTERVAL_MS = 5 * 1000;
+const LIVE_MIN_GAP_MS = 3 * 1000;
+
 let watcherId: string | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let latestFix: BGLocation | null = null;
 let currentToken: string | null = null;
-let mode: 'active' | 'idle' = 'active';
+// The token tracking was last asked to run for, kept even when starting
+// failed (no permission yet), so the set-up card can start it once the
+// permission is given.
+let requestedToken: string | null = null;
+let mode: 'active' | 'idle' | 'live' = 'active';
+let liveUntil = 0;
+// This APK reports Live Follow natively (see startBackgroundTracking).
+let nativeLive = false;
+export const hasNativeLiveTracking = () => nativeLive;
+// This APK reports everyday tracking natively too (DutyTrackingService.java):
+// it keeps going with the app in the background or swiped away, so the page
+// runs no watcher or timers of its own.
+let nativeDuty = false;
+let lastSentAt = 0;
+let lastSentFixTime = 0;
 let lastFixAt = 0;
 let switchingMode = false;
+// Every fix since the last successful send, oldest first — a trip is sent as
+// its whole path, not just the last point of each interval.
+let pendingFixes: BGLocation[] = [];
+const MAX_PENDING_FIXES = 300;
+// The phone's own heartbeat (is Location on? permission kept?) — sent even
+// when there is no fix, so the admin can tell "Location OFF" from "standing still".
+const STATE_INTERVAL_MS = 2 * 60 * 1000;
+let stateTimer: ReturnType<typeof setInterval> | null = null;
+let onVisible: (() => void) | null = null;
 
 // Best-effort battery percentage — the Web Battery API isn't in every
 // WebView, so this silently returns null rather than ever blocking a ping.
@@ -109,23 +143,68 @@ async function readBatteryPct(): Promise<number | null> {
 
 async function sendPing() {
   if (!latestFix || !currentToken) return;
+  const fix = latestFix;
+  // Live: the heartbeat timer skips a fix that was already sent, unless the
+  // map would otherwise go 30s without hearing from this phone.
+  if (mode === 'live' && fix.time === lastSentFixTime && Date.now() - lastSentAt < 30_000) {
+    if (Date.now() > liveUntil) void switchMode('active');
+    return;
+  }
+  // Nothing new since the last send (standing still): only a heartbeat — the
+  // server stores no duplicate row but still answers "should I go live?".
+  const repeat = fix.time === lastSentFixTime;
+  const batch = repeat ? [] : pendingFixes.slice();
+  lastSentAt = Date.now();
   const battery_pct = await readBatteryPct();
   try {
-    await fetch(apiUrl('/api/tracking/ping'), {
+    const res = await fetch(apiUrl('/api/tracking/ping'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
       body: JSON.stringify({
-        lat: latestFix.latitude,
-        lng: latestFix.longitude,
-        accuracy_m: latestFix.accuracy,
+        lat: fix.latitude,
+        lng: fix.longitude,
+        accuracy_m: fix.accuracy,
         battery_pct,
-        recorded_at: new Date(latestFix.time).toISOString()
+        recorded_at: new Date(fix.time).toISOString(),
+        repeat,
+        mode,
+        points: batch.map((f) => ({ lat: f.latitude, lng: f.longitude, accuracy_m: f.accuracy, recorded_at: new Date(f.time).toISOString() }))
+      })
+    });
+    if (res.ok && !repeat) {
+      lastSentFixTime = fix.time;
+      // Drop what was sent; fixes that arrived meanwhile stay for next time.
+      const sentUpTo = batch.length ? batch[batch.length - 1].time : fix.time;
+      pendingFixes = pendingFixes.filter((f) => f.time > sentUpTo);
+    }
+    const data = await res.json().catch(() => null);
+    if (data && 'live_until' in data) setLiveUntil(data.live_until);
+  } catch {
+    // Offline or server unreachable — the fixes stay queued and go out with
+    // the next successful send, so a tunnel or dead zone leaves no gap in the path.
+  }
+}
+
+// Tells the server what this phone says about location (works with no fix).
+async function sendState() {
+  if (!currentToken) return;
+  const access = await getLocationAccess();
+  const battery_pct = await readBatteryPct();
+  try {
+    await fetch(apiUrl('/api/tracking/state'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
+      body: JSON.stringify({
+        location_on: access ? access.locationOn : null,
+        foreground: access ? access.foreground : null,
+        background: access ? access.background : null,
+        precise: access ? access.precise : null,
+        mode,
+        battery_pct
       })
     });
   } catch {
-    // Offline or server unreachable — just skip this cycle. The next timer
-    // tick (or the next time the app reconnects) will try again with
-    // whatever fix is freshest then; we don't queue/retry missed pings.
+    // Offline — the next heartbeat tries again.
   }
 }
 
@@ -155,10 +234,18 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
       stale: false,
       distanceFilter: distanceFilterM
     },
-    (location) => {
-      if (!location) return;
+    (location, error) => {
+      if (!location) {
+        // Permission taken away or Location switched off — say so at once
+        // instead of waiting for the next heartbeat.
+        if (error) void sendState();
+        return;
+      }
       latestFix = location;
       lastFixAt = Date.now();
+      pendingFixes.push(location);
+      if (pendingFixes.length > MAX_PENDING_FIXES) pendingFixes = pendingFixes.slice(-MAX_PENDING_FIXES);
+      if (mode === 'live' && Date.now() - lastSentAt >= LIVE_MIN_GAP_MS) void sendPing();
       // A fix arrived while idle => the device moved past the coarse
       // threshold, i.e. it's moving again. Snap back to active mode so we
       // don't miss the rest of the movement.
@@ -167,13 +254,18 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
   );
 }
 
-async function switchMode(next: 'active' | 'idle') {
+async function switchMode(next: 'active' | 'idle' | 'live') {
   if (mode === next || switchingMode || !currentToken) return;
   switchingMode = true;
   try {
     mode = next;
-    await armWatcher(next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
-    restartPingTimer(next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
+    await armWatcher(next === 'live' ? LIVE_DISTANCE_FILTER_M : next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
+    restartPingTimer(next === 'live' ? LIVE_PING_INTERVAL_MS : next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
+    if (next === 'live') {
+      // Answer at once (even standing still) so the watcher sees the phone is live.
+      lastSentAt = 0;
+      void sendPing();
+    }
   } catch {
     // Re-arming failed (permission revoked mid-session, plugin hiccup) —
     // leave whatever watcher/timer state we had; the next idle-check tick
@@ -188,20 +280,58 @@ async function switchMode(next: 'active' | 'idle') {
 // build or if tracking is already running for this token.
 export async function startBackgroundTracking(token: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
-  if (watcherId && currentToken === token) return; // already running for this account
-  if (watcherId) await stopBackgroundTracking();
+  // Android only — the iPhone app is built without the background-location
+  // plugin (capacitor.config.ts -> ios.includePlugins).
+  if (Capacitor.getPlatform() === 'ios') return;
+  requestedToken = token;
+  // Never ask Android for location before the person has agreed on the
+  // disclosure screen (src/lib/locationDisclosure.tsx — a Google Play rule).
+  if (getLocationConsent() !== 'accepted') return;
+  if ((watcherId || nativeDuty) && currentToken === token) return; // already running for this account
+  if (watcherId || nativeDuty) await stopBackgroundTracking();
 
   currentToken = token;
   mode = 'active';
   lastFixAt = Date.now();
+  // Lets the app report live by itself, even in Recent apps (silent push ->
+  // LiveTrackingService). Older APKs don't have it; the page then does it.
+  if (isAndroidApp()) {
+    try {
+      await LocationAccess.setTrackingSession({ token, baseUrl: window.location.origin });
+      nativeLive = true;
+    } catch {
+      nativeLive = false;
+    }
+    // Everyday reporting natively, when this APK has it.
+    if (nativeLive) {
+      try {
+        await LocationAccess.startDutyTracking();
+        nativeDuty = true;
+        void askBatteryExemptionOnce();
+        return;
+      } catch {
+        nativeDuty = false; // an older APK: the page reports, as before
+      }
+    }
+  }
   try {
     await armWatcher(ACTIVE_DISTANCE_FILTER_M);
     restartPingTimer(ACTIVE_PING_INTERVAL_MS);
+    void sendState();
+    if (stateTimer) clearInterval(stateTimer);
+    stateTimer = setInterval(() => void sendState(), STATE_INTERVAL_MS);
+    // Back to the front (e.g. after turning Location on in Settings): report at once.
+    if (onVisible) document.removeEventListener('visibilitychange', onVisible);
+    onVisible = () => {
+      if (document.visibilityState === 'visible') void sendState();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     // Checks every minute whether we've gone quiet long enough to drop into
     // idle mode. Cheap (just a Date.now() comparison), so this itself costs
     // no meaningful battery.
     idleCheckTimer = setInterval(() => {
-      if (mode === 'active' && Date.now() - lastFixAt >= IDLE_AFTER_MS) {
+      if (mode === 'live' && Date.now() > liveUntil) void switchMode('active');
+      else if (mode === 'active' && Date.now() - lastFixAt >= IDLE_AFTER_MS) {
         void switchMode('idle');
       }
     }, 60 * 1000);
@@ -213,6 +343,27 @@ export async function startBackgroundTracking(token: string): Promise<void> {
 }
 
 // Call on logout, or if an Admin revokes can_use_tracking mid-session.
+// Many phones (Xiaomi, Oppo, Vivo, Samsung…) stop background apps to save
+// battery even with a foreground service; ask once to let CredenceHR run.
+async function askBatteryExemptionOnce(): Promise<void> {
+  const KEY = 'credence_battery_exemption_asked';
+  try {
+    if (localStorage.getItem(KEY)) return;
+  } catch {
+    return;
+  }
+  try {
+    const { unrestricted } = await LocationAccess.getBatteryStatus();
+    if (unrestricted) return;
+    try {
+      localStorage.setItem(KEY, String(Date.now()));
+    } catch {}
+    await LocationAccess.requestBatteryExemption();
+  } catch {
+    // older APK — nothing to ask
+  }
+}
+
 export async function stopBackgroundTracking(): Promise<void> {
   if (idleCheckTimer) {
     clearInterval(idleCheckTimer);
@@ -230,11 +381,127 @@ export async function stopBackgroundTracking(): Promise<void> {
     }
     watcherId = null;
   }
+  if (stateTimer) {
+    clearInterval(stateTimer);
+    stateTimer = null;
+  }
+  if (onVisible) {
+    document.removeEventListener('visibilitychange', onVisible);
+    onVisible = null;
+  }
+  pendingFixes = [];
+  lastSentFixTime = 0;
   latestFix = null;
+  if (isAndroidApp()) void LocationAccess.clearTrackingSession().catch(() => undefined);
+  nativeLive = false;
+  nativeDuty = false;
   currentToken = null;
+  requestedToken = null;
   mode = 'active';
+  liveUntil = 0;
+}
+
+// Live Follow: the server says this phone should report every few seconds
+// until `until` (ms since epoch), or stop (null/past). Safe to call any time;
+// a no-op when tracking isn't running on this device.
+export function setLiveUntil(until: number | null | undefined): void {
+  liveUntil = Number(until) || 0;
+  if (!watcherId || !currentToken) return;
+  if (liveUntil > Date.now()) {
+    if (mode !== 'live') void switchMode('live');
+  } else if (mode === 'live') {
+    void switchMode('active');
+  }
+}
+
+// Restarts tracking for the signed-in account after the set-up card got
+// "Allow all the time". No-op when tracking isn't on for this account.
+export async function restartBackgroundTracking(): Promise<void> {
+  const token = requestedToken;
+  if (!token) return;
+  await stopBackgroundTracking();
+  await startBackgroundTracking(token);
+}
+
+// Opens this app's own page in the phone's Settings (Permissions -> Location),
+// for the Employee Tracking set-up card. Android app only; false elsewhere.
+export async function openAppLocationSettings(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return false;
+  try {
+    await BackgroundGeolocation.openSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Location access (LocationAccessPlugin.java, Android app only).
+export interface LocationAccessStatus {
+  foreground: boolean; // any location permission ("While using the app")
+  background: boolean; // "Allow all the time"
+  precise: boolean;
+  locationOn: boolean; // the phone's Location (GPS) switch
+}
+
+interface LocationAccessPlugin {
+  getStatus(): Promise<LocationAccessStatus>;
+  requestForeground(): Promise<LocationAccessStatus>;
+  requestBackground(): Promise<LocationAccessStatus>;
+  openAppSettings(): Promise<void>;
+  openLocationSettings(): Promise<void>;
+  // APKs with native Live Follow (LiveTrackingService.java) only.
+  setTrackingSession(o: { token: string; baseUrl: string }): Promise<void>;
+  clearTrackingSession(): Promise<void>;
+  // APKs with native everyday tracking (DutyTrackingService.java) only.
+  startDutyTracking(): Promise<void>;
+  stopDutyTracking(): Promise<void>;
+  getBatteryStatus(): Promise<{ unrestricted: boolean }>;
+  requestBatteryExemption(): Promise<void>;
+}
+
+const LocationAccess = registerPlugin<LocationAccessPlugin>('LocationAccess');
+
+const isAndroidApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+
+// null on the web/iPhone, or on an APK built before the plugin existed.
+export async function getLocationAccess(): Promise<LocationAccessStatus | null> {
+  if (!isAndroidApp()) return null;
+  try {
+    return await LocationAccess.getStatus();
+  } catch {
+    return null;
+  }
+}
+
+// Android answers at once, showing nothing, when the person has refused
+// this permission too often; then the only way left is the App info page.
+const NO_PROMPT_MS = 700;
+
+async function requestOrOpenSettings(
+  request: () => Promise<LocationAccessStatus>,
+  done: (s: LocationAccessStatus) => boolean
+): Promise<{ status: LocationAccessStatus; openedSettings: boolean }> {
+  const startedAt = Date.now();
+  const status = await request();
+  if (!done(status) && Date.now() - startedAt < NO_PROMPT_MS) {
+    await LocationAccess.openAppSettings();
+    return { status, openedSettings: true };
+  }
+  return { status, openedSettings: false };
+}
+
+// Step 1: the in-app dialog ("While using the app").
+export const requestForegroundLocation = () =>
+  requestOrOpenSettings(() => LocationAccess.requestForeground(), (s) => s.foreground);
+
+// Step 2: opens CredenceHR's Location permission page ("Allow all the time").
+export const requestAllTheTimeLocation = () =>
+  requestOrOpenSettings(() => LocationAccess.requestBackground(), (s) => s.background);
+
+export async function openPhoneLocationSwitch(): Promise<void> {
+  await LocationAccess.openLocationSettings();
 }
 
 export function isBackgroundTrackingActive(): boolean {
-  return watcherId !== null;
+  return watcherId !== null || nativeDuty;
 }

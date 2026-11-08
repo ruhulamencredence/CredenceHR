@@ -16,8 +16,15 @@
 // "6. User <-> Project Permissions (Admin-only)" sections — no logic
 // changed, only moved.
 
+import { clearLoginLock } from "./LoginGuard";
 import type { Express } from "express";
+import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
+import { activeCompanyId } from "./companyContext";
+import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
+import { passwordProblem } from "./src/lib/passwordPolicy";
+import { getTrackingScopeLists } from "./TrackingScope";
+import { employeeIdConflict } from "./EmployeeLoginId";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -34,6 +41,9 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // AttendanceProjects.ts: replaces an account's check-in Project list — an
+  // older screen sending the single attendance_project_id lands there too.
+  replaceAttendanceProjects?: (queryDB: any, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) => Promise<void>;
   // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
   // Permanent Delete) — "users" is wired up to it below: create/reset-
   // password/change-email/feature-permissions/project-assignment need
@@ -61,7 +71,196 @@ interface UserManagementRouteDeps {
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets, replaceAttendanceProjects } = deps;
+
+  // ---------------------------------------------------------------------
+  // Access audit log + Access Templates (Admin Panel -> Users, Phase 3).
+  // ---------------------------------------------------------------------
+  queryDB(`
+    CREATE TABLE IF NOT EXISTS user_access_audit (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      target_user_id INT NOT NULL,
+      actor_user_id INT NULL,
+      action VARCHAR(64) NOT NULL,
+      detail TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_access_audit_target (target_user_id, created_at)
+    )
+  `).catch((err: any) => console.warn("⚠️ Could not ensure user_access_audit table exists: " + err.message));
+  queryDB(`
+    CREATE TABLE IF NOT EXISTS access_templates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      description VARCHAR(255) NULL,
+      features_json TEXT NULL,
+      modules_json TEXT NULL,
+      created_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      -- made after the company migration on a new database, so it carries
+      -- the column itself (CompanyRoutes.ts adds it to older ones)
+      company_id INT NOT NULL DEFAULT 1,
+      INDEX idx_access_templates_company (company_id)
+    )
+  `)
+    .then(() => ensureAccessTemplateSchema(queryDB))
+    .catch((err: any) => console.warn("⚠️ Could not ensure access_templates table exists: " + err.message));
+
+  // Every successful change to one account (PUT/DELETE /api/users/:id/...) is
+  // recorded after the response goes out: who did it, which endpoint, and
+  // the request body (passwords never stored). An "X-Access-Template" header
+  // marks changes made by applying a template.
+  const AUDIT_SECRET_KEYS = new Set(["password", "new_password", "newPassword", "login_password"]);
+  app.use("/api/users/:id", (req: any, res: any, next: any) => {
+    const targetId = Number(req.params.id);
+    if (!["PUT", "DELETE"].includes(req.method) || !Number.isFinite(targetId)) return next();
+    // Path below /api/users/:id ("/role", "/feature-permissions", "/" for a
+    // delete) — read now, since Express rewrites req.path once routing moves on.
+    const subPath = String(req.path || "/").replace(/^\//, "");
+    res.on("finish", () => {
+      if (res.statusCode >= 400 || !req.user) return;
+      const action = subPath || (req.method === "DELETE" ? "delete" : "update");
+      const body: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(req.body || {})) {
+        if (!AUDIT_SECRET_KEYS.has(k)) body[k] = v;
+      }
+      const template = typeof req.headers["x-access-template"] === "string" ? req.headers["x-access-template"].slice(0, 100) : null;
+      const detail = JSON.stringify(template ? { ...body, _template: template } : body).slice(0, 4000);
+      queryDB("INSERT INTO user_access_audit (target_user_id, actor_user_id, action, detail) VALUES (?, ?, ?, ?)", [
+        targetId,
+        req.user.id,
+        action.slice(0, 64),
+        detail
+      ]).catch((err: any) => console.warn("⚠️ Could not write user access audit: " + err.message));
+    });
+    next();
+  });
+
+  // GET /api/users/:id/access-audit — the "Activity" list in the Manage panel.
+  app.get("/api/users/:id/access-audit", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const [rows, users]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM user_access_audit WHERE target_user_id = ? ORDER BY id DESC LIMIT 100", [id]),
+        queryDB("SELECT id, name FROM users")
+      ]);
+      const nameById = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
+      const list = (rows as any[])
+        .filter((r) => Number(r.target_user_id) === id)
+        .sort((a, b) => Number(b.id) - Number(a.id))
+        .slice(0, 100)
+        .map((r) => {
+          let detail: any = null;
+          try {
+            detail = r.detail ? JSON.parse(r.detail) : null;
+          } catch {
+            detail = null;
+          }
+          return {
+            id: Number(r.id),
+            action: r.action,
+            detail,
+            actor_name: r.actor_user_id ? nameById.get(Number(r.actor_user_id)) || null : null,
+            created_at: r.created_at
+          };
+        });
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Access Templates — named presets ("Driver", "Field Staff"…): feature
+  // switches to turn on and Admin Panel modules to add. Applying one is done
+  // by the client through the normal per-user endpoints (so every permission
+  // check and the audit log above still apply per account). One template is
+  // the "default for new logins" — Data Import -> Employee Details applies it
+  // to every login it creates (AccessTemplateDefaults.ts).
+  function parseTemplateBody(body: any) {
+    const name = typeof body?.name === "string" ? body.name.trim().slice(0, 100) : "";
+    if (!name) throw Object.assign(new Error("Template name is required."), { status: 400 });
+    const description = typeof body?.description === "string" ? body.description.trim().slice(0, 255) : "";
+    const features = (Array.isArray(body?.features) ? body.features : []).filter((f: any) => TEMPLATE_FEATURES.includes(f));
+    const modules = (Array.isArray(body?.modules) ? body.modules : []).filter((m: any) => adminModuleKeys.includes(m));
+    return { name, description, features, modules, is_default: body?.is_default === true };
+  }
+  // Makes `id` the only default among this company's templates.
+  async function setDefaultTemplate(id: number) {
+    const rows: any[] = (await queryDB("SELECT id FROM access_templates")) || [];
+    for (const r of rows) await queryDB("UPDATE access_templates SET is_default = ? WHERE id = ?", [Number(r.id) === id ? 1 : 0, Number(r.id)]);
+  }
+  function serializeTemplate(r: any) {
+    const parse = (v: any) => {
+      try {
+        const a = JSON.parse(v || "[]");
+        return Array.isArray(a) ? a : [];
+      } catch {
+        return [];
+      }
+    };
+    return {
+      id: Number(r.id),
+      name: r.name,
+      description: r.description || "",
+      features: parse(r.features_json),
+      modules: parse(r.modules_json),
+      is_default: Number(r.is_default || 0) === 1
+    };
+  }
+
+  app.get("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), async (_req: any, res) => {
+    try {
+      await ensureDefaultAccessTemplate(queryDB);
+      const rows: any = await queryDB("SELECT * FROM access_templates");
+      res.json((rows as any[]).map(serializeTemplate).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const t = parseTemplateBody(req.body);
+      const result: any = await queryDB(
+        "INSERT INTO access_templates (name, description, features_json, modules_json, created_by) VALUES (?, ?, ?, ?, ?)",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), req.user.id]
+      );
+      if (t.is_default) await setDefaultTemplate(Number(result.insertId));
+      res.json({ id: Number(result.insertId), ...t });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/access-templates/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const t = parseTemplateBody(req.body);
+      const result: any = await queryDB(
+        "UPDATE access_templates SET name = ?, description = ?, features_json = ?, modules_json = ? WHERE id = ?",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), id]
+      );
+      if (!result.affectedRows) return res.status(404).json({ error: "Template not found." });
+      // Unticking the default only happens by making another one the default.
+      if (t.is_default) await setDefaultTemplate(id);
+      res.json({ id, ...t });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/access-templates/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "delete_trash"), async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT id, is_default FROM access_templates WHERE id = ?", [Number(req.params.id)]);
+      if (Number(rows[0]?.is_default || 0) === 1) {
+        return res.status(400).json({ error: "This is the default for new logins — make another template the default first." });
+      }
+      await queryDB("DELETE FROM access_templates WHERE id = ?", [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // 6. User Management (Admin Only)
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
@@ -70,8 +269,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       if (!name || !email || !password) {
         return res.status(400).json({ error: "Name, email and password are required" });
       }
-      if (password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      const pwBad = passwordProblem(password, { email, name });
+      if (pwBad) {
+        return res.status(400).json({ error: pwBad });
       }
 
       const existing = await queryDB("SELECT id FROM users WHERE email = ?", [email]);
@@ -105,8 +305,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     try {
       const { id } = req.params;
       const { new_password } = req.body;
-      if (!new_password || String(new_password).length < 6) {
-        return res.status(400).json({ error: "New password must be at least 6 characters." });
+      const pwBad = passwordProblem(new_password);
+      if (pwBad) {
+        return res.status(400).json({ error: pwBad });
       }
 
       const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
@@ -119,6 +320,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       const password_hash = await bcrypt.hash(String(new_password), 10);
       await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, id]);
+      // A reset lifts a sign-in lock (LoginGuard.ts).
+      await clearLoginLock(queryDB, Number(id));
+      // Whoever was signed in with the old password is signed out.
+      await endAllSessions(queryDB, Number(id), "password");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to reset password" });
@@ -160,16 +365,45 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
+  // Same page, same gate: the username a user can also sign in with (an
+  // employee's is their Employee ID until someone sets another one here —
+  // syncEmployeeLoginId in EmployeeLoginId.ts leaves a chosen one alone).
+  // Letters, digits, dot, dash and underscore; no spaces, no "@" (that is an
+  // email). Can't be anyone else's username or email, nor another employee's
+  // Employee ID (those are Login IDs too).
+  app.put("/api/users/:id/username", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const newUsername = String(req.body?.new_username ?? "").trim();
+      if (!newUsername) return res.status(400).json({ error: "New username is required." });
+      if (!/^[A-Za-z0-9._-]{3,50}$/.test(newUsername)) {
+        return res.status(400).json({ error: "Username: 3–50 letters, digits, dot (.), dash (-) or underscore (_) — no spaces or @." });
+      }
+      const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+      if (rows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const own: any[] = (await queryDB("/*unscoped*/ SELECT id FROM all_employees WHERE user_id = ?", [id])) || [];
+      const clash = await employeeIdConflict(queryDB, newUsername, { userId: Number(id), employeeRowId: own[0]?.id ? Number(own[0].id) : null });
+      if (clash) return res.status(400).json({ error: clash.replace(/Pick another Employee ID\.?$/, "Pick another username.") });
+      await queryDB("UPDATE users SET username = ? WHERE id = ?", [newUsername, id]);
+      res.json({ success: true, username: newUsername });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update username" });
+    }
+  });
+
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_disappearing, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
       // carry a real (possibly empty) list — a Superadmin implicitly has every
       // module and a plain User never opens the Admin Panel, so both get [].
-      const modulePermRows: any = await queryDB("SELECT user_id, module_key FROM admin_module_permissions");
+      const modulePermRows: any = await queryDB("SELECT user_id, module_key FROM admin_module_permissions WHERE company_id = ?", [activeCompanyId()]);
       const modulesByUser = new Map<number, string[]>();
       for (const row of modulePermRows) {
         const list = modulesByUser.get(row.user_id) || [];
@@ -177,7 +411,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         modulesByUser.set(row.user_id, list);
       }
       // Same idea, one level more granular — see PERMISSION_LAYER_MODULES.
-      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers");
+      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers WHERE company_id = ?", [activeCompanyId()]);
       const layersByUser = new Map<number, Record<string, string[]>>();
       for (const row of layerRows) {
         const byModule = layersByUser.get(row.user_id) || {};
@@ -202,8 +436,31 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         ? users
         : users.filter((u: any) => u.role !== "superadmin");
 
+      // Whether the linked Employee record is active (no record: counts as active),
+      // so pickers can leave out people who have left.
+      const empRows: any[] = (await queryDB("SELECT user_id, is_active, department FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const inactiveUsers = new Set(empRows.filter((e: any) => Number(e.is_active) === 0).map((e: any) => Number(e.user_id)));
+      const departmentByUser = new Map<number, string>();
+      for (const e of empRows) if (e.department && !departmentByUser.has(Number(e.user_id))) departmentByUser.set(Number(e.user_id), String(e.department));
+      // ?slim=1 : who's who only, for pickers and filters (no access switches).
+      if (String(req.query.slim || "") === "1") {
+        return res.json(
+          visibleUsers.map((u: any) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            username: u.username,
+            role: u.role,
+            is_blocked: u.is_blocked,
+            employee_active: !inactiveUsers.has(Number(u.id))
+          }))
+        );
+      }
       res.json(visibleUsers.map((u: any) => ({
         ...u,
+        employee_active: !inactiveUsers.has(Number(u.id)),
+        // From the linked Employee record (Users page department filter).
+        department: departmentByUser.get(Number(u.id)) || null,
         last_login_lat: canSeeLocation ? u.last_login_lat : undefined,
         last_login_lng: canSeeLocation ? u.last_login_lng : undefined,
         last_login_at: canSeeLocation ? u.last_login_at : undefined,
@@ -219,10 +476,39 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
         can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
         can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
-        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
+        can_view_bill_claims: u.role === "superadmin" ? true : !!Number(u.can_view_bill_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
+        can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
+        can_use_disappearing: u.role === "superadmin" ? true : !!Number(u.can_use_disappearing || 0),
+        can_use_chat: u.role === "superadmin" ? true : Number(u.can_use_chat ?? 1) !== 0,
+        can_use_mail: u.role === "superadmin" ? true : !!Number(u.can_use_mail),
+        can_view_mail_directory: u.role === "superadmin" ? true : !!Number(u.can_view_mail_directory || 0),
+        can_use_mail_groups: u.role === "superadmin" ? true : !!Number(u.can_use_mail_groups || 0),
+        can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
+        can_return_dispatch: u.role === "superadmin" ? true : !!Number(u.can_return_dispatch || 0),
+        can_give_feedback: u.role === "superadmin" ? true : !!Number(u.can_give_feedback || 0),
+        can_use_fingerprint: u.role === "superadmin" ? true : !!Number(u.can_use_fingerprint || 0),
+        can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
+        can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
+        can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
+        can_update_check_out: u.role === "superadmin" ? true : !!Number(u.can_update_check_out),
+        can_add_adhoc_approver: u.role === "superadmin" ? true : !!Number(u.can_add_adhoc_approver || 0),
+        can_use_assistant_voice: u.role === "superadmin" ? true : !!Number(u.can_use_assistant_voice || 0),
+        can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
+        can_view_payslip: u.role === "superadmin" ? true : !!Number(u.can_view_payslip),
+        can_request_items: u.role === "superadmin" ? true : !!Number(u.can_request_items),
+        can_email_reports: u.role === "superadmin" ? true : !!Number(u.can_email_reports),
+        can_view_group_dashboard: u.role === "superadmin" ? true : !!Number(u.can_view_group_dashboard),
+        can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
+        can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
+        can_view_service_book: u.role === "superadmin" ? true : !!Number(u.can_view_service_book),
+        can_view_loan_request: u.role === "superadmin" ? true : !!Number(u.can_view_loan_request),
+        can_view_targets: u.role === "superadmin" ? true : !!Number(u.can_view_targets),
+        can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
+        can_handle_assistant_support: u.role === "superadmin" ? true : !!Number(u.can_handle_assistant_support || 0),
+        can_export_assistant_reports: u.role === "superadmin" ? true : !!Number(u.can_export_assistant_reports || 0),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -357,7 +643,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
-        await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM duty_roster_department_access WHERE user_id = ?", [id]).catch(() => {});
         await queryDB("UPDATE users SET can_view_login_location = 0, can_access_user_panel = 0 WHERE id = ?", [id]);
       }
       res.json({ success: true });
@@ -365,6 +652,26 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       res.status(500).json({ error: err.message });
     }
   });
+
+  // The Self Service switches and Department scopes inside the Module Access
+  // popup (Check In/Out, Timesheet, Leave Application, Monthly Attendance
+  // Report departments…) follow the same rule as the modules themselves: a
+  // Superadmin can set them for anyone; an Admin with can_grant_module_access
+  // (requireModuleGrantAccess, used before this) only for a role='user'
+  // account, never another Admin.
+  const requireUserTargetUnlessSuperadmin = async (req: any, res: any, next: any) => {
+    if (req.user?.role === "superadmin") return next();
+    try {
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [req.params.id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can change another Admin's access." });
+      }
+      next();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
 
   // Sets which Admin Panel modules a given Admin or User may access — the tabs
   // are: projects, mprs, imports, reports, users, recycle, editlog, etc. Normally
@@ -376,7 +683,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req, res) => {
     try {
       const { id } = req.params;
-      const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [id]);
+      const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [id, activeCompanyId()]);
       res.json({ modules: rows.map((r: any) => r.module_key) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -402,9 +709,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(403).json({ error: "Only the Superadmin can set another Admin's Module Access." });
       }
 
-      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+      // Module Access is per company — this saves the active company's set.
+      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [id, activeCompanyId()]);
       for (const moduleKey of valid) {
-        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [id, moduleKey]);
+        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key, company_id) VALUES (?, ?, ?)", [id, moduleKey, activeCompanyId()]);
       }
       res.json({ success: true, modules: valid });
     } catch (err: any) {
@@ -429,8 +737,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const { id } = req.params;
       const moduleKey = String(req.query?.module || "");
       const rows: any = await queryDB(
-        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
-        [id, moduleKey]
+        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?",
+        [id, moduleKey, activeCompanyId()]
       );
       res.json({ layers: rows.map((r: any) => r.layer_key) });
     } catch (err: any) {
@@ -458,11 +766,11 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(403).json({ error: "Only the Superadmin can set another Admin's permission layers." });
       }
 
-      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?", [id, moduleKey]);
+      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?", [id, moduleKey, activeCompanyId()]);
       for (const layerKey of valid) {
         await queryDB(
-          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, ?, ?)",
-          [id, moduleKey, layerKey]
+          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key, company_id) VALUES (?, ?, ?, ?)",
+          [id, moduleKey, layerKey, activeCompanyId()]
         );
       }
       res.json({ success: true, module: moduleKey, layers: valid });
@@ -485,7 +793,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // accounts, and to accounts that supervise no Department at all — the
   // Department picker in the modal only uses supervisor_user_id client-side
   // to pre-tick a sensible starting selection, it isn't required here.
-  app.get("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/attendance-report-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
@@ -498,7 +806,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/attendance-report-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -539,7 +847,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // and to accounts that supervise no Department at all — the Department
   // picker in the modal only uses supervisor_user_id client-side to pre-tick
   // a sensible starting selection, it isn't required here.
-  app.get("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/leave-application-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
@@ -552,7 +860,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/leave-application-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -581,22 +889,22 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  // Superadmin: department-wise scope for the 'conveyance' module — exact
+  // Superadmin: department-wise scope for the 'bill_claim' module — exact
   // same shape/rules as the 'attendance_report_departments'/'leave_
-  // application_departments' pairs above, just backed by conveyance_claim_
+  // application_departments' pairs above, just backed by bill_claim_
   // department_access instead (Admin Panel -> Users -> Module Access ->
-  // "Conveyance Claim Departments", shown once 'conveyance' is ticked). No
+  // "Bill Claim Departments", shown once 'bill_claim' is ticked). No
   // rows for a user means unrestricted — every Department's Conveyance Bill
   // Claims visible, exactly like granting the module alone. Applies equally
   // to role 'admin' and role 'user' accounts, and to accounts that supervise
   // no Department at all — the Department picker in the modal only uses
   // supervisor_user_id client-side to pre-tick a sensible starting
   // selection, it isn't required here.
-  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/bill-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
-        "SELECT department FROM conveyance_claim_department_access WHERE user_id = ? ORDER BY department ASC",
+        "SELECT department FROM bill_claim_department_access WHERE user_id = ? ORDER BY department ASC",
         [id]
       );
       res.json({ departments: rows.map((r: any) => r.department) });
@@ -605,7 +913,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/bill-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -613,7 +921,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Conveyance Claim Department access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Bill Claim Department access only applies to Admin and User accounts." });
       }
 
       // Only real Department names (Admin Panel -> Departments) can be scoped
@@ -624,11 +932,96 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
       );
 
-      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
       for (const department of valid) {
-        await queryDB("INSERT INTO conveyance_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+        await queryDB("INSERT INTO bill_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
       }
       res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Department scope for the 'duty_roster' module (RosterRoutes.ts,
+  // duty_roster_department_access): ticked Departments = this account sees
+  // and sets only those Departments' roster and can't change the shifts; no
+  // rows = every Department (HR's full setup). Same shape and rules as
+  // bill-claim-departments above.
+  app.get("/api/users/:id/roster-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB("SELECT department FROM duty_roster_department_access WHERE user_id = ? ORDER BY department ASC", [id]);
+      res.json({ departments: rows.map((r: any) => r.department) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/roster-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Duty Roster Department access only applies to Admin and User accounts." });
+      }
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const valid = Array.from(new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d))));
+      await queryDB("DELETE FROM duty_roster_department_access WHERE user_id = ?", [id]);
+      for (const department of valid) {
+        await queryDB("INSERT INTO duty_roster_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Employee Tracking -> whom this account may see (TrackingScope.ts):
+  // Departments plus single Employees; both empty = everyone. The GET also
+  // returns the Employees to pick from (Name · ID · Designation · Department).
+  app.get("/api/users/:id/tracking-scope", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const lists = await getTrackingScopeLists(queryDB, Number(req.params.id));
+      const employees: any[] =
+        (await queryDB("SELECT id, employee_id, name, designation, department FROM all_employees WHERE is_active = 1 ORDER BY name ASC", [])) || [];
+      res.json({
+        ...lists,
+        employees: employees.map((e) => ({ id: Number(e.id), employee_id: e.employee_id || "", name: e.name, designation: e.designation || "", department: e.department || "" }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/tracking-scope", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Employee Tracking scope only applies to Admin and User accounts." });
+      }
+      const requestedDepts: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+      const requestedEmps: number[] = Array.isArray(req.body?.employee_ids) ? req.body.employee_ids : [];
+      // Only real Departments and Employees — anything else is dropped.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const departments = Array.from(new Set(requestedDepts.map((d) => String(d).trim()).filter((d) => d && realNames.has(d))));
+      const realEmployees: any = await queryDB("SELECT id FROM all_employees");
+      const realIds = new Set<number>(realEmployees.map((e: any) => Number(e.id)));
+      const employee_ids = Array.from(new Set(requestedEmps.map(Number).filter((n) => realIds.has(n))));
+      await queryDB("DELETE FROM tracking_department_access WHERE user_id = ?", [id]);
+      for (const department of departments) {
+        await queryDB("INSERT INTO tracking_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      await queryDB("DELETE FROM tracking_employee_access WHERE user_id = ?", [id]);
+      for (const pk of employee_ids) {
+        await queryDB("INSERT INTO tracking_employee_access (user_id, employee_pk) VALUES (?, ?)", [id, pk]);
+      }
+      res.json({ success: true, departments, employee_ids });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -685,7 +1078,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // user-panel-access above, but (unlike that one) applies to BOTH roles since
   // Leave Management isn't Admin Panel-only. Never applies to the Superadmin
   // itself, which always has this implicitly.
-  app.put("/api/users/:id/leave-management-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/leave-management-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canManage = !!req.body?.can_manage_leave;
@@ -704,14 +1097,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use the Movement Claim (GPS Check In/Out) section on their own User
+  // see/use the Check In/Out (GPS Check In/Out) section on their own User
   // Panel at all — same on/off switch pattern as leave-management-access above,
   // applying to BOTH roles. Nothing shows (and the underlying /api/claims/*
   // self-service routes are blocked server-side too — see requireMovementClaimAccess)
   // until the Superadmin explicitly grants it, matching every other module in
   // this app. Never applies to the Superadmin itself, which always has this
   // implicitly.
-  app.put("/api/users/:id/movement-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/movement-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_movement_claims;
@@ -719,7 +1112,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Movement Claim access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Check In/Out access only applies to Admin and User accounts." });
       }
 
       await queryDB("UPDATE users SET can_view_movement_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
@@ -730,21 +1123,21 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use the Conveyance Bill Claim section on their own User Panel at all —
+  // see/use the Bill Claim section on their own User Panel at all —
   // same on/off switch pattern as movement-claim-access above.
-  app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/bill-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
-      const canView = !!req.body?.can_view_conveyance_claims;
+      const canView = !!req.body?.can_view_bill_claims;
 
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "Conveyance Bill Claim access only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "Bill Claim access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_conveyance_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
-      res.json({ success: true, can_view_conveyance_claims: canView });
+      await queryDB("UPDATE users SET can_view_bill_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_bill_claims: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -757,7 +1150,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // their own User Panel at all — same on/off switch pattern as
   // movement-claim-access above, except ON by default (see the ALTER TABLE),
   // so this only ever needs to be called to turn it OFF for a given account.
-  app.put("/api/users/:id/budget-module-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/budget-module-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_budget_module;
@@ -778,7 +1171,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> Timesheet at all — same on/off switch pattern as
   // movement-claim-access above.
-  app.put("/api/users/:id/timesheet-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/timesheet-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_timesheet;
@@ -798,8 +1191,519 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> Leave Application at all — same on/off switch
-  // pattern as movement-claim-access above.
-  app.put("/api/users/:id/leave-application-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  // pattern as movement-claim-access above. Leave Application and the old
+  // "My Leave" are one page now (LeaveReviewPage.tsx: apply + own balance),
+  // Superadmin-only (or a delegated Admin, same gate as the switches above):
+  // grant/revoke a given Admin OR User account's Chat audio/video calls
+  // (CallRoutes.ts) — OFF by default.
+  // Superadmin-only (or a delegated Admin, same gate as the switches above):
+  // Admin Dashboard "See all companies (group view)" — in the mother company,
+  // Quick View / attendance / leave figures cover every company of the group
+  // (see DASHBOARD_GROUP_SCOPE_PATHS in server.ts). OFF by default.
+  // Self Service -> My Tasks (TaskRoutes.ts): tasks given to this account,
+  // Request to HR, and — for a department head — My Team. OFF by default.
+  app.put("/api/users/:id/tasks-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_tasks;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Tasks only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_tasks = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_tasks: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self Service -> My Mobile SIM (MobileBillRoutes.ts): own SIMs, limits,
+  // bills, and applying for a higher limit. OFF by default.
+  app.put("/api/users/:id/mobile-bill-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_mobile_bill;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Mobile SIM only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_mobile_bill = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_mobile_bill: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Profile -> My Service Book: the
+  // employee's own read-only Employee 360 (HrOps360Routes.ts). OFF by default.
+  app.put("/api/users/:id/service-book-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_service_book;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Service Book only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_service_book = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_service_book: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self Service -> My Loan / Advance (LoanRequestRoutes.ts). OFF by default.
+  app.put("/api/users/:id/loan-request-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_loan_request;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Loan / Advance requests only apply to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_loan_request = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_loan_request: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self Service -> My Targets (TargetRoutes.ts). OFF by default.
+  app.put("/api/users/:id/targets-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_targets;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Targets only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_targets = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_targets: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Chat (ChatRoutes.ts) — ON by default for everyone; this turns it off (or
+  // back on) for one account.
+  app.put("/api/users/:id/chat-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_chat;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Chat access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_chat = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_use_chat: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // AI Assistant (AiAssistantRoutes.ts) — ON by default for everyone; this
+  // turns it off (or back on) for one account.
+  app.put("/api/users/:id/ai-assistant-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_ai_assistant;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "AI Assistant access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_ai_assistant = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_use_ai_assistant: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Assistant report download (PDF / Excel under a list answer) — OFF by
+  // default; the chat route sends the full table only to accounts with it.
+  app.put("/api/users/:id/assistant-report-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_export_assistant_reports;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Assistant report download only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_export_assistant_reports = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_export_assistant_reports: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Assistant live support (AssistantSupportRoutes.ts) — OFF by default.
+  app.put("/api/users/:id/assistant-support-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_handle_assistant_support;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Assistant live support only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_handle_assistant_support = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_handle_assistant_support: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/group-dashboard-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_group_dashboard;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Group view only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_group_dashboard = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_group_dashboard: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Credence Mail (MailRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/mail-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canUse = !!req.body?.can_use_mail;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Mail access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_mail = ? WHERE id = ?", [canUse ? 1 : 0, id]);
+      res.json({ success: true, can_use_mail: canUse });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Credence Mail -> Mailboxes -> Email Directory — OFF by default, per account.
+  app.put("/api/users/:id/mail-directory-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_mail_directory;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Email Directory access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_mail_directory = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_mail_directory: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PEPM Operation -> Material Receive (MprDispatchRoutes.ts) — OFF by default.
+  app.put("/api/users/:id/material-receive-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_receive_material;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Material Receive only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_receive_material = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_receive_material: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sign in with fingerprint (FingerprintRoutes.ts) — OFF by default. Turning
+  // it off also removes the account's saved fingerprints.
+  app.put("/api/users/:id/fingerprint-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_fingerprint;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Fingerprint login only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_fingerprint = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      if (!enabled) await queryDB("DELETE FROM fingerprint_logins WHERE user_id = ?", [id]).catch(() => {});
+      res.json({ success: true, can_use_fingerprint: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self Service -> Give feedback (FeedbackRoutes.ts) — OFF by default.
+  app.put("/api/users/:id/feedback-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_give_feedback;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Feedback only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_give_feedback = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_give_feedback: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Material Receive -> take an MPR row back out of Dispatch Material
+  // (MprDispatchRoutes.ts) — OFF by default.
+  app.put("/api/users/:id/return-dispatch-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_return_dispatch;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Take back from Dispatch only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_return_dispatch = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_return_dispatch: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Credence Mail -> Tools -> My groups — OFF by default, per account.
+  app.put("/api/users/:id/mail-groups-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_mail_groups;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My groups access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_mail_groups = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_use_mail_groups: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Documents to Sign (ESignRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/sign-documents-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_sign_documents;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Documents to Sign access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_sign_documents = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_sign_documents: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Email reports (ReportEmailRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/report-email-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_email_reports;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Email reports access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_email_reports = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_email_reports: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SIM & ID Card requests (RequisitionRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/request-items-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_request_items;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "SIM & ID Card requests only apply to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_request_items = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_request_items: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // My Payslip (PayslipRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/payslip-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_payslip;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Payslip access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_payslip = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_payslip: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // My Duty Roster (RosterRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/roster-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_roster;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Duty Roster access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_roster = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_roster: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Break Time (BreakRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/break-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_take_break;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Break Time access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_take_break = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_take_break: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Remote Attendance -> "Update Out Time" the same day (AttendanceRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/check-out-update-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_update_check_out;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Update Out Time only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_update_check_out = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_update_check_out: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Book a Ride -> saved places (VehicleManagementRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/ride-places-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_save_ride_places;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Saved places only apply to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_save_ride_places = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_save_ride_places: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Approvals -> add an ad-hoc approver to a request waiting on them
+  // (ApprovalRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/adhoc-approver-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_add_adhoc_approver;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "This only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_add_adhoc_approver = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_add_adhoc_approver: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // AI Assistant -> voice (speak / listen, AiAssistantRoutes.ts) — OFF by
+  // default, per account; the speech is sent to Google to be written down.
+  app.put("/api/users/:id/assistant-voice-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_use_assistant_voice;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "This only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_assistant_voice = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_use_assistant_voice: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Chat -> Disappearing messages (ChatRoutes.ts PATCH /api/chat/rooms/:id).
+  app.put("/api/users/:id/disappearing-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canUse = !!req.body?.can_use_disappearing;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "This only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_disappearing = ? WHERE id = ?", [canUse ? 1 : 0, id]);
+      res.json({ success: true, can_use_disappearing: canUse });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/calls-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canUse = !!req.body?.can_use_calls;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Calls access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_use_calls = ? WHERE id = ?", [canUse ? 1 : 0, id]);
+      res.json({ success: true, can_use_calls: canUse });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // so this one switch sets both columns.
+  app.put("/api/users/:id/leave-application-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_leave_application;
@@ -810,17 +1714,16 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: "Leave Application access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_leave_application = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      await queryDB("UPDATE users SET can_view_leave_application = ?, can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, canView ? 1 : 0, id]);
       res.json({ success: true, can_view_leave_application: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use Self Service -> My Leave at all — same on/off switch pattern as
-  // movement-claim-access above.
-  app.put("/api/users/:id/my-leave-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  // Kept for older app builds that still send the separate "My Leave"
+  // switch — it now sets the same Leave Application access as the route above.
+  app.put("/api/users/:id/my-leave-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_my_leave;
@@ -831,7 +1734,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: "My Leave access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      await queryDB("UPDATE users SET can_view_leave_application = ?, can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, canView ? 1 : 0, id]);
       res.json({ success: true, can_view_my_leave: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -930,6 +1833,12 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
         [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
       );
+      // The single "Allowed project for check-in" is now a list
+      // (user_attendance_projects): sending it replaces the list with that one
+      // Project, or clears it (any project) with null.
+      if (existingRows[0].role !== "superadmin" && req.body.attendance_project_id !== undefined && replaceAttendanceProjects) {
+        await replaceAttendanceProjects(queryDB, Number(id), attendance_project_id ? [{ project_id: attendance_project_id, valid_from: null, valid_to: null }] : [], Number(req.user.id));
+      }
       res.json({
         success: true,
         can_edit_delivery_date: !!can_edit_delivery_date,
@@ -965,7 +1874,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
-      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM bill_claim_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM duty_roster_department_access WHERE user_id = ?", [id]).catch(() => {});
       // A deleted user might still be linked from an Employees directory row
       // (all_employees.user_id — no FK/cascade on that column) — clear it so
       // the Employee doesn't keep showing a stale "Has Login" badge for an

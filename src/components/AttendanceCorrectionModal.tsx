@@ -12,6 +12,7 @@ import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
+import { SearchSelect } from './Combobox';
 interface AttendanceCorrectionModalProps {
   token: string;
   dateStr: string;
@@ -39,7 +40,7 @@ interface AttendanceCorrectionModalProps {
   onSubmitted: () => void;
 }
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches NewConveyanceClaimModal's cap
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB, matches NewBillClaimModal's cap
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
 
 // "YYYY-MM-DD HH:MM:SS"/ISO -> "HH:MM" for pre-filling an <input type="time">.
@@ -47,6 +48,13 @@ const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'a
 // never drifts a display-hour off from what formatTime() already shows
 // elsewhere in Timesheet (both read the same naive, no-timezone-suffix string
 // the server hands back with dateStrings:true).
+// "2026-10-25" -> "2026-10-26" (calendar arithmetic, no timezone involved).
+function nextDate(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function toTimeInputValue(value?: string | null): string {
   if (!value) return '';
   const str = String(value);
@@ -60,10 +68,10 @@ function toTimeInputValue(value?: string | null): string {
 // (e.g. only the Out Time was missed). Never applied immediately: this always
 // submits a request (POST /api/attendance/corrections) that goes through the
 // same global Approval Workflow chain as Attendance Check In/Out and
-// Conveyance Bill Claims, so it shows up in the existing Admin Panel ->
+// Bill Claims, so it shows up in the existing Admin Panel ->
 // Approvals queue — no separate review page. An optional reason for the edit
 // and an optional Image/PDF attachment (5MB cap, same FileReader/Base64
-// pattern as the Conveyance Bill Claim form).
+// pattern as the Bill Claim form).
 export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps> = ({
   token,
   dateStr,
@@ -73,6 +81,23 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   onClose,
   onSubmitted
 }) => {
+  // An account with its own check-in list (Module Access -> Remote
+  // Attendance) is offered only those Projects for a fully absent day; the
+  // server checks the day's list again. null = no list (every Project).
+  const [checkInList, setCheckInList] = useState<Set<number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        if (alive && me?.attendance_projects_limited) setCheckInList(new Set((me.attendance_projects || []).map((p: any) => Number(p.id))));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   // One option per distinct Project already recorded that day, or — when the
   // day is fully Absent — one option per Project the User has access to at
   // all. Auto-selects (and hides the dropdown for) the single-option case,
@@ -85,7 +110,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   // Project than the one now pinned. The In/Out Time still pre-fills from
   // whatever row that day actually has (there's realistically at most one),
   // just filed under the pinned Project instead.
-  const options = pinnedProjectId
+  const options = (pinnedProjectId
     ? [{
         id: pinnedProjectId,
         name: projects.find((p) => p.id === pinnedProjectId)?.project_name || `Project #${pinnedProjectId}`,
@@ -93,12 +118,18 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
       }]
     : dayRecords.length > 0
       ? dayRecords.map((r) => ({ id: r.project_id, name: r.project_name || `Project #${r.project_id}`, record: r as AttendanceRecord | null }))
-      : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }));
+      : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }))
+  ).filter((o) => pinnedProjectId || dayRecords.length > 0 || !checkInList || checkInList.has(o.id));
 
   const [projectId, setProjectId] = useState<number | ''>(options.length > 0 ? options[0].id : '');
   const [checkInTime, setCheckInTime] = useState(options.length > 0 ? toTimeInputValue(options[0].record?.check_in_at) : '');
   const [checkOutTime, setCheckOutTime] = useState(options.length > 0 ? toTimeInputValue(options[0].record?.check_out_at) : '');
   const [remarks, setRemarks] = useState('');
+  // The check-in list arrives after the first render — keep the pick on it.
+  useEffect(() => {
+    if (options.length && !options.some((o) => o.id === projectId)) setProjectId(options[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkInList]);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -137,6 +168,9 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
     setFile(f);
   };
 
+  // An Out Time earlier than the In Time is a night shift: out the next morning.
+  const outNextDay = !!checkInTime && !!checkOutTime && checkOutTime < checkInTime;
+
   const validate = (): string | null => {
     if (projectId === '' || projectId === null || projectId === undefined) return 'Select a Project.';
     if (!checkInTime && !checkOutTime) return 'Enter an In Time or Out Time to correct.';
@@ -169,7 +203,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
           project_id: projectId,
           attendance_date: dateStr,
           check_in_at: checkInTime ? `${dateStr} ${checkInTime}:00` : undefined,
-          check_out_at: checkOutTime ? `${dateStr} ${checkOutTime}:00` : undefined,
+          check_out_at: checkOutTime ? `${outNextDay ? nextDate(dateStr) : dateStr} ${checkOutTime}:00` : undefined,
           remarks: remarks.trim() || undefined,
           ...(file_base64 ? { file_base64, file_name: file!.name, file_mimetype: file!.type } : {})
         })
@@ -185,7 +219,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   };
 
   // Rendered via a portal straight onto document.body — same reasoning as
-  // NewConveyanceClaimModal/AttendanceMapConfirm: this gets opened from deep
+  // NewBillClaimModal/AttendanceMapConfirm: this gets opened from deep
   // inside Timesheet's tree, and a `position: fixed` element nested inside an
   // `overflow-hidden` ancestor doesn't reliably pin to the full screen on
   // Android WebViews otherwise.
@@ -224,7 +258,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
               {options.length > 1 && (
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-500 mb-1">Project *</label>
-                  <select
+                  <SearchSelect
                     value={projectId}
                     onChange={(e) => handleProjectChange(Number(e.target.value))}
                     className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -234,7 +268,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
                         {o.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </div>
               )}
               {options.length === 1 && (
@@ -261,6 +295,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
                     onChange={(e) => setCheckOutTime(e.target.value)}
                     className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                  {outNextDay && <p className="mt-1 text-[11px] text-slate-500">Next day ({nextDate(dateStr)}) — a night shift.</p>}
                 </div>
               </div>
 

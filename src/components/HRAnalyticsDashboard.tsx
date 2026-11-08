@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart3, Users, Briefcase, LogOut, MessageSquareWarning, Fingerprint, AlertTriangle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface HRAnalyticsDashboardProps {
   token: string;
@@ -127,10 +127,7 @@ export const HRAnalyticsDashboard: React.FC<HRAnalyticsDashboardProps> = ({ toke
       )}
 
       {loading || !summary ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-6 space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">

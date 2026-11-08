@@ -1,0 +1,66 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// PDF / Excel of a Credence Assistant list answer (AiAssistantRoutes.ts
+// AssistantReport). The server sends the table only to accounts with
+// users.can_export_assistant_reports, so having one is the permission.
+// PDF uses the company's standard report layout (pdfStandard.ts).
+
+import { isNativePlatform, savePdfCrossPlatform, saveWorkbookCrossPlatform } from './saveFile';
+import { drawStandardHeader, loadPdfCompany, standardTable } from './pdfStandard';
+import { finalizePdfPageNumbers } from './pdfLetterhead';
+
+export interface AssistantReport {
+  title: string;
+  file: string;
+  details?: [string, string][];
+  columns: string[];
+  rows: (string | number | null)[][];
+}
+
+const cell = (v: string | number | null) => (v === null || v === undefined ? '' : String(v));
+
+export async function downloadAssistantPdf(token: string, r: AssistantReport, preparedBy: string, mode: 'save' | 'email' = 'save') {
+  const [{ default: jsPDF }, { default: autoTable }, co] = await Promise.all([import('./jspdf'), import('jspdf-autotable'), loadPdfCompany(token)]);
+  const doc = new jsPDF({ orientation: r.columns.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+  const y = drawStandardHeader(doc, co, r.title, [...(r.details || []), ['Prepared by', preparedBy]]);
+  autoTable(doc, {
+    ...standardTable(y),
+    head: [r.columns],
+    body: r.rows.map((row) => row.map(cell)),
+    columnStyles: { 0: { halign: 'center', cellWidth: 9 } }
+  });
+  finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    // Credence Mail's own New message window: from the asker's own mailbox
+    // with their signature, the PDF attached — never the server's account.
+    const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+    const { openMailCompose } = await import('../components/mail/ComposeLauncher');
+    openMailCompose(token, {
+      subject: r.title,
+      body: `<div>Please find the attached report: <b>${esc(r.title)}</b>.</div><div><br></div>`,
+      files: [{ name: `${r.file}.pdf`, type: 'application/pdf', dataUrl: String(doc.output('datauristring')).replace(/^data:application\/pdf;[^,]*,/, 'data:application/pdf;base64,') }]
+    });
+    return;
+  }
+  await savePdfCrossPlatform(doc, `${r.file}.pdf`);
+}
+
+export async function downloadAssistantExcel(r: AssistantReport, preparedBy: string) {
+  const XLSX = await import('xlsx');
+  const aoa: (string | number)[][] = [
+    [r.title],
+    ...(r.details || []).map(([k, v]) => [k, v]),
+    ['Prepared by', preparedBy],
+    [],
+    r.columns,
+    ...r.rows.map((row) => row.map((v) => (typeof v === 'number' ? v : cell(v))))
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = r.columns.map((c, i) => ({ wch: Math.min(45, Math.max(c.length + 2, ...r.rows.slice(0, 300).map((row) => cell(row[i]).length + 2))) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Report');
+  await saveWorkbookCrossPlatform(wb, `${r.file}.xlsx`);
+}

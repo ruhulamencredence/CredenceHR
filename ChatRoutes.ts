@@ -4,7 +4,7 @@
  */
 
 // Chat (Direct messages / Group chat / Community — WhatsApp-style) — split
-// into its own file from day one, same reasoning as ConveyanceBillClaimRoutes.ts
+// into its own file from day one, same reasoning as BillClaimRoutes.ts
 // / AssetManagementRoutes.ts: server.ts is already huge, so this stays out as
 // its own module, registered from inside startServer() via
 // registerChatRoutes(), reusing that request's authenticateToken/queryDB
@@ -45,10 +45,17 @@
 // broadcasting the same 'receive_message' event to every socket in
 // `room:<id>`, via the one shared insertChatMessage() helper below.
 
-import type { Express } from "express";
+import express, { type Express } from "express";
+import { checkSession } from "./SessionSecurity";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
+import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
+import { saveChatFile, resolveChatPath, removeChatFileIfUnused, moveOldChatAttachments } from "./chatFiles";
+import fs from "fs";
+import crypto from "crypto";
+import { runsBackgroundJobs } from "./jobRunner";
+import { currentAppMask } from "./AppAccess";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -64,12 +71,19 @@ interface ChatRouteDeps {
 // 'send_message' handler right after a message is persisted+broadcast —
 // never awaited there, so a slow/failed push never delays message delivery
 // to the people actually online.
-async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
+export async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
   try {
+    if (message.message_type === "system") return;
     const roomRows = await queryDB("SELECT type, title FROM chat_rooms WHERE id = ?", [message.room_id]);
     const room = roomRows[0];
     if (!room) return;
     const isGroup = room.type !== "direct";
+    // "@Name" in a group: that member hears about it even if they muted the group.
+    let mentioned: number[] = [];
+    if (isGroup && message.content && String(message.content).includes("@")) {
+      const names: any[] = (await queryDB("SELECT u.id, u.name FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ?", [message.room_id]).catch(() => [])) || [];
+      mentioned = names.filter((n) => n.name && String(message.content).includes(`@${n.name}`)).map((n) => Number(n.id));
+    }
     const bodyText =
       message.message_type === "image"
         ? "📷 Photo"
@@ -80,10 +94,18 @@ async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any)
         : message.content || "";
     const title = isGroup ? room.title || "Group" : message.sender_name;
     const body = isGroup ? `${message.sender_name}: ${bodyText}` : bodyText;
-    await sendPushToRoomMembers(queryDB, message.room_id, message.sender_id, title, body, {
-      roomId: String(message.room_id),
-      messageId: String(message.id)
-    });
+    await sendPushToRoomMembers(
+      queryDB,
+      message.room_id,
+      message.sender_id,
+      title,
+      body,
+      {
+        roomId: String(message.room_id),
+        messageId: String(message.id)
+      },
+      mentioned
+    );
   } catch {
     // Best-effort — see sendPushToRoomMembers; a push failure never affects
     // the message itself, which is already delivered via Socket.IO/REST.
@@ -95,7 +117,16 @@ interface ChatSocketDeps {
   jwtSecret: string;
 }
 
-const MAX_CHAT_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5MB, same ceiling AssetManagementRoutes uses
+// One chat attachment (voice, image, video, document) can be up to 50 MB.
+// The app sends the file itself as the request body (not base64 JSON, which
+// would make it a third bigger and hold it in memory twice); Nginx's
+// client_max_body_size has to allow it too (deploy/nginx.conf.example).
+const MAX_CHAT_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+// Read only for this route, after the login and chat checks passed.
+const rawChatBody = express.raw({
+  type: (req: any) => !String(req.headers["content-type"] || "").includes("json"),
+  limit: MAX_CHAT_ATTACHMENT_BYTES
+});
 
 // Self-healing migration — same pattern as ensureAssetManagementSchema in
 // AssetManagementRoutes.ts: CREATE TABLE IF NOT EXISTS means a normal server
@@ -154,7 +185,8 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
     // Idempotent (MODIFY to the same definition is a no-op), same pattern
     // as every other enum widening in server.ts's ensureSchemaMigrations.
     try {
-      await dbPool.query(`ALTER TABLE chat_messages MODIFY COLUMN message_type ENUM('text','image','file','audio') NOT NULL DEFAULT 'text'`);
+      // 'system': "X changed the group name", "Y added Z" … (centred notes).
+      await dbPool.query(`ALTER TABLE chat_messages MODIFY COLUMN message_type ENUM('text','image','file','audio','system') NOT NULL DEFAULT 'text'`);
     } catch (err: any) {
       console.warn("⚠️ Could not add 'audio' to chat_messages.message_type: " + err.message);
     }
@@ -189,6 +221,118 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
     // ORDER BY id DESC) and the unread-count aggregate (WHERE room_id = ?
     // AND sender_id != ?) below — both are hit on every room open.
     await dbPool.query(`CREATE INDEX idx_chat_messages_room ON chat_messages (room_id, id)`).catch(() => {});
+    // WhatsApp-style message actions (see the routes further down):
+    //   unsent_at            "Delete for everyone": the content and
+    //                        attachment are wiped, everyone sees
+    //                        "This message was deleted".
+    //   chat_message_hidden  "Delete for me": only this account stops
+    //                        seeing the message.
+    //   chat_message_reactions  one emoji per (message, account).
+    //   chat_wallpapers      each account's conversation background, per
+    //                        room (room_id 0 = the default for every chat).
+    //   users.chat_about     the "About" line on a chat profile.
+    for (const [sql, ignore] of [
+      ["ALTER TABLE chat_messages ADD COLUMN unsent_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD COLUMN unsent_by INT NULL", "ER_DUP_FIELDNAME"],
+      // "Edit": the sender changes a text message within 15 minutes; it then shows "Edited".
+      ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
+      // "Forward": a copy sent on to other chats shows "Forwarded".
+      ["ALTER TABLE chat_messages ADD COLUMN is_forwarded TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"],
+      // Attachments are files in the chat folder (chatFiles.ts, .env
+      // CHAT_ATTACHMENT_DIR); this is where the file is. attachment_data is
+      // only read for a file saved before that and not yet moved.
+      ["ALTER TABLE chat_messages ADD COLUMN attachment_path VARCHAR(500) NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD INDEX idx_chat_messages_attachment_path (attachment_path(191))", "ER_DUP_KEYNAME"],
+      // Group info (like WhatsApp): a description, the group photo's
+      // version (so a changed photo is fetched again), and two group
+      // settings: only admins edit the group info / only admins send.
+      ["ALTER TABLE chat_rooms ADD COLUMN description VARCHAR(1000) NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_rooms ADD COLUMN avatar_version INT NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_rooms ADD COLUMN info_admins_only TINYINT(1) NOT NULL DEFAULT 1", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_rooms ADD COLUMN send_admins_only TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      // Disappearing messages: new messages in the chat are removed this many
+      // seconds after they're sent (0 = off); expires_at is set on each one.
+      ["ALTER TABLE chat_rooms ADD COLUMN disappear_seconds INT NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD COLUMN expires_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD INDEX idx_chat_messages_expires (expires_at)", "ER_DUP_KEYNAME"],
+      // Group invite link: anyone with Chat who has the code can join.
+      ["ALTER TABLE chat_rooms ADD COLUMN invite_code VARCHAR(40) NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_rooms ADD UNIQUE INDEX uniq_chat_rooms_invite (invite_code)", "ER_DUP_KEYNAME"]
+    ] as [string, string][]) {
+      await dbPool.query(sql).catch((err: any) => {
+        if (err?.code !== ignore) console.warn("⚠️ Chat: " + err.message);
+      });
+    }
+    // Old attachments still in the database go to the folder, in the background.
+    void moveOldChatAttachments(dbPool);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_message_hidden (
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_message_reactions (
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        emoji VARCHAR(16) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) DEFAULT CHARSET=utf8mb4
+    `);
+    // Pinned messages: up to 3 per chat, each for 24 hours / 7 / 30 days.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_pinned_messages (
+        message_id INT NOT NULL PRIMARY KEY,
+        room_id INT NOT NULL,
+        pinned_by INT NULL,
+        pinned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_chat_pins_room (room_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+      )
+    `);
+    // Starred messages: each account's own bookmarks, per message.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_starred_messages (
+        user_id INT NOT NULL,
+        message_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, message_id),
+        KEY idx_chat_starred_message (message_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+      )
+    `);
+    // Each account's own settings for one chat — for now "Mute
+    // notifications" until a time ('9999-12-31' = always).
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_room_settings (
+        user_id INT NOT NULL,
+        room_id INT NOT NULL,
+        muted_until DATETIME NULL,
+        PRIMARY KEY (user_id, room_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_wallpapers (
+        user_id INT NOT NULL,
+        room_id INT NOT NULL,
+        wallpaper VARCHAR(32) NOT NULL,
+        PRIMARY KEY (user_id, room_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure Chat tables exist: " + err.message);
   }
@@ -233,23 +377,35 @@ async function findOrCreateDirectRoom(queryDB: ChatRouteDeps["queryDB"], userAId
 // Shared by the REST POST /messages route and the socket 'send_message'
 // handler — see the module comment above for why text vs attachment
 // messages take different transports to get here.
-async function insertChatMessage(
+export async function insertChatMessage(
   queryDB: ChatRouteDeps["queryDB"],
   params: {
     roomId: number;
     senderId: number;
-    messageType: "text" | "image" | "file" | "audio";
+    messageType: "text" | "image" | "file" | "audio" | "system";
     content: string | null;
     attachmentBuffer?: Buffer | null;
     attachmentMimetype?: string | null;
     attachmentFilename?: string | null;
+    // An already-saved file (a forwarded copy points at the same file).
+    attachmentPath?: string | null;
     replyToId?: number | null;
+    forwarded?: boolean;
   }
 ): Promise<any> {
+  // The file goes to the chat folder; the row keeps only where it is.
+  const attachmentPath =
+    params.attachmentPath ||
+    (params.attachmentBuffer ? await saveChatFile(params.attachmentBuffer, params.attachmentMimetype, params.attachmentFilename, params.messageType) : null);
+  // Disappearing messages on in this chat: the message gets its end time.
+  const ttl =
+    params.messageType === "system"
+      ? 0
+      : Number((((await queryDB("SELECT disappear_seconds FROM chat_rooms WHERE id = ?", [params.roomId]).catch(() => [])) || [])[0] || {}).disappear_seconds || 0);
   const result = await queryDB(
     `INSERT INTO chat_messages
-      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, reply_to_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_path, reply_to_id, is_forwarded, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${ttl > 0 ? `DATE_ADD(NOW(), INTERVAL ${Math.floor(ttl)} SECOND)` : "NULL"})`,
     [
       params.roomId,
       params.senderId,
@@ -257,24 +413,77 @@ async function insertChatMessage(
       params.content ?? null,
       params.attachmentFilename ?? null,
       params.attachmentMimetype ?? null,
-      params.attachmentBuffer ?? null,
-      params.replyToId ?? null
+      attachmentPath,
+      params.replyToId ?? null,
+      params.forwarded ? 1 : 0
     ]
   );
-  const rows = await queryDB(
-    `SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
-            cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-            cm.reply_to_id, cm.created_at,
-            rt.content AS reply_to_content, rtu.name AS reply_to_sender_name
-     FROM chat_messages cm
-     JOIN users u ON u.id = cm.sender_id
-     LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
-     LEFT JOIN users rtu ON rtu.id = rt.sender_id
-     WHERE cm.id = ?`,
-    [result.insertId]
-  );
-  return rows[0];
+  return (await loadMessages(queryDB, "cm.id = ?", [result.insertId]))[0];
 }
+
+// One shape for a message everywhere (history, send, live updates). A reply
+// shows what it quotes ("This message was deleted" once that was unsent), and
+// every message carries its reactions: [{ emoji, user_id, name }].
+const MESSAGE_SELECT = `
+  SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
+         cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_path IS NOT NULL OR cm.attachment_data IS NOT NULL) AS has_attachment,
+         cm.reply_to_id, cm.created_at, cm.unsent_at, cm.edited_at, cm.is_forwarded, cm.expires_at,
+         CASE WHEN rt.unsent_at IS NOT NULL THEN 'This message was deleted'
+              WHEN rt.content IS NOT NULL AND rt.content <> '' THEN rt.content
+              WHEN rt.message_type = 'image' THEN '📷 Photo'
+              WHEN rt.message_type = 'audio' THEN '🎤 Voice message'
+              WHEN rt.message_type = 'file' THEN CONCAT('📎 ', COALESCE(rt.attachment_filename, 'File'))
+              ELSE rt.content END AS reply_to_content,
+         rtu.name AS reply_to_sender_name
+  FROM chat_messages cm
+  JOIN users u ON u.id = cm.sender_id
+  LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
+  LEFT JOIN users rtu ON rtu.id = rt.sender_id`;
+export async function loadMessages(queryDB: ChatRouteDeps["queryDB"], where: string, params: any[], tail = "", viewerId?: number): Promise<any[]> {
+  // A disappearing message is gone once its time is up (the clean-up job
+  // then removes it for good).
+  const rows: any[] = (await queryDB(`${MESSAGE_SELECT} WHERE (${where}) AND (cm.expires_at IS NULL OR cm.expires_at > NOW()) ${tail}`, params)) || [];
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => Number(r.id));
+  // Which of these the viewer starred (their own bookmarks only).
+  const starred = new Set<number>();
+  if (viewerId) {
+    const st: any[] =
+      (await queryDB(`SELECT message_id FROM chat_starred_messages WHERE user_id = ? AND message_id IN (${ids.map(() => "?").join(",")})`, [viewerId, ...ids]).catch(() => [])) || [];
+    st.forEach((x) => starred.add(Number(x.message_id)));
+  }
+  const reacts: any[] =
+    (await queryDB(
+      `SELECT r.message_id, r.user_id, r.emoji, u.name FROM chat_message_reactions r JOIN users u ON u.id = r.user_id
+        WHERE r.message_id IN (${ids.map(() => "?").join(",")}) ORDER BY r.created_at ASC`,
+      ids
+    ).catch(() => [])) || [];
+  const byMsg = new Map<number, any[]>();
+  for (const r of reacts) {
+    const list = byMsg.get(Number(r.message_id)) || [];
+    list.push({ emoji: r.emoji, user_id: Number(r.user_id), name: r.name });
+    byMsg.set(Number(r.message_id), list);
+  }
+  return rows.map((r) => ({ ...r, reactions: byMsg.get(Number(r.id)) || [], starred: starred.has(Number(r.id)) }));
+}
+
+// Group settings: may this account change the group's name / photo /
+// description (an admin, or anyone when the group allows it), and may it
+// send messages (everyone, unless "only admins can send" is on).
+async function roomRules(queryDB: ChatRouteDeps["queryDB"], roomId: number, user: { id: number; role: string }) {
+  const room = ((await queryDB("SELECT id, type, info_admins_only, send_admins_only FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+  if (!room) return null;
+  const membership = await isMember(queryDB, roomId, user.id);
+  const admin = user.role === "superadmin" || membership?.role === "admin";
+  return {
+    room,
+    member: !!membership,
+    admin,
+    canEditInfo: room.type !== "direct" && !!membership && (admin || !Number(room.info_admins_only)),
+    canSend: !!membership && (room.type === "direct" || admin || !Number(room.send_admins_only))
+  };
+}
+const SEND_ADMINS_ONLY = "Only group admins can send messages in this group.";
 
 async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, userId: number, messageId: number): Promise<void> {
   await queryDB(
@@ -286,16 +495,70 @@ async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, use
   );
 }
 
+// Chat access per account (users.can_use_chat, Module Access -> Chat; on
+// unless turned off), cached briefly. A Superadmin always has it.
+const chatAccessCache = new Map<number, { ok: boolean; at: number }>();
+export async function canUseChat(queryDB: (sql: string, params?: any[]) => Promise<any>, userId: number): Promise<boolean> {
+  // A mobile-app request with its own narrower access skips the shared cache (AppAccess.ts).
+  const app = !!currentAppMask();
+  const hit = app ? undefined : chatAccessCache.get(userId);
+  if (hit && Date.now() - hit.at < 30 * 1000) return hit.ok;
+  const rows: any[] | null = await queryDB("SELECT role, can_use_chat FROM users WHERE id = ?", [userId]).catch(() => null);
+  if (!rows) return hit?.ok ?? false;
+  const u = rows[0];
+  const ok = !!u && (u.role === "superadmin" || Number(u.can_use_chat ?? 1) !== 0);
+  if (!app) chatAccessCache.set(userId, { ok, at: Date.now() });
+  return ok;
+}
+// SQL condition: the account in `alias` has Chat.
+const CHAT_ON_SQL = (alias: string) => `(${alias}.role = 'superadmin' OR COALESCE(${alias}.can_use_chat, 1) <> 0)`;
+
 export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatRouteDeps) {
   const { authenticateToken, queryDB } = deps;
+
+  // Every Chat route below needs Chat access (the push-token routes don't:
+  // the app's push registration carries every other notification too).
+  const requireChat = async (req: any, res: any, next: any) => {
+    if (await canUseChat(queryDB, Number(req.user?.id))) return next();
+    res.status(403).json({ error: "Chat is not turned on for your account. Ask your Superadmin.", code: "CHAT_OFF" });
+  };
+  // Of these accounts, the ones that have Chat.
+  const withChat = async (ids: number[]): Promise<number[]> => {
+    if (ids.length === 0) return [];
+    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")}`, ids);
+    return rows.map((r: any) => Number(r.id));
+  };
+  // A centred note in the chat ("Rahim changed the group name to …"), seen by
+  // everyone in it; never a push, never counted as unread.
+  const nameOf = async (id: number): Promise<string> =>
+    String((((await queryDB("SELECT name FROM users WHERE id = ?", [id]).catch(() => [])) || [])[0] || {}).name || "Someone");
+  const namesOf = async (ids: number[]): Promise<string> => {
+    if (!ids.length) return "";
+    const rows: any[] = (await queryDB(`SELECT name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+    const n = rows.map((r) => r.name);
+    return n.length <= 1 ? n.join("") : `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
+  };
+  const postSystem = async (roomId: number, actorId: number, text: string) => {
+    try {
+      const message = await insertChatMessage(queryDB, { roomId, senderId: actorId, messageType: "system", content: text });
+      io.to(`room:${roomId}`).emit("receive_message", message);
+    } catch {
+      // a note is a nicety — the change itself is already saved
+    }
+  };
+  const DISAPPEAR_LABEL: Record<number, string> = { 86400: "24 hours", 604800: "7 days", 7776000: "90 days" };
+
 
   // GET /api/chat/directory — every other account, for "start a new chat" /
   // "add members" pickers. Same company-wide visibility EmployeeDirectoryRoutes.ts
   // already grants every signed-in account (chat is internal, org-wide).
-  app.get("/api/chat/directory", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/directory", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const rows = await queryDB(
-        "SELECT id, name, email, username, role FROM users WHERE id != ? ORDER BY name ASC",
+        `SELECT u.id, u.name, u.email, u.username, u.role,
+                (SELECT e.department FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS department,
+                (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation
+         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} ORDER BY u.name ASC`,
         [req.user.id]
       );
       res.json(rows);
@@ -306,20 +569,22 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/rooms — every room this account belongs to, with a last-message
   // preview and unread count, newest activity first.
-  app.get("/api/chat/rooms", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const rooms = await queryDB(
         `SELECT r.id, r.type, r.title, r.parent_room_id, r.created_by,
-                (r.avatar_data IS NOT NULL) AS has_avatar,
+                (r.avatar_data IS NOT NULL) AS has_avatar, r.avatar_version, r.description,
+                r.info_admins_only, r.send_admins_only, r.disappear_seconds,
+                (SELECT st.muted_until FROM chat_room_settings st WHERE st.user_id = m.user_id AND st.room_id = r.id AND st.muted_until > NOW()) AS muted_until,
                 m.role AS my_role,
-                lm.id AS last_message_id, lm.content AS last_message_content,
+                lm.id AS last_message_id, IF(lm.unsent_at IS NULL, lm.content, 'This message was deleted') AS last_message_content,
                 lm.message_type AS last_message_type, lm.sender_id AS last_message_sender_id,
                 lm.created_at AS last_message_at
          FROM chat_room_members m
          JOIN chat_rooms r ON r.id = m.room_id
          LEFT JOIN chat_messages lm ON lm.id = (
-           SELECT id FROM chat_messages WHERE room_id = r.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1
+           SELECT id FROM chat_messages WHERE room_id = r.id AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY id DESC LIMIT 1
          )
          WHERE m.user_id = ?
          ORDER BY COALESCE(lm.created_at, r.created_at) DESC`,
@@ -331,7 +596,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          FROM chat_messages cm
          JOIN chat_room_members rm ON rm.room_id = cm.room_id AND rm.user_id = ?
          LEFT JOIN chat_room_reads rr ON rr.room_id = cm.room_id AND rr.user_id = ?
-         WHERE cm.sender_id != ? AND cm.deleted_at IS NULL
+         WHERE cm.sender_id != ? AND cm.deleted_at IS NULL AND cm.message_type <> 'system'
+           AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
            AND (rr.last_read_message_id IS NULL OR cm.id > rr.last_read_message_id)
          GROUP BY cm.room_id`,
         [userId, userId, userId]
@@ -352,9 +618,13 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         for (const o of others) otherParticipantByRoom.set(o.room_id, o);
       }
 
+      // This account's conversation backgrounds (room 0 = its default).
+      const wp: any[] = (await queryDB("SELECT room_id, wallpaper FROM chat_wallpapers WHERE user_id = ?", [userId]).catch(() => [])) || [];
+      const wallpaperOf = new Map<number, string>(wp.map((w: any) => [Number(w.room_id), String(w.wallpaper)]));
       res.json(
         rooms.map((r: any) => ({
           ...r,
+          wallpaper: wallpaperOf.get(Number(r.id)) || wallpaperOf.get(0) || null,
           unread_count: unreadByRoom.get(r.id) || 0,
           other_participant: r.type === "direct" ? otherParticipantByRoom.get(r.id) || null : null
         }))
@@ -366,7 +636,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/unread-count — total unread across every room, for the
   // Navbar chat bell badge (same idea as AlertsBell's /api/alerts/unread-count).
-  app.get("/api/chat/unread-count", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/unread-count", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const rows = await queryDB(
@@ -374,10 +644,13 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          FROM chat_messages cm
          JOIN chat_room_members rm ON rm.room_id = cm.room_id AND rm.user_id = ?
          LEFT JOIN chat_room_reads rr ON rr.room_id = cm.room_id AND rr.user_id = ?
-         WHERE cm.sender_id != ? AND cm.deleted_at IS NULL
-           AND (rr.last_read_message_id IS NULL OR cm.id > rr.last_read_message_id)`,
+         WHERE cm.sender_id != ? AND cm.deleted_at IS NULL AND cm.message_type <> 'system'
+           AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
+           AND (rr.last_read_message_id IS NULL OR cm.id > rr.last_read_message_id)
+           AND NOT EXISTS (SELECT 1 FROM chat_room_settings st WHERE st.user_id = rm.user_id AND st.room_id = cm.room_id AND st.muted_until > NOW())`,
         [userId, userId, userId]
       );
+      // Muted chats keep their own unread number in the list but don't add to the bell.
       res.json({ count: Number(rows[0]?.count || 0) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -386,14 +659,17 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // POST /api/chat/rooms — create (or, for 'direct', reuse) a room.
   // Body: { type: 'direct'|'group'|'community', title?, memberIds: number[] }
-  app.post("/api/chat/rooms", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { type, title, memberIds } = req.body || {};
       if (!["direct", "group", "community"].includes(type)) {
         return res.status(400).json({ error: "type must be 'direct', 'group', or 'community'." });
       }
-      const ids: number[] = Array.isArray(memberIds) ? memberIds.map(Number).filter((n) => Number.isFinite(n) && n !== userId) : [];
+      const asked: number[] = Array.isArray(memberIds) ? memberIds.map(Number).filter((n) => Number.isFinite(n) && n !== userId) : [];
+      // Only accounts that have Chat can be chatted with or added.
+      const ids = await withChat(asked);
+      if (ids.length < asked.length && type === "direct") return res.status(400).json({ error: "Chat is not turned on for that account." });
 
       if (type === "direct") {
         if (ids.length !== 1) return res.status(400).json({ error: "Direct chat needs exactly one other member." });
@@ -417,6 +693,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
           memberId
         ]);
       }
+      await postSystem(roomId, userId, `${await nameOf(userId)} created ${type === "community" ? "the community" : "the group"} "${String(title).trim()}"`);
+      if (ids.length) await postSystem(roomId, userId, `${await nameOf(userId)} added ${await namesOf(ids)}`);
       res.json({ id: roomId, type, title: String(title).trim() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -426,7 +704,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // POST /api/chat/rooms/:id/subgroups — attach an existing 'group' room as
   // a sub-group of this 'community' room (WhatsApp Community). Community
   // admin only. Body: { groupRoomId }
-  app.post("/api/chat/rooms/:id/subgroups", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/subgroups", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const communityId = Number(req.params.id);
       const groupRoomId = Number(req.body?.groupRoomId);
@@ -454,7 +732,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   });
 
   // GET /api/chat/rooms/:id/members
-  app.get("/api/chat/rooms/:id/members", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms/:id/members", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
@@ -474,7 +752,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // POST /api/chat/rooms/:id/members — add members (group/community admin only).
   // Body: { userIds: number[] }
-  app.post("/api/chat/rooms/:id/members", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/members", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const room = await queryDB("SELECT type FROM chat_rooms WHERE id = ?", [roomId]);
@@ -483,13 +761,18 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (!(await isRoomAdmin(queryDB, roomId, req.user))) {
         return res.status(403).json({ error: "Only an admin of this room can add members." });
       }
-      const ids: number[] = Array.isArray(req.body?.userIds) ? req.body.userIds.map(Number).filter(Number.isFinite) : [];
+      // Only accounts that have Chat can be added.
+      const ids = await withChat(Array.isArray(req.body?.userIds) ? req.body.userIds.map(Number).filter(Number.isFinite) : []);
+      const added: number[] = [];
       for (const memberId of ids) {
-        await queryDB("INSERT IGNORE INTO chat_room_members (room_id, user_id, role) VALUES (?, ?, 'member')", [
+        const r = await queryDB("INSERT IGNORE INTO chat_room_members (room_id, user_id, role) VALUES (?, ?, 'member')", [
           roomId,
           memberId
         ]);
+        if (r?.affectedRows) added.push(memberId);
       }
+      for (const memberId of added) io.in(`user:${memberId}`).socketsJoin(`room:${roomId}`);
+      if (added.length) await postSystem(roomId, req.user.id, `${await nameOf(req.user.id)} added ${await namesOf(added)}`);
       io.to(`room:${roomId}`).emit("members_changed", { roomId });
       res.json({ success: true });
     } catch (err: any) {
@@ -499,7 +782,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // DELETE /api/chat/rooms/:id/members/:userId — remove a member (room admin),
   // or leave the room yourself (target === requester).
-  app.delete("/api/chat/rooms/:id/members/:userId", authenticateToken, async (req: any, res) => {
+  app.delete("/api/chat/rooms/:id/members/:userId", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const targetUserId = Number(req.params.userId);
@@ -507,7 +790,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (!isSelf && !(await isRoomAdmin(queryDB, roomId, req.user))) {
         return res.status(403).json({ error: "Only an admin of this room can remove other members." });
       }
-      await queryDB("DELETE FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, targetUserId]);
+      const r = await queryDB("DELETE FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, targetUserId]);
+      if (r?.affectedRows) {
+        io.in(`user:${targetUserId}`).socketsLeave(`room:${roomId}`);
+        await postSystem(roomId, req.user.id, isSelf ? `${await nameOf(req.user.id)} left` : `${await nameOf(req.user.id)} removed ${await nameOf(targetUserId)}`);
+      }
       io.to(`room:${roomId}`).emit("members_changed", { roomId });
       res.json({ success: true });
     } catch (err: any) {
@@ -516,7 +803,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   });
 
   // PATCH /api/chat/rooms/:id/members/:userId — promote/demote. Body: { role: 'admin'|'member' }
-  app.patch("/api/chat/rooms/:id/members/:userId", authenticateToken, async (req: any, res) => {
+  app.patch("/api/chat/rooms/:id/members/:userId", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const targetUserId = Number(req.params.userId);
@@ -525,7 +812,13 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (!(await isRoomAdmin(queryDB, roomId, req.user))) {
         return res.status(403).json({ error: "Only an admin of this room can change roles." });
       }
-      await queryDB("UPDATE chat_room_members SET role = ? WHERE room_id = ? AND user_id = ?", [role, roomId, targetUserId]);
+      const r = await queryDB("UPDATE chat_room_members SET role = ? WHERE room_id = ? AND user_id = ? AND role <> ?", [role, roomId, targetUserId, role]);
+      if (r?.affectedRows)
+        await postSystem(
+          roomId,
+          req.user.id,
+          role === "admin" ? `${await nameOf(req.user.id)} made ${await nameOf(targetUserId)} a group admin` : `${await nameOf(req.user.id)} dismissed ${await nameOf(targetUserId)} as admin`
+        );
       io.to(`room:${roomId}`).emit("members_changed", { roomId });
       res.json({ success: true });
     } catch (err: any) {
@@ -535,7 +828,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/rooms/:id/messages?beforeId=&limit= — newest-first page;
   // pass the oldest id already loaded as beforeId to load the next page back.
-  app.get("/api/chat/rooms/:id/messages", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms/:id/messages", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
@@ -543,18 +836,17 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       }
       const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
       const beforeId = req.query.beforeId ? Number(req.query.beforeId) : null;
-      const rows = await queryDB(
-        `SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
-                cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-                cm.reply_to_id, cm.created_at,
-                rt.content AS reply_to_content, rtu.name AS reply_to_sender_name
-         FROM chat_messages cm
-         JOIN users u ON u.id = cm.sender_id
-         LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
-         LEFT JOIN users rtu ON rtu.id = rt.sender_id
-         WHERE cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
-         ORDER BY cm.id DESC LIMIT ?`,
-        beforeId ? [roomId, beforeId, limit] : [roomId, limit]
+      // Leaves out what this account deleted for itself ("Delete for me").
+      const rows = await loadMessages(
+        queryDB,
+        `cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
+         AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)`,
+        // LIMIT is written in (an integer clamped above) rather than bound:
+        // MySQL 8.0.22+ refuses a bound LIMIT that the driver sends as a
+        // double ("Incorrect arguments to mysqld_stmt_execute").
+        beforeId ? [roomId, beforeId, req.user.id] : [roomId, req.user.id],
+        `ORDER BY cm.id DESC LIMIT ${limit}`,
+        req.user.id
       );
       res.json(rows.reverse()); // oldest-first, ready to append/prepend in the UI
     } catch (err: any) {
@@ -566,20 +858,25 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // messages (base64 body) and as a fallback when the socket isn't connected.
   // Body: { content?, messageType, attachment_base64?, attachment_mimetype?,
   //          attachment_filename?, replyToId? }
-  app.post("/api/chat/rooms/:id/messages", authenticateToken, async (req: any, res) => {
+  // or the file itself as the body (any non-JSON Content-Type), with
+  // ?messageType=&filename=&mimetype=&replyToId= in the query string.
+  app.post("/api/chat/rooms/:id/messages", authenticateToken, requireChat, rawChatBody, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
         return res.status(403).json({ error: "Not a member of this room." });
       }
-      const { content, messageType, attachment_base64, attachment_mimetype, attachment_filename, replyToId } = req.body || {};
+      if (!(await roomRules(queryDB, roomId, req.user))?.canSend) return res.status(403).json({ error: SEND_ADMINS_ONLY });
+      const raw = Buffer.isBuffer(req.body);
+      const q = req.query || {};
+      const { content, messageType, attachment_base64, attachment_mimetype, attachment_filename, replyToId } = raw
+        ? { content: null, messageType: q.messageType, attachment_base64: null, attachment_mimetype: q.mimetype || req.headers["content-type"], attachment_filename: q.filename, replyToId: q.replyToId }
+        : req.body || {};
       const type = ["text", "image", "file", "audio"].includes(messageType) ? messageType : "text";
-      let attachmentBuffer: Buffer | null = null;
-      if (attachment_base64) {
-        attachmentBuffer = Buffer.from(attachment_base64, "base64");
-        if (attachmentBuffer.length > MAX_CHAT_ATTACHMENT_BYTES) {
-          return res.status(400).json({ error: "Attachment must be less than 5MB." });
-        }
+      let attachmentBuffer: Buffer | null = raw && req.body.length ? req.body : null;
+      if (attachment_base64) attachmentBuffer = Buffer.from(attachment_base64, "base64");
+      if (attachmentBuffer && attachmentBuffer.length > MAX_CHAT_ATTACHMENT_BYTES) {
+        return res.status(413).json({ error: "Attachment must be 50 MB or less." });
       }
       if (!content && !attachmentBuffer) return res.status(400).json({ error: "Empty message." });
 
@@ -603,32 +900,37 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/messages/:id/attachment — stream the blob, same
   // Content-Type/Cache-Control convention as profileRoutes.ts's photo GET.
-  app.get("/api/chat/messages/:id/attachment", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/messages/:id/attachment", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const messageId = Number(req.params.id);
       const rows = await queryDB(
-        "SELECT room_id, attachment_mimetype, attachment_data, attachment_filename FROM chat_messages WHERE id = ?",
+        "SELECT room_id, attachment_mimetype, attachment_path, attachment_data, attachment_filename FROM chat_messages WHERE id = ? AND unsent_at IS NULL",
         [messageId]
       );
       const row = rows[0];
-      if (!row || !row.attachment_data) return res.status(404).json({ error: "No attachment on this message." });
+      if (!row || (!row.attachment_path && !row.attachment_data)) return res.status(404).json({ error: "No attachment on this message." });
       if (!(await isMember(queryDB, row.room_id, req.user.id))) {
         return res.status(403).json({ error: "Not a member of this room." });
       }
-      const buffer: Buffer = Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data);
+      // From the chat folder (streamed, with Range for video); a file saved
+      // before that is still in the row.
+      const full = row.attachment_path ? resolveChatPath(row.attachment_path) : null;
+      if (row.attachment_path && (!full || !fs.existsSync(full))) return res.status(404).json({ error: "The file is missing on the server." });
+      res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Type", row.attachment_mimetype || "application/octet-stream");
       res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
       if (row.attachment_filename) {
         res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.attachment_filename)}"`);
       }
-      res.send(buffer);
+      if (full) return res.sendFile(full, { dotfiles: "deny", cacheControl: false, lastModified: false });
+      res.send(Buffer.isBuffer(row.attachment_data) ? row.attachment_data : Buffer.from(row.attachment_data));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // POST /api/chat/rooms/:id/read — mark everything up to messageId read.
-  app.post("/api/chat/rooms/:id/read", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/read", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const messageId = Number(req.body?.messageId);
@@ -650,7 +952,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // message — WhatsApp shows this per-message via long-press; this app shows
   // it inline for just the sender's own most recent message, which is what
   // the ChatPanel UI actually renders (see the module comment there).
-  app.get("/api/chat/messages/:id/reads", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/messages/:id/reads", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const messageId = Number(req.params.id);
       const msgRows = await queryDB("SELECT room_id, sender_id FROM chat_messages WHERE id = ?", [messageId]);
@@ -667,6 +969,687 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         [msg.room_id, msg.sender_id, messageId]
       );
       res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- WhatsApp-style message actions -------------------------------------
+  const UNSEND_WINDOW_MS = 48 * 60 * 60 * 1000;
+  const messageRow = async (id: number) => ((await queryDB("SELECT id, room_id, sender_id, message_type, content, created_at, unsent_at FROM chat_messages WHERE id = ?", [id])) || [])[0];
+  const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+  // POST /api/chat/messages/:id/edit — { content }: the sender changes a text
+  // message within 15 minutes of sending (like WhatsApp); it shows "Edited".
+  app.post("/api/chat/messages/:id/edit", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (Number(msg.sender_id) !== Number(req.user.id)) return res.status(403).json({ error: "You can only edit your own messages." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      if (msg.message_type !== "text") return res.status(400).json({ error: "Only text messages can be edited." });
+      if (Date.now() - new Date(msg.created_at).getTime() > EDIT_WINDOW_MS) return res.status(400).json({ error: "Too late to edit — a message can be edited within 15 minutes of sending." });
+      const content = String(req.body?.content ?? "").trim();
+      if (!content) return res.status(400).json({ error: "The message can't be empty." });
+      if (content === String(msg.content || "")) return res.json({ unchanged: true });
+      await queryDB("UPDATE chat_messages SET content = ?, edited_at = NOW() WHERE id = ?", [content, msg.id]);
+      const [updated] = await loadMessages(queryDB, "cm.id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_edited", { roomId: msg.room_id, messageId: msg.id, content: updated.content, edited_at: updated.edited_at });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/:id/forward — { roomIds, userIds }: a copy of
+  // the message (text and / or attachment) goes to up to 5 chats this
+  // account is in, or to people (their direct chat, made if needed). The
+  // copies show "Forwarded" and carry no reply quote.
+  app.post("/api/chat/messages/:id/forward", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const src: any = ((await queryDB(
+        "SELECT id, room_id, message_type, content, attachment_filename, attachment_mimetype, attachment_path, attachment_data, unsent_at FROM chat_messages WHERE id = ? AND deleted_at IS NULL",
+        [Number(req.params.id)]
+      )) || [])[0];
+      if (!src) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, src.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (src.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      if (src.message_type === "system") return res.status(400).json({ error: "This note can't be forwarded." });
+      const toNum = (v: any) => (Array.isArray(v) ? v : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+      const roomIds = new Set<number>(toNum(req.body?.roomIds));
+      const people = await withChat(toNum(req.body?.userIds).filter((n: number) => n !== Number(req.user.id)));
+      for (const uid of people) roomIds.add(await findOrCreateDirectRoom(queryDB, Number(req.user.id), uid));
+      if (!roomIds.size) return res.status(400).json({ error: "Pick at least one chat." });
+      if (roomIds.size > 5) return res.status(400).json({ error: "You can forward to up to 5 chats at a time." });
+      const sent: number[] = [];
+      for (const roomId of roomIds) {
+        if (!(await roomRules(queryDB, roomId, req.user))?.canSend) continue;
+        const message = await insertChatMessage(queryDB, {
+          roomId,
+          senderId: req.user.id,
+          messageType: src.message_type,
+          content: src.content,
+          attachmentPath: src.attachment_path || null,
+          attachmentBuffer: !src.attachment_path && src.attachment_data ? (Buffer.isBuffer(src.attachment_data) ? src.attachment_data : Buffer.from(src.attachment_data)) : null,
+          attachmentMimetype: src.attachment_mimetype,
+          attachmentFilename: src.attachment_filename,
+          forwarded: true
+        });
+        // A direct chat just made for this: its sockets join the room now.
+        io.in(`user:${req.user.id}`).socketsJoin(`room:${roomId}`);
+        const others: any[] = (await queryDB("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId])) || [];
+        for (const o of others) io.in(`user:${o.user_id}`).socketsJoin(`room:${roomId}`);
+        io.to(`room:${roomId}`).emit("receive_message", message);
+        void notifyNewMessage(queryDB, message);
+        sent.push(roomId);
+      }
+      res.json({ forwarded: sent.length, roomIds: sent });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Pinned messages (like WhatsApp): any member pins a message for everyone
+  // in the chat for 24 hours, 7 days or 30 days; at most 3 per chat — a
+  // 4th replaces the oldest. GET lists the live ones, newest first.
+  const PIN_MAX = 3;
+  const PIN_DAYS: Record<string, number> = { "24h": 1, "7d": 7, "30d": 30 };
+  const livePins = (roomId: number) =>
+    queryDB(
+      `SELECT p.message_id, p.pinned_at, p.expires_at, pu.name AS pinned_by_name
+         FROM chat_pinned_messages p LEFT JOIN users pu ON pu.id = p.pinned_by
+        WHERE p.room_id = ? AND (p.expires_at IS NULL OR p.expires_at > NOW())
+        ORDER BY p.pinned_at DESC`,
+      [roomId]
+    );
+  app.get("/api/chat/rooms/:id/pins", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const pins: any[] = (await livePins(roomId)) || [];
+      const msgs = pins.length ? await loadMessages(queryDB, `cm.id IN (${pins.map(() => "?").join(",")}) AND cm.unsent_at IS NULL`, pins.map((p) => p.message_id)) : [];
+      const byId = new Map(msgs.map((m: any) => [Number(m.id), m]));
+      res.json(
+        pins
+          .filter((p) => byId.has(Number(p.message_id)))
+          .map((p) => ({ message: byId.get(Number(p.message_id)), pinned_at: p.pinned_at, expires_at: p.expires_at, pinned_by_name: p.pinned_by_name || "" }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/chat/messages/:id/pin", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      const days = PIN_DAYS[String(req.body?.duration || "7d")];
+      if (!days) return res.status(400).json({ error: "Pick how long: 24 hours, 7 days or 30 days." });
+      await queryDB("DELETE FROM chat_pinned_messages WHERE room_id = ? AND expires_at IS NOT NULL AND expires_at <= NOW()", [msg.room_id]);
+      await queryDB(
+        `INSERT INTO chat_pinned_messages (message_id, room_id, pinned_by, pinned_at, expires_at) VALUES (?, ?, ?, NOW(), NOW() + INTERVAL ${days} DAY)
+         ON DUPLICATE KEY UPDATE pinned_by = VALUES(pinned_by), pinned_at = NOW(), expires_at = VALUES(expires_at)`,
+        [msg.id, msg.room_id, req.user.id]
+      );
+      // Keep the newest 3.
+      const all: any[] = (await queryDB("SELECT message_id FROM chat_pinned_messages WHERE room_id = ? ORDER BY pinned_at DESC, message_id DESC", [msg.room_id])) || [];
+      for (const old of all.slice(PIN_MAX)) await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [old.message_id]);
+      io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
+      res.json({ success: true, replaced: Math.max(0, all.length - PIN_MAX) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/messages/:id/pin", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/:id/react — { emoji } sets this account's one
+  // reaction (the same emoji again, or emoji null, takes it off).
+  app.post("/api/chat/messages/:id/react", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      const emoji = req.body?.emoji ? String(req.body.emoji).trim().slice(0, 16) : "";
+      const mine: any[] = await queryDB("SELECT emoji FROM chat_message_reactions WHERE message_id = ? AND user_id = ?", [msg.id, req.user.id]);
+      if (!emoji || mine[0]?.emoji === emoji) {
+        await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ? AND user_id = ?", [msg.id, req.user.id]);
+      } else {
+        await queryDB(
+          "INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = VALUES(emoji), created_at = CURRENT_TIMESTAMP",
+          [msg.id, req.user.id, emoji]
+        );
+      }
+      const [updated] = await loadMessages(queryDB, "cm.id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_reactions", { roomId: msg.room_id, messageId: msg.id, reactions: updated?.reactions || [] });
+      res.json({ reactions: updated?.reactions || [] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/:id/unsend — "Delete for everyone": the sender
+  // within 48 hours, or an admin of the group / community at any time.
+  // The text and attachment are wiped; everyone sees "This message was deleted".
+  app.post("/api/chat/messages/:id/unsend", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.json({ success: true });
+      const own = Number(msg.sender_id) === Number(req.user.id);
+      const room = ((await queryDB("SELECT type FROM chat_rooms WHERE id = ?", [msg.room_id])) || [])[0];
+      const asAdmin = room && room.type !== "direct" && (await isRoomAdmin(queryDB, msg.room_id, req.user));
+      if (!own && !asAdmin) return res.status(403).json({ error: "You can only delete your own messages for everyone." });
+      if (own && !asAdmin && Date.now() - new Date(msg.created_at).getTime() > UNSEND_WINDOW_MS) {
+        return res.status(400).json({ error: "Too late to delete for everyone (48 hours) — you can still delete it for yourself." });
+      }
+      const filePath: any = ((await queryDB("SELECT attachment_path FROM chat_messages WHERE id = ?", [msg.id])) || [])[0]?.attachment_path;
+      await queryDB(
+        "UPDATE chat_messages SET unsent_at = NOW(), unsent_by = ?, content = NULL, attachment_data = NULL, attachment_path = NULL, attachment_filename = NULL, attachment_mimetype = NULL WHERE id = ?",
+        [req.user.id, msg.id]
+      );
+      // The file goes too, unless a forwarded copy still shows it.
+      await removeChatFileIfUnused(queryDB, filePath);
+      await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ?", [msg.id]);
+      const unpinned: any = await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_unsent", { roomId: msg.room_id, messageId: msg.id });
+      if (Number(unpinned?.affectedRows)) io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/hide — "Delete for me": { messageIds } leave this
+  // account's view only.
+  app.post("/api/chat/messages/hide", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const ids = [...new Set<number>((Array.isArray(req.body?.messageIds) ? req.body.messageIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 200);
+      let hidden = 0;
+      for (const id of ids) {
+        const msg = await messageRow(id);
+        if (!msg || !(await isMember(queryDB, msg.room_id, req.user.id))) continue;
+        await queryDB("INSERT IGNORE INTO chat_message_hidden (message_id, user_id) VALUES (?, ?)", [id, req.user.id]);
+        hidden++;
+      }
+      res.json({ hidden });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/chat/rooms/:id/wallpaper — { wallpaper, forAll } this
+  // account's background for one conversation, or (forAll) its default for
+  // every chat (clears the per-chat ones). wallpaper null = back to default.
+  const WALLPAPERS = new Set(["soft", "doodle", "plain", "mint", "sky", "blush", "lavender", "sand", "slate"]);
+  app.put("/api/chat/rooms/:id/wallpaper", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const forAll = !!req.body?.forAll;
+      const wallpaper = req.body?.wallpaper ? String(req.body.wallpaper) : null;
+      if (wallpaper && !WALLPAPERS.has(wallpaper)) return res.status(400).json({ error: "Unknown wallpaper." });
+      if (!forAll && !(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const target = forAll ? 0 : roomId;
+      if (forAll) await queryDB("DELETE FROM chat_wallpapers WHERE user_id = ?", [req.user.id]);
+      if (wallpaper) {
+        await queryDB("INSERT INTO chat_wallpapers (user_id, room_id, wallpaper) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE wallpaper = VALUES(wallpaper)", [req.user.id, target, wallpaper]);
+      } else {
+        await queryDB("DELETE FROM chat_wallpapers WHERE user_id = ? AND room_id = ?", [req.user.id, target]);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET/PUT /api/chat/me/about — this account's "About" line.
+  // ---- Group info (WhatsApp-style) -------------------------------------
+  // Name, description, photo and the two group settings. Changing the info
+  // needs a group admin (or any member when "Edit group info" is open to
+  // everyone); the settings themselves are admins only.
+  app.patch("/api/chat/rooms/:id", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const rules = await roomRules(queryDB, roomId, req.user);
+      if (!rules || !rules.member) return res.status(403).json({ error: "Not a member of this room." });
+      const b = req.body || {};
+      const direct = rules.room.type === "direct";
+      if (direct && Object.keys(b).some((k) => k !== "disappear_seconds")) return res.status(400).json({ error: "A direct chat has no group info." });
+      const sets: string[] = [];
+      const vals: any[] = [];
+      const notes: string[] = [];
+      const actor = await nameOf(req.user.id);
+      // Disappearing messages: either person in a direct chat; in a group,
+      // whoever may edit the group info.
+      if (b.disappear_seconds !== undefined) {
+        const secs = Number(b.disappear_seconds);
+        if (secs !== 0 && !DISAPPEAR_LABEL[secs]) return res.status(400).json({ error: "Choose off, 24 hours, 7 days or 90 days." });
+        if (!direct && !rules.canEditInfo) return res.status(403).json({ error: "Only group admins can change disappearing messages." });
+        // Turning them ON needs its own switch (users.can_use_disappearing,
+        // Module Access; off by default) — those messages are deleted for
+        // good. Turning them off is always allowed.
+        if (secs !== 0 && req.user.role !== "superadmin") {
+          const me: any[] = (await queryDB("SELECT can_use_disappearing FROM users WHERE id = ?", [req.user.id])) || [];
+          if (!Number(me[0]?.can_use_disappearing)) {
+            return res.status(403).json({ error: "Disappearing messages aren't turned on for your account. Ask your Superadmin." });
+          }
+        }
+        sets.push("disappear_seconds = ?");
+        vals.push(secs);
+        notes.push(
+          secs
+            ? `${actor} turned on disappearing messages. New messages will disappear ${DISAPPEAR_LABEL[secs]} after they're sent.`
+            : `${actor} turned off disappearing messages.`
+        );
+      }
+      if (b.title !== undefined || b.description !== undefined) {
+        if (!rules.canEditInfo) return res.status(403).json({ error: "Only group admins can edit the group info." });
+        if (b.title !== undefined) {
+          const t = String(b.title || "").trim();
+          if (!t) return res.status(400).json({ error: "Group name is required." });
+          sets.push("title = ?");
+          vals.push(t.slice(0, 150));
+          notes.push(`${actor} changed the group name to "${t.slice(0, 150)}"`);
+        }
+        if (b.description !== undefined) {
+          const d = String(b.description || "").trim().slice(0, 1000);
+          sets.push("description = ?");
+          vals.push(d || null);
+          notes.push(d ? `${actor} changed the group description` : `${actor} removed the group description`);
+        }
+      }
+      for (const k of ["info_admins_only", "send_admins_only"]) {
+        if (b[k] === undefined) continue;
+        if (!rules.admin) return res.status(403).json({ error: "Only group admins can change the group settings." });
+        sets.push(`${k} = ?`);
+        vals.push(b[k] ? 1 : 0);
+        notes.push(
+          k === "send_admins_only"
+            ? `${actor} changed this group's settings to allow ${b[k] ? "only admins" : "all members"} to send messages`
+            : `${actor} changed this group's settings to allow ${b[k] ? "only admins" : "all members"} to edit this group's info`
+        );
+      }
+      if (!sets.length) return res.status(400).json({ error: "Nothing to change." });
+      await queryDB(`UPDATE chat_rooms SET ${sets.join(", ")} WHERE id = ?`, [...vals, roomId]);
+      for (const n of notes) await postSystem(roomId, req.user.id, n);
+      io.to(`room:${roomId}`).emit("room_updated", { roomId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Group photo: members see it; changing it follows "Edit group info".
+  const MAX_GROUP_PHOTO = 5 * 1024 * 1024;
+  const rawPhoto = express.raw({ type: (r: any) => /^image\//.test(String(r.headers["content-type"] || "")), limit: MAX_GROUP_PHOTO });
+  app.get("/api/chat/rooms/:id/avatar", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const row = ((await queryDB("SELECT avatar_mimetype, avatar_data FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+      if (!row?.avatar_data) return res.status(404).json({ error: "No group photo." });
+      res.setHeader("Content-Type", row.avatar_mimetype || "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.send(Buffer.isBuffer(row.avatar_data) ? row.avatar_data : Buffer.from(row.avatar_data));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.put("/api/chat/rooms/:id/avatar", authenticateToken, requireChat, rawPhoto, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const rules = await roomRules(queryDB, roomId, req.user);
+      if (!rules?.canEditInfo) return res.status(403).json({ error: "Only group admins can change the group photo." });
+      const type = String(req.headers["content-type"] || "");
+      if (!/^image\/(jpeg|png|webp)$/.test(type)) return res.status(400).json({ error: "Use a JPG, PNG or WebP picture." });
+      if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "No picture." });
+      await queryDB("UPDATE chat_rooms SET avatar_mimetype = ?, avatar_data = ?, avatar_version = avatar_version + 1 WHERE id = ?", [type, req.body, roomId]);
+      await postSystem(roomId, req.user.id, `${await nameOf(req.user.id)} changed this group's photo`);
+      io.to(`room:${roomId}`).emit("room_updated", { roomId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/rooms/:id/avatar", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const rules = await roomRules(queryDB, roomId, req.user);
+      if (!rules?.canEditInfo) return res.status(403).json({ error: "Only group admins can change the group photo." });
+      await queryDB("UPDATE chat_rooms SET avatar_mimetype = NULL, avatar_data = NULL, avatar_version = avatar_version + 1 WHERE id = ?", [roomId]);
+      await postSystem(roomId, req.user.id, `${await nameOf(req.user.id)} removed this group's photo`);
+      io.to(`room:${roomId}`).emit("room_updated", { roomId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Starred messages: each account's own bookmarks ------------------
+  app.post("/api/chat/messages/:id/star", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = ((await queryDB("SELECT id, room_id FROM chat_messages WHERE id = ? AND deleted_at IS NULL AND unsent_at IS NULL AND message_type <> 'system'", [Number(req.params.id)])) || [])[0];
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (req.body?.starred === false) await queryDB("DELETE FROM chat_starred_messages WHERE user_id = ? AND message_id = ?", [req.user.id, msg.id]);
+      else await queryDB("INSERT IGNORE INTO chat_starred_messages (user_id, message_id) VALUES (?, ?)", [req.user.id, msg.id]);
+      res.json({ starred: req.body?.starred !== false });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // ?roomId= for one chat, or every chat this account is still in.
+  app.get("/api/chat/starred", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = req.query.roomId ? Number(req.query.roomId) : null;
+      const rows = await loadMessages(
+        queryDB,
+        `cm.deleted_at IS NULL AND cm.unsent_at IS NULL ${roomId ? "AND cm.room_id = ?" : ""}
+         AND EXISTS (SELECT 1 FROM chat_starred_messages s WHERE s.message_id = cm.id AND s.user_id = ?)
+         AND EXISTS (SELECT 1 FROM chat_room_members m WHERE m.room_id = cm.room_id AND m.user_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)`,
+        roomId ? [roomId, req.user.id, req.user.id, req.user.id] : [req.user.id, req.user.id, req.user.id],
+        "ORDER BY cm.id DESC LIMIT 200",
+        req.user.id
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Mute notifications (this account only) --------------------------
+  const MUTE_FOR: Record<string, string | null> = {
+    "8h": "DATE_ADD(NOW(), INTERVAL 8 HOUR)",
+    "1w": "DATE_ADD(NOW(), INTERVAL 7 DAY)",
+    always: "'9999-12-31 00:00:00'",
+    off: null
+  };
+  app.put("/api/chat/rooms/:id/mute", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const key = String(req.body?.for || "");
+      if (!(key in MUTE_FOR)) return res.status(400).json({ error: "for must be 8h, 1w, always or off." });
+      const expr = MUTE_FOR[key];
+      await queryDB(
+        `INSERT INTO chat_room_settings (user_id, room_id, muted_until) VALUES (?, ?, ${expr || "NULL"})
+         ON DUPLICATE KEY UPDATE muted_until = VALUES(muted_until)`,
+        [req.user.id, roomId]
+      );
+      const row = ((await queryDB("SELECT muted_until FROM chat_room_settings WHERE user_id = ? AND room_id = ?", [req.user.id, roomId])) || [])[0];
+      res.json({ muted_until: row?.muted_until || null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Clear chat (for me) and search inside a chat ---------------------
+  app.post("/api/chat/rooms/:id/clear", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const keepStarred = req.body?.keepStarred !== false;
+      await queryDB(
+        `INSERT IGNORE INTO chat_message_hidden (message_id, user_id)
+         SELECT cm.id, ? FROM chat_messages cm
+          WHERE cm.room_id = ? ${keepStarred ? "AND NOT EXISTS (SELECT 1 FROM chat_starred_messages s WHERE s.message_id = cm.id AND s.user_id = ?)" : ""}`,
+        keepStarred ? [req.user.id, roomId, req.user.id] : [req.user.id, roomId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get("/api/chat/rooms/:id/search", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const q = String(req.query.q || "").trim();
+      if (q.length < 2) return res.json([]);
+      const like = `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
+      const rows = await loadMessages(
+        queryDB,
+        `cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND cm.message_type <> 'system'
+         AND (cm.content LIKE ? OR cm.attachment_filename LIKE ?)
+         AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)`,
+        [roomId, like, like, req.user.id],
+        "ORDER BY cm.id DESC LIMIT 50",
+        req.user.id
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Group invite link ---------------------------------------------------
+  // A group admin makes (or resets / turns off) a link; anyone who has Chat
+  // and the link can see the group's name and size and join it.
+  const newInviteCode = () => crypto.randomBytes(16).toString("base64url");
+  app.post("/api/chat/rooms/:id/invite", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const rules = await roomRules(queryDB, roomId, req.user);
+      if (!rules?.member || rules.room.type === "direct") return res.status(404).json({ error: "Group not found." });
+      if (!rules.admin) return res.status(403).json({ error: "Only group admins can share the invite link." });
+      const cur = ((await queryDB("SELECT invite_code FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+      let code = cur?.invite_code;
+      if (!code || req.body?.reset) {
+        code = newInviteCode();
+        await queryDB("UPDATE chat_rooms SET invite_code = ? WHERE id = ?", [code, roomId]);
+        if (cur?.invite_code) await postSystem(roomId, req.user.id, `${await nameOf(req.user.id)} reset this group's invite link`);
+      }
+      res.json({ code });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/rooms/:id/invite", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const rules = await roomRules(queryDB, roomId, req.user);
+      if (!rules?.admin || rules.room.type === "direct") return res.status(403).json({ error: "Only group admins can turn off the invite link." });
+      await queryDB("UPDATE chat_rooms SET invite_code = NULL WHERE id = ?", [roomId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  const roomByInvite = async (code: string) =>
+    code && /^[A-Za-z0-9_-]{10,40}$/.test(code)
+      ? ((await queryDB(
+          "SELECT r.id, r.type, r.title, r.description, (r.avatar_data IS NOT NULL) AS has_avatar, (SELECT COUNT(*) FROM chat_room_members m WHERE m.room_id = r.id) AS member_count FROM chat_rooms r WHERE r.invite_code = ? AND r.type <> 'direct'",
+          [code]
+        )) || [])[0]
+      : null;
+  app.get("/api/chat/invite/:code", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const room = await roomByInvite(String(req.params.code));
+      if (!room) return res.status(404).json({ error: "This invite link isn't valid any more. Ask a group admin for a new one." });
+      res.json({
+        id: room.id,
+        type: room.type,
+        title: room.title,
+        description: room.description || "",
+        member_count: Number(room.member_count),
+        already_member: !!(await isMember(queryDB, room.id, req.user.id))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/chat/invite/:code/join", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const room = await roomByInvite(String(req.params.code));
+      if (!room) return res.status(404).json({ error: "This invite link isn't valid any more. Ask a group admin for a new one." });
+      const r = await queryDB("INSERT IGNORE INTO chat_room_members (room_id, user_id, role) VALUES (?, ?, 'member')", [room.id, req.user.id]);
+      if (r?.affectedRows) {
+        io.in(`user:${req.user.id}`).socketsJoin(`room:${room.id}`);
+        await postSystem(room.id, req.user.id, `${await nameOf(req.user.id)} joined using this group's invite link`);
+        io.to(`room:${room.id}`).emit("members_changed", { roomId: room.id });
+      }
+      res.json({ id: room.id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Disappearing messages: once their time is up they are removed for good
+  // (with the file, when nothing else uses it). One worker does this.
+  if (runsBackgroundJobs()) {
+    const sweep = async () => {
+      try {
+        const gone: any[] = (await queryDB("SELECT id, attachment_path FROM chat_messages WHERE expires_at IS NOT NULL AND expires_at <= NOW() AND deleted_at IS NULL LIMIT 500")) || [];
+        if (!gone.length) return;
+        const ids = gone.map((g) => Number(g.id));
+        await queryDB(
+          `UPDATE chat_messages SET deleted_at = NOW(), content = NULL, attachment_path = NULL, attachment_data = NULL WHERE id IN (${ids.map(() => "?").join(",")})`,
+          ids
+        );
+        for (const g of gone) if (g.attachment_path) await removeChatFileIfUnused(queryDB, g.attachment_path);
+      } catch {
+        // tried again next round
+      }
+    };
+    setInterval(() => void sweep(), 5 * 60 * 1000).unref?.();
+    setTimeout(() => void sweep(), 30 * 1000).unref?.();
+  }
+
+  app.get("/api/chat/me/about", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT chat_about FROM users WHERE id = ?", [req.user.id]);
+      res.json({ about: rows[0]?.chat_about || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.put("/api/chat/me/about", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const about = String(req.body?.about ?? "").trim().slice(0, 140);
+      await queryDB("UPDATE users SET chat_about = ? WHERE id = ?", [about || null, req.user.id]);
+      res.json({ about });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/chat/rooms/:id/profile — what the conversation's info page
+  // shows. A direct chat: the other person (name, About, and the same
+  // directory-safe work details Employee Directory shows everyone —
+  // designation, department, work email / phone, branch), common groups.
+  // Any room: its shared photos, files and voice messages (newest 60).
+  app.get("/api/chat/rooms/:id/profile", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const room = ((await queryDB(
+        "SELECT r.id, r.type, r.title, r.created_at, r.description, r.info_admins_only, r.send_admins_only, r.disappear_seconds, r.invite_code, u.name AS created_by_name FROM chat_rooms r LEFT JOIN users u ON u.id = r.created_by WHERE r.id = ?",
+        [roomId]
+      )) || [])[0];
+      if (!room) return res.status(404).json({ error: "Room not found." });
+      let person: any = null;
+      let commonGroups: any[] = [];
+      if (room.type === "direct") {
+        const other = ((await queryDB(
+          "SELECT u.id, u.name, u.email, u.username, u.chat_about FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND m.user_id <> ? LIMIT 1",
+          [roomId, req.user.id]
+        )) || [])[0];
+        if (other) {
+          const emp = ((await queryDB(
+            "/*unscoped*/ SELECT designation, department, email, phone, mobile, branch, employee_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1",
+            [other.id]
+          ).catch(() => [])) || [])[0];
+          person = {
+            id: Number(other.id),
+            name: other.name,
+            username: other.username || "",
+            about: other.chat_about || "",
+            email: emp?.email || other.email || "",
+            phone: emp?.mobile || emp?.phone || "",
+            designation: emp?.designation || "",
+            department: emp?.department || "",
+            branch: emp?.branch || "",
+            employee_id: emp?.employee_id || ""
+          };
+          commonGroups = (await queryDB(
+            `SELECT r.id, r.type, r.title FROM chat_rooms r
+              JOIN chat_room_members a ON a.room_id = r.id AND a.user_id = ?
+              JOIN chat_room_members b ON b.room_id = r.id AND b.user_id = ?
+             WHERE r.type <> 'direct' ORDER BY r.title`,
+            [req.user.id, other.id]
+          )) || [];
+        }
+      }
+      const media: any[] =
+        (await queryDB(
+          `SELECT cm.id, cm.message_type, cm.attachment_filename, cm.created_at, u.name AS sender_name
+             FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
+            WHERE cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND (cm.attachment_path IS NOT NULL OR cm.attachment_data IS NOT NULL)
+              AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
+              AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)
+            ORDER BY cm.id DESC LIMIT 60`,
+          [roomId, req.user.id]
+        )) || [];
+      const starredCount = Number(
+        (((await queryDB(
+          "SELECT COUNT(*) AS n FROM chat_starred_messages s JOIN chat_messages cm ON cm.id = s.message_id WHERE s.user_id = ? AND cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL",
+          [req.user.id, roomId]
+        ).catch(() => [])) || [])[0] || {}).n || 0
+      );
+      // Links shared in the chat (the "Links" tab).
+      const linkRows: any[] =
+        (await queryDB(
+          `SELECT cm.id, cm.content, cm.created_at, u.name AS sender_name
+             FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
+            WHERE cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND cm.message_type = 'text'
+              AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
+              AND (cm.content LIKE '%http://%' OR cm.content LIKE '%https://%' OR cm.content LIKE '%www.%')
+              AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)
+            ORDER BY cm.id DESC LIMIT 60`,
+          [roomId, req.user.id]
+        ).catch(() => [])) || [];
+      const links: any[] = [];
+      for (const l of linkRows) {
+        for (const url of String(l.content).match(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi) || []) {
+          links.push({ message_id: l.id, url: url.replace(/[).,;!?]+$/, ""), created_at: l.created_at, sender_name: l.sender_name });
+        }
+      }
+      const iAmAdmin = room.type !== "direct" && (req.user.role === "superadmin" || (await isMember(queryDB, roomId, req.user.id))?.role === "admin");
+      res.json({
+        links,
+        room: {
+          disappear_seconds: Number(room.disappear_seconds || 0),
+          // Only an admin sees (and shares) the invite link.
+          invite_code: iAmAdmin ? room.invite_code || null : undefined,
+          id: room.id,
+          type: room.type,
+          title: room.title,
+          created_at: room.created_at,
+          description: room.description || "",
+          created_by_name: room.created_by_name || null,
+          info_admins_only: !!Number(room.info_admins_only),
+          send_admins_only: !!Number(room.send_admins_only)
+        },
+        person,
+        commonGroups,
+        media,
+        starredCount
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -710,16 +1693,29 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 // shared httpServer is created.
 export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
   const { queryDB, jwtSecret } = deps;
-  // userId -> live socket ids for that account (more than one tab/device can
-  // be connected at once) — presence only flips to "online"/"offline" on the
-  // first connect / last disconnect for that user, not every socket.
-  const onlineSockets = new Map<number, Set<string>>();
+  // Presence is read from Socket.IO itself (fetchSockets), not a list kept
+  // in this process: with several PM2 workers + the Redis adapter it asks
+  // every worker, so someone connected to another worker still shows as
+  // online; with one process it is the same local answer as before.
+  // "online"/"offline" only flips on a user's first connect / last
+  // disconnect (several tabs/devices can be connected at once).
+  const socketsOfUser = async (userId: number) => {
+    try {
+      return (await io.in(`user:${userId}`).fetchSockets()).length;
+    } catch {
+      return 0;
+    }
+  };
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = (socket.handshake.auth as any)?.token as string | undefined;
       if (!token) return next(new Error("Authentication required"));
       const payload: any = jwt.verify(token, jwtSecret);
+      // Same rule as every request (logged out, ended, unused too long).
+      if (await checkSession(queryDB, token, payload)) return next(new Error("Session ended"));
+      // A new joiner's temporary login has no chat or calls (OnboardingSelfServiceRoutes.ts).
+      if (payload?.onb || (await accountOnboarding(queryDB, Number(payload?.id)))) return next(new Error("Not available during onboarding"));
       (socket.data as any).user = payload;
       next();
     } catch {
@@ -732,27 +1728,35 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
     const userId = Number(user.id);
     socket.join(`user:${userId}`);
 
-    let sockets = onlineSockets.get(userId);
-    if (!sockets) {
-      sockets = new Set();
-      onlineSockets.set(userId, sockets);
-    }
-    sockets.add(socket.id);
-    if (sockets.size === 1) io.emit("presence_change", { userId, online: true });
+    if ((await socketsOfUser(userId)) === 1) io.emit("presence_change", { userId, online: true });
 
     // Auto-join every room this account belongs to so 'receive_message' /
     // 'user_typing' / 'message_read' reach it without a 'join_room' round
     // trip per room on every reconnect.
+    // An account without Chat joins no room (this socket still carries its
+    // alerts, mail and notices).
+    const chatOn = () => canUseChat(queryDB, userId);
     try {
-      const rooms = await queryDB("SELECT room_id FROM chat_room_members WHERE user_id = ?", [userId]);
+      const rooms = (await chatOn()) ? await queryDB("SELECT room_id FROM chat_room_members WHERE user_id = ?", [userId]) : [];
       for (const r of rooms) socket.join(`room:${r.room_id}`);
     } catch {
       // Best-effort — a room missed here still gets joined the next time
       // GET /api/chat/rooms is called and the UI opens it (join_room below).
     }
 
+    // Everyone online right now (ChatPanel asks when it opens, since
+    // presence_change only reports changes).
+    socket.on("presence_list", async (ack?: (ids: number[]) => void) => {
+      if (typeof ack !== "function") return;
+      if (!(await chatOn())) return ack([]);
+      io.fetchSockets()
+        .then((all) => ack(Array.from(new Set(all.map((x) => Number((x.data as any)?.user?.id)).filter((id) => id > 0)))))
+        .catch(() => ack([]));
+    });
+
     socket.on("join_room", async (roomId: number) => {
       try {
+        if (!(await chatOn())) return;
         const member = await queryDB("SELECT id FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, userId]);
         if (member.length > 0) socket.join(`room:${roomId}`);
       } catch {
@@ -760,9 +1764,10 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       }
     });
 
-    socket.on("typing", (data: { roomId: number; isTyping: boolean }) => {
+    socket.on("typing", async (data: { roomId: number; isTyping: boolean }) => {
       const roomId = Number(data?.roomId);
-      if (!Number.isFinite(roomId)) return;
+      // Only into a room this socket joined as a member.
+      if (!Number.isFinite(roomId) || !socket.rooms.has(`room:${roomId}`) || !(await chatOn())) return;
       socket.to(`room:${roomId}`).emit("user_typing", { roomId, userId, isTyping: !!data.isTyping });
     });
 
@@ -772,8 +1777,10 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       async (data: { roomId: number; content: string; replyToId?: number | null }, ack?: (res: any) => void) => {
         try {
           const roomId = Number(data?.roomId);
+          if (!(await chatOn())) throw new Error("Chat is not turned on for your account.");
           const member = await queryDB("SELECT id FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, userId]);
           if (member.length === 0) throw new Error("Not a member of this room.");
+          if (!(await roomRules(queryDB, roomId, { id: userId, role: String(user.role || "") }))?.canSend) throw new Error(SEND_ADMINS_ONLY);
           const content = String(data?.content || "").trim();
           if (!content) throw new Error("Empty message.");
           const message = await insertChatMessage(queryDB, {
@@ -797,6 +1804,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
         const roomId = Number(data?.roomId);
         const messageId = Number(data?.messageId);
         if (!Number.isFinite(roomId) || !Number.isFinite(messageId)) return;
+        if (!socket.rooms.has(`room:${roomId}`) || !(await chatOn())) return;
         await upsertRead(queryDB, roomId, userId, messageId);
         io.to(`room:${roomId}`).emit("message_read", { roomId, userId, messageId });
       } catch {
@@ -804,14 +1812,9 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       }
     });
 
-    socket.on("disconnect", () => {
-      const set = onlineSockets.get(userId);
-      if (!set) return;
-      set.delete(socket.id);
-      if (set.size === 0) {
-        onlineSockets.delete(userId);
-        io.emit("presence_change", { userId, online: false });
-      }
+    socket.on("disconnect", async () => {
+      // This socket has already left its rooms here.
+      if ((await socketsOfUser(userId)) === 0) io.emit("presence_change", { userId, online: false });
     });
   });
 }

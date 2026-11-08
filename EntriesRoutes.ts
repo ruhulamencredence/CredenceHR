@@ -9,7 +9,7 @@
 // the entry form's client-side checks. Split out of server.ts on purpose —
 // server.ts is already ~8,000 lines in one file, so this moves out as-is (no
 // logic changes) the same way Personal Data, Users, Holidays, Attendance,
-// and Conveyance Bill Claims already were.
+// and Bill Claims already were.
 //
 // Dependencies below are all defined elsewhere in server.ts (parseQtyNumber/
 // toDateOnlyString are plain top-level helpers there, not closures) and
@@ -22,8 +22,13 @@ interface EntriesRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireSuperAdmin: any;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
+  getAdminModules: (userId: number) => Promise<string[]>;
+  // Per-module action layers (server.ts) — PEPM Reports: read / edit_add /
+  // delete_trash / permanent_delete.
+  requireModuleLayer: (moduleKey: any, layer: any) => any;
   requireBudgetModuleAccess: any;
+  requireBudgetRead: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   todayInDhaka: () => string;
   parseQtyNumber: (value: any) => number | null;
@@ -32,11 +37,14 @@ interface EntriesRouteDeps {
 
 export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   const {
+    requireModuleLayer,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    getAdminModules,
     requireBudgetModuleAccess,
+    requireBudgetRead,
     queryDB,
     todayInDhaka,
     parseQtyNumber,
@@ -55,8 +63,64 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // a no-op when no submission row exists yet (the common case — most deletes
   // happen before the user ever submits) or when the user still has other active
   // entries under this Budget.
+  // Final Submit can be per Budget (budget_submissions — every Job of that
+  // Budget) or per Job (job_submissions — that one Job only). An entry is locked
+  // when either covers it.
+  // An MPR No belongs to whoever first used it under a Budget: that user may
+  // keep using its other Items / remaining Qty in more of their own Jobs (the
+  // per-item Qty cap still applies); nobody else can use it. Returns true when
+  // another user already has it.
+  const mprTakenByOther = async (mprId: any, budgetId: any, ownerId: any, exceptEntryId?: any): Promise<boolean> => {
+    const rows = await queryDB(
+      "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND created_by <> ? AND deleted_at IS NULL" + (exceptEntryId ? " AND id <> ?" : ""),
+      exceptEntryId ? [mprId, budgetId, ownerId, exceptEntryId] : [mprId, budgetId, ownerId]
+    );
+    return rows.length > 0;
+  };
+
+  // Next Job No for a user under a Budget: the lowest number not held by one of
+  // their Jobs. A Job whose entries were all permanently deleted (Job Recycle ->
+  // Delete permanently) no longer holds its number: its row is kept (edit history
+  // points at it) but renamed so the number can be given out again.
+  const nextJobNo = async (userId: any, budgetId: any): Promise<string> => {
+    const jobs = await queryDB("SELECT id, job_no FROM jobs WHERE created_by = ? AND budget_id = ?", [userId, budgetId]);
+    const held = new Set<number>();
+    for (const j of jobs) {
+      const n = /^JOB-(\d+)$/.exec(String(j.job_no || ""));
+      if (!n) continue;
+      const any = await queryDB("SELECT id FROM entries WHERE job_id = ? LIMIT 1", [j.id]);
+      if (any.length > 0) held.add(Number(n[1]));
+      else await queryDB("UPDATE jobs SET job_no = ? WHERE id = ?", [`${j.job_no}~${j.id}`, j.id]);
+    }
+    let next = 1;
+    while (held.has(next)) next++;
+    return `JOB-${String(next).padStart(4, "0")}`;
+  };
+
+  const isEntryLocked = async (budgetId: any, jobId: any, userId: any): Promise<boolean> => {
+    if (budgetId) {
+      const b = await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+      if (b.length > 0) return true;
+    }
+    if (jobId) {
+      const j = await queryDB("SELECT id FROM job_submissions WHERE job_id = ? AND user_id = ?", [jobId, userId]);
+      if (j.length > 0) return true;
+    }
+    return false;
+  };
+
   const unlockBudgetSubmissionIfEmpty = async (budgetId: number | null | undefined, userId: number | null | undefined) => {
     if (!budgetId || !userId) return;
+    // A Job's own Final Submit lifts the same way once the user has no active entry left in it.
+    try {
+      const jobLocks = await queryDB("SELECT id, job_id FROM job_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+      for (const js of jobLocks) {
+        const left = await queryDB("SELECT id FROM entries WHERE job_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1", [js.job_id, userId]);
+        if (left.length === 0) await queryDB("DELETE FROM job_submissions WHERE id = ?", [js.id]);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not auto-unlock Job submissions for budget " + budgetId + ": " + err.message);
+    }
     try {
       const remaining = await queryDB(
         "SELECT id FROM entries WHERE budget_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1",
@@ -97,10 +161,16 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           bi.specification, bi.req_qty, bi.unit, bi.po_qty, bi.received_qty, bi.balance_qty,
           bi.entry_user AS bi_entry_user, bi.approved_date AS bi_approved_date,
           bi.app_user AS bi_app_user, bi.site_sup_date,
+          -- Purchase orders put on this row by Reports -> P.O Import.
+          (SELECT GROUP_CONCAT(DISTINCT pl.po_no ORDER BY pl.po_date, pl.id SEPARATOR ', ') FROM mpr_po_lines pl WHERE pl.entry_id = e.id) AS po_numbers,
           -- Whether the creating user has already submitted (locked) the Budget this
           -- entry belongs to — the client uses this to decide if editing is allowed.
           (SELECT COUNT(*) FROM budget_submissions bs
-             WHERE bs.budget_id = e.budget_id AND bs.user_id = e.created_by) AS budget_locked
+             WHERE bs.budget_id = e.budget_id AND bs.user_id = e.created_by)
+          + (SELECT COUNT(*) FROM job_submissions js
+             WHERE js.job_id = e.job_id AND js.user_id = e.created_by) AS budget_locked,
+          (SELECT COUNT(*) FROM job_submissions js2
+             WHERE js2.job_id = e.job_id AND js2.user_id = e.created_by) AS job_locked
         FROM entries e
         JOIN projects p ON e.project_id = p.id
         JOIN jobs j ON e.job_id = j.id
@@ -123,7 +193,14 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         WHERE e.deleted_at IS NULL
       `;
       const params: any[] = [];
-      if (req.user.role !== "admin" && req.user.role !== "superadmin") {
+      // A plain User sees only their own entries — except in the Admin Panel
+      // (?scope=all) when the Superadmin granted them the Reports module, who
+      // otherwise got "0 matching records" in PEPM Reports.
+      let seesAll = req.user.role === "admin" || req.user.role === "superadmin";
+      if (!seesAll && req.query.scope === "all") {
+        seesAll = (await getAdminModules(Number(req.user.id))).includes("reports");
+      }
+      if (!seesAll) {
         sql += ` AND e.created_by = ?`;
         params.push(req.user.id);
       }
@@ -133,6 +210,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         entries.map((e: any) => ({
           ...e,
           budget_locked: !!Number(e.budget_locked),
+          job_locked: !!Number(e.job_locked),
           delivery_date_from: toDateOnlyString(e.delivery_date_from),
           delivery_date_to: toDateOnlyString(e.delivery_date_to)
         }))
@@ -143,9 +221,19 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   });
 
   // Minimal, system-wide "is this MPR No already used, and under which Job" lookup —
-  // available to every authenticated user (not just Admin), since a User needs this to
+  // available to every PEPM account (requireBudgetRead, not just Admin), since a User needs this to
   // avoid picking an MPR No someone else already entered. Deliberately leaves out
   // created_by / user_name so it doesn't turn into a way to browse other users' entries.
+  app.get("/api/jobs/next-no", authenticateToken, requireBudgetRead, async (req: any, res) => {
+    try {
+      const budgetId = Number(req.query.budget_id);
+      if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
+      res.json({ job_no: await nextJobNo(req.user.id, budgetId) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/entries/mpr-usage", authenticateToken, async (req: any, res) => {
     try {
       // used_by_other: whether THIS particular usage row belongs to a DIFFERENT user
@@ -475,14 +563,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       for (const it of items) {
         // Deleted entries free up their MPR No for reuse — only an active (non-deleted)
         // entry counts as "already used".
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, req.user.id)) {
           return res.status(400).json({
             warning: true,
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -491,12 +575,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // JOB-0002 ... for THIS user under THIS Budget specifically) — so every user's
       // own submissions start again from JOB-0001 independently of what any other user
       // is on, AND start again from JOB-0001 whenever they move to a different Budget.
-      const jobCountRows = await queryDB("SELECT COUNT(*) as cnt FROM jobs WHERE created_by = ? AND budget_id = ?", [
-        req.user.id,
-        budget_id
-      ]);
-      const nextJobSeq = (jobCountRows[0]?.cnt || 0) + 1;
-      const job_no = `JOB-${String(nextJobSeq).padStart(4, "0")}`;
+      const job_no = await nextJobNo(req.user.id, budget_id);
 
       // 2. Create one Job for this submission (Job No is unique per user PER BUDGET,
       // not globally and not just per user)
@@ -578,11 +657,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // Only require can_job_edit once the owner has ALREADY Final Submitted this
         // Job's Budget — before that, adding another MPR to your own not-yet-locked
         // Job needs no special permission, same as creating one in the first place.
-        const ownSubmissionRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [job.budget_id, req.user.id]
-        );
-        const budgetAlreadySubmitted = ownSubmissionRows.length > 0;
+        const budgetAlreadySubmitted = await isEntryLocked(job.budget_id, job.id, req.user.id);
         if (budgetAlreadySubmitted) {
           const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
           const canJobEdit = permRows.length > 0 && !!Number(permRows[0].can_job_edit);
@@ -742,15 +817,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         }
       }
 
-      // An MPR No can only ever be used ONCE, system-wide — same rule as creation.
+      // Same MPR ownership rule as creation: the Job owner may reuse their own MPR Nos.
       for (const it of items) {
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, job.created_by)) {
           return res.status(400).json({
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -876,7 +947,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
           [budget_id, req.user.id]
         );
-        if (ownSubmissionRows.length === 0) {
+        const ownJobSubmissionRows = await queryDB("SELECT id FROM job_submissions WHERE budget_id = ? AND user_id = ? LIMIT 1", [
+          budget_id,
+          req.user.id
+        ]);
+        if (ownSubmissionRows.length === 0 && ownJobSubmissionRows.length === 0) {
           return res.status(403).json({ error: "You can only add a new Job through Job Edit for a Budget you've already Final Submitted." });
         }
         const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
@@ -963,13 +1038,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // An MPR No can only ever be used ONCE, system-wide — same rule as POST
       // /api/entries and Add MPR above.
       for (const it of items) {
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, req.user.id)) {
           return res.status(400).json({
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -1109,14 +1180,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // only if they have NEITHER permission at all.
       let budgetLocked = false;
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
-        budgetLocked = submittedRows.length > 0;
+        budgetLocked = await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by);
         if (budgetLocked && !canJobEdit && !canEditDeliveryDate) {
           return res.status(400).json({
-            error: "This entry's Budget has already been submitted. It can no longer be edited."
+            error: "This entry's Job has already been Final Submitted. It can no longer be edited."
           });
         }
       }
@@ -1193,12 +1260,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // its own current MPR No must stay allowed) and any deleted entry (deleted
         // entries free up their MPR No for reuse). Never reusable again afterwards by
         // anyone, including this entry's own owner under a different entry/Job.
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND id <> ? AND deleted_at IS NULL",
-          [mpr_id, entry.budget_id, id]
-        );
-        if (usedRows.length > 0) {
-          return res.status(400).json({ error: "That MPR No has already been used in another entry under this Budget." });
+        if (await mprTakenByOther(mpr_id, entry.budget_id, entry.created_by, id)) {
+          return res.status(400).json({ error: "That MPR No is already used by another user under this Budget." });
         }
         // Must still belong to the same Budget + Project this entry was created under —
         // blocks smuggling in an MPR No from an unrelated Budget/Project via a direct API call.
@@ -1436,13 +1499,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       }
 
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
+        const submittedRows = (await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by)) ? [1] : [];
         if (submittedRows.length > 0) {
           return res.status(400).json({
-            error: "This entry's Budget has already been submitted. It can no longer be split."
+            error: "This entry's Job has already been Final Submitted. It can no longer be split."
           });
         }
       }
@@ -1539,6 +1599,132 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     }
   });
 
+  // Admin Panel -> PEPM Management -> Reports -> "Submission Status": for one
+  // Budget, every Project it covers (the Project Name column of its imported
+  // Budget items, plus any Project that has Jobs under it anyway) and how far
+  // each got — no Job yet, Jobs submitted but not every submitter has Final
+  // Submitted, or Final Submitted. Aggregated in JS from plain SELECTs so it
+  // runs the same on MySQL and the in-memory fallback.
+  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), requireModuleLayer("reports", "submission_status"), async (req, res) => {
+    try {
+      const budgetId = Number(req.query.budget_id);
+      if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
+      const budgetRows = await queryDB("SELECT id, budget_name FROM budgets WHERE id = ?", [budgetId]);
+      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
+
+      const [items, entries, projects, submissions, jobSubmissions, users, jobs] = await Promise.all([
+        queryDB("SELECT project_name FROM budget_items WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, project_id, job_id, created_by, created_at, deleted_at FROM entries WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, project_name FROM projects", []),
+        queryDB("SELECT user_id, submitted_at FROM budget_submissions WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT job_id, user_id, submitted_at FROM job_submissions WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, name FROM users", []),
+        queryDB("SELECT id, job_no FROM jobs WHERE budget_id = ?", [budgetId])
+      ]);
+
+      const norm = (v: any) => String(v || "").trim().toLowerCase();
+      const userName = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
+      const jobNo = new Map<number, string>(jobs.map((j: any) => [Number(j.id), j.job_no]));
+      const submittedAt = new Map<number, any>(submissions.map((s: any) => [Number(s.user_id), s.submitted_at]));
+      // "userId:jobId" -> when that one Job was Final Submitted.
+      const jobSubmittedAt = new Map<string, any>(jobSubmissions.map((s: any) => [`${s.user_id}:${s.job_id}`, s.submitted_at]));
+
+      type Row = {
+        key: string;
+        project_id: number | null;
+        project_name: string;
+        in_budget: boolean;
+        budget_item_count: number;
+        jobs: Set<number>;
+        entry_count: number;
+        last_entry_at: any;
+        byUser: Map<number, Set<number>>;
+      };
+      const rows = new Map<string, Row>();
+      const projectByName = new Map<string, any>(projects.map((p: any) => [norm(p.project_name), p]));
+      const projectById = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
+      const rowFor = (name: string, projectId: number | null) => {
+        const key = norm(name);
+        if (!rows.has(key)) {
+          rows.set(key, {
+            key,
+            project_id: projectId,
+            project_name: name,
+            in_budget: false,
+            budget_item_count: 0,
+            jobs: new Set(),
+            entry_count: 0,
+            last_entry_at: null,
+            byUser: new Map()
+          });
+        }
+        return rows.get(key)!;
+      };
+
+      for (const it of items) {
+        const name = String(it.project_name || "").trim();
+        if (!name) continue;
+        const p = projectByName.get(norm(name));
+        const r = rowFor(p ? p.project_name : name, p ? Number(p.id) : null);
+        r.in_budget = true;
+        r.budget_item_count++;
+      }
+      for (const e of entries) {
+        if (e.deleted_at) continue;
+        const p = projectById.get(Number(e.project_id));
+        const r = rowFor(p ? p.project_name : `Project #${e.project_id}`, Number(e.project_id));
+        r.project_id = Number(e.project_id);
+        r.entry_count++;
+        if (e.job_id) r.jobs.add(Number(e.job_id));
+        if (!r.last_entry_at || String(e.created_at) > String(r.last_entry_at)) r.last_entry_at = e.created_at;
+        const uid = Number(e.created_by);
+        if (!r.byUser.has(uid)) r.byUser.set(uid, new Set());
+        if (e.job_id) r.byUser.get(uid)!.add(Number(e.job_id));
+      }
+
+      const result = Array.from(rows.values()).map((r) => {
+        const submitters = Array.from(r.byUser.entries()).map(([uid, jobIds]) => ({
+          user_id: uid,
+          name: userName.get(uid) || `User #${uid}`,
+          job_count: jobIds.size,
+          job_nos: Array.from(jobIds).map((id) => jobNo.get(id)).filter(Boolean),
+          // Final Submitted: the whole Budget, or every one of this user's Jobs here one by one.
+          submitted_job_nos: Array.from(jobIds)
+            .filter((id) => jobSubmittedAt.has(`${uid}:${id}`))
+            .map((id) => jobNo.get(id))
+            .filter(Boolean),
+          final_submitted: submittedAt.has(uid) || (jobIds.size > 0 && Array.from(jobIds).every((id) => jobSubmittedAt.has(`${uid}:${id}`))),
+          final_submitted_at:
+            submittedAt.get(uid) ||
+            Array.from(jobIds)
+              .map((id) => jobSubmittedAt.get(`${uid}:${id}`))
+              .filter(Boolean)
+              .sort()
+              .pop() ||
+            null
+        }));
+        const status =
+          r.entry_count === 0 ? "not_submitted" : submitters.every((s) => s.final_submitted) ? "final_submitted" : "job_submitted";
+        return {
+          project_id: r.project_id,
+          project_name: r.project_name,
+          in_budget: r.in_budget,
+          budget_item_count: r.budget_item_count,
+          job_count: r.jobs.size,
+          entry_count: r.entry_count,
+          last_entry_at: r.last_entry_at,
+          submitters,
+          status
+        };
+      });
+      const order: Record<string, number> = { not_submitted: 0, job_submitted: 1, final_submitted: 2 };
+      result.sort((a, b) => order[a.status] - order[b.status] || a.project_name.localeCompare(b.project_name));
+      res.json({ budget: budgetRows[0], projects: result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the submission status" });
+    }
+  });
+
   // Full change history for one entry row (Item Name, Delivery Date, MPR No, and any
   // Job Name / Job Duration edits made from this or a sibling row under the same Job).
   // Admin-only, per the Admin Panel's Reports tab.
@@ -1621,16 +1807,13 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // Final-Submitted Job — but even then, the delete is QUEUED for Admin approval
       // (job_edit_requests) rather than applied immediately, same as Add MPR above.
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
+        const submittedRows = (await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by)) ? [1] : [];
         if (submittedRows.length > 0) {
           const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
           const canJobEdit = permRows.length > 0 && !!Number(permRows[0].can_job_edit);
           if (!canJobEdit) {
             return res.status(400).json({
-              error: "This entry's Budget has already been submitted. It can no longer be deleted."
+              error: "This entry's Job has already been Final Submitted. It can no longer be deleted."
             });
           }
           // Refuse a second delete request while one against this same entry is
@@ -1670,6 +1853,103 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to delete entry" });
+    }
+  });
+
+  // ---------------- PEPM Reports -> MPR Entries Report row actions ----------------
+  // Gated by the Reports module's permission layers (Admin Panel -> Users ->
+  // Module Access -> Reports): Edit, Delete/Trash, Permanent Delete. Unlike
+  // the Self Service routes above these don't depend on owning the entry.
+  const reportEntry = async (id: any) => {
+    const rows = await queryDB(
+      `SELECT e.*, j.job_no, p.project_name, m.mpr_no,
+              creator.name AS entry_created_by_name, deleter.name AS entry_deleted_by_name
+         FROM entries e
+         LEFT JOIN jobs j ON e.job_id = j.id
+         LEFT JOIN projects p ON e.project_id = p.id
+         LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+         LEFT JOIN users creator ON e.created_by = creator.id
+         LEFT JOIN users deleter ON e.deleted_by = deleter.id
+        WHERE e.id = ?`,
+      [id]
+    );
+    return rows.length > 0 ? rows[0] : null;
+  };
+
+  // Edit: Item Name and Delivery Date (each change kept in the edit history).
+  app.put("/api/reports/entries/:id", authenticateToken, requireAdmin, requireModuleLayer("reports", "edit_add"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry || entry.deleted_at) return res.status(404).json({ error: "Entry not found" });
+      const itemName = String(req.body?.item_name ?? "").trim();
+      const deliveryDate = toDateOnlyString(req.body?.delivery_date);
+      if (!itemName || !deliveryDate) return res.status(400).json({ error: "Item Name and Delivery Date are required" });
+      const changes: { field: string; oldVal: any; newVal: any }[] = [];
+      if (itemName !== String(entry.item_name ?? "")) changes.push({ field: "item_name", oldVal: entry.item_name, newVal: itemName });
+      const oldDate = toDateOnlyString(entry.delivery_date);
+      if (deliveryDate !== oldDate) changes.push({ field: "delivery_date", oldVal: oldDate, newVal: deliveryDate });
+      if (changes.length === 0) return res.json({ success: true, changed: 0 });
+      await queryDB("UPDATE entries SET item_name = ?, delivery_date = ? WHERE id = ?", [itemName, deliveryDate, entry.id]);
+      for (const c of changes)
+        await queryDB("INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, ?, ?, ?)", [
+          entry.id,
+          req.user.id,
+          c.field,
+          c.oldVal == null ? null : String(c.oldVal),
+          String(c.newVal)
+        ]);
+      res.json({ success: true, changed: changes.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update entry" });
+    }
+  });
+
+  // Delete/Trash: moves the entry to the Job Recycle bin (it can be restored there).
+  app.delete("/api/reports/entries/:id", authenticateToken, requireAdmin, requireModuleLayer("reports", "delete_trash"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry || entry.deleted_at) return res.status(404).json({ error: "Entry not found" });
+      await queryDB("UPDATE entries SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", [req.user.id, entry.id]);
+      await unlockBudgetSubmissionIfEmpty(entry.budget_id, entry.created_by);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to delete entry" });
+    }
+  });
+
+  // Permanent Delete: erased for good, straight from the report — recorded in
+  // the Permanent Delete Log like an erase from the Job Recycle bin.
+  app.delete("/api/reports/entries/:id/permanent", authenticateToken, requireAdmin, requireModuleLayer("reports", "permanent_delete"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry) return res.status(404).json({ error: "Entry not found" });
+      await queryDB(
+        `INSERT INTO entry_permanent_delete_log
+           (entry_id, entry_date, job_name, job_no, project_name, mpr_no, item_name, requisitioned_qty,
+            entry_created_by_name, entry_deleted_by_name, entry_deleted_at,
+            permanently_deleted_by, permanently_deleted_by_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          entry.id,
+          entry.entry_date,
+          entry.job_name,
+          entry.job_no,
+          entry.project_name,
+          entry.mpr_no,
+          entry.item_name,
+          entry.requisitioned_qty,
+          entry.entry_created_by_name,
+          entry.deleted_at ? entry.entry_deleted_by_name : req.user.name,
+          entry.deleted_at || new Date(),
+          req.user.id,
+          req.user.name
+        ]
+      );
+      await queryDB("DELETE FROM entries WHERE id = ?", [entry.id]);
+      if (!entry.deleted_at) await unlockBudgetSubmissionIfEmpty(entry.budget_id, entry.created_by);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to permanently delete entry" });
     }
   });
 
@@ -1826,9 +2106,84 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
          WHERE r.status = 'pending' OR r.reviewed_at >= NOW() - INTERVAL 30 DAY
          ORDER BY (r.status = 'pending') DESC, r.created_at DESC`
       );
-      res.json(rows.map(parseJobEditRequestRow));
+      // The Budget row behind each proposed MPR row (Specification, Unit, the
+      // Budget's Req. Qty) for the reviewer's Details view.
+      const parsed = rows.map(parseJobEditRequestRow);
+      const lines = (r: any): any[] => (r.action === "add_job" ? (Array.isArray(r.payload?.items) ? r.payload.items : []) : r.action === "add_item" && r.payload ? [r.payload] : []);
+      const itemIds = [...new Set(parsed.flatMap((r: any) => lines(r).map((it: any) => Number(it.budget_item_id)).filter((n: number) => n > 0)))];
+      if (itemIds.length) {
+        const bi: any[] = await queryDB(`SELECT id, specification, unit, req_qty FROM budget_items WHERE id IN (${itemIds.map(() => "?").join(",")})`, itemIds);
+        const byId = new Map(bi.map((b) => [Number(b.id), b]));
+        for (const r of parsed)
+          for (const it of lines(r)) {
+            const b = byId.get(Number(it.budget_item_id));
+            if (b) Object.assign(it, { specification: b.specification || "", unit: b.unit || "", budget_qty: b.req_qty ?? null });
+          }
+      }
+      res.json(parsed);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load Job Edit requests" });
+    }
+  });
+
+  // Job Edit Approvals -> Details: what the change does to the Job. Returns the
+  // Job's current MPR rows (plus, for a delete, the row being deleted with its
+  // dispatch / receive state) and, for an Add MPR, how much of that Budget item
+  // is already requisitioned — so the reviewer sees the Job before and after.
+  // Same "editlog" gate as the list above.
+  app.get("/api/job-edits/:id/context", authenticateToken, requireAdmin, requireModule("editlog"), async (req: any, res) => {
+    try {
+      const reqRows = await queryDB("SELECT * FROM job_edit_requests WHERE id = ?", [req.params.id]);
+      if (reqRows.length === 0) return res.status(404).json({ error: "Job Edit request not found" });
+      const request = reqRows[0];
+      const payload = request.payload ? JSON.parse(request.payload) : {};
+      if (!request.job_id) return res.json({ job: null, rows: [], item: null });
+
+      const jobRows = await queryDB(
+        `SELECT j.id, j.job_no, j.job_duration, j.created_by, b.budget_name,
+                (SELECT e.job_name FROM entries e WHERE e.job_id = j.id ORDER BY e.id LIMIT 1) AS job_name,
+                (SELECT p.project_name FROM entries e JOIN projects p ON e.project_id = p.id WHERE e.job_id = j.id ORDER BY e.id LIMIT 1) AS project_name
+           FROM jobs j LEFT JOIN budgets b ON j.budget_id = b.id
+          WHERE j.id = ?`,
+        [request.job_id]
+      );
+      const job = jobRows[0] || null;
+      const rows = await queryDB(
+        `SELECT e.id, m.mpr_no, e.item_name, bi.specification, bi.unit, bi.req_qty AS budget_qty,
+                e.budget_item_id, e.requisitioned_qty, e.delivery_date, e.entry_date, e.deleted_at,
+                e.md_status, e.md_dispatched_qty, e.md_received_qty, u.name AS created_by_name
+           FROM entries e
+           LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+           LEFT JOIN budget_items bi ON e.budget_item_id = bi.id
+           LEFT JOIN users u ON e.created_by = u.id
+          WHERE e.job_id = ? AND (e.deleted_at IS NULL OR e.id = ?)
+          ORDER BY m.mpr_no, e.id`,
+        [request.job_id, request.entry_id || 0]
+      );
+
+      // Add MPR: the Budget item's Req. Qty and what this Job's owner has
+      // already requisitioned against it.
+      let item: any = null;
+      if (request.action === "add_item" && payload.budget_item_id && job) {
+        const bi = await queryDB("SELECT req_qty, specification, unit FROM budget_items WHERE id = ?", [payload.budget_item_id]);
+        const used = await queryDB(
+          "SELECT COALESCE(SUM(requisitioned_qty), 0) AS used FROM entries WHERE budget_item_id = ? AND created_by = ? AND deleted_at IS NULL",
+          [payload.budget_item_id, job.created_by]
+        );
+        item = {
+          budget_qty: bi[0] ? parseQtyNumber(bi[0].req_qty) : null,
+          specification: bi[0]?.specification || "",
+          unit: bi[0]?.unit || "",
+          used: Number(used[0]?.used || 0)
+        };
+      }
+      res.json({
+        job: job && { job_no: job.job_no, job_name: job.job_name, project_name: job.project_name, budget_name: job.budget_name, job_duration: job.job_duration },
+        rows,
+        item
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the Job for this request" });
     }
   });
 
@@ -1903,13 +2258,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
             });
           }
         }
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [payload.mpr_id, job.budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(payload.mpr_id, job.budget_id, request.requested_by)) {
           return res.status(400).json({
-            error: "That MPR No has since been used in another entry under this Budget. This request can no longer be approved as-is."
+            error: "That MPR No has since been used by another user under this Budget. This request can no longer be approved as-is."
           });
         }
 
@@ -1989,13 +2340,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           }
         }
         for (const it of payload.items) {
-          const usedRows = await queryDB(
-            "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-            [it.mpr_id, payload.budget_id]
-          );
-          if (usedRows.length > 0) {
+          if (await mprTakenByOther(it.mpr_id, payload.budget_id, request.requested_by)) {
             return res.status(400).json({
-              error: `MPR No "${it.mpr_no}" has since been used in another entry under this Budget. This request can no longer be approved as-is.`
+              error: `MPR No "${it.mpr_no}" has since been used by another user under this Budget. This request can no longer be approved as-is.`
             });
           }
         }
@@ -2003,12 +2350,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // Auto-generate the Job No exactly like POST /api/entries does — sequential
         // PER USER PER BUDGET, using the requesting user (not the approving Admin)
         // as the owner.
-        const jobCountRows = await queryDB("SELECT COUNT(*) as cnt FROM jobs WHERE created_by = ? AND budget_id = ?", [
-          request.requested_by,
-          payload.budget_id
-        ]);
-        const nextJobSeq = (jobCountRows[0]?.cnt || 0) + 1;
-        const job_no = `JOB-${String(nextJobSeq).padStart(4, "0")}`;
+        const job_no = await nextJobNo(request.requested_by, payload.budget_id);
 
         const jobResult = await queryDB(
           "INSERT INTO jobs (job_no, job_duration, created_by, budget_id) VALUES (?, ?, ?, ?)",

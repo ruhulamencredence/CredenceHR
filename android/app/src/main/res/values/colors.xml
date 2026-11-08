@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App header's purple gradient is
+         linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%)
+         (see Navbar.tsx's transparentHeader / WelcomeBanner.tsx).
+         styles.xml (AppTheme) references these three colors but this file
+         was missing from the project, so Android had nothing to fall back
+         to before App.tsx's StatusBar.setBackgroundColor('#6300C6') JS call
+         runs — which is why the status bar showed as plain black/default
+         on first paint instead of matching the header. Setting
+         colorPrimaryDark (the color Android itself paints the status bar
+         with) to the same gradient mid-stop keeps native chrome and the
+         app header in sync from the very first frame, before any JS runs. -->
+    <color name="colorPrimary">#7F00FF</color>
+    <color name="colorPrimaryDark">#6300C6</color>
+    <color name="colorAccent">#7F00FF</color>
+</resources>

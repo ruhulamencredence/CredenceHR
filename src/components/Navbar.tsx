@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { User } from '../types';
-import { Shield, LogOut, Smartphone, Search, X } from 'lucide-react';
+import { User, chatAllowed } from '../types';
+import { Shield, LogOut, Search, X, Calendar, ChevronLeft } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
+import { requestQuickAccessTab } from '../lib/quickAccess';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
+import { HeaderMoreMenu } from './HeaderMoreMenu';
+import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
-import { useHeaderPageTitle } from '../lib/headerPageTitle';
+import { BLENDED_HEADER_TITLES, useHeaderPageTitle } from '../lib/headerPageTitle';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
 // stacked vertically, matching the app's own rounded-corner language (the
@@ -45,7 +49,7 @@ interface NavbarProps {
   // Only passed (non-undefined) when this Admin has been granted
   // can_access_user_panel by the Superadmin. No longer renders a visible
   // switcher in the header (removed) — kept only so this component's
-  // inUserView/canSeeMovementClaims/canSeeConveyanceBillClaim logic still
+  // inUserView/canSeeMovementClaims/canSeeBillClaim logic still
   // knows which panel App.tsx is currently showing for this account. Absent
   // entirely for a plain User or Superadmin, or an Admin without the grant.
   viewMode?: 'admin' | 'user';
@@ -56,12 +60,12 @@ interface NavbarProps {
   // GlobalSidebar's onGoToDashboard exactly.
   onGoToDashboard: () => void;
   // Web-only "Claims" menu (see the dropdown below) — jumps straight to Movement
-  // Claims or Conveyance Bill Claim on whichever panel is currently showing
+  // Claims or Bill Claim on whichever panel is currently showing
   // (the Admin's own tab there, or the User's own section). Hidden on the
   // Android APK / narrow screens, where the existing tile menu / bottom nav
   // already covers this.
   onGoToMovementClaims: () => void;
-  onGoToConveyanceBillClaim: () => void;
+  onGoToBillClaim: () => void;
   // Web-only "Jobs" menu (see the dropdown below) — jumps straight to one of
   // the four User Panel sections it groups (Entry, Jobs, Entry Details, Job
   // Edits). Unlike Claims above, every one of these lives ONLY in the User
@@ -86,7 +90,7 @@ interface NavbarProps {
   // Workforce above, this isn't Admin-gated — every account sees it. Leave
   // Approvals is the one exception: only shown to Admin/Superadmin accounts,
   // since only they can ever be picked as a Leave Application's Approver.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => void;
   // Mobile-only hamburger button in the header — opens the single
   // GlobalSidebar drawer (see GlobalSidebar.tsx / App.tsx). Desktop
   // (md and up) keeps using the dropdown menus above instead, unchanged —
@@ -104,6 +108,9 @@ interface NavbarProps {
   // AlertsBell's dropdown footer "View all" link — opens AlertsPage.tsx,
   // same full-page destination GlobalSidebar's own "Alerts" item opens.
   onOpenAlerts: () => void;
+  // The round Back button of the blended phone header — the same step back
+  // as the phone's own Back (App.tsx pageBackRef / backButtonStack.ts).
+  onPageBack?: () => void;
 }
 
 // Styled after the Gemini app's top bar: a plain white surface, the Credence
@@ -119,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onViewModeChange,
   onGoToDashboard,
   onGoToMovementClaims,
-  onGoToConveyanceBillClaim,
+  onGoToBillClaim,
   onGoToJobsTab,
   onGoToBudgetTab,
   onGoToManageTab,
@@ -129,13 +136,39 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenProfile,
   onOpenChat,
   isChatOpen,
-  onOpenAlerts
+  onOpenAlerts,
+  onPageBack
 }) => {
   // Both the User Panel and the Admin Panel now get the fully transparent
   // header on the native Android APK (per request) — the web build keeps the
   // solid header either way.
   const isNativeApp = Capacitor.isNativePlatform();
-  const transparentHeader = isNativeApp;
+  // Phone-width web (mobile browser, iPhone "Add to Home Screen") gets the
+  // same purple header as the app — the white one left the status bar strip
+  // white too. Desktop keeps the solid header.
+  const [phoneWidth, setPhoneWidth] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const on = () => setPhoneWidth(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const transparentHeader = isNativeApp || phoneWidth;
+
+  // Today's Date & Day — web header only (see the "hidden md:flex" wrapper
+  // below), same dd-MMM-yyyy convention as formatDate.ts elsewhere in the
+  // app, prefixed with the short weekday name. Re-reads the clock once a
+  // minute (not every render) so it silently rolls over to the next day
+  // around midnight without anyone needing to refresh the page.
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setToday(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+  const todayLabel = today.toLocaleDateString('en-US', { weekday: 'short' }) + ', ' +
+    String(today.getDate()).padStart(2, '0') + '-' +
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][today.getMonth()] + '-' +
+    today.getFullYear();
 
   // Whichever page is showing may have docked its own search box into this
   // header (see headerSearch.ts) — while that page's own search bar has
@@ -153,14 +186,51 @@ export const Navbar: React.FC<NavbarProps> = ({
   const headerPageTitle = useHeaderPageTitle();
   const showMobilePageTitle = !!headerPageTitle;
   const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
+  // The Self Service pages in BLENDED_HEADER_TITLES (Timesheet, My Claims,
+  // Leave, My Tasks, Payslip…) on a phone: the header blends into the page — no purple bar, round white buttons, the
+  // picked (or the theme's) glow behind it —
+  // and turns to frosted glass once the page scrolls under it. Every other
+  // page keeps the purple header (`purple`).
+  const blend = transparentHeader && !!headerPageTitle && BLENDED_HEADER_TITLES.has(headerPageTitle);
+  const purple = transparentHeader && !blend;
+  // Flat page colour under the glow while a blended page is open (index.css
+  // html[data-blend-page]) — the theme's own background gradient would put
+  // colour at the bottom of the page too.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!blend) return;
+    root.dataset.blendPage = '';
+    return () => {
+      delete root.dataset.blendPage;
+    };
+  }, [blend]);
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    if (!blend) return;
+    const on = () => setScrolled(window.scrollY > 6);
+    on();
+    window.addEventListener('scroll', on, { passive: true });
+    return () => window.removeEventListener('scroll', on);
+  }, [blend]);
+  // The app's status bar: dark clock/battery on the light blended header,
+  // white on the purple one.
+  useEffect(() => {
+    if (!isNativeApp) return;
+    import('@capacitor/status-bar')
+      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: blend ? Style.Light : Style.Dark }))
+      .catch(() => {});
+  }, [blend, isNativeApp]);
   // A page-title takeover (e.g. "Select a Budget") means this page owns the
   // whole mobile header row — its own search icon (if some other, unrelated
   // page had left one docked) and the Weather badge both get out of the way
   // on mobile, matching the reference screenshot. Desktop is unaffected.
   const showMobileSearchIconResolved = showMobileSearchIcon && !showMobilePageTitle;
+  // The blended phone header has its own search button (Employee
+  // Directory's docked search, next to the ⋮) — see the blend row below.
+  const blendSearch = blend && showMobileSearchIcon;
   useEffect(() => {
-    if (!showMobileSearchIconResolved) setMobileSearchOpen(false);
-  }, [showMobileSearchIconResolved]);
+    if (!showMobileSearchIconResolved && !blendSearch) setMobileSearchOpen(false);
+  }, [showMobileSearchIconResolved, blendSearch]);
 
   // Circular avatar shown at the top right (initial + role-tinted background) —
   // falls back to this when the account has no Personal Data photo uploaded
@@ -175,9 +245,38 @@ export const Navbar: React.FC<NavbarProps> = ({
       : { background: 'var(--g-accent-soft)', color: 'var(--g-accent)' };
   const photoUrl = useProfilePhoto(token, photoVersion);
 
+  // Personal Alerts bell — on by default for every account (no module
+  // grant needed). Clicking a Leave Application alert jumps to Self Service
+  // -> Leave Application. Shared by the normal header and the blended one.
+  const alertsBell = (
+    <AlertsBell
+      token={token}
+      onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
+      onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
+      onOpenVehicleManagement={(target) => {
+        // A ride update is about an existing ride — open Ride Status
+        // (or the assign screens for one still needing a vehicle).
+        requestQuickAccessTab('bookRide', target || 'status');
+        onGoToSelfServiceTab('vehicleManagement');
+      }}
+      onOpenBillClaim={onGoToBillClaim}
+      onOpenMyAsset={(target) => {
+        requestQuickAccessTab('myAsset', target);
+        onGoToSelfServiceTab('assetManagement');
+      }}
+      onOpenResignation={() => onGoToSelfServiceTab('resignation')}
+      onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
+      canOpenGrievanceAdmin={user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary')}
+      onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
+      onViewAll={onOpenAlerts}
+    />
+  );
+
   return (
+    <>
+    {blend && createPortal(<div className="page-glow" aria-hidden="true" />, document.body)}
     <header
-      className="sticky top-0 z-50"
+      className={`sticky top-0 z-50 ${blend ? `hdr-blend${scrolled ? ' hdr-blend-scrolled' : ''}` : ''}`}
       style={{
         // On the native Android APK the header no longer sits on plain
         // transparent/page background — it's filled with the same violet
@@ -185,8 +284,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         // #welcomeBannerGradient stops) so the header visually fuses with the
         // banner directly below it into one continuous card, instead of
         // looking like two separate pieces.
-        background: transparentHeader
-          ? 'linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%)'
+        background: blend
+          ? undefined
+          : transparentHeader
+          ? 'var(--g-header-gradient, linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%))'
           : 'var(--g-surface)',
         borderBottom: transparentHeader ? 'none' : '1px solid var(--g-border)',
         // App.tsx now makes the native status bar fully transparent and
@@ -207,6 +308,64 @@ export const Navbar: React.FC<NavbarProps> = ({
         paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))'
       }}
     >
+      {blend && (
+        // Phone pages in BLENDED_HEADER_TITLES: round Back on the left, the
+        // page title in the middle, one round button on the right —
+        // Timesheet's Alerts bell, the others a ⋮ with Alerts, Chat,
+        // Profile and the menu (HeaderMoreMenu.tsx).
+        // A page that docks its search into the header (Employee Directory,
+        // once its own search bar has scrolled away) gets a round search
+        // button beside the ⋮; tapping it swaps the title for the box.
+        <div className={`w-full px-4 h-16 grid ${blendSearch ? 'grid-cols-[88px_minmax(0,1fr)_88px]' : 'grid-cols-[44px_minmax(0,1fr)_44px]'} items-center gap-2`}>
+          <button type="button" onClick={onPageBack ?? onGoToDashboard} className="hdr-round" aria-label="Back">
+            <ChevronLeft className="w-[22px] h-[22px]" strokeWidth={2.4} />
+          </button>
+          {blendSearch && mobileSearchOpen ? (
+            <div className="relative min-w-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
+              <input
+                autoFocus
+                type="text"
+                value={headerSearchReg?.value || ''}
+                onChange={(e) => headerSearchReg?.onChange(e.target.value)}
+                placeholder={headerSearchReg?.placeholder || 'Search…'}
+                className="w-full pl-9 pr-8 py-2.5 rounded-full text-sm bg-white text-slate-900 shadow-[0_6px_16px_-8px_rgba(15,23,42,0.35)] focus:outline-none"
+              />
+              <button type="button" onClick={() => setMobileSearchOpen(false)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1" style={{ color: 'var(--g-text-muted)' }} aria-label="Close search">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <h1
+              className={`${(headerPageTitle?.length ?? 0) > 20 ? 'text-[16px]' : (headerPageTitle?.length ?? 0) > 14 ? 'text-[19px]' : 'text-[21px]'} font-extrabold tracking-tight text-center truncate`}
+              style={{ color: 'var(--g-text)' }}
+            >
+              {headerPageTitle}
+            </h1>
+          )}
+          <div className="flex items-center justify-end gap-2">
+          {blendSearch && !mobileSearchOpen && (
+            <button type="button" onClick={() => setMobileSearchOpen(true)} className="hdr-round" aria-label="Search">
+              <Search className="w-[18px] h-[18px]" />
+            </button>
+          )}
+          {headerPageTitle === 'Timesheet' ? (
+            <div className="hdr-chip hdr-solo">{alertsBell}</div>
+          ) : (
+            <HeaderMoreMenu
+              token={token}
+              showChat={chatAllowed(user)}
+              onOpenAlerts={onOpenAlerts}
+              onOpenChat={onOpenChat}
+              onOpenProfile={onOpenProfile}
+              onOpenMenu={onOpenMobileMenu}
+              onGoHome={onGoToDashboard}
+            />
+          )}
+          </div>
+        </div>
+      )}
+      {!blend && (
       <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Logo, left-aligned. The desktop dropdown menus that used to sit
             next to it (Claims / Jobs / Budget / Manage / Workforce / Self
@@ -225,7 +384,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               showing. Desktop (md and up) still hides this button — the
               GlobalSidebar persistent variant is its desktop navigation now.
               On the native app the
-              header is the purple gradient (transparentHeader — see above),
+              header is the purple gradient (`purple` — see above),
               where the old muted-gray icon color was nearly invisible; white
               on a soft translucent pill keeps it visible there while the
               plain web header (light background) keeps the original muted
@@ -233,12 +392,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenMobileMenu}
-            className={`md:hidden -ml-1 w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-              transparentHeader
+            className={`md:hidden -ml-1 rounded-xl flex items-center justify-center shrink-0 transition-colors w-9 h-9 ${
+              purple
                 ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
                 : 'hover:opacity-70'
             }`}
-            style={transparentHeader ? undefined : { color: 'var(--g-text-muted)' }}
+            style={purple ? undefined : { color: 'var(--g-text-muted)' }}
             aria-label="Open menu"
           >
             <ThreeDotsMenuIcon className="w-[18px] h-[18px]" />
@@ -273,7 +432,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <span
               className="text-base font-semibold truncate"
-              style={{ color: transparentHeader ? 'white' : 'var(--g-text)' }}
+              style={{ color: purple ? 'white' : 'var(--g-text)' }}
             >
               {headerPageTitle}
             </span>
@@ -292,7 +451,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="relative flex-1">
                   <Search
                     className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2"
-                    style={{ color: transparentHeader ? 'rgba(255,255,255,0.75)' : 'var(--g-text-muted)' }}
+                    style={{ color: purple ? 'rgba(255,255,255,0.75)' : 'var(--g-text-muted)' }}
                   />
                   <input
                     autoFocus
@@ -301,7 +460,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onChange={(e) => headerSearchReg?.onChange(e.target.value)}
                     placeholder={headerSearchReg?.placeholder || 'Search…'}
                     className={`w-full pl-9 pr-8 py-2 rounded-xl text-sm focus:outline-none ${
-                      transparentHeader
+                      purple
                         ? 'bg-white/15 text-white placeholder-white/70'
                         : 'bg-slate-50 text-slate-900 border border-slate-200'
                     }`}
@@ -310,7 +469,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     type="button"
                     onClick={() => setMobileSearchOpen(false)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
-                    style={{ color: transparentHeader ? 'white' : 'var(--g-text-muted)' }}
+                    style={{ color: purple ? 'white' : 'var(--g-text-muted)' }}
                     aria-label="Close search"
                   >
                     <X className="w-4 h-4" />
@@ -321,11 +480,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={() => setMobileSearchOpen(true)}
                   className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
-                    transparentHeader
+                    purple
                       ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
                       : 'hover:opacity-70'
                   }`}
-                  style={transparentHeader ? undefined : { color: 'var(--g-text-muted)' }}
+                  style={purple ? undefined : { color: 'var(--g-text-muted)' }}
                   aria-label="Search"
                 >
                   <Search className="w-[18px] h-[18px]" />
@@ -350,14 +509,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               above and onGoToBudgetTab/onGoToManageTab/onGoToWorkforceTab in
               App.tsx, which switch viewMode to 'admin' themselves). */}
 
-          <button
-            onClick={onOpenApkInfo}
-            className="hidden md:flex items-center justify-center w-9 h-9 rounded-full transition-colors hover:opacity-70"
-            style={{ color: 'var(--g-text-muted)' }}
-            title="Android APK Build Instructions"
-          >
-            <Smartphone className="w-[18px] h-[18px]" />
-          </button>
+          {/* Android APK Build Instructions button removed from the header
+              (per request) — onOpenApkInfo/onOpenApkInfo prop is left wired
+              in App.tsx in case another entry point still needs it. */}
+
+          {/* Today's Date & Day — web header only, hidden on the native
+              Android APK (the purple header
+              already has less room, and the mobile page-title/date isn't
+              needed there the way it is on a wide desktop browser tab). */}
+          {!isNativeApp && (
+            <div
+              className={`hidden md:flex items-center gap-1 shrink-0 ${showMobilePageTitle ? 'md:hidden lg:flex' : ''}`}
+              style={{ color: 'var(--g-text-muted)' }}
+              title="Today"
+            >
+              <Calendar className="w-[16px] h-[16px]" />
+              <span className="text-xs font-medium whitespace-nowrap">{todayLabel}</span>
+            </div>
+          )}
+
+          {/* Company switcher — only for accounts in more than one company. */}
+          <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
+            <CompanySwitcher token={token} transparent={purple} />
+          </div>
 
           {/* Live weather — free (no API key, no permission prompt of its
               own), shown on both the mobile and web header since this
@@ -366,7 +540,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               or offline. Hidden on mobile while a page-title takeover (e.g.
               "Select a Budget") owns the header row — desktop keeps it. */}
           <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
-            <WeatherBadge transparent={transparentHeader} />
+            <WeatherBadge transparent={purple} />
           </div>
 
           {/* Personal Alerts bell — on by default for every account (no
@@ -375,11 +549,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
-          <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} onViewAll={onOpenAlerts} />
+          <div className="hdr-chip">{alertsBell}</div>
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}
-          {!isChatOpen && <ChatBell token={token} onOpenChat={onOpenChat} />}
+          {!isChatOpen && chatAllowed(user) && (
+            <div className="hdr-chip">
+              <ChatBell token={token} onOpenChat={onOpenChat} />
+            </div>
+          )}
 
           <div className="hidden lg:block text-right mr-1">
             <div className="text-sm font-medium leading-tight" style={{ color: 'var(--g-text)' }}>{user.name}</div>
@@ -403,7 +581,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenProfile}
-            className={`w-9 h-9 rounded-full items-center justify-center text-sm font-semibold flex-shrink-0 transition-opacity hover:opacity-80 overflow-hidden ${
+            className={`hdr-avatar w-9 h-9 rounded-full items-center justify-center text-sm font-semibold flex-shrink-0 transition-opacity hover:opacity-80 overflow-hidden ${
               isProfilePageOpen ? 'hidden' : 'flex'
             }`}
             style={photoUrl ? undefined : avatarColors}
@@ -427,6 +605,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </div>
+      )}
     </header>
+    </>
   );
 };

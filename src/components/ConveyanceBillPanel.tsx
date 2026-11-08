@@ -1,29 +1,40 @@
-import React, { useEffect, useState } from 'react';
-import jsPDF from 'jspdf';
+import { activePeople } from '../lib/activePeople';
+import React, { useEffect, useRef, useState } from 'react';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
-import { Wallet, Plus, Trash2, X, Route, PenLine, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
+import { Wallet, Plus, Trash2, X, Route, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
 import {
   ConveyanceBill,
   ConveyanceBillItem,
   ClaimRecord,
   User,
-  UserClaim,
-  UserClaimCategory,
-  USER_CLAIM_CATEGORIES,
-  UserClaimReference
+  BillClaim,
+  BillClaimCategoryName,
+  BILL_CLAIM_CATEGORIES,
+  BillClaimReference
 } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
+import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
+import { ClaimBillLines } from './ClaimBillLines';
+import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
+import { confirmDialog } from '../lib/confirmDialog';
+import { NewBillClaimModal } from './NewBillClaimModal';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { SearchSelect } from './Combobox';
 interface ConveyanceBillPanelProps {
   token: string;
   users: User[];
+  // The signed-in account: a bill in its own name can't be changed from here.
+  currentUserId: number;
 }
 
 // Blank draft for both the "Add Manual Item" form and the inline "Edit Item"
@@ -39,100 +50,71 @@ const blankItemDraft = () => ({
   remarks: ''
 });
 
-// Admin Panel -> Conveyance Bill Claim (Superadmin + explicitly-granted Admins
-// only — see ADMIN_MODULES/'conveyance'). A Bill groups several travel/conveyance
+// Admin Panel -> Bill Claim (Superadmin + explicitly-granted Admins
+// only — see ADMIN_MODULES/'bill_claim'). A Bill groups several travel/conveyance
 // line items for ONE User into a single claim document; each item either gets
-// pulled in from that User's own completed Movement Claim (see the "Movement
+// pulled in from that User's own completed Check In/Out (see the "Movement
 // Claims" tab) or is added fully by hand.
-export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users }) => {
+export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users, currentUserId }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
+  const canEmailReports = useCanEmailReports();
   const plainUsers = users.filter((u) => u.role === 'user');
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
   const [billItems, setBillItems] = useState<Record<number, ConveyanceBillItem[]>>({});
-  const [userClaims, setUserClaims] = useState<UserClaim[]>([]);
+  const [billClaims, setBillClaims] = useState<BillClaim[]>([]);
   const [loading, setLoading] = useState(false);
   const [userFilter, setUserFilter] = useState('');
   const [fromFilter, setFromFilter] = useState('');
   const [toFilter, setToFilter] = useState('');
   const [deletingBillId, setDeletingBillId] = useState<number | null>(null);
+  // The table is one page of the server's combined list (Bills + Claims not yet in a Bill).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const listReq = useRef(0);
 
-  // Bill rows in the unified table show which items/claims were added inside
-  // them — the list endpoint only returns item_count, so pull each bill's own
-  // items in parallel (same endpoint the detail modal already uses) and cache
-  // them by bill id.
-  const loadBillItems = async (billsList: ConveyanceBill[]) => {
-    try {
-      const results = await Promise.all(
-        billsList.map(async (b) => {
-          const res = await fetch(apiUrl(`/api/conveyance-bills/${b.id}`), { headers: authHeaders });
-          if (!res.ok) return [b.id, []] as const;
-          const detail: ConveyanceBill = await res.json();
-          return [b.id, detail.items || []] as const;
-        })
-      );
-      setBillItems(Object.fromEntries(results));
-    } catch (err) {
-      console.error('Failed to load bill items', err);
-    }
-  };
-
-  const fetchBills = async () => {
+  // One request for the whole page: Bills (with the particulars of their items) and
+  // Claims, newest first. From/To filter both on the server.
+  const fetchAll = async () => {
+    const req = ++listReq.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (userFilter) params.set('user_id', userFilter);
       if (fromFilter) params.set('from', fromFilter);
       if (toFilter) params.set('to', toFilter);
-      const res = await fetch(apiUrl(`/api/conveyance-bills?${params.toString()}`), { headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/conveyance-bills/combined/list?${params.toString()}`), { headers: authHeaders });
       if (res.ok) {
-        const data: ConveyanceBill[] = await res.json();
-        setBills(data);
-        loadBillItems(data);
+        const data: { total: number; bills: ConveyanceBill[]; claims: BillClaim[] } = await res.json();
+        if (req !== listReq.current) return; // a newer request is on its way
+        setBills(data.bills);
+        setBillClaims(data.claims);
+        setBillItems(Object.fromEntries(data.bills.map((b) => [b.id, (b.items || []) as ConveyanceBillItem[]])));
+        setTotal(Number(data.total) || 0);
       }
     } catch (err) {
       console.error('Failed to load conveyance bills', err);
     } finally {
-      setLoading(false);
+      if (req === listReq.current) setLoading(false);
     }
-  };
-
-  // User Claims and Bills are shown together in ONE table (one row each) —
-  // fetch both. The backend doesn't support a date-range filter on
-  // /api/user-claims, so From/To are applied client-side on claim_date.
-  const fetchUserClaims = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (userFilter) params.set('user_id', userFilter);
-      const res = await fetch(apiUrl(`/api/user-claims?${params.toString()}`), { headers: authHeaders });
-      if (res.ok) {
-        const data: UserClaim[] = await res.json();
-        const filtered = data.filter((c) => {
-          const d = String(c.claim_date).slice(0, 10);
-          if (fromFilter && d < fromFilter) return false;
-          if (toFilter && d > toFilter) return false;
-          return true;
-        });
-        setUserClaims(filtered);
-      }
-    } catch (err) {
-      console.error('Failed to load user claims', err);
-    }
-  };
-
-  const fetchAll = async () => {
-    await Promise.all([fetchBills(), fetchUserClaims()]);
   };
 
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize]);
+
+  // Applying a filter always starts again from page 1.
+  const applyFilters = () => {
+    if (page !== 1) setPage(1);
+    else fetchAll();
+  };
 
   const hasFilters = userFilter || fromFilter || toFilter;
 
   const handleDeleteBill = async (id: number) => {
-    if (!confirm('Delete this bill and all its items? This cannot be undone. (Any Movement Claims used in it become billable again.)')) return;
+    if (!(await confirmDialog('Delete this bill and all its items? This cannot be undone. (Any check in/out records used in it become billable again.)'))) return;
     setDeletingBillId(id);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -144,51 +126,52 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     }
   };
 
-  // ---- New Bill ----
-  const [showNewBill, setShowNewBill] = useState(false);
-  const [newBillUserId, setNewBillUserId] = useState('');
-  const [newBillDate, setNewBillDate] = useState(todayDateOnlyString());
-  const [newBillRemarks, setNewBillRemarks] = useState('');
-  const [creatingBill, setCreatingBill] = useState(false);
-  const [createBillError, setCreateBillError] = useState('');
+  // ---- Claim on Behalf ----
+  // Bills aren't made by hand any more: a claim filed here for an employee
+  // goes through that employee's approval chain, and its bill is made when it
+  // is approved. Needs Conveyance -> "Claim on Behalf" (explicit-only layer);
+  // never for oneself.
+  const [canClaimOnBehalf, setCanClaimOnBehalf] = useState(false);
+  const [showBehalfPicker, setShowBehalfPicker] = useState(false);
+  const [behalfUserId, setBehalfUserId] = useState('');
+  const [behalfFor, setBehalfFor] = useState<{ id: number; name: string } | null>(null);
+  const [behalfEditClaim, setBehalfEditClaim] = useState<BillClaim | null>(null);
+  const behalfCandidates = activePeople(users.filter((u) => u.id !== currentUserId)).sort((a, b) => a.name.localeCompare(b.name));
 
-  const resetNewBillForm = () => {
-    setShowNewBill(false);
-    setNewBillUserId('');
-    setNewBillDate(todayDateOnlyString());
-    setNewBillRemarks('');
-    setCreateBillError('');
-  };
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl('/api/bill-claims/on-behalf/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setCanClaimOnBehalf(!!d?.on_behalf);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const handleCreateBill = async () => {
-    if (!newBillUserId) {
-      setCreateBillError('Select a User for this bill.');
-      return;
-    }
-    setCreatingBill(true);
-    setCreateBillError('');
-    try {
-      const res = await fetch(apiUrl('/api/conveyance-bills'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ user_id: Number(newBillUserId), bill_date: newBillDate, remarks: newBillRemarks })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create bill');
-      resetNewBillForm();
-      await fetchBills();
-      setViewingBillId(data.id);
-    } catch (err: any) {
-      setCreateBillError(err.message || 'Failed to create bill');
-    } finally {
-      setCreatingBill(false);
-    }
+  const startBehalfClaim = () => {
+    const u = behalfCandidates.find((x) => String(x.id) === behalfUserId);
+    if (!u) return;
+    setShowBehalfPicker(false);
+    setBehalfUserId('');
+    setBehalfFor({ id: u.id, name: u.name });
   };
 
   // ---- Bill detail (view/edit items) ----
   const [viewingBillId, setViewingBillId] = useState<number | null>(null);
   const [billDetail, setBillDetail] = useState<ConveyanceBill | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Why this bill can't be changed here, if it can't (the server refuses too).
+  const billLock = !billDetail
+    ? null
+    : Number(billDetail.user_id) === Number(currentUserId)
+      ? "This bill is in your own name, so you can't change it."
+      : billDetail.is_disbursed
+        ? 'This bill has been disbursed and is locked. Undo the disbursement to change it.'
+        : null;
 
   const fetchBillDetail = async (id: number) => {
     setLoadingDetail(true);
@@ -212,7 +195,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     if (viewingBillId === null) {
       setBillDetail(null);
       setShowClaimPicker(false);
-      setShowManualForm(false);
       setEditingItemId(null);
       return;
     }
@@ -226,10 +208,10 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   };
 
   // ---- User Claim detail (unified table row click) ----
-  const [viewingUserClaimId, setViewingUserClaimId] = useState<number | null>(null);
-  const viewingUserClaim = userClaims.find((c) => c.id === viewingUserClaimId) || null;
+  const [viewingBillClaimId, setViewingBillClaimId] = useState<number | null>(null);
+  const viewingBillClaim = billClaims.find((c) => c.id === viewingBillClaimId) || null;
 
-  // ---- Add from Movement Claim ----
+  // ---- Add from Check In/Out ----
   const [showClaimPicker, setShowClaimPicker] = useState(false);
   const [availableClaims, setAvailableClaims] = useState<ClaimRecord[]>([]);
   const [loadingClaims, setLoadingClaims] = useState(false);
@@ -240,7 +222,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const openClaimPicker = async () => {
     if (!billDetail) return;
     setShowClaimPicker(true);
-    setShowManualForm(false);
     setClaimPickerError('');
     setLoadingClaims(true);
     try {
@@ -279,19 +260,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     }
   };
 
-  // ---- Add Manual Item ----
-  const [showManualForm, setShowManualForm] = useState(false);
-  const [manualDraft, setManualDraft] = useState(blankItemDraft());
-  const [savingManual, setSavingManual] = useState(false);
-  const [manualError, setManualError] = useState('');
-
-  const openManualForm = () => {
-    setShowManualForm(true);
-    setShowClaimPicker(false);
-    setManualDraft(blankItemDraft());
-    setManualError('');
-  };
-
   const computedAmount = (d: ReturnType<typeof blankItemDraft>): string => {
     if (d.amount) return d.amount;
     const dist = Number(d.distance_km);
@@ -300,37 +268,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       return String(Math.round(dist * rate * 100) / 100);
     }
     return '';
-  };
-
-  const handleAddManual = async () => {
-    if (!billDetail) return;
-    if (!manualDraft.entry_date || !manualDraft.particulars.trim()) {
-      setManualError('Date and Particulars are required.');
-      return;
-    }
-    const amt = computedAmount(manualDraft);
-    if (!amt || !(Number(amt) > 0)) {
-      setManualError('Enter an Amount (or both Distance and Rate per KM).');
-      return;
-    }
-    setSavingManual(true);
-    setManualError('');
-    try {
-      const res = await fetch(apiUrl(`/api/conveyance-bills/${billDetail.id}/items`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ source: 'manual', ...manualDraft, amount: amt })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add item');
-      setShowManualForm(false);
-      setManualDraft(blankItemDraft());
-      await fetchBillDetail(billDetail.id);
-    } catch (err: any) {
-      setManualError(err.message || 'Failed to add item');
-    } finally {
-      setSavingManual(false);
-    }
   };
 
   // ---- Edit / Delete an existing item ----
@@ -383,7 +320,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
   const handleDeleteItem = async (itemId: number) => {
     if (!billDetail) return;
-    if (!confirm('Remove this item from the bill?')) return;
+    if (!(await confirmDialog('Remove this item from the bill?'))) return;
     setDeletingItemId(itemId);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${billDetail.id}/items/${itemId}`), { method: 'DELETE', headers: authHeaders });
@@ -396,13 +333,14 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   };
 
   // ---- PDF export ----
-  const handleExportPdf = async (bill: ConveyanceBill) => {
+  const handleExportPdf = async (bill: ConveyanceBill, mode: 'save' | 'email' = 'save') => {
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const items = bill.items || [];
 
     const letterheadOptions = {
-      reportTitle: 'Conveyance Bill Claim',
+      reportTitle: 'Bill Claim',
+      filtersLabel: 'Bill Details:',
       filters: [
         ['User', bill.user_name || '—'],
         ['Bill Date', formatDate(bill.bill_date) || '—']
@@ -411,6 +349,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 8, right: 8 },
       head: [['SL', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Rate/KM', 'Amount', 'Remarks']],
@@ -425,7 +364,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         it.amount.toFixed(2),
         it.remarks || ''
       ]),
-      styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+      styles: { ...STD_STYLES, fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
       columnStyles: {
         0: { cellWidth: 8 },
         1: { cellWidth: 18 },
@@ -437,8 +376,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         7: { cellWidth: 18 },
         8: { cellWidth: 24 }
       },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      headStyles: { ...STD_HEAD, fontSize: 7 },
       didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
     });
 
@@ -452,18 +390,33 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     // Signature lines — a Conveyance Bill is a physical claim document, so leave
     // room for the Claimant/Approver to sign the printed copy.
     const pageWidth = doc.internal.pageSize.getWidth();
-    const sigY = finalY + 30;
+    // Each approving Layer's signature (Bill Claim Policy -> "Put each approver's
+    // signature on the Bill and Voucher"); with none, the plain "Approved By" line.
+    const approvers = await loadBillApprovers(token, bill.id);
+    let sigY = finalY + 30;
+    if (approvers.length) {
+      const below = drawApproverBlock(doc, approvers, finalY + 16, 14, pageWidth - 14, { perRow: 3, title: 'Approved By' });
+      sigY = below + 14;
+      if (sigY > doc.internal.pageSize.getHeight() - 20) {
+        doc.addPage();
+        sigY = 30;
+      }
+    }
     doc.setDrawColor(148, 163, 184);
     doc.setLineWidth(0.2);
     doc.line(14, sigY, 74, sigY);
-    doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
+    if (!approvers.length) doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.text('Claimant\'s Signature', 14, sigY + 4);
-    doc.text('Approved By', pageWidth - 74, sigY + 4);
+    if (!approvers.length) doc.text('Approved By', pageWidth - 74, sigY + 4);
 
     finalizePdfPageNumbers(doc);
     const filename = `Conveyance_Bill_${bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
@@ -495,7 +448,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
   type CombinedRow =
     | { kind: 'bill'; key: string; date: string; user_name?: string | null; amount: number; bill: ConveyanceBill }
-    | { kind: 'user_claim'; key: string; date: string; user_name?: string | null; amount: number; claim: UserClaim };
+    | { kind: 'bill_claim'; key: string; date: string; user_name?: string | null; amount: number; claim: BillClaim };
 
   const combinedRows: CombinedRow[] = [
     ...bills.map((b): CombinedRow => ({
@@ -509,10 +462,10 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     // A User Claim that's already been attached into a Bill (bill_id set)
     // is already visible inside that Bill's own row (its items list) —
     // showing it again here would just be the same claim twice.
-    ...userClaims
+    ...billClaims
       .filter((c) => !c.bill_id)
       .map((c): CombinedRow => ({
-        kind: 'user_claim',
+        kind: 'bill_claim',
         key: `claim-${c.id}`,
         date: c.claim_date,
         user_name: c.user_name,
@@ -528,24 +481,26 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-blue-600" /> Conveyance Bill Claim
+                <Wallet className="w-4 h-4 text-blue-600" /> Bill Claim
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 User Claims and Bills together, one row each — click a row to view its details.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowNewBill(true)}
-              className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" /> New Bill
-            </button>
+            {canClaimOnBehalf && (
+              <button
+                type="button"
+                onClick={() => setShowBehalfPicker(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Claim on Behalf
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
             <div className="min-w-0">
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-              <select
+              <SearchSelect
                 value={userFilter}
                 onChange={(e) => setUserFilter(e.target.value)}
                 className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -554,7 +509,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 {plainUsers.map((u) => (
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
             <div className="min-w-0">
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">From</label>
@@ -576,7 +531,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
             </div>
             <button
               type="button"
-              onClick={fetchAll}
+              onClick={applyFilters}
               className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
             >
               <Filter className="w-3.5 h-3.5" /> Apply
@@ -608,7 +563,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 <button
                   key={row.key}
                   type="button"
-                  onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingUserClaimId(row.claim.id))}
+                  onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingBillClaimId(row.claim.id))}
                   className="w-full text-left p-4 flex flex-col gap-2.5 hover:bg-slate-50/80 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -630,7 +585,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-500">
                     <span>{formatDate(row.date)}</span>
-                    {row.kind !== 'bill' && <UserClaimStatusBadge status={row.claim.status} />}
+                    {row.kind !== 'bill' && <BillClaimStatusBadge status={row.claim.status} />}
                   </div>
                   {row.kind === 'bill' && (
                     <div className="text-xs">{renderBillItemsSummary(row.bill.id, row.bill.item_count)}</div>
@@ -657,7 +612,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   {combinedRows.map((row) => (
                     <tr
                       key={row.key}
-                      onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingUserClaimId(row.claim.id))}
+                      onClick={() => (row.kind === 'bill' ? setViewingBillId(row.bill.id) : setViewingBillClaimId(row.claim.id))}
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-3 whitespace-nowrap text-xs">
@@ -680,7 +635,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                         {row.kind === 'bill' ? (
                           renderBillItemsSummary(row.bill.id, row.bill.item_count)
                         ) : (
-                          <UserClaimStatusBadge status={row.claim.status} />
+                          <BillClaimStatusBadge status={row.claim.status} />
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-900 font-semibold text-xs">{row.amount.toFixed(2)}</td>
@@ -695,6 +650,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
+                            {Number(row.bill.user_id) !== Number(currentUserId) && !row.bill.is_disbursed && (
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleDeleteBill(row.bill.id); }}
@@ -704,6 +660,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                             >
                               {deletingBillId === row.bill.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />}
                             </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -712,73 +669,99 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 </tbody>
               </table>
             </div>
+            {total > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 text-xs text-slate-600">
+                <span>
+                  {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                    aria-label="Rows per page"
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>{n} / page</option>
+                    ))}
+                  </select>
+                  <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40">
+                    Prev
+                  </button>
+                  <span>Page {page} / {Math.max(1, Math.ceil(total / pageSize))}</span>
+                  <button
+                    type="button"
+                    disabled={page >= Math.ceil(total / pageSize)}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
 
-      {/* New Bill modal */}
-      {showNewBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between gap-4 p-5 border-b border-slate-200">
-              <h3 className="text-base font-bold text-slate-900">New Conveyance Bill</h3>
-              <button onClick={resetNewBillForm} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-3">
-              {createBillError && <p className="text-xs text-rose-600">{createBillError}</p>}
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">User</label>
-                <select
-                  value={newBillUserId}
-                  onChange={(e) => setNewBillUserId(e.target.value)}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+      {/* Claim on Behalf: pick the employee, then the same claim form they use */}
+      {showBehalfPicker && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowBehalfPicker(false)}>
+          <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Claim on Behalf">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Claim on Behalf</h3>
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                    File a Bill Claim for an employee. It goes through their approval chain; the bill is made when it is approved.
+                  </p>
+                </div>
+                <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <label className="block mt-4 text-[11px] font-semibold text-slate-500 mb-1">Employee</label>
+              <SearchSelect
+                value={behalfUserId}
+                onChange={(e) => setBehalfUserId(e.target.value)}
+                className="liquid-glass-inset w-full px-3 py-2.5 rounded-2xl text-sm text-slate-800 bg-transparent focus:outline-none"
+              >
+                <option value="">Select employee</option>
+                {behalfCandidates.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </SearchSelect>
+              <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Bill Claim.</p>
+              <div className="mt-5 flex gap-2.5">
+                <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!behalfUserId}
+                  onClick={startBehalfClaim}
+                  className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-50"
                 >
-                  <option value="">Select User</option>
-                  {plainUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
+                  Continue
+                </button>
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Bill Date</label>
-                <input
-                  type="date"
-                  value={newBillDate}
-                  onChange={(e) => setNewBillDate(e.target.value)}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Remarks (optional)</label>
-                <textarea
-                  value={newBillRemarks}
-                  onChange={(e) => setNewBillRemarks(e.target.value)}
-                  rows={2}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 p-5 pt-0">
-              <button
-                type="button"
-                disabled={creatingBill}
-                onClick={handleCreateBill}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-colors"
-              >
-                {creatingBill ? 'Creating…' : 'Create & Add Items'}
-              </button>
-              <button
-                type="button"
-                onClick={resetNewBillForm}
-                className="flex-1 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-medium transition-colors"
-              >
-                Cancel
-              </button>
             </div>
           </div>
         </div>
+      )}
+      {behalfFor && (
+        <NewBillClaimModal
+          token={token}
+          onBehalfOf={behalfFor}
+          onClose={() => setBehalfFor(null)}
+          onSubmitted={() => {
+            setBehalfFor(null);
+            void fetchAll();
+          }}
+        />
       )}
 
       {/* Bill detail modal */}
@@ -801,6 +784,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
                 )}
+                {canEmailReports && billDetail && (billDetail.items?.length || 0) > 0 && (
+                  <EmailReportButton
+                    onClick={() => handleExportPdf(billDetail, 'email')}
+                    className="flex items-center gap-1.5 py-2 px-3 bg-white border border-emerald-600 hover:bg-emerald-50 text-emerald-700 font-semibold rounded-xl text-xs transition-all shadow-sm whitespace-nowrap"
+                  />
+                )}
                 <button onClick={closeDetail} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="Close">
                   <X className="w-5 h-5" />
                 </button>
@@ -812,28 +801,26 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 <p className="text-sm text-slate-400 text-center py-10">Loading...</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={openClaimPicker}
-                      className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
-                    >
-                      <Route className="w-3.5 h-3.5" /> Add from Movement Claim
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openManualForm}
-                      className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium transition-colors"
-                    >
-                      <PenLine className="w-3.5 h-3.5" /> Add Manual Item
-                    </button>
-                  </div>
+                  {billLock ? (
+                    <p className="text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">{billLock}</p>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={openClaimPicker}
+                        className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
+                      >
+                        <Route className="w-3.5 h-3.5" /> Add from Check In/Out
+                      </button>
+                      <span className="text-[11px] text-slate-500">Only approved check-in/outs. Amounts can be lowered here, not raised.</span>
+                    </div>
+                  )}
 
-                  {/* Movement Claim picker */}
+                  {/* Check In/Out picker */}
                   {showClaimPicker && (
                     <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/40 space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-700">Completed Movement Claims for {billDetail.user_name} (not yet billed)</h4>
+                        <h4 className="text-xs font-bold text-slate-700">Completed check in/out records for {billDetail.user_name} (not yet billed)</h4>
                         <button onClick={() => setShowClaimPicker(false)} className="text-slate-400 hover:text-slate-700">
                           <X className="w-4 h-4" />
                         </button>
@@ -842,7 +829,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                       {loadingClaims ? (
                         <p className="text-xs text-slate-400 flex items-center gap-1.5"><Spinner size={14} /> Loading...</p>
                       ) : availableClaims.length === 0 ? (
-                        <p className="text-xs text-slate-400">No unbilled completed Movement Claims for this User.</p>
+                        <p className="text-xs text-slate-400">No unbilled completed check in/out records for this User.</p>
                       ) : (
                         <ul className="divide-y divide-blue-100 bg-white rounded-lg border border-blue-100 overflow-hidden">
                           {availableClaims.map((c) => (
@@ -876,37 +863,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                           ))}
                         </ul>
                       )}
-                    </div>
-                  )}
-
-                  {/* Manual item form */}
-                  {showManualForm && (
-                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-700">Add Manual Item</h4>
-                        <button onClick={() => setShowManualForm(false)} className="text-slate-400 hover:text-slate-700">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                      {manualError && <p className="text-xs text-rose-600">{manualError}</p>}
-                      <ItemFields draft={manualDraft} setDraft={setManualDraft} />
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={savingManual}
-                          onClick={handleAddManual}
-                          className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-50"
-                        >
-                          {savingManual ? 'Adding…' : 'Add Item'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowManualForm(false)}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs"
-                        >
-                          Cancel
-                        </button>
-                      </div>
                     </div>
                   )}
 
@@ -951,12 +907,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                   className={`shrink-0 px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                     it.source === 'movement_claim'
                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                      : it.source === 'user_claim'
+                                      : it.source === 'bill_claim'
                                       ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                       : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                                 >
-                                  {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                  {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'bill_claim' ? 'User Claim' : 'Manual'}
                                 </span>
                               </div>
 
@@ -971,19 +927,19 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                               </div>
 
                               <div className="flex items-center gap-2 pt-1">
-                                {it.source === 'user_claim' && it.user_claim_id && (
+                                {it.source === 'bill_claim' && it.bill_claim_id && (
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setViewingBillId(null);
-                                      setViewingUserClaimId(it.user_claim_id!);
+                                      setViewingBillClaimId(it.bill_claim_id!);
                                     }}
                                     className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-medium transition-colors"
                                   >
                                     <Clock className="w-3.5 h-3.5" /> History
                                   </button>
                                 )}
-                                <button
+                                {!billLock && <><button
                                   type="button"
                                   onClick={() => startEditItem(it)}
                                   className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-medium transition-colors"
@@ -997,7 +953,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                   className="flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                                 >
                                   {deletingItemId === it.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />} Remove
-                                </button>
+                                </button></>}
                               </div>
                             </div>
                           )
@@ -1057,12 +1013,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                     className={`px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                       it.source === 'movement_claim'
                                         ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                        : it.source === 'user_claim'
+                                        : it.source === 'bill_claim'
                                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                     }`}
                                   >
-                                    {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
+                                    {it.source === 'movement_claim' ? 'Check In/Out' : it.source === 'bill_claim' ? 'User Claim' : 'Manual'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-700 max-w-[200px]">
@@ -1076,12 +1032,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                 <td className="px-3 py-2.5 whitespace-nowrap font-semibold text-slate-900">{it.amount.toFixed(2)}</td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">
                                   <div className="flex items-center gap-1">
-                                    {it.source === 'user_claim' && it.user_claim_id && (
+                                    {it.source === 'bill_claim' && it.bill_claim_id && (
                                       <button
                                         type="button"
                                         onClick={() => {
                                           setViewingBillId(null);
-                                          setViewingUserClaimId(it.user_claim_id!);
+                                          setViewingBillClaimId(it.bill_claim_id!);
                                         }}
                                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                         title="View this claim's approval History"
@@ -1089,7 +1045,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                         <Clock className="w-3.5 h-3.5" />
                                       </button>
                                     )}
-                                    <button
+                                    {!billLock && <><button
                                       type="button"
                                       onClick={() => startEditItem(it)}
                                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -1105,7 +1061,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                       title="Remove item"
                                     >
                                       {deletingItemId === it.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />}
-                                    </button>
+                                    </button></>}
                                   </div>
                                 </td>
                               </tr>
@@ -1131,12 +1087,33 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       )}
 
       {/* User Claim detail modal — opened by clicking a "User Claim" row */}
-      {viewingUserClaim && (
-        <UserClaimDetailModal
-          claim={viewingUserClaim}
+      {viewingBillClaim && (
+        <AdminBillClaimDetailModal
+          claim={viewingBillClaim}
           token={token}
-          onClose={() => setViewingUserClaimId(null)}
+          onClose={() => setViewingBillClaimId(null)}
           onChanged={fetchAll}
+          onFilerEdit={
+            viewingBillClaim.filed_by === currentUserId && viewingBillClaim.editable && canClaimOnBehalf
+              ? () => {
+                  setBehalfEditClaim(viewingBillClaim);
+                  setViewingBillClaimId(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {/* The Admin who filed a claim on behalf can edit it while it's open. */}
+      {behalfEditClaim && (
+        <NewBillClaimModal
+          token={token}
+          onBehalfOf={{ id: behalfEditClaim.user_id, name: behalfEditClaim.user_name || '' }}
+          editClaim={behalfEditClaim}
+          onClose={() => setBehalfEditClaim(null)}
+          onSubmitted={() => {
+            setBehalfEditClaim(null);
+            void fetchAll();
+          }}
         />
       )}
     </div>
@@ -1202,18 +1179,21 @@ const ItemFields: React.FC<{
 };
 // Full detail view for ONE User Claim — opened by clicking a "User Claim" row
 // in the unified table above. Originally ported from a standalone
-// always-expanded list (UserClaimsReviewPanel.tsx) so nothing was lost
+// always-expanded list (BillClaimsReviewPanel.tsx) so nothing was lost
 // (edit, delete, approve/reject for legacy pending claims with no Approval
 // Request, referenced check-in/out map, attachment link) — just shown one
 // claim at a time instead of a long list. That standalone file was never
 // actually wired into App.tsx/AdminPanel.tsx (dead code) and has since been
 // deleted; this modal is the real, live "User Claim detail + History" view.
-const UserClaimDetailModal: React.FC<{
-  claim: UserClaim;
+const AdminBillClaimDetailModal: React.FC<{
+  claim: BillClaim;
   token: string;
   onClose: () => void;
   onChanged: () => void;
-}> = ({ claim, token, onClose, onChanged }) => {
+  // Set when this account filed the claim on the employee's behalf and it can
+  // still be edited — opens the claim form for it.
+  onFilerEdit?: () => void;
+}> = ({ claim, token, onClose, onChanged, onFilerEdit }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
 
   const [editing, setEditing] = useState(false);
@@ -1230,11 +1210,13 @@ const UserClaimDetailModal: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState('');
-  const [viewingRef, setViewingRef] = useState<UserClaimReference | null>(null);
+  const [viewingRef, setViewingRef] = useState<BillClaimReference | null>(null);
 
   const hasRefs = !!claim.claim_refs && claim.claim_refs.length > 0;
+  const hasItems = !!claim.items && claim.items.length > 0;
+  const categoryNames = useBillClaimCategoryNames(token);
 
-  const refToClaimRecord = (ref: UserClaimReference): ClaimRecord => ({
+  const refToClaimRecord = (ref: BillClaimReference): ClaimRecord => ({
     id: ref.claim_id,
     user_id: claim.user_id,
     user_name: claim.user_name,
@@ -1276,7 +1258,7 @@ const UserClaimDetailModal: React.FC<{
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
@@ -1308,7 +1290,7 @@ const UserClaimDetailModal: React.FC<{
     setActing(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}/decision`), {
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}/decision`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ action, remarks: remarks.trim() || undefined })
@@ -1325,11 +1307,11 @@ const UserClaimDetailModal: React.FC<{
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`))) return;
     setDeleting(true);
     setError('');
     try {
-      const res = await fetch(apiUrl(`/api/user-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/bill-claims/${claim.id}`), { method: 'DELETE', headers: authHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete claim');
       onChanged();
@@ -1349,7 +1331,7 @@ const UserClaimDetailModal: React.FC<{
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap">
               {claim.category} Claim
               {claim.has_file && <Paperclip className="w-3.5 h-3.5 text-slate-400" />}
-              <UserClaimStatusBadge status={claim.status} />
+              <BillClaimStatusBadge status={claim.status} />
             </h3>
             <p className="text-xs text-slate-500 mt-0.5 truncate">{claim.user_name || '—'}</p>
           </div>
@@ -1360,6 +1342,23 @@ const UserClaimDetailModal: React.FC<{
 
         <div className="p-5 space-y-3">
           {error && <p className="text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700">{error}</p>}
+          {claim.filed_by_name && (
+            <p className="text-[11px] text-slate-500">Filed on behalf by {claim.filed_by_name}</p>
+          )}
+          {claim.edit_mode === 'returned' && (
+            <p className="text-xs px-3 py-2 rounded-lg bg-amber-50 text-amber-800">
+              Returned to the employee for correction{claim.return_reason ? `: ${claim.return_reason}` : '.'}
+            </p>
+          )}
+          {onFilerEdit && (
+            <button
+              type="button"
+              onClick={onFilerEdit}
+              className="w-full flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-semibold"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit this claim (you filed it)
+            </button>
+          )}
 
           {editing ? (
             <div className="space-y-2.5 bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -1395,10 +1394,12 @@ const UserClaimDetailModal: React.FC<{
                   <label className="block text-[10px] font-semibold text-slate-500 mb-1">Category</label>
                   <select
                     value={editDraft.category}
-                    onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value as UserClaimCategory }))}
-                    className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    disabled={hasItems}
+                    title={hasItems ? 'Set per bill — not editable here' : undefined}
+                    onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value as BillClaimCategoryName }))}
+                    className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                   >
-                    {USER_CLAIM_CATEGORIES.map((cat) => (
+                    {[...new Set([...categoryNames, editDraft.category])].map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -1406,13 +1407,13 @@ const UserClaimDetailModal: React.FC<{
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-                  Amount {hasRefs && '(derived from referenced check-in/outs — not editable)'}
+                  Amount {hasItems ? '(total of the bills — not editable)' : hasRefs && '(derived from referenced check-in/outs — not editable)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={editDraft.amount}
-                  disabled={hasRefs}
+                  disabled={hasRefs || hasItems}
                   onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))}
                   className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                 />
@@ -1461,6 +1462,8 @@ const UserClaimDetailModal: React.FC<{
 
               {claim.description && <p className="text-xs text-slate-600">{claim.description}</p>}
 
+              <ClaimBillLines items={claim.items} />
+
               {hasRefs && (
                 <div className="space-y-1">
                   {claim.claim_refs!.map((r) => (
@@ -1485,7 +1488,7 @@ const UserClaimDetailModal: React.FC<{
 
               {claim.has_file && (
                 <a
-                  href={apiUrl(`/api/user-claims/${claim.id}/file`)}
+                  href={apiUrl(`/api/bill-claims/${claim.id}/file`)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold hover:underline"
@@ -1532,13 +1535,15 @@ const UserClaimDetailModal: React.FC<{
                       .sort((a, b) => a.step_order - b.step_order)
                       .map((a, i) => (
                         <div key={i} className="flex items-start gap-2 text-xs">
-                          {a.action === 'approved' ? (
+                          {a.action === 'approved' || (a as any).action === 'adhoc_added' ? (
                             <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
                           ) : (
                             <X className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
                           )}
-                          <div className={a.action === 'approved' ? 'text-emerald-700' : 'text-rose-700'}>
-                            {a.approver_name} {a.action === 'approved' ? 'approved' : 'rejected'} (Layer {a.step_order})
+                          <div className={(a as any).action === 'adhoc_added' ? 'text-violet-700' : a.action === 'approved' ? 'text-emerald-700' : 'text-rose-700'}>
+                            {(a as any).action === 'adhoc_added'
+                              ? `${a.approver_name} asked ${(a as any).adhoc_to_name || 'someone'} to approve first (Layer ${a.step_order})`
+                              : `${a.approver_name} ${a.action === 'approved' ? 'approved' : a.action === 'rejected' ? 'rejected' : a.action}${(a as any).adhoc ? ' as an added approver' : ''} (Layer ${a.step_order})`}
                             {a.acted_at && <span className="text-slate-400"> &middot; {formatDate(a.acted_at)}</span>}
                             {a.approved_amount != null && (
                               <div className="text-slate-500">
@@ -1571,8 +1576,10 @@ const UserClaimDetailModal: React.FC<{
                   {claim.approval ? (
                     <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
                       <Clock className="w-3.5 h-3.5 shrink-0" />
-                      Waiting on Approval Workflow — step {claim.approval.current_step} of {claim.approval.total_steps}. Act on it
-                      from the <span className="font-semibold">Approvals</span> tab.
+                      <span>
+                        Waiting on {claim.approval.current_approver_name || 'the Approval Workflow'} — step {claim.approval.current_step} of{' '}
+                        {claim.approval.total_steps}. The approver acts on it from their own Approve Application page.
+                      </span>
                     </div>
                   ) : (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">

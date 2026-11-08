@@ -1,8 +1,18 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
-import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban } from 'lucide-react';
+import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck, FileDown } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
+import { ExitPendingList } from './ExitPendingList';
+import { ClearanceDepartments } from './ClearanceDepartments';
+import { saveClearanceCertificatePdf, saveSettlementSheetPdf, clearanceCertificatePdfBytes, settlementSheetPdfBytes, type ExitDocuments } from '../lib/exitDocuments';
+import { SendForSigningButton, useSignSources } from './SendForSigningButton';
+import { LoadingBlock } from './LoadingBlock';
+import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
+import { SearchSelect } from './Combobox';
 interface ExitOffboardingPanelProps {
   token: string;
 }
@@ -13,6 +23,8 @@ interface ClearanceItem {
   item_label: string;
   is_cleared: boolean;
   remarks: string | null;
+  approver_user_id: number | null;
+  approver_name: string | null;
 }
 
 interface Settlement {
@@ -75,7 +87,65 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   const [creating, setCreating] = useState(false);
 
   const [settlementDrafts, setSettlementDrafts] = useState<Record<number, Record<string, string>>>({});
+  // Dues from other modules (layer "exit_dues"): whether to show the card,
+  // a counter to reload it, and the popup when Paid / Settled is refused.
+  const [canSeeDues, setCanSeeDues] = useState(false);
+  // Clearance Certificate / Settlement Sheet PDFs (layer "exit_pdf").
+  const [canPdf, setCanPdf] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const canEmailReports = useCanEmailReports();
+  // E-Signature: send either PDF for signing (Document Vault access only).
+  const signing = useSignSources(token, ['exit_clearance', 'exit_settlement']);
+  const exitPdfBytes = async (exitId: number, which: 'clearance' | 'settlement') => {
+    const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/documents`), { headers: authHeaders });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not load the document');
+    return which === 'clearance' ? clearanceCertificatePdfBytes(data as ExitDocuments) : settlementSheetPdfBytes(data as ExitDocuments);
+  };
+  const downloadPdf = async (exitId: number, which: 'clearance' | 'settlement', mode: 'save' | 'email' = 'save') => {
+    setError('');
+    setPdfBusy(`${exitId}:${which}`);
+    try {
+      const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/documents`), { headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load the document');
+      await (which === 'clearance' ? saveClearanceCertificatePdf(data as ExitDocuments, mode) : saveSettlementSheetPdf(data as ExitDocuments, mode));
+    } catch (err: any) {
+      setError(err.message || 'Could not make the PDF');
+    } finally {
+      setPdfBusy(null);
+    }
+  };
+  const [duesRefresh, setDuesRefresh] = useState(0);
+  // Reloads the Pending list after anything here changes.
+  const [pendingRefresh, setPendingRefresh] = useState(0);
+  const openFromPending = (exitId: number) => {
+    setExpandedId(exitId);
+    openSettlement(exitId);
+    setTimeout(() => document.getElementById(`exit-request-${exitId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  const [duesBlocked, setDuesBlocked] = useState<{ message: string; items: ExitDue[] } | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/exit-dues/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a) => {
+        setCanSeeDues(!!a?.exit_dues);
+        setCanPdf(!!a?.exit_pdf);
+        setCanSetupClearance(!!a?.exit_clearance_setup);
+      })
+      .catch(() => {
+        setCanSeeDues(false);
+        setCanPdf(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [savingSettlementId, setSavingSettlementId] = useState<number | null>(null);
+
+  // Clearance Departments (ClearanceDepartments.tsx): the departments new
+  // exits are cleared by and their approvers; changing the list itself needs
+  // the exit_clearance_setup layer.
+  const [showApprovers, setShowApprovers] = useState(false);
+  const [canSetupClearance, setCanSetupClearance] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -126,6 +196,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create exit request');
       setRequests((prev) => [data, ...prev]);
+      setPendingRefresh((n) => n + 1);
       setShowNew(false);
       setNewUserId('');
       setNewReason('');
@@ -147,8 +218,13 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         body: JSON.stringify({ status })
       });
       const data = await res.json();
+      if (res.status === 409 && data.blocking) {
+        setDuesBlocked({ message: data.error, items: data.blocking });
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to update status');
       setRequests((prev) => prev.map((r) => (r.id === id ? data : r)));
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update status');
     }
@@ -169,13 +245,14 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
           r.id === exitId ? { ...r, clearance_items: r.clearance_items.map((ci) => (ci.id === item.id ? data : ci)) } : r
         )
       );
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update clearance item');
     }
   };
 
-  const openSettlement = async (exitId: number) => {
-    if (settlementDrafts[exitId]) return;
+  const openSettlement = async (exitId: number, force = false) => {
+    if (settlementDrafts[exitId] && !force) return;
     try {
       const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/settlement`), { headers: authHeaders });
       const data = await res.json();
@@ -201,6 +278,15 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   const saveSettlement = async (exitId: number, markStatus?: 'approved' | 'paid') => {
     const draft = settlementDrafts[exitId];
     if (!draft) return;
+    if (
+      markStatus === 'paid' &&
+      !(await confirmDialog('Mark the Full & Final paid and settle this exit? The settlement is then final and the login is blocked.', {
+        title: 'Mark Paid & Settle',
+        confirmLabel: 'Mark Paid & Settle',
+        tone: 'default'
+      }))
+    )
+      return;
     setSavingSettlementId(exitId);
     setError('');
     try {
@@ -219,13 +305,29 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         })
       });
       const data = await res.json();
+      if (res.status === 409 && data.blocking) {
+        setDuesBlocked({ message: data.error, items: data.blocking });
+        setDuesRefresh((n) => n + 1);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to save settlement');
       setRequests((prev) => prev.map((r) => (r.id === exitId ? { ...r, settlement: data, status: markStatus === 'paid' ? 'settled' : r.status } : r)));
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to save settlement');
     } finally {
       setSavingSettlementId(null);
     }
+  };
+
+  // Why Paid & Settle can't be pressed yet (the server checks the same, plus
+  // the assets / SIMs / loans still open in other modules).
+  const settleHold = (r: ExitRequest): string | null => {
+    if (r.status === 'cancelled') return 'This exit is cancelled.';
+    if (r.status === 'pending') return 'Start Clearance first — the exit hasn’t been accepted yet.';
+    const open = r.clearance_items.filter((c) => !c.is_cleared);
+    if (open.length) return `Clearance not done: ${open.map((c) => c.department).join(', ')}.`;
+    return null;
   };
 
   const netPayablePreview = (exitId: number) => {
@@ -254,32 +356,43 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowNew((v) => !v)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" /> New Exit Request
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowApprovers((v) => !v)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" /> Clearance Departments
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowNew((v) => !v)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> New Exit Request
+          </button>
+        </div>
       </div>
+
+      {showApprovers && <ClearanceDepartments token={token} users={users} canSetup={canSetupClearance} />}
 
       {showNew && (
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/60">
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
-              <select
+              <SearchSelect
                 value={newUserId}
                 onChange={(e) => setNewUserId(e.target.value)}
                 className="w-52 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select…</option>
-                {users.map((u) => (
+                {activePeople(users, newUserId).map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-slate-500 mb-1">Type</label>
@@ -336,6 +449,8 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         </div>
       )}
 
+      <ExitPendingList token={token} refreshKey={pendingRefresh} onOpen={openFromPending} />
+
       {error && (
         <div className="mx-6 mt-4 px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {error}
@@ -343,17 +458,14 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading exit requests…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2.5">
           {requests.map((r) => {
             const expanded = expandedId === r.id;
             const draft = settlementDrafts[r.id];
             return (
-              <div key={r.id} className="rounded-xl border border-slate-200 overflow-hidden">
+              <div key={r.id} id={`exit-request-${r.id}`} className="rounded-xl border border-slate-200 overflow-hidden scroll-mt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -402,6 +514,40 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                           <Ban className="w-3 h-3" /> Cancel
                         </button>
                       )}
+                      {canPdf &&
+                        (['clearance', 'settlement'] as const).map((w) => (
+                          <React.Fragment key={w}>
+                            <button
+                              type="button"
+                              disabled={pdfBusy === `${r.id}:${w}`}
+                              onClick={() => downloadPdf(r.id, w)}
+                              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                            >
+                              <FileDown className="w-3 h-3" /> {w === 'clearance' ? 'Clearance Certificate (PDF)' : 'Settlement Sheet (PDF)'}
+                            </button>
+                            {canEmailReports && (
+                              <EmailReportButton
+                                onClick={() => downloadPdf(r.id, w, 'email')}
+                                disabled={pdfBusy === `${r.id}:${w}`}
+                                title={w === 'clearance' ? 'Email the Clearance Certificate as a PDF' : 'Email the Settlement Sheet as a PDF'}
+                                className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                              />
+                            )}
+                            {signing.enabled && r.status !== 'cancelled' && (
+                              <SendForSigningButton
+                                token={token}
+                                sourceType={w === 'clearance' ? 'exit_clearance' : 'exit_settlement'}
+                                sourceId={r.id}
+                                state={signing.stateOf(w === 'clearance' ? 'exit_clearance' : 'exit_settlement', r.id)}
+                                ownerName={r.user_name}
+                                docType={w === 'clearance' ? 'Clearance Certificate' : 'Full & Final Settlement'}
+                                makePdf={() => exitPdfBytes(r.id, w)}
+                                onChanged={() => void signing.reload()}
+                                onError={setError}
+                              />
+                            )}
+                          </React.Fragment>
+                        ))}
                     </div>
 
                     <div>
@@ -424,11 +570,28 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                               <span className="font-semibold text-slate-700">{item.department}</span>
                               <br />
                               <span className="text-slate-500">{item.item_label}</span>
+                              <br />
+                              <span className="text-slate-400">
+                                {item.approver_name ? `Assigned to ${item.approver_name}` : 'Unassigned — see Clearance Departments above'}
+                              </span>
                             </span>
                           </label>
                         ))}
                       </div>
                     </div>
+
+                    {canSeeDues && (
+                      <ExitDuesCard
+                        token={token}
+                        exitId={r.id}
+                        settlementPaid={r.settlement?.status === 'paid'}
+                        refreshKey={duesRefresh}
+                        onAdded={() => {
+                          openSettlement(r.id, true);
+                          setPendingRefresh((n) => n + 1);
+                        }}
+                      />
+                    )}
 
                     <div>
                       <p className="text-xs font-bold text-slate-700 mb-2">Full &amp; Final Settlement</p>
@@ -468,6 +631,11 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                             />
                           </div>
                           <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                            {settleHold(r) && (
+                              <p className="w-full text-[11px] text-amber-700 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" /> {settleHold(r)}
+                              </p>
+                            )}
                             <p className="text-sm font-bold text-slate-800">
                               Net Payable: <span className="text-emerald-700">{netPayablePreview(r.id).toFixed(2)}</span>
                             </p>
@@ -484,7 +652,8 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                               <button
                                 type="button"
                                 onClick={() => saveSettlement(r.id, 'paid')}
-                                disabled={savingSettlementId === r.id}
+                                disabled={savingSettlementId === r.id || !!settleHold(r)}
+                                title={settleHold(r) || undefined}
                                 className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                               >
                                 <CheckCircle2 className="w-3 h-3" /> Mark Paid &amp; Settle
@@ -502,6 +671,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
           {requests.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No exit requests yet.</p>}
         </div>
       )}
+      {duesBlocked && <DuesBlockedModal message={duesBlocked.message} items={duesBlocked.items} onClose={() => setDuesBlocked(null)} />}
     </div>
   );
 };

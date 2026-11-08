@@ -17,6 +17,9 @@ import { Spinner } from './Spinner';
 
 interface AttendanceMapConfirmProps {
   kind: 'in' | 'out';
+  // Outside every one of the account's own Projects: it goes for approval,
+  // and a reason is required.
+  offsite?: boolean;
   project: Project;
   coords: { latitude: number; longitude: number };
   submitting: boolean;
@@ -135,6 +138,7 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // validated either way), Cancel just closes this with nothing sent.
 export default function AttendanceMapConfirm({
   kind,
+  offsite = false,
   project,
   coords,
   submitting,
@@ -214,7 +218,7 @@ export default function AttendanceMapConfirm({
       .bindPopup('You are here');
 
     if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: PROJECT_ZOOM });
+      map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
     }
 
     setTimeout(() => {
@@ -304,7 +308,7 @@ export default function AttendanceMapConfirm({
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
         if (bounds.length > 1) {
-          mapRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: PROJECT_ZOOM });
+          mapRef.current.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
         } else {
           mapRef.current.panTo([fresh.latitude, fresh.longitude]);
         }
@@ -424,9 +428,19 @@ export default function AttendanceMapConfirm({
             </p>
           )}
 
+          {offsite && (
+            <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                You're outside your project area. You can still give your {kind === 'in' ? 'In' : 'Out'} Time — it goes to your approvers and
+                counts as attendance only once it's approved. Write why below.
+              </span>
+            </div>
+          )}
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-              Remarks <span className="font-normal normal-case text-slate-400">(optional)</span>
+              {offsite ? 'Reason' : 'Remarks'}{' '}
+              <span className="font-normal normal-case text-slate-400">{offsite ? '(required)' : '(optional)'}</span>
             </label>
             <textarea
               value={remarks}
@@ -451,11 +465,11 @@ export default function AttendanceMapConfirm({
           <button
             type="button"
             onClick={() => onConfirm(remarks.trim())}
-            disabled={submitting}
+            disabled={submitting || (offsite && !remarks.trim())}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
           >
             {submitting ? <Spinner size={16} /> : <Check className="w-4 h-4" />}
-            {kind === 'in' ? 'Confirm Check In' : 'Confirm Check Out'}
+            {offsite ? 'Send for approval' : kind === 'in' ? 'Confirm Check In' : 'Confirm Check Out'}
           </button>
         </div>
       </div>

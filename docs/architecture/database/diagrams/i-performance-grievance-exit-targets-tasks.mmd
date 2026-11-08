@@ -1,0 +1,168 @@
+erDiagram
+  case_feedback {
+    int id PK
+    int user_id FK
+    varchar case_type
+    int case_id
+    varchar role
+    text message
+    int group_id
+  }
+  disciplinary_actions {
+    int id PK
+    int user_id FK
+    enum action_type
+    text reason
+    text document_text
+    timestamp issued_at
+    tinyint acknowledged
+  }
+  exit_clearance_approvers {
+    int id PK
+    int approver_user_id FK
+    varchar department
+    varchar item_label
+    int sort_order
+    int company_id
+  }
+  exit_clearance_items {
+    int id PK
+    int exit_id FK
+    int cleared_by FK
+    int approver_user_id FK
+    varchar department
+    varchar item_label
+    tinyint is_cleared
+  }
+  exit_requests {
+    int id PK
+    int user_id FK
+    enum exit_type
+    text reason
+    date notice_date
+    date last_working_day
+    enum status
+  }
+  grievances {
+    int id PK
+    int raised_by FK
+    int against_user_id FK
+    int assigned_to FK
+    varchar category
+    text description
+    tinyint is_anonymous
+  }
+  performance_cycles {
+    int id PK
+    varchar name
+    date period_start
+    date period_end
+    enum status
+    int company_id
+  }
+  performance_goals {
+    int id PK
+    int cycle_id FK
+    int user_id FK
+    varchar title
+    text description
+    decimal weight
+    decimal self_rating
+  }
+  performance_reviews {
+    int id PK
+    int cycle_id FK
+    int user_id FK
+    int reviewer_id FK
+    decimal overall_rating
+    text strengths
+    text improvements
+  }
+  target_task_updates {
+    int id PK
+    int task_id FK
+    int user_id FK
+    int from_progress
+    int to_progress
+    varchar from_status
+    varchar to_status
+  }
+  target_tasks {
+    int id PK
+    int target_id
+    int sort_order
+    varchar title
+    text description
+    date due_date
+    int weight
+  }
+  targets {
+    int id PK
+    int user_id FK
+    int department_id FK
+    int company_id
+    varchar department
+    varchar period_type
+    varchar period
+  }
+  task_assignees {
+    int id PK
+    int task_id FK
+    int user_id FK
+    timestamp assigned_at
+  }
+  task_comments {
+    int id PK
+    int task_id FK
+    int user_id FK
+    text message
+    varchar kind
+  }
+  task_recurrences {
+    int id PK
+    varchar title
+    text description
+    varchar category
+    varchar priority
+    varchar assignee_ids
+    varchar source
+  }
+  tasks {
+    int id PK
+    int recurrence_id FK
+    varchar title
+    text description
+    varchar source
+    varchar category
+    varchar request_type
+  }
+  departments {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  users ||..o{ case_feedback : "user_id"
+  users ||--o{ disciplinary_actions : "user_id"
+  users ||--o{ exit_clearance_approvers : "approver_user_id"
+  users ||--o{ exit_clearance_items : "approver_user_id"
+  users ||--o{ exit_clearance_items : "cleared_by"
+  exit_requests ||--o{ exit_clearance_items : "exit_id"
+  users ||--o{ exit_requests : "user_id"
+  users ||--o{ grievances : "against_user_id"
+  users ||--o{ grievances : "assigned_to"
+  users ||--o{ grievances : "raised_by"
+  performance_cycles ||--o{ performance_goals : "cycle_id"
+  users ||--o{ performance_goals : "user_id"
+  performance_cycles ||--o{ performance_reviews : "cycle_id"
+  users ||--o{ performance_reviews : "reviewer_id"
+  users ||--o{ performance_reviews : "user_id"
+  target_tasks ||--o{ target_task_updates : "task_id"
+  users ||--o{ target_task_updates : "user_id"
+  users ||--o{ targets : "user_id"
+  departments ||..o{ targets : "department_id"
+  tasks ||--o{ task_assignees : "task_id"
+  users ||--o{ task_assignees : "user_id"
+  tasks ||--o{ task_comments : "task_id"
+  users ||--o{ task_comments : "user_id"
+  task_recurrences ||--o{ tasks : "recurrence_id"

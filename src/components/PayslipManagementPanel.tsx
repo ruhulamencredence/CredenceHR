@@ -13,16 +13,15 @@
 //   * Individual Payslip View & Print / Download — View opens the PDF in a
 //     new tab (the browser's own viewer gives Print/Save for free);
 //     Download saves it straight to disk via savePdfCrossPlatform.
-//   * Email Payslips — per-employee and "Email All" buttons. NOTE: this
-//     calls POST /api/payroll/:id/email and POST /api/payroll/email-bulk,
-//     which do not exist yet in PayrollRoutes.ts (no SMTP/mailer is wired
-//     up anywhere in this project) — the buttons are ready, but the server
-//     route + mail transport still need to be added before they can
-//     actually send anything.
+//   * Email Payslips — per-employee and "Email All" buttons: each employee
+//     gets an email with their payslip PDF (the same file as the PDF
+//     button) attached, via POST /api/payroll/:id/email.
+//   * Pick several people (tick boxes, search, Select all shown): the two
+//     bulk buttons then work on just them — "Email Selected (N)" /
+//     "PDF of Selected (N)". Nothing ticked = everyone, as before.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import jsPDF from '../lib/jspdf';
 import {
   ReceiptText,
   FileDown,
@@ -31,116 +30,22 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
-  Layers
+  Layers,
+  Search
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { buildSinglePayslip, drawPayslipPage, loadPayslipLogo, money, monthLabel, type PayrollRecord } from '../lib/payslipPdf';
 import { Spinner } from './Spinner';
-import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import credenceLogo from '../assets/credence-logo.png';
+import { LoadingBlock } from './LoadingBlock';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface PayslipManagementPanelProps {
   token: string;
 }
 
-interface PayrollRecord {
-  id: number;
-  employee_id: number;
-  employee_name: string;
-  employee_code: string | null;
-  designation: string | null;
-  department: string | null;
-  month_year: string;
-  total_working_days: number;
-  present_days: number;
-  absent_days: number;
-  leave_days: number;
-  lwp_days: number;
-  overtime_hours: number;
-  basic_amount: number;
-  allowances_total: number;
-  overtime_amount: number;
-  bonus_amount: number;
-  gross_earned: number;
-  absent_deduction: number;
-  tax_deduction: number;
-  pf_deduction: number;
-  advance_deduction: number;
-  other_deduction: number;
-  total_deduction: number;
-  net_salary: number;
-  payment_status: 'unpaid' | 'processed' | 'paid';
-  remarks: string | null;
-}
-
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
-
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const monthLabel = (my: string) => {
-  const [y, m] = my.split('-').map(Number);
-  if (!y || !m) return my;
-  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-};
-
-// One employee's payslip content drawn onto whatever page of `doc` is
-// currently active — shared by the single-record view/download/print flow
-// and the bulk generator (which just calls this once per page).
-const drawPayslipPage = (doc: jsPDF, logoImg: HTMLImageElement, record: PayrollRecord) => {
-  const startY = drawPdfLetterhead(doc, logoImg, {
-    reportTitle: `Payslip — ${monthLabel(record.month_year)}`,
-    filters: [
-      ['Employee', `${record.employee_name}${record.employee_code ? ` (${record.employee_code})` : ''}`],
-      ['Designation', record.designation || '—'],
-      ['Department', record.department || '—'],
-      ['Payment Status', record.payment_status.toUpperCase()]
-    ]
-  });
-
-  autoTable(doc, {
-    startY,
-    margin: { top: startY, left: 14, right: 14 },
-    head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
-    body: [
-      ['Basic Salary', money(record.basic_amount), 'Absent / LWP Deduction', money(record.absent_deduction)],
-      ['Allowances', money(record.allowances_total), 'Tax Deduction', money(record.tax_deduction)],
-      ['Overtime', money(record.overtime_amount), 'Provident Fund', money(record.pf_deduction)],
-      ['Bonus', money(record.bonus_amount), 'Advance Recovery', money(record.advance_deduction)],
-      ['', '', 'Other Deduction', money(record.other_deduction)]
-    ],
-    foot: [['Gross Earned', money(record.gross_earned), 'Total Deduction', money(record.total_deduction)]],
-    theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2.5 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' }
-  });
-
-  const finalY = (doc as any).lastAutoTable.finalY + 10;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Net Salary: ${money(record.net_salary)}`, 14, finalY);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text(
-    `Attendance: ${record.present_days} present / ${record.absent_days} absent / ${record.leave_days} leave / ${record.lwp_days} LWP out of ${record.total_working_days} working days`,
-    14,
-    finalY + 6
-  );
-  if (record.remarks) {
-    doc.text(`Remarks: ${record.remarks}`, 14, finalY + 12);
-  }
-};
-
-const buildSinglePayslip = async (record: PayrollRecord) => {
-  const logoImg = await loadImageElement(credenceLogo);
-  const doc = new jsPDF();
-  drawPayslipPage(doc, logoImg, record);
-  finalizePdfPageNumbers(doc);
-  return doc;
-};
 
 export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -153,6 +58,34 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
   const [busyId, setBusyId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState<'pdf' | 'email' | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Who the bulk buttons are for: the ticked people, or everyone when none is.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((r) => [r.employee_name, r.employee_code, r.department].some((v) => String(v || '').toLowerCase().includes(q)));
+  }, [records, query]);
+  const picked = useMemo(() => records.filter((r) => selected.has(r.id)), [records, selected]);
+  const targets = picked.length ? picked : records;
+  const allShownPicked = shown.length > 0 && shown.every((r) => selected.has(r.id));
+  const someShownPicked = shown.some((r) => selected.has(r.id));
+  const toggle = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of shown) {
+        if (allShownPicked) next.delete(r.id);
+        else next.add(r.id);
+      }
+      return next;
+    });
 
   const fetchRecords = async () => {
     setLoading(true);
@@ -174,6 +107,7 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
   useEffect(() => {
     fetchRecords();
     setNotice(null);
+    setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthYear]);
 
@@ -201,19 +135,20 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
 
   // ---- Bulk: one PDF, one page per employee -------------------------------
   const generateBulkPayslips = async () => {
-    if (records.length === 0) return;
+    const list = targets;
+    if (list.length === 0) return;
     setBulkBusy('pdf');
     setNotice(null);
     try {
-      const logoImg = await loadImageElement(credenceLogo);
+      const logoImg = await loadPayslipLogo();
       const doc = new jsPDF();
-      records.forEach((record, i) => {
+      list.forEach((record, i) => {
         if (i > 0) doc.addPage();
         drawPayslipPage(doc, logoImg, record);
       });
       finalizePdfPageNumbers(doc);
-      await savePdfCrossPlatform(doc, `Payslips_${monthYear}.pdf`);
-      setNotice({ type: 'success', text: `Generated ${records.length} payslip${records.length === 1 ? '' : 's'} in one PDF.` });
+      await savePdfCrossPlatform(doc, picked.length ? `Payslips_${monthYear}_selected.pdf` : `Payslips_${monthYear}.pdf`);
+      setNotice({ type: 'success', text: `Generated ${list.length} payslip${list.length === 1 ? '' : 's'} in one PDF.` });
     } catch {
       setNotice({ type: 'error', text: 'Failed to generate the bulk payslip PDF.' });
     } finally {
@@ -222,18 +157,27 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
   };
 
   // ---- Email: per-employee and "Email All" --------------------------------
-  // Backend route not implemented yet — see file header note.
+  // The same PDF as the PDF button, built here and attached by the server.
+  const sendPayslipEmail = async (record: PayrollRecord) => {
+    const doc = await buildSinglePayslip(record);
+    const pdf_base64 = String(doc.output('datauristring')).split(',')[1] || '';
+    return fetch(apiUrl(`/api/payroll/${record.id}/email`), {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf_base64 })
+    });
+  };
   const emailPayslip = async (record: PayrollRecord) => {
     setBusyId(record.id);
     setNotice(null);
     try {
-      const res = await fetch(apiUrl(`/api/payroll/${record.id}/email`), { method: 'POST', headers: authHeaders });
+      const res = await sendPayslipEmail(record);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setNotice({ type: 'error', text: data.error || `Couldn't email ${record.employee_name}'s payslip — email sending isn't set up on the server yet.` });
         return;
       }
-      setNotice({ type: 'success', text: `Payslip emailed to ${record.employee_name}.` });
+      setNotice({ type: 'success', text: `Payslip emailed to ${record.employee_name} with the PDF attached.` });
     } catch {
       setNotice({ type: 'error', text: `Couldn't email ${record.employee_name}'s payslip — email sending isn't set up on the server yet.` });
     } finally {
@@ -241,23 +185,33 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
     }
   };
 
+  // One email per employee (the ticked ones, or everyone), each with their
+  // own payslip PDF attached.
   const emailAllPayslips = async () => {
-    if (records.length === 0) return;
+    const list = targets;
+    if (list.length === 0) return;
+    const who = picked.length ? `the ${list.length} selected employee${list.length === 1 ? '' : 's'}` : `all ${list.length} employee${list.length === 1 ? '' : 's'}`;
+    if (!(await confirmDialog(`Email ${monthLabel(monthYear)} payslips to ${who}? Each gets their own payslip PDF.`, { title: 'Email payslips', confirmLabel: `Email ${list.length}` }))) return;
     setBulkBusy('email');
     setNotice(null);
     try {
-      const res = await fetch(apiUrl('/api/payroll/email-bulk'), {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month_year: monthYear })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setNotice({ type: 'error', text: data.error || "Couldn't email payslips — email sending isn't set up on the server yet." });
-        return;
+      let sent = 0;
+      const failed: string[] = [];
+      for (const [i, record] of list.entries()) {
+        setNotice({ type: 'success', text: `Emailing ${i + 1} of ${list.length}…` });
+        const res = await sendPayslipEmail(record);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) sent++;
+        else {
+          failed.push(`${record.employee_name}: ${data.error || 'failed'}`);
+          // Email not set up at all: stop instead of failing every one.
+          if (/isn't set up/i.test(String(data.error || ''))) break;
+        }
       }
-      const sent = (data.results || []).filter((r: any) => r.success).length;
-      setNotice({ type: 'success', text: `Emailed ${sent} of ${records.length} payslip${records.length === 1 ? '' : 's'}.` });
+      setNotice({
+        type: failed.length && !sent ? 'error' : 'success',
+        text: `Emailed ${sent} of ${list.length} payslip${list.length === 1 ? '' : 's'} with the PDF attached.${failed.length ? ` Not sent — ${failed.slice(0, 5).join('; ')}${failed.length > 5 ? ` and ${failed.length - 5} more` : ''}.` : ''}`
+      });
     } catch {
       setNotice({ type: 'error', text: "Couldn't email payslips — email sending isn't set up on the server yet." });
     } finally {
@@ -298,21 +252,37 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
 
       {/* Bulk actions */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Bulk Actions</h3>
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+          <h3 className="text-sm font-semibold text-slate-700">Bulk Actions</h3>
+          <p className="text-[11px] text-slate-500">
+            {picked.length ? (
+              <>
+                For the <b className="text-slate-700">{picked.length} selected</b> ·{' '}
+                <button type="button" onClick={() => setSelected(new Set())} className="font-semibold text-blue-600 hover:underline">
+                  Clear selection
+                </button>
+              </>
+            ) : (
+              'For everyone this month — tick people in the list below to send to just them.'
+            )}
+          </p>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={generateBulkPayslips}
             disabled={records.length === 0 || bulkBusy !== null}
             className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-all justify-center disabled:opacity-50"
           >
-            {bulkBusy === 'pdf' ? <Spinner size={16} /> : <Layers className="w-4 h-4" />} Generate All Payslips (PDF)
+            {bulkBusy === 'pdf' ? <Spinner size={16} /> : <Layers className="w-4 h-4" />}{' '}
+            {picked.length ? `PDF of Selected (${picked.length})` : 'Generate All Payslips (PDF)'}
           </button>
           <button
             onClick={emailAllPayslips}
             disabled={records.length === 0 || bulkBusy !== null}
             className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all justify-center disabled:opacity-50"
           >
-            {bulkBusy === 'email' ? <Spinner size={16} /> : <Mail className="w-4 h-4" />} Email All Payslips
+            {bulkBusy === 'email' ? <Spinner size={16} /> : <Mail className="w-4 h-4" />}{' '}
+            {picked.length ? `Email Selected (${picked.length})` : 'Email All Payslips'}
           </button>
         </div>
       </div>
@@ -331,7 +301,7 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
       {/* Individual list */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><Spinner size={26} /></div>
+          <LoadingBlock />
         ) : error ? (
           <p className="text-xs text-rose-600 text-center py-16">{error}</p>
         ) : records.length === 0 ? (
@@ -340,13 +310,52 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
             <p className="text-xs text-slate-400">No payroll runs generated for {monthLabel(monthYear)} yet — use "Run Payroll" first.</p>
           </div>
         ) : (
+          <>
+          <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60 flex-wrap">
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allShownPicked}
+                ref={(el) => {
+                  if (el) el.indeterminate = !allShownPicked && someShownPicked;
+                }}
+                onChange={toggleShown}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              {query.trim() ? `Select all shown (${shown.length})` : `Select all (${records.length})`}
+            </label>
+            <div className="relative flex-1 min-w-[180px] sm:max-w-xs ml-auto">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Find by name, ID or department"
+                aria-label="Find employee"
+                className="w-full pl-8 pr-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          </div>
+          {shown.length === 0 && <p className="text-xs text-slate-400 text-center py-10">No one matches "{query.trim()}".</p>}
           <ul className="divide-y divide-slate-100">
-            {records.map((r) => (
-              <li key={r.id} className="flex items-center justify-between px-4 py-2.5 gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{r.employee_name}</p>
-                  <p className="text-[11px] text-slate-400">{r.department || '—'} &middot; Net {money(r.net_salary)}</p>
-                </div>
+            {shown.map((r) => (
+              <li key={r.id} className={`flex items-center justify-between px-4 py-2.5 gap-3 ${selected.has(r.id) ? 'bg-blue-50/50' : ''}`}>
+                <label className="flex items-center gap-3 min-w-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(r.id)}
+                    onChange={() => toggle(r.id)}
+                    aria-label={`Select ${r.employee_name}`}
+                    className="w-4 h-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-slate-800 truncate">{r.employee_name}</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {r.employee_code ? `${r.employee_code} · ` : ''}
+                      {r.department || '—'} &middot; Net {money(r.net_salary)}
+                    </span>
+                  </span>
+                </label>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => viewPayslip(r)}
@@ -374,6 +383,7 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
               </li>
             ))}
           </ul>
+          </>
         )}
       </div>
     </div>

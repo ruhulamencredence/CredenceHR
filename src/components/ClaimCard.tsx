@@ -3,19 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
+import { readDraft, saveDraft, clearDraft } from '../lib/formDraft';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { Route, LogIn, LogOut, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
-import ClaimMapConfirm from './ClaimMapConfirm';
+import { retryImport } from '../lib/chunkReload';
+// The map (Leaflet) is fetched when it opens, not with the card.
+const ClaimMapConfirm = React.lazy(retryImport(() => import('./ClaimMapConfirm')));
 import { Spinner } from './Spinner';
 
 interface ClaimCardProps {
   token: string;
   // Fires after a successful Check In OR Check Out (not on error) — lets a
-  // parent showing this form inside a sheet/modal (e.g. the Movement Claim
+  // parent showing this form inside a sheet/modal (e.g. the Check In/Out
   // page's "Add Check In/Out" button) know to refresh its own list of past
   // claims. Receives which action just completed: on 'in' the sheet is left
   // open (the user may still want to Check Out right after Checking In, in
@@ -27,7 +31,7 @@ interface ClaimCardProps {
 // Same geolocation flow AttendanceCard.tsx / AuthScreen.tsx already use:
 // Capacitor's plugin on the native Android app build, plain
 // navigator.geolocation on the web build.
-async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+export async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {
@@ -39,11 +43,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
       try {
         status = (await Geolocation.requestPermissions()).location;
       } catch {
-        throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+        throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
       }
     }
     if (status !== 'granted') {
-      throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+      throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
@@ -62,14 +66,20 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
   });
 }
 
-// "Movement Claim" — free-form point A -> point B travel record for office work
+// "Check In/Out" — free-form point A -> point B travel record for office work
 // (client visits, bank runs, site trips, etc.), separate from the fixed-site
 // Remote Attendance above it. A User types WHY/WHERE they're going, Checks In
 // from their current spot, and later Checks Out once they reach/finish — the
 // straight-line distance travelled is then available to the Admin for TA/DA-style
 // reimbursement review. Shown near the top of the User Panel, same as Attendance.
 export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
-  const [purpose, setPurpose] = useState('');
+  // The Purpose being typed survives a reload / app restart (lib/formDraft.ts).
+  const [purpose, setPurposeState] = useState(() => readDraft<string>('checkinout-purpose') || '');
+  const setPurpose = (v: string) => {
+    setPurposeState(v);
+    if (v.trim()) saveDraft('checkinout-purpose', v);
+    else clearDraft('checkinout-purpose');
+  };
   const [openClaim, setOpenClaim] = useState<ClaimRecord | null>(null);
   // The most recently completed claim (if any), kept around purely so its
   // check-out Approval Workflow badge stays visible after checking out —
@@ -86,8 +96,10 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
   const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number } } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchStatus = async () => {
-    setLoadingStatus(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => fetchStatus(true));
+  const fetchStatus = async (silent?: unknown) => {
+    if (silent !== true) setLoadingStatus(true);
     try {
       const res = await fetch(apiUrl('/api/claims/status'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
@@ -183,13 +195,13 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
     <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-sm">
       <div className="flex items-start justify-between gap-3 mb-0.5">
         <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-          <Route className="w-4 h-4 text-indigo-600" /> Movement Claim
+          <Route className="w-4 h-4 text-indigo-600" /> Check In/Out
         </h3>
       </div>
       <p className="text-xs text-slate-500 mb-2.5">
         Going out for office work? Check in from where you start and check out once you reach or finish — your
-        travel distance is recorded for claim review. See your past claims and their locations on the
-        <span className="font-semibold text-slate-600"> My Claims</span> card below.
+        travel distance is recorded for review. See your past check in/outs and their locations in the
+        <span className="font-semibold text-slate-600"> Check In/Out</span> list below.
       </p>
 
       <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -245,7 +257,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
                 {lastCompletedClaim.distance_km != null ? ` — ${lastCompletedClaim.distance_km} km travelled.` : '.'}
               </span>
             ) : (
-              <span>No open claim right now — start one above when you head out.</span>
+              <span>Nothing checked in right now — check in above when you head out.</span>
             )}
           </div>
           {openClaim?.check_in_remarks && (
@@ -268,6 +280,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
       )}
 
       {pending && (
+        <React.Suspense fallback={null}>
         <ClaimMapConfirm
           kind={pending.kind}
           purpose={purpose.trim()}
@@ -285,6 +298,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
           onConfirm={handleConfirmPending}
           onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
+        </React.Suspense>
       )}
     </div>
   );

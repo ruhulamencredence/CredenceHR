@@ -1,3 +1,6 @@
+-- NOTE: not needed to set up CredenceHR — the app creates these tables
+-- itself (with any newer columns) the first time it starts. Kept for reference.
+SET FOREIGN_KEY_CHECKS = 0;
 -- ============================================================================
 -- Payroll Module schema — adapted from the uploaded Payroll.sql to this app's
 -- real conventions:
@@ -109,3 +112,5 @@ CREATE TABLE IF NOT EXISTS payrolls (
     FOREIGN KEY (paid_by) REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE KEY unique_employee_month (employee_id, month_year)
 );
+
+SET FOREIGN_KEY_CHECKS = 1;

@@ -3,23 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import { useLiveRefresh } from '../lib/liveRefresh';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil } from 'lucide-react';
+import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil, AlarmClock, Plane } from 'lucide-react';
 import { AttendanceRecord, AttendanceCorrection, Project, HolidayEntry } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AttendanceCorrectionModal } from './AttendanceCorrectionModal';
 import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusModal';
-import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { LoadingBlock } from './LoadingBlock';
+import { AttendanceGauge, DayStatus, PeriodPill, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, TodayCheckInPill, periodLabel, useIsPhone } from './TimesheetPhone';
 
 interface TimesheetProps {
   token: string;
   // Kept for the caller's mobile tile-menu wiring, but no longer rendered as
-  // a Back button — matches ConveyanceClaimCard/ClaimCard, which accept this
+  // a Back button — matches BillClaimCard/ClaimCard, which accept this
   // same prop and rely on the bottom nav to leave the section instead.
   onBack?: () => void;
   // Superadmin/Admin-pinned Project for Remote Attendance (Admin Panel ->
@@ -28,9 +30,32 @@ interface TimesheetProps {
   // Correct Attendance modal, which drops its own Project picker entirely
   // once this is set (see AttendanceCorrectionModal.tsx).
   attendanceProjectId?: number | null;
+  // False while the phone's bottom nav keeps this page mounted but hidden.
+  active?: boolean;
 }
 
 type TimesheetTab = 'month' | 'day' | 'range';
+
+type LateKind = 'delay' | 'extreme';
+
+// Delay / Extreme Delay badges — same two tiers the Late Attendance Policy
+// (Admin Panel -> Payroll) and the month summary card use.
+const LateBadge: React.FC<{ kind: LateKind }> = ({ kind }) =>
+  kind === 'extreme' ? (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+      <AlarmClock className="w-3 h-3" /> Extreme Delay
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700">
+      <AlarmClock className="w-3 h-3" /> Delay
+    </span>
+  );
+
+const LeaveBadge: React.FC<{ label: string }> = ({ label }) => (
+  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700" title={label}>
+    <Plane className="w-3 h-3" /> On Leave
+  </span>
+);
 
 const TABS: { key: TimesheetTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'month', label: 'Month Wise', icon: CalendarDays },
@@ -107,8 +132,10 @@ const DateCard: React.FC<{
   records: AttendanceRecord[];
   correction?: AttendanceCorrection;
   holiday?: HolidayEntry;
+  late?: LateKind;
+  leave?: string;
   onClick: () => void;
-}> = ({ dateStr, records, correction, holiday, onClick }) => {
+}> = ({ dateStr, records, correction, holiday, late, leave, onClick }) => {
   const present = records.length > 0;
   const projectNames = Array.from(new Set(records.map((r) => r.project_name).filter(Boolean))).join(', ');
   const checkIns = records.map((r) => r.check_in_at).filter(Boolean) as string[];
@@ -131,18 +158,22 @@ const DateCard: React.FC<{
       // a blur layer each is what made other list pages stutter on Android
       // (see the Employee Directory / Job Entry Details fix). A flatter,
       // more opaque white gives the same glass look at no per-card cost.
-      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
+      // Desktop: one line per day (date | project | in | out | status) instead
+      // of a tall card with most of it empty; phone keeps the card.
+      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 md:px-4 md:py-2.5 md:flex md:items-center md:gap-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-2 md:contents">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 md:w-44 md:shrink-0">
           <Pencil className="w-3.5 h-3.5 text-slate-300" />
           {formatDate(dateStr)} <DayOfWeek dateStr={dateStr} />
         </span>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 md:order-3 md:ml-auto md:justify-end">
           {present ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
               <CheckCircle2 className="w-3 h-3" /> Present
             </span>
+          ) : leave ? (
+            <LeaveBadge label={leave} />
           ) : holiday ? (
             <span
               className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
@@ -157,6 +188,7 @@ const DateCard: React.FC<{
               <XCircle className="w-3 h-3" /> Absent
             </span>
           )}
+          {present && late && <LateBadge kind={late} />}
           {pendingCorrection && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
               <Clock className="w-2.5 h-2.5" /> Correction Pending
@@ -172,23 +204,48 @@ const DateCard: React.FC<{
           )}
         </div>
       </div>
-      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Project</p>
-          <p className="font-semibold text-slate-700 mt-0.5 truncate">{present ? (projectNames || '—') : '—'}</p>
+      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs md:order-2 md:mt-0 md:flex-1 md:min-w-0 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Project</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0 truncate">{present ? (projectNames || '—') : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">In Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(earliestIn) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">In</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(earliestIn) : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Out Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(latestOut) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Out</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(latestOut) : '—'}</p>
         </div>
       </div>
     </div>
   );
 };
+
+const CountsLegend: React.FC<{
+  counts: { present: number; absent: number; leave: number; delay: number; extreme: number };
+  className?: string;
+}> = ({ counts, className = '' }) => (
+  <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs ${className}`}>
+    <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
+      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {counts.present}
+    </span>
+    <span className="flex items-center gap-1.5 font-semibold text-rose-600">
+      <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {counts.absent}
+    </span>
+    {counts.leave > 0 && (
+      <span className="flex items-center gap-1.5 font-semibold text-violet-700">
+        <span className="w-2 h-2 rounded-full bg-violet-500" /> Leave: {counts.leave}
+      </span>
+    )}
+    <span className="flex items-center gap-1.5 font-semibold text-orange-700">
+      <span className="w-2 h-2 rounded-full bg-orange-500" /> Delay: {counts.delay}
+    </span>
+    <span className="flex items-center gap-1.5 font-semibold text-red-700">
+      <span className="w-2 h-2 rounded-full bg-red-600" /> Extreme Delay: {counts.extreme}
+    </span>
+  </div>
+);
 
 // "Self Service" > "Timesheet" — every account's own Present/Absent Remote
 // Attendance history, viewable Month Wise (a full calendar month's P/A grid),
@@ -200,8 +257,8 @@ const DateCard: React.FC<{
 // Navbar's web-only "Self Service" header menu, GlobalSidebar's mobile
 // drawer, and (in future) a Dashboard tile — same "Back" pattern as
 // LeaveApplication/LeaveManagement.
-export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId }) => {
-  // Same isNativeApp split as LeaveManagement.tsx / LeaveApplication.tsx: the
+export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId, active = true }) => {
+  // Same isNativeApp split as LeaveManage.tsx / LeaveReviewPage.tsx: the
   // web build keeps the "Self Service / Timesheet" module-path breadcrumb,
   // the Android APK build hides it — the bottom nav is the only way to leave
   // this section there, matching onBack no longer being rendered above.
@@ -213,10 +270,13 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // GlobalSidebar (App.tsx renders it directly, with UserPanel unmounted) and
   // the bottom nav (UserPanel's own section) — and only the component itself
   // is present on both paths.
+  // Only while it's the page on screen — the phone's bottom nav keeps this
+  // page mounted (hidden) between visits.
   useEffect(() => {
+    if (!active) return;
     setHeaderPageTitle('Timesheet');
     return () => setHeaderPageTitle(null);
-  }, []);
+  }, [active]);
 
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
@@ -225,6 +285,16 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // module access (GET /api/holidays is open to every signed-in account), so
   // Weekend/Holiday dates never show as Absent below.
   const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
+  // From GET /api/attendance/my-calendar — the same rules as the Monthly
+  // Attendance Report and payroll: days before joining are never Absent,
+  // and Leave on a supervisor's team sheet is Leave.
+  const [joiningDate, setJoiningDate] = useState<string | null>(null);
+  const [siteLeaveDates, setSiteLeaveDates] = useState<string[]>([]);
+  // "YYYY-MM-DD" -> Delay / Extreme Delay, from GET /api/my-late-days
+  // (fetched per visible window below, merged as the window moves).
+  const [lateDays, setLateDays] = useState<Record<string, LateKind>>({});
+  // Approved Leave Applications, so those days read "On Leave", not Absent.
+  const [leaves, setLeaves] = useState<{ start_date: string; end_date: string; leave_type_label?: string; leave_type?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TimesheetTab>('month');
   // Which date's row was clicked — opens the Correct Attendance modal for it.
@@ -245,9 +315,37 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   const [rangeFrom, setRangeFrom] = useState(firstOfThisMonth);
   const [rangeTo, setRangeTo] = useState(today);
 
-  const loadData = async (cancelledRef?: { cancelled: boolean }) => {
+  // Phone layout (TimesheetPhone.tsx): one period button + bottom sheet in
+  // place of the tabs/selects, and a gauge whose legend filters the list.
+  const isPhone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
+  const period: TimesheetPeriod = { mode: tab, year: selYear, month: selMonth, day: selDay, from: rangeFrom, to: rangeTo };
+  const applyPeriod = (p: TimesheetPeriod) => {
+    setTab(p.mode);
+    setSelYear(p.year);
+    setSelMonth(p.month);
+    setSelDay(p.day);
+    setRangeFrom(p.from);
+    setRangeTo(p.to);
+    setStatusFilter(null);
+    setSheetOpen(false);
+  };
+
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => loadData());
+  const lastLoadedAt = useRef(0);
+  const loadData =async (cancelledRef?: { cancelled: boolean }) => {
     try {
-      const [attRes, corrRes, projRes, holRes] = await Promise.all([
+      // Which calendar (Head Office vs Project site) applies to THIS account
+      // — fetched first since the holidays call below needs it.
+      // The rest don't depend on it, so they go out at the same time — on a
+      // slow phone connection that's one round trip less.
+      const groupReq = fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } })
+        .then(async (r) => (r.ok && (await r.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office'))
+        .catch(() => 'head_office');
+
+      const [attRes, corrRes, projRes, holRes, leaveRes] = await Promise.all([
         fetch(apiUrl('/api/attendance/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/attendance/corrections/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         // /api/projects/all (not the permission-filtered /api/projects) — a
@@ -257,13 +355,32 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/holidays'), { headers: { Authorization: `Bearer ${token}` } })
+        // This account's own calendar with its Duty Roster laid over it
+        // (an Off day is a Weekend, a rostered shift on a holiday a working
+        // day). The plain calendar of its group if that isn't available.
+        fetch(apiUrl('/api/attendance/my-calendar'), { headers: { Authorization: `Bearer ${token}` } })
+          .then(async (r) => {
+            if (!r.ok) throw new Error('no calendar');
+            const d = await r.json();
+            if (!cancelledRef?.cancelled) {
+              setJoiningDate(d.joining_date || null);
+              setSiteLeaveDates(Array.isArray(d.site_leave_dates) ? d.site_leave_dates : []);
+            }
+            return new Response(JSON.stringify(d.holidays || []), { status: 200 });
+          })
+          .catch(() => groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } }))),
+        fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
+      lastLoadedAt.current = Date.now();
       if (attRes.ok) setRecords(await attRes.json());
       if (corrRes.ok) setCorrections(await corrRes.json());
       if (projRes.ok) setProjects(await projRes.json());
       if (holRes.ok) setHolidays(await holRes.json());
+      if (leaveRes.ok) {
+        const rows = await leaveRes.json();
+        if (Array.isArray(rows)) setLeaves(rows.filter((l: any) => l.status === 'approved'));
+      }
     } catch {
       // Offline/unreachable — the page just shows whatever it already had (or
       // stays empty); switching tabs/filters still works once back online.
@@ -280,6 +397,25 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
       ref.cancelled = true;
     };
   }, [token]);
+
+  // Back on this page (bottom nav): what it had shows at once, and the
+  // latest (e.g. a Check In just made) arrives quietly — no blank / loading
+  // step in between. Data under a minute old is kept as is (live refresh
+  // already brings changes), and "Updating…" shows only when a refresh is
+  // actually slow, so flipping between tabs doesn't flash it every time.
+  const [updating, setUpdating] = useState(false);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current && !loading && Date.now() - lastLoadedAt.current > 60_000) {
+      const slow = setTimeout(() => setUpdating(true), 1000);
+      loadData().finally(() => {
+        clearTimeout(slow);
+        setUpdating(false);
+      });
+    }
+    wasActive.current = active;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // "YYYY-MM-DD" -> every attendance row recorded that day (almost always
   // one, but a User who checked into more than one Project the same day gets
@@ -319,13 +455,79 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
     return map;
   }, [holidays]);
 
-  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
-  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // "YYYY-MM-DD" -> Leave Type label, for every day covered by an approved
+  // Leave Application.
+  const leaveByDate = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const l of leaves) {
+      for (const d of buildRangeDates(String(l.start_date).slice(0, 10), String(l.end_date).slice(0, 10))) {
+        map.set(d, l.leave_type_label || l.leave_type || 'Leave');
+      }
+    }
+    for (const d of siteLeaveDates) if (!map.has(d)) map.set(d, 'Leave (team sheet)');
+    return map;
+  }, [leaves, siteLeaveDates]);
 
-  const monthPresentCount = monthDates.filter((d) => (byDate.get(d) || []).length > 0).length;
-  const monthAbsentCount = monthDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
-  const rangePresentCount = rangeDates.filter((d) => (byDate.get(d) || []).length > 0).length;
-  const rangeAbsentCount = rangeDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
+  // Days before this person joined aren't shown (never Absent), as on the
+  // Monthly Attendance Report.
+  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today).filter((d) => !joiningDate || d >= joiningDate), [selYear, selMonth, today, joiningDate]);
+  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo).filter((d) => !joiningDate || d >= joiningDate), [rangeFrom, rangeTo, joiningDate]);
+  // Newest-to-oldest for display (today/last date at top) — monthDates/
+  // rangeDates themselves stay oldest-to-newest since buildRangeDates'
+  // MAX_DAYS cap and the Present/Absent counts below don't care about order.
+  const monthDatesDesc = useMemo(() => [...monthDates].reverse(), [monthDates]);
+  const rangeDatesDesc = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
+
+  const isAbsent = (d: string) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d) && !leaveByDate.has(d);
+  const countsFor = (dates: string[]) => ({
+    present: dates.filter((d) => (byDate.get(d) || []).length > 0).length,
+    absent: dates.filter(isAbsent).length,
+    leave: dates.filter((d) => (byDate.get(d) || []).length === 0 && leaveByDate.has(d)).length,
+    delay: dates.filter((d) => lateDays[d] === 'delay').length,
+    extreme: dates.filter((d) => lateDays[d] === 'extreme').length
+  });
+  const monthCounts = countsFor(monthDates);
+  const rangeCounts = countsFor(rangeDates);
+
+  // One status per date for the phone gauge / list.
+  const dayStatus = (d: string): DayStatus => {
+    if ((byDate.get(d) || []).length > 0) return lateDays[d] === 'extreme' ? 'extreme' : lateDays[d] === 'delay' ? 'delay' : 'ontime';
+    if (leaveByDate.has(d)) return 'leave';
+    const h = holidayByDate.get(d);
+    if (h) return h.day_type === 'weekend' ? 'weekend' : 'holiday';
+    return 'absent';
+  };
+  const gaugeCounts = (dates: string[]) => {
+    const c = { ontime: 0, delay: 0, extreme: 0, absent: 0, leave: 0 };
+    for (const d of dates) {
+      const st = dayStatus(d);
+      if (st in c) c[st as keyof typeof c]++;
+    }
+    return c;
+  };
+
+  // Fetch Delay / Extreme Delay for whatever window is on screen.
+  const lateWindow =
+    tab === 'month' ? [monthDates[0], monthDates[monthDates.length - 1]] : tab === 'range' ? [rangeDates[0], rangeDates[rangeDates.length - 1]] : [selDay, selDay];
+  const [lateFrom, lateTo] = lateWindow;
+  useEffect(() => {
+    if (!lateFrom || !lateTo) return;
+    let cancelled = false;
+    fetch(apiUrl(`/api/my-late-days?from=${lateFrom}&to=${lateTo}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.days) return;
+        setLateDays((prev) => {
+          const next = { ...prev };
+          for (const d of buildRangeDates(lateFrom, lateTo)) delete next[d];
+          return { ...next, ...json.days };
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [token, lateFrom, lateTo, records]);
 
   const dayRecords = byDate.get(selDay) || [];
 
@@ -359,26 +561,91 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
     return Array.from(years).sort((a, b) => b - a);
   }, [records, todayYear]);
 
+  const renderPhoneDays = (datesAsc: string[], datesDesc: string[], emptyText: string) => {
+    if (datesAsc.length === 0) {
+      return <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">{emptyText}</div>;
+    }
+    const shown = statusFilter ? datesDesc.filter((d) => dayStatus(d) === statusFilter) : datesDesc;
+    const FILTER_TITLE: Record<StatusFilter, string> = { ontime: 'On time days', delay: 'Delay days', extreme: 'Extreme delay days', absent: 'Absent days' };
+    return (
+      <div className="flex flex-col gap-3">
+        <AttendanceGauge counts={gaugeCounts(datesAsc)} period={periodLabel(period)} filter={statusFilter} onFilter={setStatusFilter} />
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div className="text-[17px] font-bold text-slate-900">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
+          {statusFilter && (
+            <button type="button" onClick={() => setStatusFilter(null)} className="text-xs font-semibold text-[color:var(--g-accent,#7f00ff)] px-1 py-1.5">
+              Show all
+            </button>
+          )}
+        </div>
+        {shown.length === 0 ? (
+          <div className="liquid-glass rounded-[22px] p-6 text-center text-[13px] text-zinc-500">Nothing to show for this choice.</div>
+        ) : (
+          shown.map((d) => {
+            const recs = byDate.get(d) || [];
+            const st = dayStatus(d);
+            const ins = (recs.map((r) => r.check_in_at).filter(Boolean) as string[]).sort();
+            const outs = (recs.map((r) => r.check_out_at).filter(Boolean) as string[]).sort();
+            const holiday = holidayByDate.get(d);
+            const times = recs.length ? `${formatTime(ins[0])} – ${outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}` : st === 'weekend' ? 'Weekend' : st === 'holiday' ? 'Holiday' : '—';
+            // First In to last Out, e.g. "8 h 44 m".
+            const worked =
+              ins.length && outs.length
+                ? (() => {
+                    const mins = Math.round((new Date(outs[outs.length - 1]).getTime() - new Date(ins[0]).getTime()) / 60000);
+                    return mins > 0 ? `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, '0')} m` : '';
+                  })()
+                : '';
+            const projects = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
+            const where = recs.length
+              ? [worked, projects].filter(Boolean).join(' · ') || 'Checked in'
+              : st === 'leave'
+              ? leaveByDate.get(d) || 'Leave'
+              : holiday
+              ? holiday.title || 'Day off'
+              : 'No check-in';
+            const corr = correctionsByDate.get(d);
+            return (
+              <PhoneDayCard
+                key={d}
+                dateStr={d}
+                status={st}
+                inAt={ins.length ? formatTime(ins[0]) : undefined}
+                outAt={outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}
+                times={times}
+                where={where}
+                correction={corr?.status === 'pending' ? 'pending' : corr?.status === 'rejected' ? 'rejected' : undefined}
+                onClick={() => openDateCard(d)}
+              />
+            );
+          })
+        )}
+      </div>
+    );
+  };
+
   const selectClass =
     'text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none';
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
-      <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
+      <div className={`w-full ${isPhone ? 'px-0' : 'px-2'} sm:px-6 lg:px-8 pt-3 pb-8`}>
         {/* Breadcrumb is desktop-only: hidden on the APK (isNativeApp) and,
             via hidden md:block, on a narrow browser window too — the mobile
             layout shows "Timesheet" in the header instead, so the
             "Self Service / Timesheet" path is redundant there. */}
         {!isNativeApp && (
           <div className="hidden md:block px-2 sm:px-0">
-            <ModulePath path={['Self Service', 'Timesheet']} />
+            <ModulePath path={['Self Service', 'My HR', 'Attendance', 'Timesheet']} />
           </div>
         )}
         {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
-            big rounded corners), same as Conveyance Bill Claim / My Claims /
+            big rounded corners), same as Bill Claim / My Claims /
             Leave Applications; the md: overrides keep the original plain
             white panel on desktop. */}
-        <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
+        {/* On a phone the cards (period button, gauge, days) sit straight on
+            the page, without this panel around them. */}
+        <div className={isPhone ? '' : 'bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none'}>
           {/* Hidden on mobile — the header shows this page's own "Timesheet"
               title in the logo's place (see headerPageTitle.ts), so repeating
               it here would just be a duplicate. Desktop has no such takeover
@@ -399,6 +666,19 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
               rounded-pill treatment LeaveReviewPage's Review/Approved/Rejected
               switcher uses. Extra top padding on mobile since the header row
               above is hidden there. */}
+          {isPhone ? (
+            <div className="mx-3 mt-2 flex flex-col gap-3">
+              <PeriodPill period={period} today={today} minYear={yearOptions[yearOptions.length - 1]} onOpen={() => setSheetOpen(true)} onChange={applyPeriod} />
+              {(() => {
+                // Today's check-in, whatever period is on screen.
+                const recs = byDate.get(today) || [];
+                const ins = (recs.map((r) => r.check_in_at).filter(Boolean) as string[]).sort();
+                if (!ins.length) return null;
+                const where = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
+                return <TodayCheckInPill at={formatTime(ins[0])} status={dayStatus(today)} where={where} />;
+              })()}
+            </div>
+          ) : (
           <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
             {TABS.map((t) => {
               const active = tab === t.key;
@@ -416,35 +696,33 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
               );
             })}
           </div>
+          )}
 
-          {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
+          {updating && (
+            <div className="mx-3 sm:mx-6 mt-2 text-[11px] text-slate-500 flex items-center gap-1.5" role="status">
+              <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" aria-hidden="true" /> Updating…
             </div>
+          )}
+          {loading ? (
+            <LoadingBlock />
           ) : (
-            <div className="px-3 sm:px-6 py-5">
+            <div className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
               {/* Month Wise */}
-              {tab === 'month' && (
+              {tab === 'month' && isPhone && renderPhoneDays(monthDates, monthDatesDesc, "This month hasn't started yet.")}
+              {tab === 'month' && !isPhone && (
                 <>
                   <div className="flex flex-wrap items-center gap-3 mb-4">
-                    <select value={selMonth} onChange={(e) => setSelMonth(Number(e.target.value))} className={selectClass}>
+                    <select aria-label="Month" value={selMonth} onChange={(e) => setSelMonth(Number(e.target.value))} className={selectClass}>
                       {MONTH_NAMES.map((name, idx) => (
                         <option key={name} value={idx + 1}>{name}</option>
                       ))}
                     </select>
-                    <select value={selYear} onChange={(e) => setSelYear(Number(e.target.value))} className={selectClass}>
+                    <select aria-label="Year" value={selYear} onChange={(e) => setSelYear(Number(e.target.value))} className={selectClass}>
                       {yearOptions.map((y) => (
                         <option key={y} value={y}>{y}</option>
                       ))}
                     </select>
-                    <div className="ml-auto flex items-center gap-4 text-xs">
-                      <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {monthPresentCount}
-                      </span>
-                      <span className="flex items-center gap-1.5 font-semibold text-rose-600">
-                        <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {monthAbsentCount}
-                      </span>
-                    </div>
+                    <CountsLegend counts={monthCounts} className="ml-auto" />
                   </div>
 
                   {monthDates.length === 0 ? (
@@ -453,9 +731,9 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                       <p className="text-sm">This month hasn't started yet.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {monthDates.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
+                    <div className="space-y-3 md:space-y-1.5">
+                      {monthDatesDesc.map((d) => (
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}
@@ -465,7 +743,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
               {/* Day Wise */}
               {tab === 'day' && (
                 <>
-                  <div className="mb-4">
+                  <div className="mb-4 hidden md:block">
                     <input
                       type="date"
                       value={selDay}
@@ -475,8 +753,19 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     />
                   </div>
 
+                  {dayRecords.length > 0 && lateDays[selDay] && (
+                    <div className="mb-3">
+                      <LateBadge kind={lateDays[selDay]} />
+                    </div>
+                  )}
                   {dayRecords.length === 0 ? (
-                    holidayByDate.has(selDay) ? (
+                    leaveByDate.has(selDay) ? (
+                      <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
+                        <Plane className="w-6 h-6 text-violet-300" />
+                        <p className="text-sm font-semibold text-slate-500">On Leave — {leaveByDate.get(selDay)}</p>
+                        <p className="text-xs text-slate-400 max-w-[260px]">{formatDate(selDay)} is covered by an approved Leave Application.</p>
+                      </div>
+                    ) : holidayByDate.has(selDay) ? (
                       <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
                         <CheckCircle2 className={`w-6 h-6 ${holidayByDate.get(selDay)!.day_type === 'weekend' ? 'text-sky-300' : 'text-amber-300'}`} />
                         <p className="text-sm font-semibold text-slate-500">
@@ -534,7 +823,8 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
               )}
 
               {/* Custom Range */}
-              {tab === 'range' && (
+              {tab === 'range' && isPhone && renderPhoneDays(rangeDates, rangeDatesDesc, 'Pick a valid From / To date to see the report.')}
+              {tab === 'range' && !isPhone && (
                 <>
                   <div className="flex flex-wrap items-end gap-3 mb-4">
                     <div>
@@ -558,14 +848,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                         className={selectClass}
                       />
                     </div>
-                    <div className="ml-auto flex items-center gap-4 text-xs pb-2.5">
-                      <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {rangePresentCount}
-                      </span>
-                      <span className="flex items-center gap-1.5 font-semibold text-rose-600">
-                        <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {rangeAbsentCount}
-                      </span>
-                    </div>
+                    <CountsLegend counts={rangeCounts} className="ml-auto pb-2.5" />
                   </div>
 
                   {rangeDates.length === 0 ? (
@@ -574,9 +857,9 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                       <p className="text-sm">Pick a valid From / To date to see the report.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {rangeDates.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
+                    <div className="space-y-3 md:space-y-1.5">
+                      {rangeDatesDesc.map((d) => (
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}
@@ -586,6 +869,15 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
           )}
         </div>
       </div>
+
+      <PeriodSheet
+        open={sheetOpen && active}
+        value={period}
+        today={today}
+        minYear={yearOptions[yearOptions.length - 1]}
+        onClose={() => setSheetOpen(false)}
+        onApply={applyPeriod}
+      />
 
       {correctionDate && (
         <AttendanceCorrectionModal

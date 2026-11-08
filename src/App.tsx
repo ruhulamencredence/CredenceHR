@@ -5,12 +5,11 @@
 
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { RefreshCw, ArrowLeft, X } from 'lucide-react';
-import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
+import { RefreshCw, ArrowLeft, X, Car } from 'lucide-react';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest, chatAllowed } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
-import { ProfilePage } from './components/ProfilePage';
 // UserPanel/AdminPanel are the two heaviest branches of the app (PDF export,
 // Leaflet maps, Excel import/export, etc. all live under one of these two) —
 // lazy-loading them means the Login screen only has to download/parse the
@@ -18,34 +17,100 @@ import { ProfilePage } from './components/ProfilePage';
 // eagerly-loaded bundle every visitor's phone has to fetch before they can
 // even see the login form. See the Suspense fallback below for what shows
 // during the brief gap while a panel's own chunk downloads after login.
-const UserPanel = lazy(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
-const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+// Opened from the avatar / the Assistant button — not part of the first download.
+const ProfilePage = lazy(retryImport(() => import('./components/ProfilePage').then(m => ({ default: m.ProfilePage }))));
+const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant }))));
+// The Dashboard's code starts downloading the moment the app starts (or the
+// moment someone signs in) — not only once React gets round to drawing it —
+// so the Dashboard opens without its placeholder on a signed-in phone.
+const loadUserPanel = retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
+let userPanelLoad: ReturnType<typeof loadUserPanel> | null = null;
+const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().catch((err) => {
+  userPanelLoad = null; // let the next try download it again
+  throw err;
+}));
+const UserPanel = lazy(preloadUserPanel);
+try {
+  if (localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
+} catch {
+  // storage unavailable — it loads when first drawn instead
+}
+const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
-const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
-const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
+const ChatPanel = lazy(retryImport(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel }))));
+const AlertsPage = lazy(retryImport(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage }))));
+// Credence Mail (Self Service, users.can_use_mail) — its own chunk.
+const CredenceMail = lazy(retryImport(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail }))));
+// My Duty Roster (Self Service, users.can_view_roster).
+const MyRoster = lazy(retryImport(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster }))));
+// Break Time (Self Service, users.can_take_break).
+const MyBreak = lazy(retryImport(() => import('./components/MyBreak').then(m => ({ default: m.MyBreak }))));
+// PEPM Operation -> Material Receive (users.can_receive_material, MprDispatchRoutes.ts).
+const MaterialReceive = lazy(retryImport(() => import('./components/MaterialReceive').then(m => ({ default: m.MaterialReceive }))));
+// Documents to Sign (Self Service, users.can_sign_documents).
+const MyRequisitions = lazy(retryImport(() => import('./components/MyRequisitions').then(m => ({ default: m.MyRequisitions }))));
+const MySignatures = lazy(retryImport(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures }))));
+// My Payslip (Self Service, users.can_view_payslip).
+const MyPayslips = lazy(retryImport(() => import('./components/MyPayslips').then(m => ({ default: m.MyPayslips }))));
+// Self Service pages: each loads with its own code (and libraries such as
+// xlsx / jspdf / leaflet / pdf.js) only when opened.
+const LeaveManage = lazy(retryImport(() => import('./components/LeaveManage').then(m => ({ default: m.LeaveManage }))));
+const ApproveApplications = lazy(retryImport(() => import('./components/ApproveApplications').then(m => ({ default: m.ApproveApplications }))));
+const Timesheet = lazy(retryImport(() => import('./components/Timesheet').then(m => ({ default: m.Timesheet }))));
+const PayrollModule = lazy(retryImport(() => import('./components/PayrollModule').then(m => ({ default: m.PayrollModule }))));
+const EmployeeDirectory = lazy(retryImport(() => import('./components/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory }))));
+const MyResignation = lazy(retryImport(() => import('./components/MyResignation').then(m => ({ default: m.MyResignation }))));
+const AssetManagement = lazy(retryImport(() => import('./components/AssetManagement').then(m => ({ default: m.AssetManagement }))));
+const MyCases = lazy(retryImport(() => import('./components/MyCases').then(m => ({ default: m.MyCases }))));
+const MyTasks = lazy(retryImport(() => import('./components/MyTasks').then(m => ({ default: m.MyTasks }))));
+const MyMobileSim = lazy(retryImport(() => import('./components/MyMobileSim').then(m => ({ default: m.MyMobileSim }))));
+const MyLoans = lazy(retryImport(() => import('./components/MyLoans').then(m => ({ default: m.MyLoans }))));
+const MyTargets = lazy(retryImport(() => import('./components/MyTargets').then(m => ({ default: m.MyTargets }))));
+const MyLetters = lazy(retryImport(() => import('./components/MyLetters').then(m => ({ default: m.MyLetters }))));
+const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendance').then(m => ({ default: m.TeamAttendance }))));
+const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
+import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
+import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { retryImport } from './lib/chunkReload';
+import { preloadPdfCompany } from './lib/pdfStandard';
+import { setReportEmailAccess } from './lib/reportEmail';
+import { ModulePath } from './components/ModulePath';
+import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
-import { LeaveManage } from './components/LeaveManage';
-import { MyLeave } from './components/MyLeave';
-import { LeaveApprovals } from './components/LeaveApprovals';
-import { ApproveApplications } from './components/ApproveApplications';
-import { Timesheet } from './components/Timesheet';
-import { PayrollModule } from './components/PayrollModule';
-import { EmployeeDirectory } from './components/EmployeeDirectory';
+import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
+import { CallLayer } from './components/CallLayer';
+import { GroupCallLayer } from './components/GroupCallLayer';
+import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
+import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
+import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
+import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
+import { clearScreenCache } from './lib/screenCache';
+import { clearAllDrafts } from './lib/formDraft';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
+import { ensureLocationConsent } from './lib/locationDisclosure';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
+import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
+import { WebPushPrompt } from './components/WebPushPrompt';
+import { AppUpdatePrompt } from './components/AppUpdatePrompt';
+import { setActiveCompanyId } from './lib/company';
+import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSignedOutReason } from './lib/device';
+import { refreshNotices } from './lib/noticesLive';
+import { refreshAvatars } from './components/UserAvatar';
+import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -55,6 +120,8 @@ export default function App() {
   });
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   useBackButtonClose(isApkModalOpen, () => setIsApkModalOpen(false));
+  // Book a Ride keeps its own title row only on a desktop browser.
+  const bookRideWide = useWideWeb();
 
   // Navbar's web-only "Claims" header menu — see ClaimsNavRequest in types.ts.
   const [claimsNavRequest, setClaimsNavRequest] = useState<ClaimsNavRequest | null>(null);
@@ -64,6 +131,20 @@ export default function App() {
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
   // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
   const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
+  // HR Operations' open tab (HROperationsPanel.tsx tells us), so the sidebar
+  // highlights that tab's own item instead of always "Monthly Report".
+  const [hrOpsTab, setHrOpsTab] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('hr_ops_tab') || 'dashboard';
+    } catch {
+      return 'dashboard';
+    }
+  });
+  useEffect(() => {
+    const on = (e: Event) => setHrOpsTab(String((e as CustomEvent).detail || 'dashboard'));
+    window.addEventListener('credence:hr-ops-active', on);
+    return () => window.removeEventListener('credence:hr-ops-active', on);
+  }, []);
   // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — see
   // LeaveNavRequest in types.ts.
   const [leaveNavRequest, setLeaveNavRequest] = useState<LeaveNavRequest | null>(null);
@@ -91,12 +172,28 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | null>(() => {
     try {
+      // A link straight to an Admin Panel page (/admin/departments) opens that page.
+      if (openedOnAdminUrl()) return null;
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
-      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'myLeave' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory') {
-        return saved;
-      }
+      // A link straight to a Self Service page (/self/my-tasks) opens that page,
+      // when this account may see it.
+      const fromUrl = adminUrlEnabled() ? selfPathToView(window.location.pathname) : null;
+      if (fromUrl && canOpenSelfView(fromUrl, user)) return fromUrl;
+      // An unknown or not-allowed /self/... address opens no Self Service page.
+      if (adminUrlEnabled() && /^\/self\//i.test(window.location.pathname)) return null;
+      const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans', 'myTargets'];
+      if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
+      // Payroll and the other gated pages come back only for an account that still has them.
+      if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
+      if (saved === 'credenceMail' && canOpenSelfView('credenceMail', user)) return 'credenceMail';
+      if (saved === 'myRoster' && canOpenSelfView('myRoster', user)) return 'myRoster';
+      if (saved === 'myBreak' && canOpenSelfView('myBreak', user)) return 'myBreak';
+      if (saved === 'mySignatures' && canOpenSelfView('mySignatures', user)) return 'mySignatures';
+      if (saved === 'myPayslips' && canOpenSelfView('myPayslips', user)) return 'myPayslips';
+      if (saved === 'materialReceive' && canOpenSelfView('materialReceive', user)) return 'materialReceive';
+      if (saved === 'myRequisitions' && canOpenSelfView('myRequisitions', user)) return 'myRequisitions';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -112,6 +209,43 @@ export default function App() {
       // ignore, it just means a reload won't be able to restore this page.
     }
   }, [selfServiceView, selfServiceViewStorageKey]);
+  // Mirrors the open Self Service page in the browser address (/self/my-tasks):
+  // copy / bookmark / Back / Forward. The first write replaces the entry.
+  const selfUrlSynced = useRef(false);
+  useEffect(() => {
+    if (!user || !adminUrlEnabled()) return;
+    try {
+      if (selfServiceView) {
+        const target = selfViewToPath(selfServiceView as any);
+        if (window.location.pathname !== target) {
+          if (selfUrlSynced.current) window.history.pushState(null, '', target);
+          else window.history.replaceState(null, '', target);
+        }
+      } else if (/^\/self\//i.test(window.location.pathname)) {
+        window.history.replaceState(null, '', '/');
+      }
+    } catch {
+      // history can be unavailable in some embedded WebViews — the page still works, just no address.
+    }
+    selfUrlSynced.current = true;
+  }, [selfServiceView, user]);
+  useEffect(() => {
+    if (!user || !adminUrlEnabled()) return;
+    const onPop = () => {
+      const view = selfPathToView(window.location.pathname);
+      if (view && canOpenSelfView(view, user)) {
+        setShowProfilePage(false);
+        setSelfServiceView(view);
+      } else {
+        setSelfServiceView(null);
+        // Back onto an Admin Panel address from a Self Service page.
+        if (adminPathToTab(window.location.pathname) && (user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0)) setViewMode('admin');
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
   // ProfilePage.tsx — opened from the avatar in Navbar (desktop header) or
   // GlobalSidebar (mobile drawer's own profile header). Takes over the main
   // area the same way Self Service does, and only ever clears itself via its
@@ -123,6 +257,7 @@ export default function App() {
   const showProfilePageStorageKey = user ? `mpr_show_profile_page_${user.id}` : null;
   const [showProfilePage, setShowProfilePage] = useState(() => {
     try {
+      if (openedOnAdminUrl() || selfPathToView(window.location.pathname)) return false;
       return showProfilePageStorageKey ? localStorage.getItem(showProfilePageStorageKey) === '1' : false;
     } catch {
       return false;
@@ -144,6 +279,8 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // Module Access -> Chat (on unless turned off for this account).
+  const chatOn = chatAllowed(user);
   // Docked FloatingChatButton's own popup — a New-Leave-Application-sized
   // centered modal card (see the render block near FloatingChatButton below),
   // kept fully separate from showChat above so Navbar's ChatBell (which still
@@ -161,6 +298,33 @@ export default function App() {
   // AlertsBell dropdown's "View all" footer link. Same not-persisted-across-
   // reload reasoning as showChat above.
   const [showAlertsPage, setShowAlertsPage] = useState(false);
+
+  // GlobalSidebar's "360 ERP" item — no page of its own; clicking it calls
+  // POST /api/sso/erp360/initiate and opens the returned forward_url in a
+  // new tab. `erp360Error` surfaces a failed attempt (server not configured,
+  // 360 ERP rejected the request, etc.) as a small dismissible banner —
+  // there's no toast system in this app yet, so this is deliberately
+  // self-contained rather than introducing one for a single caller.
+  const [erp360Loading, setErp360Loading] = useState(false);
+  const [erp360Error, setErp360Error] = useState<string | null>(null);
+  async function openErp360() {
+    if (!token) return;
+    setErp360Loading(true);
+    setErp360Error(null);
+    try {
+      const res = await fetch(apiUrl('/api/sso/erp360/initiate'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start the 360 ERP login.');
+      window.open(data.forward_url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      setErp360Error(err.message || 'Could not start the 360 ERP login.');
+    } finally {
+      setErp360Loading(false);
+    }
+  }
 
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
@@ -205,6 +369,9 @@ export default function App() {
 
         const subscription = await CapacitorApp.addListener('backButton', () => {
           if (closeTopmostOrReturnFalse()) return;
+          // No popup / drill-down of its own is open: a full page steps back
+          // towards the dashboard before the app offers to exit.
+          if (pageBackRef.current()) return;
 
           if (awaitingExitConfirmRef.current) {
             CapacitorApp.exitApp();
@@ -267,8 +434,16 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
+    // Nothing saved from an earlier sign-in on this device is shown.
+    clearScreenCache();
+    void preloadUserPanel().catch(() => {});
     localStorage.setItem('mpr_token', newToken);
     localStorage.setItem('mpr_user', JSON.stringify(newUser));
+    // A new joiner's temporary login opens only My Onboarding (main.tsx).
+    if (newUser.is_onboarding) {
+      window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+      return;
+    }
     setToken(newToken);
     setUser(newUser);
     // Every fresh login lands on the User Panel dashboard — regardless of
@@ -285,7 +460,15 @@ export default function App() {
           setShowAlertsPage(false);
   };
 
+  // True once the server has said this sign-in is over — then there is
+  // nothing left to log out of.
+  const sessionEndedRef = useRef(false);
   const handleLogout = () => {
+    // The sign-in ends on the server too, so a copy of the token is useless.
+    if (token && !sessionEndedRef.current) {
+      void fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+    }
+    sessionEndedRef.current = false;
     // Also drop this account's remembered mobile/desktop User Panel section
     // (see UserPanel.tsx) — otherwise the next login on this device restores
     // whichever section (e.g. Claims) was on screen when this account last
@@ -297,14 +480,133 @@ export default function App() {
       localStorage.removeItem(`mpr_self_service_view_${user.id}`);
       localStorage.removeItem(`mpr_show_profile_page_${user.id}`);
     }
+    // The in-memory nav requests / open page outlive the logout too — without
+    // clearing them the next account to log in on this device was dropped
+    // onto whatever page the previous one last opened (e.g. Leave Application).
+    setClaimsNavRequest(null);
+    setJobsNavRequest(null);
+    setAdminNavRequest(null);
+    setDashboardNavRequest(null);
+    setLeaveNavRequest(null);
+    setSelfServiceView(null);
+    setShowProfilePage(false);
+    setShowChat(false);
+    setShowAlertsPage(false);
     if (token) clearPushToken(token);
+    // This browser stops getting the signed-out account's desktop notifications.
+    void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
+    // The Dashboard's saved copy of this account's data (screenCache.ts),
+    // and any unsent form drafts (formDraft.ts).
+    clearScreenCache();
+    clearAllDrafts();
+    refreshAvatars();
+    setActiveCompanyId(null);
     setToken(null);
     setUser(null);
     stopBackgroundTracking();
     disconnectChatSocket();
   };
+
+  // The Superadmin removed this phone from the account (Device Access), or
+  // the account was blocked: sign out and say why on the sign-in screen.
+  useEffect(() => {
+    if (!token) return;
+    const onRevoked = () => {
+      setSignedOutReason('This phone was removed from your account by your Superadmin. Sign in again to ask for access.');
+      handleLogout();
+    };
+    const onBlocked = (e: Event) => {
+      setSignedOutReason(
+        (e as CustomEvent).detail === 'removed'
+          ? 'This account no longer exists. Sign in again.'
+          : 'This account has been blocked. Contact HR.'
+      );
+      handleLogout();
+    };
+    // The sign-in itself ended (SessionSecurity.ts).
+    const onEnded = (e: Event) => {
+      if (sessionEndedRef.current) return;
+      sessionEndedRef.current = true;
+      const why = (e as CustomEvent).detail;
+      setSignedOutReason(
+        why === 'idle'
+          ? 'You were signed out because the session was not used for a while. Sign in again.'
+          : why === 'signed_out'
+            ? 'This sign-in was ended. Sign in again.'
+            : why === 'password'
+              ? 'The password of this account was changed. Sign in again with the new password.'
+              : why === 'app_off'
+                ? 'The mobile app was turned off for your account. Use the website, or ask HR to turn it on.'
+                : 'Your session has expired. Sign in again.'
+      );
+      handleLogout();
+    };
+    window.addEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+    window.addEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+    window.addEventListener(SESSION_ENDED_EVENT, onEnded);
+    return () => {
+      window.removeEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+      window.removeEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+      window.removeEventListener(SESSION_ENDED_EVENT, onEnded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, user]);
+
+  // Website only: signs out after the Superadmin's "idle minutes" with no
+  // mouse, keyboard or touch in any tab of this site (the alerts poll keeps
+  // the server side alive while a tab is open, so the page watches this
+  // itself). The app is left to the server — it runs in the background.
+  useEffect(() => {
+    if (!token || Capacitor.isNativePlatform()) return;
+    const KEY = 'credence_last_activity';
+    let idleMs = 0;
+    let lastWrite = 0;
+    const mark = () => {
+      const now = Date.now();
+      if (now - lastWrite < 15000) return;
+      lastWrite = now;
+      try {
+        localStorage.setItem(KEY, String(now));
+      } catch {}
+    };
+    const last = () => {
+      try {
+        return Number(localStorage.getItem(KEY)) || lastWrite;
+      } catch {
+        return lastWrite;
+      }
+    };
+    const check = () => {
+      if (idleMs > 0 && Date.now() - last() > idleMs) {
+        const idleMinutes = Math.round(idleMs / 60000);
+        idleMs = 0;
+        setSignedOutReason(`You were signed out after ${idleMinutes} minutes without activity. Sign in again.`);
+        handleLogout();
+      }
+    };
+    lastWrite = 0;
+    mark();
+    fetch('/api/session-policy', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        idleMs = Math.max(0, Number(d?.idle_minutes) || 0) * 60000;
+      })
+      .catch(() => {});
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, mark, { passive: true, capture: true }));
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const t = setInterval(check, 30000);
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, mark, { capture: true } as any));
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(t);
+    };
+  }, [token]);
 
   // Employee Tracking (Admin Panel -> Employee Tracking): starts/stops the
   // APK's background location watcher whenever can_use_tracking changes for
@@ -313,9 +615,18 @@ export default function App() {
   // on the web build. Deliberately NOT tied to which panel (User/Admin) is
   // on screen — an Admin/Superadmin who is also out in the field should
   // still report location while looking at their Admin Panel.
+  // In the Android app the background-location disclosure comes first
+  // (locationDisclosure.tsx); after "Not now" startBackgroundTracking only
+  // remembers the account, so the tracking notice's Set up Now can start it.
   useEffect(() => {
     if (token && user?.can_use_tracking) {
-      startBackgroundTracking(token);
+      let cancelled = false;
+      void ensureLocationConsent().then(() => {
+        if (!cancelled) void startBackgroundTracking(token);
+      });
+      return () => {
+        cancelled = true;
+      };
     } else {
       stopBackgroundTracking();
     }
@@ -338,6 +649,33 @@ export default function App() {
   // an Alerts push (any other alert type — leave decisions, conveyance
   // claims, ...) opens the Alerts page instead, same as GlobalSidebar's own
   // "Alerts" item.
+  // Desktop notifications on the website (webPush.ts): tie this browser to
+  // the account if it already allowed them, and open the chat / Alerts a
+  // clicked notification is about — same as tapping an app push.
+  useEffect(() => {
+    if (!token) return;
+    void syncWebPush(token);
+    return listenWebPushOpens((d) => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      // A Notice: back to the dashboard, where its popup shows.
+      if (d.type === 'notice') {
+        setShowAlertsPage(false);
+        setShowChat(false);
+        refreshNotices();
+        return;
+      }
+      if (d.roomId && Number(d.roomId)) {
+        setShowAlertsPage(false);
+        setPendingChatRoomId(Number(d.roomId));
+        setShowChat(true);
+      } else {
+        setShowChat(false);
+        setShowAlertsPage(true);
+      }
+    });
+  }, [token]);
+
   useEffect(() => {
     if (token) {
       initPushNotifications(token, {
@@ -348,10 +686,16 @@ export default function App() {
           setPendingChatRoomId(roomId);
           setShowChat(true);
         },
-        onAlertTap: () => {
+        onAlertTap: (a) => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          // A Notice: back to the dashboard, where its popup shows.
+          if (a.type === 'notice') {
+            setShowAlertsPage(false);
+            refreshNotices();
+            return;
+          }
           setShowAlertsPage(true);
         }
       });
@@ -372,6 +716,9 @@ export default function App() {
   // session, instead of resetting to the User Panel dashboard every time.
   const [viewMode, setViewMode] = useState<'admin' | 'user'>(() => {
     try {
+      // Opened on /admin/<page>: straight into the Admin Panel (AdminPanel still
+      // checks the account may open that page).
+      if (user && openedOnAdminUrl() && (user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0)) return 'admin';
       const saved = user ? localStorage.getItem(`mpr_view_mode_${user.id}`) : null;
       if (saved === 'admin' || saved === 'user') return saved;
     } catch {
@@ -413,6 +760,63 @@ export default function App() {
   // always sees Admin Panel" case, since Superadmin now starts on the User
   // Panel dashboard like everyone else and switches in the same way.
   const isAdminView = hasAdminPanel && viewMode === 'admin';
+
+  // The phone's Back on a full page (see the backButton listener above):
+  // Chat / Alerts / Profile / a Self Service page close back to where they
+  // were opened from; an Admin Panel page goes to the Admin dashboard, and
+  // that to the User dashboard. Returns false on the User dashboard, where
+  // the app then offers to exit. A page's own popups, and Book a Ride
+  // (VehicleManagement keeps its own steps), are handled first by the
+  // back-button stack.
+  const adminTabRef = useRef(adminActiveTab);
+  adminTabRef.current = adminActiveTab;
+  const pageBackRef = useRef<() => boolean>(() => false);
+  pageBackRef.current = () => {
+    if (showChat) {
+      setShowChat(false);
+      return true;
+    }
+    if (showAlertsPage) {
+      setShowAlertsPage(false);
+      return true;
+    }
+    if (showProfilePage) {
+      setShowProfilePage(false);
+      return true;
+    }
+    if (selfServiceView) {
+      setSelfServiceView(null);
+      return true;
+    }
+    if (isAdminView) {
+      if (adminTabRef.current !== 'dashboard') {
+        setAdminNavRequest({ target: 'dashboard', ts: Date.now() });
+        // An account without the Admin dashboard stays on its page — then
+        // Back goes to the User dashboard instead.
+        setTimeout(() => {
+          if (adminTabRef.current !== 'dashboard') {
+            setViewMode('user');
+            setDashboardNavRequest({ ts: Date.now() });
+          }
+        }, 150);
+      } else {
+        setViewMode('user');
+        setDashboardNavRequest({ ts: Date.now() });
+      }
+      return true;
+    }
+    return false;
+  };
+  // An /admin/... address with no Admin Panel showing (no access, or the User
+  // Panel is open) has nothing to point at — back to /.
+  useEffect(() => {
+    if (!user || isAdminView || !adminUrlEnabled()) return;
+    try {
+      if (adminPathToTab(window.location.pathname)) window.history.replaceState(null, '', '/');
+    } catch {
+      // ignore
+    }
+  }, [user, isAdminView]);
 
   // Refresh the logged-in user's own record (role, and the Admin-toggleable
   // can_edit_delivery_date / can_job_edit feature permissions) once per app open.
@@ -532,10 +936,199 @@ export default function App() {
     </div>
   );
 
+  // The company's name, address and logo for every report PDF's header
+  // (lib/pdfStandard.ts), loaded once after sign-in.
+  useEffect(() => {
+    if (token) preloadPdfCompany(token);
+  }, [token]);
+  // Who may use "Email" next to a report's PDF button (lib/reportEmail.tsx).
+  useEffect(() => {
+    setReportEmailAccess(user, token);
+  }, [user, token]);
+
+  // Download the Admin Panel's code in the background once an account that
+  // can open it is signed in, so opening it later doesn't wait on it.
+  useEffect(() => {
+    if (!user) return;
+    const canAdmin = user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0;
+    if (!canAdmin) return;
+    // Not in the phone app: there Home is what opens, and fetching and
+    // reading the whole Admin Panel right after made the phone slow for a
+    // few seconds. It downloads when the Admin Panel is opened instead.
+    if (Capacitor.isNativePlatform()) return;
+    const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1500));
+    const id = idle(() => {
+      import('./components/AdminPanel').catch(() => {});
+    });
+    return () => ((window as any).cancelIdleCallback ? (window as any).cancelIdleCallback(id) : clearTimeout(id));
+  }, [user]);
+
+  // Opens an Admin Panel module from places that don't get
+  // onGoToAdminModule as a prop (the header's alerts bell — e.g. an HR
+  // Operations alert). Same state changes as sidebarNavProps.onGoToAdminModule.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const target = (e as CustomEvent).detail;
+      if (!target) return;
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('admin');
+      setAdminNavRequest({ target, ts: Date.now() });
+    };
+    window.addEventListener('credence:open-admin-module', onOpen);
+    return () => window.removeEventListener('credence:open-admin-module', onOpen);
+  }, []);
+  // An E-Signature alert: waiting for this account's signature -> Documents
+  // to Sign; signed / declined -> Document Vault for whoever has it, else
+  // Documents to Sign.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const title = String((e as CustomEvent).detail?.title || '');
+      const hasVault = !!user && (user.role === 'superadmin' || (user.module_permissions || []).includes('document_vault'));
+      const hasSelf = canOpenSelfView('mySignatures', user);
+      if (!/waiting for your signature/i.test(title) && hasVault) {
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'document_vault' }));
+      } else if (hasSelf) {
+        setShowProfilePage(false);
+        setShowChat(false);
+        setShowAlertsPage(false);
+        setSelfServiceView('mySignatures');
+      }
+    };
+    window.addEventListener('credence:open-esign', onOpen);
+    return () => window.removeEventListener('credence:open-esign', onOpen);
+  }, [user]);
+  // Same, for a Self Service page (e.g. a Site Attendance alert or the
+  // mobile Team Attendance tile -> Team Attendance).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const target = (e as CustomEvent).detail;
+      // Credence Mail only for an account that has it (a mail alert).
+      if (target !== 'teamAttendance' && !((target === 'timesheet' || target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setSelfServiceView(target);
+    };
+    window.addEventListener('credence:open-self-service', onOpen);
+    return () => window.removeEventListener('credence:open-self-service', onOpen);
+  }, [user]);
+  // A task alert (TaskRoutes.ts): one about work given to this account opens
+  // My Tasks; anything else (a request to HR, a task they gave) opens Task
+  // Management for HR. The page then opens the task itself.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isHr = user.role === 'superadmin' || (user.module_permissions || []).includes('task_management');
+      const hasMyTasks = user.role === 'superadmin' || !!user.can_view_tasks || isHr;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      const forMe = ['New task for you', 'Task assigned to you', 'Task due today'].includes(title);
+      if (isHr && (!forMe || !user.can_view_tasks)) {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'task_management' }));
+      } else if (hasMyTasks) {
+        setSelfServiceView('myTasks');
+      }
+    };
+    window.addEventListener('credence:open-task', onOpen);
+    return () => window.removeEventListener('credence:open-task', onOpen);
+  }, [user]);
+  // A target alert (TargetRoutes.ts) opens My Targets with that target open
+  // (the page reads it from sessionStorage); someone with only Target Reports
+  // gets the report.
+  useEffect(() => {
+    const onOpen = () => {
+      if (!user) return;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (user.role === 'superadmin' || !!user.can_view_targets) {
+        setSelfServiceView('myTargets');
+      } else if ((user.module_permissions || []).includes('target_reports')) {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'target_reports' }));
+      }
+    };
+    window.addEventListener('credence:open-target', onOpen);
+    return () => window.removeEventListener('credence:open-target', onOpen);
+  }, [user]);
+  // A Mobile Bill alert (MobileBillRoutes.ts): a new limit request with no
+  // approval chain opens HR's Mobile Bill; anything else opens My Mobile SIM.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isHr = user.role === 'superadmin' || (user.module_permissions || []).includes('mobile_bill');
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (isHr && title === 'Mobile Limit Request') {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'mobile_bill' }));
+      } else if (user.role === 'superadmin' || !!user.can_view_mobile_bill || isHr) {
+        setSelfServiceView('myMobileSim');
+      }
+    };
+    window.addEventListener('credence:open-mobile-bill', onOpen);
+    return () => window.removeEventListener('credence:open-mobile-bill', onOpen);
+  }, [user]);
+  // A Loan / Advance alert (LoanRequestRoutes.ts): one for Payroll to decide
+  // opens Payroll -> Loans & Advances -> Approvals; anything else opens My
+  // Loan / Advance.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isPayroll = user.role === 'superadmin' || (user.module_permissions || []).includes('payroll');
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision)$/.test(title)) {
+        try {
+          sessionStorage.setItem('payroll_tab', 'loans');
+          sessionStorage.setItem('loans_subtab', 'approvals');
+        } catch {
+          // storage unavailable
+        }
+        setSelfServiceView(null);
+        setTimeout(() => setSelfServiceView('payroll'), 0);
+      } else if (user.role === 'superadmin' || !!user.can_view_loan_request) {
+        setSelfServiceView('myLoans');
+      }
+    };
+    window.addEventListener('credence:open-loan', onOpen);
+    return () => window.removeEventListener('credence:open-loan', onOpen);
+  }, [user]);
+  // A salary-sheet alert (PayrollApprovalRoutes.ts) opens Payroll -> Approval.
+  useEffect(() => {
+    const onOpen = () => {
+      if (!user || !(user.role === 'superadmin' || (user.module_permissions || []).includes('payroll'))) return;
+      try {
+        sessionStorage.setItem('payroll_tab', 'approval');
+      } catch {
+        // storage unavailable
+      }
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setSelfServiceView(null);
+      setTimeout(() => setSelfServiceView('payroll'), 0);
+    };
+    window.addEventListener('credence:open-payroll-approval', onOpen);
+    return () => window.removeEventListener('credence:open-payroll-approval', onOpen);
+  }, [user]);
+
   if (!token || !user) {
     return (
       <>
         <AuthScreen onLoginSuccess={handleLoginSuccess} />
+        {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
+        <AppUpdatePrompt />
         {pullToRefreshIndicator}
         {pullToRefreshFullscreenLoader}
         {backToServerBadge}
@@ -562,6 +1155,7 @@ export default function App() {
   // new tab" — it's one WebView — so native keeps the original in-app panel
   // behavior.
   const openChat = () => {
+    if (!chatOn) return;
     if (Capacitor.isNativePlatform()) {
       setSelfServiceView(null);
       setShowProfilePage(false);
@@ -576,6 +1170,7 @@ export default function App() {
   // like the New Leave Application modal, rather than a full-screen takeover
   // or a new browser tab. See showChatPopup's render block below.
   const openChatPopup = () => {
+    if (!chatOn) return;
     setShowChatPopup(true);
   };
 
@@ -593,7 +1188,7 @@ export default function App() {
       case 'jobEdit': return 'jobEdit';
       case 'claim':
       case 'claims': return 'userMovementClaims';
-      case 'conveyanceClaim': return 'userConveyanceClaims';
+      case 'billClaim': return 'userBillClaims';
       case 'leave': return 'leaveApplication';
       case 'timesheet': return 'timesheet';
       case 'employeeDirectory': return 'employeeDirectory';
@@ -602,13 +1197,13 @@ export default function App() {
   };
 
   // mobileActiveSection isn't actually mobile-only for these values — per
-  // UserPanel.tsx's showingClaimsPage, Movement Claim/My Claims/Conveyance
+  // UserPanel.tsx's showingClaimsPage, Check In/Out/My Claims/Conveyance
   // Bill Claim/Leave/Timesheet/Employee Directory/Notice Board show as their
   // OWN page on desktop too, driven by this same state. desktopActiveSection
   // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on
   // desktop these need to be checked first, before falling back to it.
   const CLAIMS_TYPE_SECTIONS = new Set([
-    'claim', 'claims', 'conveyanceClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
+    'claim', 'claims', 'billClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
   ]);
 
   // Which GlobalSidebar item currently matches what's actually on screen —
@@ -621,6 +1216,21 @@ export default function App() {
     if (showAlertsPage) return 'alerts';
     if (showProfilePage) return null;
     if (selfServiceView) return selfServiceView;
+    if (isAdminView && adminActiveTab === 'hr_operations') {
+      const byTab: Record<string, string> = {
+        dashboard: 'hr_operations',
+        actions: 'hr_operations_actions',
+        grievance: 'grievance_disciplinary',
+        service_book: 'hr_operations_service_book',
+        letters: 'hr_operations_letters',
+        onboarding: 'hr_operations_onboarding',
+        increments: 'hr_operations_increments',
+        reports: 'hr_operations_reports',
+        requisitions: 'hr_operations_requisitions',
+        settings: 'hr_operations_settings'
+      };
+      return byTab[hrOpsTab] || 'hr_operations';
+    }
     if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
     if (viewport === 'mobile') return mapUserSectionToSidebarKey(userActiveSection.mobile);
     if (userActiveSection.mobile && CLAIMS_TYPE_SECTIONS.has(userActiveSection.mobile)) {
@@ -661,7 +1271,7 @@ export default function App() {
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
-    onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => {
+    onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -669,15 +1279,15 @@ export default function App() {
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
-    onGoToAdminClaims: (target: 'claims' | 'conveyance') => {
+    onGoToAdminClaims: (target: 'claims' | 'bill_claim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
       setViewMode('admin');
-      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
+      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'billClaim', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'bill_claim'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -685,7 +1295,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -696,7 +1306,7 @@ export default function App() {
         // bottom nav already open, so there's exactly one Leave Application
         // interface regardless of entry point (see leaveNavRequest above and
         // LeaveNavRequest in types.ts). Switches into the User Panel first,
-        // same as onGoToJobsTab/onGoToUserClaims above.
+        // same as onGoToJobsTab/onGoToBillClaims above.
         setSelfServiceView(null);
         setViewMode('user');
         setLeaveNavRequest({ ts: Date.now() });
@@ -717,16 +1327,57 @@ export default function App() {
       setShowChat(false);
       setShowAlertsPage(true);
     },
+    onOpenErp360: openErp360,
   };
 
   return (
     <div
       className="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white"
-      style={{ background: 'var(--g-bg-gradient)', color: 'var(--g-text)' }}
+      style={{ color: 'var(--g-text)' }}
     >
+      {/* A password HR set (e.g. a New Joiner just approved) is replaced
+          before anything else. */}
+      {user.must_change_password && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-center justify-center p-4" role="presentation">
+          <div className="w-full max-w-sm" role="dialog" aria-modal="true" aria-label="Set a new password">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+              <ChangeTempPassword
+                bare
+                token={token}
+                currentLabel="Current password"
+                intro="Welcome! Set a new password only you know before you start."
+                onDone={() =>
+                  setUser((prev) => {
+                    if (!prev) return prev;
+                    const next = { ...prev, must_change_password: false };
+                    localStorage.setItem('mpr_user', JSON.stringify(next));
+                    return next;
+                  })
+                }
+              />
+              <button type="button" onClick={handleLogout} className="mt-3 w-full text-xs font-semibold text-slate-500 hover:text-slate-800">
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
+      {erp360Error && (
+        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
+          <span className="flex-1">{erp360Error}</span>
+          <button type="button" onClick={() => setErp360Error(null)} className="shrink-0 opacity-80 hover:opacity-100" aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+      {erp360Loading && (
+        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-slate-800 text-white text-sm px-4 py-3 shadow-lg">
+          Opening 360 ERP…
+        </div>
+      )}
       <Navbar
         user={user}
         token={token || ''}
@@ -779,12 +1430,12 @@ export default function App() {
           setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
-        onGoToConveyanceBillClaim={() => {
+        onGoToBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
-          setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
+          setClaimsNavRequest({ target: 'billClaim', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
           // Every "Jobs" menu target lives only in the User Panel — the mirror
@@ -827,12 +1478,10 @@ export default function App() {
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
-        onGoToSelfServiceTab={(target) => {
-          setShowProfilePage(false);
-          setShowChat(false);
-          setShowAlertsPage(false);
-          setSelfServiceView(target);
-        }}
+        // Same handler GlobalSidebar uses, so the Alerts bell's "Leave
+        // Application" jump routes into UserPanel's Leave page (a plain
+        // selfServiceView = 'leaveApplication' rendered nothing).
+        onGoToSelfServiceTab={sidebarNavProps.onGoToSelfServiceTab}
         onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
         onOpenProfile={() => {
           setSelfServiceView(null);
@@ -843,6 +1492,11 @@ export default function App() {
         onOpenChat={openChat}
         isChatOpen={showChat}
         onOpenAlerts={sidebarNavProps.onOpenAlerts}
+        // The blended phone header's round Back: the same step as the
+        // phone's own Back button (a page's open popup first, then the page).
+        onPageBack={() => {
+          if (!closeTopmostOrReturnFalse()) pageBackRef.current();
+        }}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
@@ -871,14 +1525,40 @@ export default function App() {
 
         <div className="flex-1 min-w-0 flex flex-col">
       <main className="flex-1">
-        <Suspense fallback={<AppLoader />}>
-        {showChat ? (
+        {/* While a page's code downloads it shows a placeholder at once,
+            never a blank page: the User Dashboard its own layout
+            (UserDashboardSkeleton), HR Operations its page skeleton, any
+            other Admin Panel tab AdminPageSkeleton, Chat / Alerts a list
+            skeleton, every other page the generic loader. An error on a
+            page (or its code failing to download after a deploy) shows a
+            card instead of a white screen (AppErrorBoundary). */}
+        <AppErrorBoundary resetKey={`${isAdminView}|${selfServiceView}|${showChat}|${showAlertsPage}|${showProfilePage}|${adminActiveTab}`}>
+        <Suspense
+          fallback={
+            isAdminView && !showProfilePage && !selfServiceView && !showChat && !showAlertsPage && (adminNavRequest?.target || (adminUrlEnabled() && adminPathToTab(window.location.pathname)) || adminActiveTab) === 'hr_operations' ? (
+              <HrOpsPageSkeleton />
+            ) : showChat || showAlertsPage ? (
+              <ListPageSkeleton />
+            ) : isAdminView && !showProfilePage && !selfServiceView ? (
+              <AdminPageSkeleton />
+            ) : !showProfilePage && !selfServiceView ? (
+              <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
+            ) : (
+              <AppLoader />
+            )
+          }
+        >
+        {showChat && chatOn ? (
           <ChatPanel
             user={user}
             token={token || ''}
             onBack={() => setShowChat(false)}
             initialRoomId={pendingChatRoomId}
             onInitialRoomHandled={() => setPendingChatRoomId(null)}
+            onOpenProfile={() => {
+              setShowChat(false);
+              setShowProfilePage(true);
+            }}
           />
         ) : showAlertsPage ? (
           <AlertsPage
@@ -888,15 +1568,54 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('leaveApplication');
             }}
+            onOpenApproveApplications={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('approveApplications');
+            }}
+            onOpenVehicleManagement={(target) => {
+              setShowAlertsPage(false);
+              requestQuickAccessTab('bookRide', target || 'status');
+              sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
+            }}
+            onOpenBillClaim={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToBillClaims('billClaim');
+            }}
+            onOpenMyAsset={(target) => {
+              setShowAlertsPage(false);
+              requestQuickAccessTab('myAsset', target);
+              sidebarNavProps.onGoToSelfServiceTab('assetManagement');
+            }}
+            onOpenResignation={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('resignation');
+            }}
+            onOpenMyCases={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('myCases');
+            }}
+            canOpenGrievanceAdmin={!!user && (user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary'))}
+            onOpenMyLetters={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('myLetters');
+            }}
+            onOpenHrOperations={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToAdminModule('hr_operations');
+            }}
           />
         ) : showProfilePage ? (
+          <Suspense fallback={<ListPageSkeleton />}>
           <ProfilePage
             user={user}
             token={token || ''}
             photoVersion={photoVersion}
             onBack={() => setShowProfilePage(false)}
             onLogout={handleLogout}
-            onPhotoUpdated={() => setPhotoVersion((v) => v + 1)}
+            onPhotoUpdated={() => {
+              refreshAvatars();
+              setPhotoVersion((v) => v + 1);
+            }}
             onProfileNameUpdated={(fullName) => {
               // Keep the header/sidebar avatar+name (and the cached user in
               // localStorage) in sync immediately after Personal Data is
@@ -909,12 +1628,9 @@ export default function App() {
               });
             }}
           />
-        ) : selfServiceView === 'myLeave' ? (
-          <MyLeave token={token} user={user} onBack={() => setSelfServiceView(null)} />
+          </Suspense>
         ) : selfServiceView === 'leaveManagement' ? (
           <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
-        ) : selfServiceView === 'leaveApprovals' ? (
-          <LeaveApprovals token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'approveApplications' ? (
           <ApproveApplications token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'timesheet' ? (
@@ -923,6 +1639,70 @@ export default function App() {
           <PayrollModule token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'employeeDirectory' ? (
           <EmployeeDirectory token={token} user={user} onBack={() => setSelfServiceView(null)} isActive />
+        ) : selfServiceView === 'resignation' ? (
+          <MyResignation token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'assetManagement' ? (
+          // AssetManagement.tsx now carries its own Leave-Application-style
+          // header/back link (see AssetManagement.tsx's return) — same
+          // component ProfilePage -> Settings -> Asset Management renders,
+          // so the sidebar entry point and the Profile entry point land on
+          // an identical page.
+          <AssetManagement onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myCases' ? (
+          <MyCases token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myTasks' ? (
+          <MyTasks token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myMobileSim' ? (
+          <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myLoans' ? (
+          <MyLoans token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'credenceMail' && canOpenSelfView('credenceMail', user) ? (
+          <CredenceMail token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myRoster' && canOpenSelfView('myRoster', user) ? (
+          <MyRoster token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myBreak' && canOpenSelfView('myBreak', user) ? (
+          <MyBreak token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
+          <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
+        ) : selfServiceView === 'myRequisitions' && canOpenSelfView('myRequisitions', user) ? (
+          <MyRequisitions token={token} userName={user.name} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
+          <MyPayslips token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myTargets' ? (
+          <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myLetters' ? (
+          <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'teamAttendance' ? (
+          <TeamAttendance token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'vehicleManagement' ? (
+          // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
+          // less wrapper pattern as My Asset just above.
+          <div className="w-full min-h-[calc(100vh-4rem)] [background:var(--g-surface-muted)] max-md:[background:transparent]">
+            {/* Web: full content width (map beside the booking panel, Ride Status
+                in two columns) instead of a narrow phone-width column. */}
+            <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
+              {!Capacitor.isNativePlatform() && bookRideWide && <ModulePath path={['Self Service', 'Book a Ride']} />}
+              {/* Phone: the title is in the header (VehicleManagement sets it)
+                  and the phone's Back leaves — no row of its own here. */}
+              <div className={`items-center gap-2 mb-3 ${bookRideWide ? 'flex' : 'hidden'}`}>
+                <button
+                  type="button"
+                  onClick={() => setSelfServiceView(null)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
+                  style={{ color: 'var(--g-text-muted)' }}
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h1 className="text-base font-bold flex items-center gap-2">
+                  <Car className="w-5 h-5 text-blue-600 shrink-0" /> Book a Ride
+                </h1>
+              </div>
+              <VehicleManagement user={user} onBack={() => setSelfServiceView(null)} />
+            </div>
+          </div>
         ) : isAdminView ? (
           <AdminPanel
             token={token}
@@ -930,13 +1710,6 @@ export default function App() {
             claimsNavRequest={claimsNavRequest}
             adminNavRequest={adminNavRequest}
             onActiveTabChange={setAdminActiveTab}
-            // AdminPanel's own mobile drawer (navigating BETWEEN admin tabs
-            // while already inside the Admin Panel) is now superseded by the
-            // single GlobalSidebar above — same tabs are reachable from
-            // there, so this drawer is permanently closed rather than
-            // wired to a second mobile hamburger.
-            mobileSidebarOpen={false}
-            onCloseMobileSidebar={() => {}}
           />
         ) : (
           <>
@@ -948,6 +1721,20 @@ export default function App() {
               dashboardNavRequest={dashboardNavRequest}
               leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
+              onOpenBookRide={(tab) => {
+                requestQuickAccessTab('bookRide', tab);
+                sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
+              }}
+              onOpenMyAsset={(target) => {
+                requestQuickAccessTab('myAsset', target);
+                sidebarNavProps.onGoToSelfServiceTab('assetManagement');
+              }}
+              onOpenSelfService={(target) => {
+                if (target === 'chat') sidebarNavProps.onOpenChat();
+                else if (target === 'alerts') sidebarNavProps.onOpenAlerts();
+                else if (target === 'erp360') sidebarNavProps.onOpenErp360();
+                else sidebarNavProps.onGoToSelfServiceTab(target);
+              }}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
                 User's dashboard, right after they land here post-login. */}
@@ -955,15 +1742,16 @@ export default function App() {
           </>
         )}
         </Suspense>
+        </AppErrorBoundary>
       </main>
 
-      {/* This footer line is web-only — hidden on the Capacitor Android APK
-          build so mobile app users never see it, while the website keeps
-          showing it exactly as before. */}
+      {/* This footer line is desktop-web only — hidden on the Capacitor APK
+          and on phone-width web (mobile browser, iPhone Home Screen) so a
+          phone looks the same everywhere. */}
       {!Capacitor.isNativePlatform() && (
-        <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-text)', color: '#9aa0a6' }}>
+        <footer className="hidden md:block py-6 text-center text-xs" style={{ background: 'var(--g-accent)', color: 'rgba(255,255,255,0.85)' }}>
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
-          <p className="mt-1">&copy; 2026 Credence Housing Limited. All rights reserved.</p>
+          <p className="mt-1" style={{ color: 'rgba(255,255,255,0.65)' }}>&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>
       )}
         </div>
@@ -979,14 +1767,68 @@ export default function App() {
           opens the same place; this is just a second, always-visible way in.
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
-      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+      {chatOn && <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />}
+
+      {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
+          off in Module Access; its buttons open the page an answer is about. */}
+      <Suspense fallback={null}>
+      <AiAssistant
+        token={token || ''}
+        user={user}
+        hidden={showChat || showChatPopup}
+        onNavigate={(nav) => {
+          const [kind, target] = nav.split(':');
+          if (nav === 'home') return sidebarNavProps.onGoToDashboard();
+          if (nav === 'profile') return sidebarNavProps.onOpenProfile();
+          // Profile -> My Service Book (ProfilePage.tsx).
+          if (nav === 'profile:service_book') {
+            try {
+              sessionStorage.setItem('profile_open', 'service_book');
+            } catch {
+              // storage unavailable — the event below still opens it
+            }
+            sidebarNavProps.onOpenProfile();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:profile-open', { detail: 'service_book' })), 0);
+            return;
+          }
+          if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
+          if (kind === 'claims') return sidebarNavProps.onGoToBillClaims(target as 'movementClaims' | 'billClaim');
+          if (kind === 'admin') {
+            if (target === 'claims' || target === 'bill_claim') return sidebarNavProps.onGoToAdminClaims(target);
+            return sidebarNavProps.onGoToAdminModule(target as Parameters<typeof sidebarNavProps.onGoToAdminModule>[0]);
+          }
+          if (kind === 'hrops') {
+            try {
+              sessionStorage.setItem('hr_ops_tab', target);
+            } catch {
+              // storage unavailable — the panel opens on its default tab
+            }
+            sidebarNavProps.onGoToAdminModule('hr_operations');
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: target })), 0);
+          }
+        }}
+      />
+      </Suspense>
+
+      {/* Chat audio/video calls — rings on any page; only for accounts with
+          Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
+
+      {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
+      <AppUpdatePrompt />
+
+      {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
+      {token && user && <WebPushPrompt token={token} userId={user.id} />}
+      {/* Give feedback (More menu) + the 7-day "How do you like the app?" question. */}
+      {token && user && canGiveFeedback(user) && <FeedbackHost key={user.id} token={token} />}
 
       {/* FloatingChatButton's popup — a centered card sized like
           NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
           instead of taking over the whole screen the way showChat above
           does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
           this needs its own close button + backdrop-click-to-close. */}
-      {showChatPopup && user && (
+      {showChatPopup && chatOn && user && (
         <div
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
@@ -1004,7 +1846,7 @@ export default function App() {
             >
               <X className="w-4 h-4" />
             </button>
-            <Suspense fallback={<AppLoader />}>
+            <Suspense fallback={null}>
               <ChatPanel
                 user={user}
                 token={token || ''}

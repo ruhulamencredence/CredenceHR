@@ -16,10 +16,10 @@ interface MyApprovalsBellProps {
 }
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
-  user_claim: 'Conveyance Bill Claim',
+  bill_claim: 'Bill Claim',
   leave: 'Leave Application',
   attendance_correction: 'Timesheet Edit',
-  attendance: 'Attendance/Movement Claim'
+  attendance: 'Attendance/Check In/Out'
 };
 
 // Approver role is loosened company-wide — any logged-in account (including a
@@ -104,7 +104,7 @@ export const MyApprovalsBell: React.FC<MyApprovalsBellProps> = ({ token }) => {
         {count > 0 && (
           <span
             className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-semibold text-white"
-            style={{ background: '#2563eb' }}
+            style={{ background: 'var(--g-info, #2563eb)' }}
           >
             {count > 9 ? '9+' : count}
           </span>
@@ -147,6 +147,7 @@ export const MyApprovalsBell: React.FC<MyApprovalsBellProps> = ({ token }) => {
                   <textarea
                     value={remarksDraft[r.id] || ''}
                     onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    aria-label="Remarks"
                     placeholder="Remarks (optional)"
                     rows={1}
                     className="w-full mt-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"

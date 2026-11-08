@@ -3,33 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ClipboardList, Route, CreditCard, CalendarClock, Clock, ChevronRight } from 'lucide-react';
-import { LeaveApplication, ClaimRecord, UserClaim, AttendanceCorrection } from '../types';
+import { LeaveApplication, ClaimRecord, BillClaim, AttendanceCorrection } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 
 // Which UserPanel section a row opens — same values goToMobileSection takes
 // (these four drive the page on desktop too, not just mobile; see
 // showingClaimsPage in UserPanel.tsx).
-export type MyRequestTarget = 'claim' | 'conveyanceClaim' | 'leave' | 'timesheet';
+export type MyRequestTarget = 'claim' | 'billClaim' | 'leave' | 'timesheet';
 
 interface MyRequestsCardProps {
   token: string;
   // Each source endpoint is module-gated server-side
-  // (requireMovementClaimAccess / requireConveyanceClaimAccess /
+  // (requireMovementClaimAccess / requireBillClaimAccess /
   // requireTimesheetAccess), so a source this account isn't granted is never
   // fetched at all rather than fetched and 403'd. Leave Applications have no
   // such gate — every account can have them — so they're always fetched.
   canSeeMovementClaim: boolean;
-  canSeeConveyanceClaim: boolean;
+  canSeeBillClaim: boolean;
   canSeeTimesheet: boolean;
   onOpen: (target: MyRequestTarget) => void;
   // Applied to this card's own root, for the Dashboard grid's column span.
   className?: string;
 }
 
-// 'open' only ever comes from a Movement Claim — the one source here that
+// 'open' only ever comes from a Check In/Out — the one source here that
 // isn't approval-reviewed at all (see the mapping below).
 type RowStatus = 'pending' | 'approved' | 'rejected' | 'open';
 
@@ -62,10 +63,12 @@ const isWaiting = (status: RowStatus) => status === 'pending' || status === 'ope
 
 // How many rows the card shows before it stops and points at the full pages.
 const MAX_ROWS = 6;
+// Shown instead of "With …" when a request has nobody to approve it yet.
+const NO_APPROVER = 'No approver set yet — tell HR';
 
 // Dashboard "My Requests" — every request this account has submitted, across
-// all four workflows that have one (Leave Application, Movement Claim,
-// Conveyance Bill Claim, Timesheet Correction), in one list with its current
+// all four workflows that have one (Leave Application, Check In/Out,
+// Bill Claim, Timesheet Correction), in one list with its current
 // status. Each of those already has its own page showing its own history;
 // what none of them could answer was the question an employee actually asks
 // ("I submitted things — where are they stuck?"), which meant opening four
@@ -74,7 +77,7 @@ const MAX_ROWS = 6;
 export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
   token,
   canSeeMovementClaim,
-  canSeeConveyanceClaim,
+  canSeeBillClaim,
   canSeeTimesheet,
   onOpen,
   className = ''
@@ -82,6 +85,8 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Live refresh: statuses update without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
 
@@ -103,7 +108,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
       const [leaves, claims, conveyance, corrections] = await Promise.all([
         fetchMine<LeaveApplication>('/api/leave-applications/mine', true),
         fetchMine<ClaimRecord>('/api/claims/mine', canSeeMovementClaim),
-        fetchMine<UserClaim>('/api/user-claims/mine', canSeeConveyanceClaim),
+        fetchMine<BillClaim>('/api/bill-claims/mine', canSeeBillClaim),
         fetchMine<AttendanceCorrection>('/api/attendance/corrections/mine', canSeeTimesheet)
       ]);
       if (cancelled) return;
@@ -126,11 +131,13 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
               ? null
               : a.reliever_status === 'pending'
               ? `Reliever${a.reliever_name ? ` · ${a.reliever_name}` : ''}`
+              : a.no_approver
+              ? NO_APPROVER
               : a.approver_name
               ? `${a.approver_name}${a.total_steps ? ` · Layer ${a.current_step} of ${a.total_steps}` : ''}`
               : null
         })),
-        // Only STILL-OPEN Movement Claims. Unlike the other three, a Movement
+        // Only STILL-OPEN Check In/Out. Unlike the other three, a Movement
         // Claim is never routed through the Approval Chain at all (no
         // approval_requests row is ever created for source_type 'claim' — see
         // POST /api/claims/check-in in server.ts), so a completed one has no
@@ -143,7 +150,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
             key: `claim-${c.id}`,
             target: 'claim' as const,
             icon: Route,
-            title: 'Movement Claim',
+            title: 'Check In/Out',
             detail: `${c.purpose} · not checked out yet`,
             date: c.check_in_at,
             status: 'open' as const,
@@ -151,13 +158,13 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           })),
         ...conveyance.map((c) => ({
           key: `conveyance-${c.id}`,
-          target: 'conveyanceClaim' as const,
+          target: 'billClaim' as const,
           icon: CreditCard,
-          title: 'Conveyance Bill Claim',
+          title: 'Bill Claim',
           detail: `${c.category} · ৳${Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`,
           date: c.claim_date,
           status: c.status,
-          waitingOn: null
+          waitingOn: c.status === 'pending' && c.approval?.no_approver ? NO_APPROVER : null
         })),
         ...corrections.map((c) => ({
           key: `correction-${c.id}`,
@@ -167,7 +174,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
           detail: `For ${formatDate(c.attendance_date)}`,
           date: c.created_at || c.attendance_date,
           status: c.status,
-          waitingOn: c.status === 'pending' ? c.approval?.current_approver_name || null : null
+          waitingOn: c.status === 'pending' ? (c.approval?.no_approver ? NO_APPROVER : c.approval?.current_approver_name || null) : null
         }))
       ];
 
@@ -186,7 +193,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet]);
+  }, [token, canSeeMovementClaim, canSeeBillClaim, canSeeTimesheet, liveTick]);
 
   const waitingCount = rows.filter((r) => isWaiting(r.status)).length;
   const visible = rows.slice(0, MAX_ROWS);
@@ -240,7 +247,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
                   <div className="text-sm font-semibold text-slate-900 truncate">{row.title}</div>
                   <div className="text-xs text-slate-500 truncate mt-0.5">{row.detail}</div>
                   {row.waitingOn && (
-                    <div className="text-[11px] text-amber-700 truncate mt-0.5">With {row.waitingOn}</div>
+                    <div className="text-[11px] text-amber-700 truncate mt-0.5">{row.waitingOn === NO_APPROVER ? NO_APPROVER : `With ${row.waitingOn}`}</div>
                   )}
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">

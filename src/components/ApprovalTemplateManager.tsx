@@ -1,11 +1,15 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import {
-  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil
+  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
 } from 'lucide-react';
-import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
+import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
+import { MultiSelectFilter } from './MultiSelectFilter';
 interface ApprovalTemplateManagerProps {
   token: string;
   user: User;
@@ -13,16 +17,77 @@ interface ApprovalTemplateManagerProps {
 }
 
 const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
-  { key: 'conveyance', label: 'Conveyance Bill Claim' },
+  { key: 'bill_claim', label: 'Bill Claim' },
   { key: 'leave', label: 'Leave Application' },
-  { key: 'timesheet', label: 'Timesheet (Attendance Correction)' }
+  { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
+  { key: 'asset', label: 'Asset Requisition' },
+  { key: 'vehicle', label: 'Vehicle Requisition' },
+  { key: 'mobile', label: 'Mobile Limit Request' },
+  { key: 'loan', label: 'Loan / Advance Request' }
 ];
+
+// Per-Request-Type Layer names — shown instead of the generic "Layer N" so
+// the editor reads like the workflow it was actually speced against (e.g.
+// Asset Requisition's flowchart: Layer 1 = Supervisor Approval, Layer 2 =
+// HR/IT Department Review). A Request Type/index not listed here just falls
+// back to "Layer N", so this is purely additive — every existing template
+// (conveyance/leave/timesheet) keeps its current generic labels.
+const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> = {
+  // Layer 1 = requester's own Supervisor (auto-gate, skipped entirely when
+  // the requester IS their own Supervisor). Layer 2 = HR/Admin's own picked
+  // approvers, who review + decide. Layer 3 = the Store/Inventory
+  // Department's own picked approvers — approving THIS layer is what makes
+  // the requisition 'approved' and hands that same account the actual
+  // hand-over step (Employee Profile -> Asset Management -> "Approved by
+  // Me" — no separate Admin Panel access needed, see wasFinalApprover in
+  // AssetManagementRoutes.ts). A Template only needs Layer 3 configured if
+  // Inventory should also formally sign off before dispatch; a 2-layer
+  // Template still works exactly as before (HR/Admin fulfills directly).
+  asset: { 1: 'Supervisor Approval', 2: 'HR/Admin Review', 3: 'Inventory/Store Disbursement' },
+  // Vehicle Requisition Flowchart v2.0 — "সুপারভাইজার অনুমোদন করেছেন?" then
+  // "HR/Admin রিভিউ (গাড়ির অ্যাভেইলেবিলিটি চেক)": Layer 1 defaults to the
+  // requester's own Supervisor (same auto-gate as Asset), Layer 2 is HR/
+  // Admin's own picked approvers.
+  vehicle: { 1: 'Supervisor Approval', 2: 'HR/Admin Review' },
+  // Mobile Bill limit raise: the requester's Supervisor, then HR.
+  mobile: { 1: 'Supervisor Approval', 2: 'HR Approval' }
+};
+function layerLabel(requestType: ApprovalRequestType, idx: number): string {
+  const named = LAYER_NAMES[requestType]?.[idx + 1];
+  return named || `Layer ${idx + 1}`;
+}
 
 // A step still being edited in the Template modal — approvers kept as plain
 // user_ids here; resolved to names via the `users` prop at render time.
+// approver_type is the "Approver Type" dropdown per Layer: index 0 (Layer 1)
+// may be 'supervisor' — the default, purely virtual position (no approvers
+// picked here at all; the request's real Supervisor, resolved the same way
+// it always has been, fills this slot automatically) — or, like every other
+// Layer, 'employee'/'admin' when explicitly overridden with a picked
+// approver. Only index 0 can ever be 'supervisor'.
 interface StepDraft {
   approver_user_ids: number[];
+  // 'vehicle_maintainer' is only valid on a Vehicle Requisition template's
+  // LAST Layer — reaching it skips the separate Approve step entirely: the
+  // Vehicle Maintainer's own vehicle+driver Assign action both closes the
+  // approval chain and confirms the ride in one step (see PUT
+  // .../approve-and-assign in VehicleManagementRoutes.ts). Enforced
+  // server-side too (validateTemplateSteps in ApprovalRoutes.ts).
+  // 'asset_fulfiller' is the Asset Requisition equivalent: the LAST Layer's
+  // approver fulfills/hands over the items instead of approving (PUT
+  // .../approve-and-fulfill in AssetManagementRoutes.ts).
+  // 'conveyance_disburser': a Conveyance template's LAST Layer pays the claim
+  // out (own Bill + voucher) as it approves (performApprovalAction).
+  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer' | 'asset_fulfiller' | 'conveyance_disburser';
+  // Custom Layer name — empty means "fall back to the generic/position-based
+  // name" (layerLabel() below). Travels WITH this step's own approvers when
+  // dragged/moved, unlike the position-based fallback, so e.g. an Asset
+  // Requisition's "Inventory/Store Disbursement" Layer keeps reading as
+  // Inventory even after being moved earlier in the order.
+  label: string;
 }
+
+const isAdminRole = (role: string) => role === 'admin' || role === 'superadmin';
 
 // Admin Panel -> Approvals -> "Templates" / "Assign to Employees" — Part 2 of
 // the Dynamic Approval Engine. Templates are built here (Superadmin-only to
@@ -33,7 +98,7 @@ interface StepDraft {
 export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = ({ token, user, users }) => {
   const isSuperAdmin = user.role === 'superadmin';
   const [subView, setSubView] = useState<'templates' | 'assign'>('templates');
-  const [requestType, setRequestType] = useState<ApprovalRequestType>('conveyance');
+  const [requestType, setRequestType] = useState<ApprovalRequestType>('bill_claim');
 
   const [templates, setTemplates] = useState<ApprovalTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,10 +108,10 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [showEditor, setShowEditor] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameDraft, setNameDraft] = useState('');
-  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('conveyance');
+  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('bill_claim');
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [isActiveDraft, setIsActiveDraft] = useState(true);
-  const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [] }]);
+  const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
   const [approverSearch, setApproverSearch] = useState<Record<number, string>>({});
   const [openApproverDropdown, setOpenApproverDropdown] = useState<number | null>(null);
   const [dragStepIndex, setDragStepIndex] = useState<number | null>(null);
@@ -58,6 +123,18 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [defaultTemplate, setDefaultTemplate] = useState<{ id: number; name: string } | null>(null);
   const [assignLoading, setAssignLoading] = useState(false);
   const [savingAssignFor, setSavingAssignFor] = useState<number | null>(null);
+  // Assign screen filters (empty = no filter) + the template to give everyone shown
+  const [fDept, setFDept] = useState<string[]>([]);
+  const [fDesig, setFDesig] = useState<string[]>([]);
+  const [fUser, setFUser] = useState<string[]>([]);
+  const [fTemplate, setFTemplate] = useState<string[]>([]);
+  const [bulkTemplate, setBulkTemplate] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Edit/Add layer of Module Access -> Approvals (the server enforces it too)
+  const canAssign = isSuperAdmin || (() => {
+    const saved = user.module_permission_layers?.approvals;
+    return saved && saved.length > 0 ? saved.includes('edit_add') : !EXPLICIT_ONLY_LAYERS.includes('edit_add');
+  })();
 
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
 
@@ -105,7 +182,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     setTypeDraft(requestType);
     setIsDefaultDraft(false);
     setIsActiveDraft(true);
-    setStepsDraft([{ approver_user_ids: [] }]);
+    setStepsDraft([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
     setApproverSearch({});
     setOpenApproverDropdown(null);
     setEditorError(null);
@@ -123,8 +200,23 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       setTypeDraft(data.request_type);
       setIsDefaultDraft(!!data.is_default);
       setIsActiveDraft(!!data.is_active);
+      // Every persisted step is a Layer 2+ (skip_auto_supervisor false) or, once
+      // the Layer 1 override is on (skip_auto_supervisor true), the persisted
+      // steps ARE Layer 1 onward — either way they map straight to StepDrafts.
+      // When the override is off, a virtual "Supervisor" card is prepended so
+      // index 0 always represents Layer 1 in the editor, exactly like create.
+      const persistedSteps: StepDraft[] = (data.steps || []).map((s: ApprovalTemplateStep) => ({
+        approver_user_ids: s.approvers.map((a) => a.user_id),
+        approver_type:
+          ['admin', 'vehicle_maintainer', 'asset_fulfiller', 'conveyance_disburser'].includes((s as any).approver_type) ? (s as any).approver_type : 'employee',
+        label: (s as any).label || ''
+      }));
       setStepsDraft(
-        (data.steps || []).map((s: ApprovalTemplateStep) => ({ approver_user_ids: s.approvers.map((a) => a.user_id) }))
+        data.skip_auto_supervisor
+          ? persistedSteps.length
+            ? persistedSteps
+            : [{ approver_user_ids: [], approver_type: 'employee', label: '' }]
+          : [{ approver_user_ids: [], approver_type: 'supervisor', label: '' }, ...persistedSteps]
       );
       setApproverSearch({});
       setOpenApproverDropdown(null);
@@ -134,10 +226,12 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     }
   };
 
-  const addStep = () => setStepsDraft((prev) => [...prev, { approver_user_ids: [] }]);
+  const addStep = () => setStepsDraft((prev) => [...prev, { approver_user_ids: [], approver_type: 'employee', label: '' }]);
+  const setStepLabel = (stepIdx: number, label: string) =>
+    setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, label } : s)));
   const removeStep = (idx: number) => setStepsDraft((prev) => prev.filter((_, i) => i !== idx));
   const moveStep = (from: number, to: number) => {
-    if (to < 0 || to >= stepsDraft.length) return;
+    if (from === 0 || to === 0 || to < 0 || to >= stepsDraft.length) return;
     setStepsDraft((prev) => {
       const next = [...prev];
       const [moved] = next.splice(from, 1);
@@ -145,6 +239,14 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       return next;
     });
   };
+  // Layer 1's Approver Type: 'supervisor' (default — this Layer stays virtual,
+  // no approvers picked, the employee's real Supervisor fills it automatically
+  // and the external auto-Supervisor gate stays exactly as it is today) or
+  // 'employee'/'admin' (override — Layer 1 becomes a real Layer with its own
+  // picked approver(s), and the auto-Supervisor gate is skipped for requests
+  // on this template). Layers below Layer 1 are never 'supervisor'.
+  const setStepApproverType = (stepIdx: number, type: StepDraft['approver_type']) =>
+    setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, approver_type: type, approver_user_ids: type === 'supervisor' ? [] : s.approver_user_ids } : s)));
   const addApproverToStep = (stepIdx: number, uid: number) => {
     if (!uid) return;
     setStepsDraft((prev) =>
@@ -161,12 +263,37 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     setSaving(true);
     setEditorError(null);
     try {
+      // Layer 1 left as the default 'supervisor' stays virtual — it isn't sent
+      // as a step at all, the external auto-Supervisor gate fills it exactly as
+      // it always has. Overridden to 'employee'/'admin', it IS sent as a real
+      // first step and skip_auto_supervisor tells the backend to skip that gate.
+      const skipAutoSupervisor = stepsDraft[0]?.approver_type !== 'supervisor';
+      const realSteps = skipAutoSupervisor ? stepsDraft : stepsDraft.slice(1);
+      if (realSteps.length === 0) {
+        setEditorError('Layer 1 এ Supervisor রেখে দিলে অন্তত একটি Layer (Layer 2+) যোগ করতে হবে।');
+        setSaving(false);
+        return;
+      }
       const payload = {
         name: nameDraft.trim(),
         request_type: typeDraft,
         is_default: isDefaultDraft,
         is_active: isActiveDraft,
-        steps: stepsDraft.map((s) => ({ approver_user_ids: s.approver_user_ids }))
+        skip_auto_supervisor: skipAutoSupervisor,
+        // 'vehicle_maintainer' is only valid on the LAST Layer (see
+        // validateTemplateSteps in ApprovalRoutes.ts) — a Layer added or
+        // moved after it since it was set no longer qualifies, so it's
+        // downgraded here rather than left to fail the save.
+        steps: realSteps.map((s, i) => ({
+          approver_user_ids: s.approver_user_ids,
+          approver_type:
+            (s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller' || s.approver_type === 'conveyance_disburser') && i !== realSteps.length - 1
+              ? 'employee'
+              : s.approver_type === 'admin' || s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller' || s.approver_type === 'conveyance_disburser'
+                ? s.approver_type
+                : 'employee',
+          label: s.label.trim() || undefined
+        }))
       };
       const url = editingId ? apiUrl(`/api/approval-templates/${editingId}`) : apiUrl('/api/approval-templates');
       const res = await fetch(url, {
@@ -188,7 +315,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Delete this template? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this template? This cannot be undone.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/approval-templates/${id}`), {
         method: 'DELETE',
@@ -252,6 +379,88 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       setMessage({ type: 'error', text: err.message || 'Failed to save this assignment' });
     } finally {
       setSavingAssignFor(null);
+    }
+  };
+
+  const DEFAULT_KEY = '__default';
+  // Each filter only offers what the OTHER filters still leave on screen
+  // (with how many), so a combination can't end in an empty list by accident;
+  // anything already ticked stays in its list so it can be unticked.
+  type FKey = 'dept' | 'desig' | 'user' | 'tpl';
+  const tplKey = (r: any) => (r.assigned_template_id ? String(r.assigned_template_id) : DEFAULT_KEY);
+  const passes = (r: any, skip?: FKey) =>
+    (skip === 'dept' || !fDept.length || fDept.includes((r.department || '').trim())) &&
+    (skip === 'desig' || !fDesig.length || fDesig.includes((r.designation || '').trim())) &&
+    (skip === 'user' || !fUser.length || fUser.includes(String(r.employee_user_id))) &&
+    (skip === 'tpl' || !fTemplate.length || fTemplate.includes(tplKey(r)));
+  const facet = (skip: FKey, keyOf: (r: any) => string, labelOf: (k: string, r: any) => string, keep: string[]) => {
+    const seen = new Map<string, { label: string; count: number }>();
+    for (const r of assignRows) {
+      if (!passes(r, skip)) continue;
+      const k = keyOf(r);
+      if (!k) continue;
+      const cur = seen.get(k);
+      if (cur) cur.count++;
+      else seen.set(k, { label: labelOf(k, r), count: 1 });
+    }
+    for (const k of keep) if (!seen.has(k)) {
+      const r = assignRows.find((x) => keyOf(x) === k);
+      seen.set(k, { label: r ? labelOf(k, r) : k, count: 0 });
+    }
+    return [...seen.entries()].map(([value, v]) => ({ value, label: v.label, count: v.count })).sort((x, y) => x.label.localeCompare(y.label));
+  };
+  const deptOptions = facet('dept', (r) => (r.department || '').trim(), (k) => k, fDept);
+  const desigOptions = facet('desig', (r) => (r.designation || '').trim(), (k) => k, []);
+  const userOptions = facet('user', (r) => String(r.employee_user_id), (_k, r) => [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · '), []);
+  const templateFilterOptions = facet(
+    'tpl',
+    tplKey,
+    (k) => (k === DEFAULT_KEY ? 'Using the default' : templates.find((t) => String(t.id) === k)?.name || `Template #${k}`),
+    fTemplate
+  );
+  const shownRows = assignRows.filter((r) => passes(r));
+  // Department -> Designation -> User narrow each other: picking a Department
+  // drops ticked Designations / Users outside it, so the User list (and the
+  // table) only ever holds people of the chosen Departments.
+  const inDept = (r: any) => !fDept.length || fDept.includes((r.department || '').trim());
+  const inDesig = (r: any) => !fDesig.length || fDesig.includes((r.designation || '').trim());
+  useEffect(() => {
+    setFDesig((cur) => {
+      const next = cur.filter((v) => assignRows.some((r) => inDept(r) && (r.designation || '').trim() === v));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, assignRows]);
+  useEffect(() => {
+    setFUser((cur) => {
+      const next = cur.filter((id) => assignRows.some((r) => String(r.employee_user_id) === id && inDept(r) && inDesig(r)));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, fDesig, assignRows]);
+  const anyFilter = fDept.length + fDesig.length + fUser.length + fTemplate.length > 0;
+  const clearFilters = () => { setFDept([]); setFDesig([]); setFUser([]); setFTemplate([]); };
+
+  const handleBulkAssign = async () => {
+    if (!shownRows.length) return;
+    const tpl = templates.find((t) => String(t.id) === bulkTemplate);
+    const what = tpl ? `the template “${tpl.name}”` : 'the default template';
+    if (!(await confirmDialog(`Assign ${what} to ${shownRows.length} employee${shownRows.length === 1 ? '' : 's'} for ${REQUEST_TYPES.find((r) => r.key === requestType)?.label}?`))) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch(apiUrl('/api/template-assignments/bulk'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ employee_user_ids: shownRows.map((r) => r.employee_user_id), request_type: requestType, template_id: bulkTemplate ? Number(bulkTemplate) : null })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to assign');
+      setMessage({ type: 'success', text: `${data.updated} employee${data.updated === 1 ? '' : 's'} assigned.` });
+      fetchAssignments();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to assign' });
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -330,9 +539,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       {subView === 'templates' && (
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="p-10 flex justify-center">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : templates.length === 0 ? (
             <div className="p-10 text-center text-sm text-slate-400">
               No templates yet for {REQUEST_TYPES.find((r) => r.key === requestType)?.label}.
@@ -435,10 +642,43 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               </span>
             )}
           </div>
-          {assignLoading ? (
-            <div className="p-10 flex justify-center">
-              <Spinner size={20} className="text-slate-400" />
+          {!assignLoading && (
+            <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
+              <MultiSelectFilter label="Department" options={deptOptions} selected={fDept} onChange={setFDept} />
+              <MultiSelectFilter label="Designation" options={desigOptions} selected={fDesig} onChange={setFDesig} />
+              <MultiSelectFilter label="User" options={userOptions} selected={fUser} onChange={setFUser} width={360} />
+              <MultiSelectFilter label="Template" options={templateFilterOptions} selected={fTemplate} onChange={setFTemplate} />
+              {anyFilter && (
+                <button type="button" onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:underline">Clear filters</button>
+              )}
+              <span className="text-[11px] text-slate-500 ml-auto">Showing {shownRows.length} of {assignRows.length}</span>
             </div>
+          )}
+          {!assignLoading && canAssign && (
+            <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-600">Give everyone shown:</span>
+              <SearchSelect
+                value={bulkTemplate}
+                onChange={(e) => setBulkTemplate(e.target.value)}
+                className="w-64 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <option value="">{defaultTemplate ? `Use default (${defaultTemplate.name})` : 'Use default (none — auto-approve)'}</option>
+                {templates.filter((t) => t.is_active).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </SearchSelect>
+              <button
+                type="button"
+                onClick={handleBulkAssign}
+                disabled={bulkBusy || shownRows.length === 0}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> {bulkBusy ? 'Assigning…' : `Assign (${shownRows.length})`}
+              </button>
+            </div>
+          )}
+          {assignLoading ? (
+            <LoadingBlock />
           ) : (
             <table className="w-full text-sm mt-2">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
@@ -448,14 +688,34 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {assignRows.map((row) => (
+                {shownRows.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-14 text-center">
+                      <Users2 className="w-8 h-8 mx-auto text-slate-300" />
+                      <div className="mt-2 text-sm font-semibold text-slate-700">
+                        {assignRows.length === 0 ? 'No employee accounts yet' : 'No employee matches these filters'}
+                      </div>
+                      {anyFilter && (
+                        <>
+                          <div className="mt-1 text-xs text-slate-500">Change a filter above, or show everyone again.</div>
+                          <button type="button" onClick={clearFilters} className="mt-3 px-4 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+                            Clear filters
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {shownRows.map((row) => (
                   <tr key={row.employee_user_id} className="hover:bg-slate-50/60">
                     <td className="px-4 py-3">
                       <div className="font-medium text-slate-900">{row.employee_name}</div>
-                      <div className="text-[11px] text-slate-500">{row.employee_role}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {[row.employee_role, row.employee_code, row.designation, row.department].filter(Boolean).join(' · ')}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <select
+                      <SearchSelect
                         value={row.assigned_template_id || ''}
                         disabled={savingAssignFor === row.employee_user_id}
                         onChange={(e) => handleAssignChange(row.employee_user_id, e.target.value)}
@@ -471,7 +731,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               {t.name}
                             </option>
                           ))}
-                      </select>
+                      </SearchSelect>
                     </td>
                   </tr>
                 ))}
@@ -490,7 +750,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 <h3 className="text-base font-bold text-slate-900">{editingId ? 'Edit Template' : 'New Template'}</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Layer 1 is checked first; once ANY ONE of a Layer's approvers approves, the request moves to
-                  the next Layer.
+                  the next Layer. Layer 1's Approver Type defaults to Supervisor — the employee's own
+                  Supervisor, resolved automatically as always — unless overridden below.
                 </p>
               </div>
               <button
@@ -544,93 +805,224 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-600 block">Layers</label>
-                {stepsDraft.map((step, idx) => (
-                  <div
-                    key={idx}
-                    draggable
-                    onDragStart={() => setDragStepIndex(idx)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragStepIndex !== null && dragStepIndex !== idx) moveStep(dragStepIndex, idx);
-                      setDragStepIndex(null);
-                    }}
-                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <GripVertical className="w-4 h-4 text-slate-300 shrink-0 cursor-move" />
-                      <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-700">Layer {idx + 1}</span>
-                      {stepsDraft.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeStep(idx)}
-                          className="ml-auto p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                {stepsDraft.map((step, idx) => {
+                  const isVirtualSupervisor = idx === 0 && step.approver_type === 'supervisor';
+                  const pickerUsers = activePeople(
+                    step.approver_type === 'admin' ? users.filter((u) => isAdminRole(u.role)) : users,
+                    ...step.approver_user_ids
+                  );
+                  const isLastLayer = idx === stepsDraft.length - 1;
+                  return (
+                    <div
+                      key={idx}
+                      draggable={idx > 0}
+                      onDragStart={() => idx > 0 && setDragStepIndex(idx)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (idx > 0 && dragStepIndex !== null && dragStepIndex !== idx) moveStep(dragStepIndex, idx);
+                        setDragStepIndex(null);
+                      }}
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <GripVertical className={`w-4 h-4 shrink-0 hidden sm:block ${idx > 0 ? 'text-slate-300 cursor-move' : 'text-slate-200'}`} />
+                        {/* Up/Down move buttons — the drag handle above only
+                            works with a mouse (native HTML5 drag-and-drop
+                            doesn't fire on touch), so this is the reliable way
+                            to reorder Layers on mobile; kept visible on
+                            desktop too as a precise alternative to dragging. */}
+                        {idx > 0 && (
+                          <div className="flex flex-col shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveStep(idx, idx - 1)}
+                              disabled={idx === 1}
+                              title="Move up"
+                              aria-label="Move layer up"
+                              className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveStep(idx, idx + 1)}
+                              disabled={idx === stepsDraft.length - 1}
+                              title="Move down"
+                              aria-label="Move layer down"
+                              className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        {isVirtualSupervisor ? (
+                          <span className="text-xs font-semibold text-slate-700">{layerLabel(typeDraft, idx)}</span>
+                        ) : (
+                          <input
+                            type="text"
+                            value={step.label}
+                            onChange={(e) => setStepLabel(idx, e.target.value)}
+                            placeholder={layerLabel(typeDraft, idx)}
+                            title="Custom Layer name — stays with this Layer's approvers even after it's moved/reordered"
+                            className="text-xs font-semibold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-0.5 w-40"
+                          />
+                        )}
+                        {step.approver_type !== 'vehicle_maintainer' && step.approver_type !== 'asset_fulfiller' && step.approver_type !== 'conveyance_disburser' && (
+                          <select
+                            value={step.approver_type}
+                            onChange={(e) => setStepApproverType(idx, e.target.value as any)}
+                            className="text-[11px] px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            {idx === 0 && <option value="supervisor">Supervisor</option>}
+                            <option value="employee">Employee</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        )}
+                        {idx > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => removeStep(idx)}
+                            className="ml-auto p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isVirtualSupervisor ? (
+                        <p className="text-[11px] text-slate-500 pl-7">
+                          Automatically routes to this employee's own Supervisor — no manual pick needed. Switch
+                          Approver Type above to Employee or Admin to set someone specific instead (this will
+                          skip the automatic Supervisor for requests on this template).
+                        </p>
+                      ) : (
+                        <>
+                          {typeDraft === 'vehicle' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'vehicle_maintainer'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'vehicle_maintainer' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Vehicle Maintainer (Ride Bypass)</span> — the
+                                employees picked here get Vehicle Maintainer access automatically, and instead of
+                                Approve/Reject they assign the vehicle &amp; driver, which approves and confirms the ride
+                                in one step.
+                              </span>
+                            </label>
+                          )}
+                          {typeDraft === 'asset' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'asset_fulfiller'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'asset_fulfiller' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Asset Fulfiller (Hand Over)</span> — the
+                                people picked here get an alert when a requisition reaches this Layer, and on Pending
+                                Approvals they get <span className="font-semibold">Fulfill &amp; Hand Over</span> instead of
+                                Approve/Reject: they type what they're handing over, the employee is notified to confirm
+                                it in My Asset, or report an issue if something is wrong.
+                              </span>
+                            </label>
+                          )}
+                          {typeDraft === 'bill_claim' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'conveyance_disburser'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'conveyance_disburser' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Conveyance Disburser (Pay Out)</span> — the
+                                people picked here get an alert when a claim reaches this Layer, and on Pending Approvals
+                                they get <span className="font-semibold">Disburse</span> instead of Approve: the claim is
+                                approved, put on its own Bill and marked paid with a voucher number in one step, and the
+                                employee is told it has been disbursed.
+                              </span>
+                            </label>
+                          )}
+                          <div className="flex flex-wrap gap-1.5 pl-7">
+                            {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
+                            {step.approver_user_ids.map((uid) => (
+                              <span
+                                key={uid}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium pl-2.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-slate-700"
+                              >
+                                {userMap.get(uid)?.name || `User #${uid}`}
+                                <button type="button" onClick={() => removeApproverFromStep(idx, uid)} className="p-0.5 hover:text-rose-600">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="relative pl-7">
+                            <input
+                              type="text"
+                              value={approverSearch[idx] || ''}
+                              onChange={(e) => {
+                                setApproverSearch((prev) => ({ ...prev, [idx]: e.target.value }));
+                                setOpenApproverDropdown(idx);
+                              }}
+                              onFocus={() => setOpenApproverDropdown(idx)}
+                              onBlur={() => setTimeout(() => setOpenApproverDropdown((cur) => (cur === idx ? null : cur)), 150)}
+                              placeholder={
+                                step.approver_type === 'admin'
+                                  ? 'Search an Admin/Superadmin by name to add as approver…'
+                                  : step.approver_type === 'vehicle_maintainer'
+                                    ? 'Search a Vehicle Maintainer by name to add as approver…'
+                                    : step.approver_type === 'asset_fulfiller'
+                                      ? 'Search who hands over the assets (store/inventory) by name…'
+                                    : step.approver_type === 'conveyance_disburser'
+                                      ? 'Search who pays out conveyance (accounts/cash) by name…'
+                                    : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
+                              }
+                              className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            />
+                            {openApproverDropdown === idx && (() => {
+                              const q = (approverSearch[idx] || '').trim().toLowerCase();
+                              const matches = pickerUsers
+                                .filter((u) => !step.approver_user_ids.includes(u.id))
+                                .filter((u) => !q || u.name.toLowerCase().includes(q))
+                                .slice(0, 30);
+                              return (
+                                <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+                                  {matches.length === 0 ? (
+                                    <div className="px-3 py-2 text-xs text-slate-400">
+                                      No matching {step.approver_type === 'admin' ? 'Admin' : step.approver_type === 'vehicle_maintainer' ? 'Vehicle Maintainer' : 'employee'} found.
+                                    </div>
+                                  ) : (
+                                    matches.map((u) => (
+                                      <button
+                                        key={u.id}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => addApproverToStep(idx, u.id)}
+                                        className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 hover:bg-blue-50 text-slate-700"
+                                      >
+                                        <span className="font-medium">{u.name}</span>
+                                        <span className="text-slate-400">{u.role}</span>
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </>
                       )}
                     </div>
-
-                    <div className="flex flex-wrap gap-1.5 pl-7">
-                      {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
-                      {step.approver_user_ids.map((uid) => (
-                        <span
-                          key={uid}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium pl-2.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-slate-700"
-                        >
-                          {userMap.get(uid)?.name || `User #${uid}`}
-                          <button type="button" onClick={() => removeApproverFromStep(idx, uid)} className="p-0.5 hover:text-rose-600">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="relative pl-7">
-                      <input
-                        type="text"
-                        value={approverSearch[idx] || ''}
-                        onChange={(e) => {
-                          setApproverSearch((prev) => ({ ...prev, [idx]: e.target.value }));
-                          setOpenApproverDropdown(idx);
-                        }}
-                        onFocus={() => setOpenApproverDropdown(idx)}
-                        onBlur={() => setTimeout(() => setOpenApproverDropdown((cur) => (cur === idx ? null : cur)), 150)}
-                        placeholder="Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…"
-                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      />
-                      {openApproverDropdown === idx && (() => {
-                        const q = (approverSearch[idx] || '').trim().toLowerCase();
-                        const matches = users
-                          .filter((u) => !step.approver_user_ids.includes(u.id))
-                          .filter((u) => !q || u.name.toLowerCase().includes(q))
-                          .slice(0, 30);
-                        return (
-                          <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
-                            {matches.length === 0 ? (
-                              <div className="px-3 py-2 text-xs text-slate-400">No matching employee found.</div>
-                            ) : (
-                              matches.map((u) => (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => addApproverToStep(idx, u.id)}
-                                  className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 hover:bg-blue-50 text-slate-700"
-                                >
-                                  <span className="font-medium">{u.name}</span>
-                                  <span className="text-slate-400">{u.role}</span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <button
                   type="button"

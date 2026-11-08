@@ -1,6 +1,7 @@
 import React from 'react';
-import { Lottie } from 'lottie-react';
-import authHeroAnimation from '../assets/auth-hero.json';
+import { Lottie, useLottieJson } from './LazyLottie';
+// Fetched by itself when the login screen shows (not with the app's code).
+const loadAuthHero = () => import('../assets/office-illustration.json');
 
 // Split out from AuthScreen.tsx and loaded via React.lazy() there so the
 // (fairly heavy) lottie-react library + this JSON animation are their own
@@ -8,8 +9,9 @@ import authHeroAnimation from '../assets/auth-hero.json';
 // instead of blocking the very first paint the boot spinner is covering for.
 // Purely decorative, so a brief blank box while this chunk loads (see the
 // Suspense fallback in AuthScreen.tsx) is not a problem.
-const AuthHeroLottie: React.FC<{ className?: string }> = ({ className }) => (
-  <Lottie src={authHeroAnimation} autoplay loop className={className} />
-);
+const AuthHeroLottie: React.FC<{ className?: string }> = ({ className }) => {
+  const authHeroAnimation = useLottieJson(loadAuthHero);
+  return authHeroAnimation ? <Lottie src={authHeroAnimation} autoplay loop className={className} /> : <span className={className} />;
+};
 
 export default AuthHeroLottie;

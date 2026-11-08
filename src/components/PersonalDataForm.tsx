@@ -7,6 +7,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Camera, User as UserIcon, Briefcase, Building2, MapPin, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { PhotoRulesSheet } from './PhotoRulesSheet';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PersonalDataFormProps {
   token: string;
@@ -32,12 +35,17 @@ interface PersonalData {
   has_photo: boolean;
   position: string | null;
   department: string | null;
+  // A new photo waiting for the Superadmin's approval, and the last refusal.
+  photo_pending?: { id: number; requested_at: string } | null;
+  photo_rejected?: { reason: string | null; decided_at: string } | null;
+  // False for the Superadmin (and a joiner in onboarding): their photo goes straight in.
+  photo_needs_approval?: boolean;
 }
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 // Converts a File to a base64 string (no "data:...;base64," prefix), the same
-// FileReader -> base64 approach already used for Conveyance Bill Claim
+// FileReader -> base64 approach already used for Bill Claim
 // attachments and Budget Excel imports elsewhere in this app.
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -62,6 +70,10 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // The new photo while it waits for the Superadmin (the old one stays shown).
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  // The photo rules (PhotoRulesSheet) come before picking a photo that needs approval.
+  const [rulesOpen, setRulesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlRef = useRef<string | null>(null);
 
@@ -82,8 +94,8 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
 
   const loadPhoto = async () => {
     try {
-      const res = await fetch(apiUrl('/api/profile/photo'), { headers: authHeaders });
-      if (!res.ok) return;
+      const res = await fetch(apiUrl('/api/profile/photo'), { headers: authHeaders, cache: 'no-store' });
+      if (!res.ok || res.status === 204) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -106,6 +118,10 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
         if (cancelled) return;
         setData(json);
         if (json.has_photo) await loadPhoto();
+        if (json.photo_pending) {
+          const pr = await fetch(apiUrl('/api/profile/photo/pending'), { headers: authHeaders, cache: 'no-store' }).catch(() => null);
+          if (pr && pr.ok && pr.status !== 204 && !cancelled) setPendingUrl(URL.createObjectURL(await pr.blob()));
+        }
       } catch (err: any) {
         if (!cancelled) setError(err.message || 'Could not load your Personal Data.');
       } finally {
@@ -119,12 +135,14 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handlePhotoPick = () => fileInputRef.current?.click();
+  const handlePhotoPick = () => (data.photo_needs_approval ? setRulesOpen(true) : fileInputRef.current?.click());
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (file) await handleFile(file);
+  };
+  const handleFile = async (file: File) => {
     setError(null);
 
     if (!/^image\/(jpeg|jpg|png)$/i.test(file.type)) {
@@ -147,6 +165,12 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Could not upload the photo.');
 
+      if (json.pending) {
+        // Waits for the Superadmin: the current photo stays, the new one is shown apart.
+        setPendingUrl(URL.createObjectURL(file));
+        setData((prev) => ({ ...prev, photo_pending: { id: json.id, requested_at: new Date().toISOString() }, photo_rejected: null }));
+        return;
+      }
       // Show the picked file immediately rather than waiting on a round-trip
       // GET — same instant-preview approach as elsewhere in the app.
       const localUrl = URL.createObjectURL(file);
@@ -159,6 +183,18 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
       setError(err.message || 'Could not upload the photo.');
     } finally {
       setUploadingPhoto(false);
+    }
+  };
+
+  const cancelPending = async () => {
+    if (!(await confirmDialog('Cancel the new photo you sent for approval? Your current photo stays.'))) return;
+    try {
+      const res = await fetch(apiUrl('/api/profile/photo/pending'), { method: 'DELETE', headers: authHeaders });
+      if (!res.ok) throw new Error('Could not cancel it.');
+      setPendingUrl(null);
+      setData((prev) => ({ ...prev, photo_pending: null }));
+    } catch (err: any) {
+      setError(err.message || 'Could not cancel it.');
     }
   };
 
@@ -221,9 +257,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Spinner size={28} />
-          </div>
+          <LoadingBlock />
         ) : (
           /* One column on a phone; the two sections sit side by side from md
              up, where stacking them left the right half of the page empty.
@@ -280,6 +314,42 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                 <p className="text-[11px] text-center mt-0.5" style={{ color: 'var(--g-text-muted)' }}>
                   JPEG or PNG, at least 800×800px and less than 5MB
                 </p>
+                {data.photo_needs_approval && (
+                  <button
+                    type="button"
+                    onClick={() => setRulesOpen(true)}
+                    className="mt-2 inline-block rounded-2xl px-3 py-1.5 text-[11.5px] font-semibold leading-snug text-center border"
+                    // Blue on purpose, as fixed colours: the app theme recolours Tailwind's blue.
+                    style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
+                  >
+                    New photo shows after Superadmin approval · <u className="font-bold whitespace-nowrap">Photo rules</u>
+                  </button>
+                )}
+                <PhotoRulesSheet
+                  open={rulesOpen}
+                  onClose={() => setRulesOpen(false)}
+                  onPick={(f) => {
+                    setRulesOpen(false);
+                    void handleFile(f);
+                  }}
+                />
+                {data.photo_pending && (
+                  <div className="mt-3 w-full max-w-xs flex items-center gap-3 rounded-2xl px-3 py-2.5 bg-amber-50 border border-amber-200">
+                    {pendingUrl && <img src={pendingUrl} alt="New photo waiting for approval" className="w-12 h-12 rounded-full object-cover shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-amber-900">New photo waiting for approval</p>
+                      <p className="text-[11px] text-amber-800">The Superadmin will check it; your current photo stays until then.</p>
+                      <button type="button" onClick={() => void cancelPending()} className="text-[11px] font-semibold text-amber-900 underline mt-0.5">
+                        Cancel request
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!data.photo_pending && data.photo_rejected && (
+                  <p className="mt-3 w-full max-w-xs text-[11px] rounded-2xl px-3 py-2 bg-rose-50 border border-rose-200 text-rose-800">
+                    Your last new photo was not approved{data.photo_rejected.reason ? `: ${data.photo_rejected.reason}` : ''}. You can upload another one.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -293,7 +363,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                     placeholder="First Name"
                   />
                 </Field>
-                <Field label="Last Name" icon={<UserIcon className="w-4 h-4" />}>
+                <Field label="Last Name (optional)" icon={<UserIcon className="w-4 h-4" />}>
                   <input
                     type="text"
                     value={data.last_name}
@@ -384,7 +454,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                   type="submit"
                   disabled={saving}
                   className="w-full md:w-auto md:px-12 py-3 rounded-full text-white text-sm font-semibold shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
-                  style={{ background: 'linear-gradient(90deg, #7F00FF, #6300C6)' }}
+                  style={{ background: 'linear-gradient(90deg, var(--g-accent, #7F00FF), var(--g-accent-hover, #6300C6))' }}
                 >
                   {saving && <Spinner size={16} className="text-white" />}
                   Update

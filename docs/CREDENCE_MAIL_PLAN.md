@@ -1,0 +1,204 @@
+# Credence Mail → CredenceHR: একত্র করার পরিকল্পনা
+
+**উৎস:** https://github.com/ruhulamencredence/credence-mail (commit `df9f376`)
+**লক্ষ্য:** Mail-এর জন্য আলাদা কোনো app লাগবে না। "Credence Mail" CredenceHR-এর ভেতরেই একটা module হিসেবে চলবে, Ollama AI বাদে বাকি সব ফিচার নিয়ে।
+
+---
+
+## ১. Credence Mail-এ এখন কী আছে
+
+| বিষয় | বিবরণ |
+|---|---|
+| প্রযুক্তি | React 19 + Express + MySQL (mysql2) + Tailwind 4। CredenceHR-এর সাথে মেলে। |
+| Mail server | cPanel `credencehousinglimited.com`। IMAP 993 দিয়ে পড়া, SMTP 465 দিয়ে পাঠানো। Gmail, Outlook, Yahoo, Zoho-র preset-ও আছে। |
+| Package | `imapflow`, `mailparser`, `nodemailer`, `dompurify`, `recharts`, `motion`, `lucide-react` |
+| আকার | প্রায় ৯,০০০ লাইন। server ~২,২০০, App.tsx ~১,২০০, component ১০টা। |
+
+**ফিচার:**
+- **Mail:** Inbox, Sent, Draft, Spam, Trash, Starred / Important, label আর category। mail পড়া, খোঁজা, পড়া / না-পড়া, একসাথে অনেকগুলোর কাজ (batch), মুছে ফেলা।
+- **লেখা:** Compose, Reply / Forward, attachment, draft রাখা, নির্দিষ্ট সময়ে পাঠানো।
+- **Signature:** ছবি / logo সহ HTML।
+- **ব্যবস্থাপনা:** Template, Filter / Rules, Contacts, Task, Calendar event।
+- **Settings:** vacation responder, blocked senders, layout, ভাষা, timezone।
+- **Analytics:** mail-এর হিসাব আর chart।
+- **Live notification:** নতুন mail এলে সাথে সাথে জানানো।
+- **Sync:** প্রতি ৩০ সেকেন্ডে background sync, প্রতিটা mailbox-এর জন্য সারাক্ষণ খোলা IMAP সংযোগ (IDLE), প্রতি মিনিটে schedule করা mail পাঠানো।
+
+**যা আনা হবে না:** `server-ai.ts` আর এর সব `/api/ai/*` route (smart reply, compose, summary, tone, grammar, translate, categorize, reply draft, template generation)। এগুলো Ollama দিয়ে চলে। UI-র AI বোতামগুলোও বাদ যাবে।
+
+---
+
+## ২. যে সমস্যাগুলো পাওয়া গেছে (আনার সময় ঠিক করা হবে)
+
+1. **অন্যের mail পড়া যায়:** `GET /api/emails?account=<অন্য email>`-এ শুধু দেখা হয় account-টা আছে কিনা, সেটা নিজের কিনা দেখা হয় না। তাই login করা যে কেউ অন্যের inbox পড়তে পারে।
+2. **Encryption key দুর্বল:** `.env`-এ `ENCRYPTION_KEY` না থাকলে code-এ লেখা একটা ডিফল্ট key দিয়ে mail password encrypt হয়। Repo public, তাই সেই key সবাই দেখতে পায়।
+3. **দুর্বল hash:** login-এর password hash-এ একটা নির্দিষ্ট salt দেওয়া SHA-256 ব্যবহার হয়েছে। CredenceHR-এ এর দরকারই পড়বে না, কারণ CredenceHR-এর নিজের login থাকবে।
+4. **`requireAuth` অব্যবহৃত:** লেখা আছে কিন্তু কোথাও ব্যবহার হয়নি। প্রতিটা route নিজে token দেখে, ফলে কোথাও ভুলের সুযোগ থাকে।
+5. **১৫০০ জনের জন্য টিকবে না:**
+   - প্রতিটা mailbox-এর জন্য সারাক্ষণ একটা IMAP সংযোগ খোলা থাকে।
+   - প্রতি ৩০ সেকেন্ডে সবার mail sync হয়।
+   - cPanel (Dovecot) এক IP থেকে এত সংযোগ সাধারণত আটকে দেয়।
+6. **PM2 cluster-এ চলবে না:** SSE live notification প্রতিটা process-এর নিজের memory-তে থাকে। Session-ও memory-তে থাকে।
+7. **ডিস্কে ফাইল:** Signature logo `uploads/` ফোল্ডারে রাখা হয়।
+8. **নাম মিলে যায়:** `tasks`, `events`, `settings`, `accounts`, `sessions` নামের table। CredenceHR-এ `tasks` নামে table আগে থেকেই আছে।
+
+---
+
+## ৩. CredenceHR-এ কীভাবে বসবে
+
+### Login আর mailbox যুক্ত করা
+- Credence Mail-এর আলাদা login বা session থাকবে না। CredenceHR-এর login (JWT, `authenticateToken`) দিয়েই চলবে।
+- প্রথমবার Credence Mail খুললে **"আপনার mailbox যুক্ত করুন"** আসবে। email আর password দিলে IMAP দিয়ে যাচাই হবে, তারপর encrypt করে রাখা হবে।
+- Password AES-256-GCM দিয়ে encrypt হবে। Key আসবে `.env`-এর `MAIL_ENCRYPTION_KEY` থেকে।
+  - Key না থাকলে mailbox যুক্ত করা বন্ধ থাকবে, আর পরিষ্কার error দেখাবে। কোনো ডিফল্ট key থাকবে না।
+- প্রতিটা mailbox CredenceHR-এর একজন user-এর (`users.id`)। একজন একাধিক mailbox যুক্ত করতে পারবেন।
+- প্রতিটা query user দিয়ে ছাঁকা হবে। অন্যের mailbox কোনোভাবেই দেখা যাবে না।
+
+### অনুমতি (CLAUDE.md-এর নিয়ম অনুযায়ী)
+- **Self Service feature:** `users.can_use_mail` switch।
+  - শুরুতে বন্ধ থাকবে।
+  - চালু হবে Admin Panel → Users → Module Access থেকে।
+  - Superadmin-এর সবসময় চালু।
+- প্রতিটা `/api/mail/*` route এই switch দেখবে, আর menu-র "Credence Mail" শুধু তখনই দেখা যাবে।
+
+### Database (সব table-এর নাম `mail_` দিয়ে শুরু)
+| table | কাজ |
+|---|---|
+| `mail_accounts` | user_id, email, provider, IMAP / SMTP host-port, encrypt করা password, শেষ sync-এর সময় |
+| `mail_messages` | user_id, account_id, IMAP UID / folder, thread, from / to / cc, subject, body, snippet, তারিখ, flag, label, category, attachment-এর তথ্য |
+| `mail_attachments` | message_id, নাম, ধরন, আকার, ডেটা (দরকার হলে IMAP থেকে আনা) |
+| `mail_drafts` / `mail_scheduled` | draft আর পরে পাঠানোর জন্য রাখা mail |
+| `mail_templates`, `mail_filters`, `mail_contacts`, `mail_tasks`, `mail_events` | user ধরে |
+| `mail_settings` | প্রতি user-এর signature, vacation responder, blocked senders, layout, ভাষা, timezone |
+| `mail_signature_images` | signature logo, ডিস্কের বদলে database-এ |
+
+- table তৈরি হবে CredenceHR-এর বিদ্যমান migration পদ্ধতিতে (`ensure…Schema`)। `memoryDbFallback.ts`-এও যোগ হবে।
+- Index থাকবে (user_id, account_id, folder, date)। তালিকা আসবে পাতা ধরে।
+
+### Sync (১৫০০ জনের উপযোগী)
+- **খোলা সংযোগ:** IMAP সংযোগ খোলা থাকবে শুধু যিনি এখন Credence Mail-এ online আছেন, তাঁর জন্য (Socket.IO দিয়ে বোঝা যাবে)। চলে গেলে কয়েক মিনিট পর বন্ধ হবে।
+- **বাকিরা:** তাঁদের mail sync হবে Credence Mail খুললে বা refresh চাপলে।
+- **একসাথে সংযোগের সীমা:** পুরো server থেকে একসাথে সর্বোচ্চ কতটা IMAP সংযোগ খুলবে, সেটা Settings-এ ঠিক করা যাবে।
+- **Background কাজ:** schedule করা mail পাঠানো আর vacation responder-এর মতো কাজ `jobRunner.ts` দিয়ে শুধু একটা worker-এ চলবে।
+- **Notification:** নতুন mail এলে CredenceHR-এর Socket.IO দিয়ে `user:<id>`-কে জানানো হবে। এটা cluster আর Redis-এ কাজ করে।
+  - Alert ঘণ্টাতেও দেখাতে চাইলে `createAlert` ব্যবহার হবে, তবে সেটা ঐচ্ছিক।
+
+### Screen
+- **কোথায় থাকবে:** CredenceHR-এর Self Service menu-তে "Credence Mail"।
+- **Layout:**
+  - ডেস্কটপে তিন ভাগ: ফোল্ডার, তালিকা, mail।
+  - মোবাইলে এক ভাগ করে দেখাবে।
+  - Capacitor app-এ চলবে।
+- **CredenceHR-এর নিয়ম অনুযায়ী:**
+  - সব popup liquid-glass ধাঁচে: Compose, Rules, Settings, Contacts, event, task।
+  - নিশ্চিত হতে প্রশ্ন করবে `confirmDialog` দিয়ে, `window.confirm` নয়।
+  - লোড হওয়ার সময় skeleton দেখাবে।
+- **নিরাপত্তা:** HTML mail দেখানোর আগে DOMPurify দিয়ে পরিষ্কার করা হবে। বাইরের ছবি ডিফল্টে বন্ধ থাকবে, "ছবি দেখাও" চাপলে আসবে।
+- **CredenceHR-এর সাথে যোগ:** Compose-এ address লেখার সময় CredenceHR-এর Employee Directory থেকেও নাম আসবে।
+
+---
+
+## ৪. ধাপে ধাপে কাজ
+
+প্রতিটা ধাপের শেষে tsc (৫৭টা error, আগের মতো) আর `vite build` চলবে। তারপর একটা নকল IMAP / SMTP server দিয়ে API আর Playwright পরীক্ষা, DB আগের অবস্থায় ফেরানো, commit আর `claude/nice-fermi-0tale9`-এ push। শেষে বাংলায় রিপোর্ট।
+
+### ধাপ ১: Server (শেষ, পরীক্ষিত)
+- [x] `MailRoutes.ts`: schema আর migration, `can_use_mail` switch (users column, Module Access route, UserManagement), অনুমতির middleware
+- [x] Mailbox যুক্ত করা, পরীক্ষা করা, সরানো (IMAP যাচাই, encrypt করে রাখা, provider preset)
+- [x] Sync: Inbox / Sent / অন্য folder (UID ধরে কেবল নতুনগুলো), mail parse, attachment-এর তথ্য
+- [x] তালিকা (folder, label, category, খোঁজা, পাতা), একটা mail, flag / label বদলানো, batch, মুছে ফেলা (IMAP-এও)
+- [x] পাঠানো (SMTP, attachment, signature), draft, schedule (jobRunner)
+- [x] Socket.IO দিয়ে নতুন mail-এর খবর, online user-দের জন্য IDLE, একসাথে সংযোগের সীমা
+- [x] নিরাপত্তা: প্রতিটা query user দিয়ে ছাঁকা, ডিফল্ট key নেই, হাতে sync-এ ১০ সেকেন্ডের সীমা
+
+### ধাপ ২: মূল screen (শেষ, পরীক্ষিত)
+- [x] menu-তে জায়গা আর অনুমতি, mailbox যুক্ত করার পাতা
+- [x] folder-এর তালিকা, mail-এর তালিকা, mail পড়া (DOMPurify), Compose / Reply / Forward, attachment
+- [x] মোবাইল layout, skeleton, liquid-glass popup
+
+### ধাপ ৩: বাকি ফিচার (শেষ, পরীক্ষিত)
+- [x] Settings: signature আর logo (Credence-এর নকশা, বা নিজের মতো), vacation responder, blocked senders, compact তালিকা, timezone
+- [x] Template, Filter / Rules (rule-এর label folder-তালিকায়), Contacts, Task, Calendar event (mail থেকে সরাসরি task / event / contact / rule / block)
+- [x] Analytics, Notification panel (ঘণ্টা)
+- [x] CredenceHR Employee Directory থেকে address বেছে নেওয়া (Compose-এ suggestion)
+- ভাষা বদলের setting রাখা হয়নি — CredenceHR-এর বাকি সব screen-এর মতো Mail-ও ইংরেজিতে।
+
+---
+
+### পরীক্ষার ফলাফল
+- **ধাপ ১:** এই পরিবেশে চালানো একটা Dovecot mail server (IMAP, cPanel-এর মতো `INBOX.Sent` / `INBOX.Trash` / `INBOX.Junk`) আর তার সাথে যুক্ত একটা SMTP server দিয়ে পুরো `/api/mail` API — ৭৩টা পরীক্ষা পাস।
+  - এতে পাওয়া bug ঠিক করা হয়েছে: reply আলাদা conversation-এ চলে যেত; rule-এর "পড়া হয়েছে" / star পরের sync-এ উল্টে যেত; watcher চালু হওয়ার আগে আসা mail live দেখাত না।
+- **ধাপ ২:** Chromium-এ (desktop 1440px আর phone 390px) ৩৯টা পরীক্ষা পাস — mailbox যুক্ত করা, পড়া, HTML mail-এর script / form / iframe বাদ পড়া, ছবি বন্ধ থাকা, attachment, Reply all, Draft, Send later, একসাথে মুছে ফেলা, live নতুন mail, আর switch বন্ধ থাকলে menu-তে না দেখানো।
+- **ধাপ ৩:** Chromium-এ ৪৪টা পরীক্ষা পাস — Settings (compact, timezone, blocked sender, signature আর logo, vacation reply), Template বসানো, Rule আর তার label, live mail-এ rule আর block, notification ঘণ্টা, mail থেকে Task / Event / Contact / Block, Analytics (tooltip, table), phone-এ drawer আর settings। ধাপ ১ আর ২-এর পরীক্ষা আবার চালিয়ে সব পাস।
+- Attachment একসাথে সর্বোচ্চ ১৫ MB (server-এর ২৫ MB JSON সীমার মধ্যে থাকার জন্য)।
+
+### ভেতরের mail (Internal delivery) — শেষ, পরীক্ষিত
+অফিসের একজনের mail আরেকজনের কাছে cPanel দিয়ে যায় না, CredenceHR নিজেই পৌঁছে দেয়।
+- **কে "ভেতরের":** প্রেরক আর প্রাপক দুজনের ঠিকানাই আমাদের domain-এর (ডিফল্ট `credencehousinglimited.com`)। আর প্রাপকের mailbox Credence Mail-এ যুক্ত, তার Credence Mail চালু, account block করা নেই।
+- **কে "বাইরের":** অন্য domain। অথবা আমাদের domain কিন্তু Credence Mail-এ নেই বা বন্ধ। এদের কাছে mail আগের মতো cPanel SMTP দিয়ে যায়।
+- **মিশ্র প্রাপক:** SMTP দিয়ে যায় শুধু বাইরের জনদের কাছে, আগে সেটা হয়। সফল হলে তারপর ভেতরের জনদের Inbox-এ বসে। এতে কেউ দুটো কপি পায় না।
+  - To আর Cc সবার কাছে আগের মতোই দেখায়। Bcc কারো কাছে দেখায় না।
+- **প্রাপকের দিকে যা আগের মতোই খাটে:** blocked sender, rule, category, alert আর push, vacation reply।
+  - ভেতরের vacation reply-ও ভেতরেই যায়। দুটো away reply একে অপরকে উত্তর দেয় না।
+  - Reply করলে একই conversation-এ থাকে।
+- **Sent আর attachment:**
+  - শুধু ভেতরে গেলে cPanel-এর Sent-এ কপি রাখা হয় না, CredenceHR-এ থাকে।
+  - Attachment একবারই রাখা হয় (`mail_blobs`), যতজনই পাক। কেউ না রাখলে ৬ ঘণ্টা পরপর পরিষ্কার হয়।
+- **চিহ্ন:**
+  - এমন mail-এ সবুজ **"Internal"** লেখা থাকে।
+  - পাঠানোর পর লেখা আসে "Delivered inside CredenceHR", অথবা কতজন ভেতরে আর কতজন mail server দিয়ে।
+- **Setting:** Admin Panel → MIS → Mail Administration → **Internal delivery** tab। চালু বা বন্ধ করা যায়, আর domain-এর তালিকা দেওয়া যায়। ডিফল্ট চালু।
+  - দেখতে পারে Mail Administration-এর "read" যাদের আছে।
+  - বদলাতে পারে শুধু নতুন explicit-only layer **"Internal delivery settings"** (`mail_settings`) যাদের টিক দেওয়া।
+- **Mailbox যুক্ত না থাকলেও:** প্রাপক নিজের mailbox Credence Mail-এ যুক্ত না করে থাকলেও mail ভেতরেই যায়, যদি:
+  - ঠিকানাটা তার CredenceHR account-এর login email বা Employee-র official email হয়, আর
+  - তার Credence Mail চালু থাকে।
+  - তখন তার জন্য একটা "শুধু ভেতরের" mailbox আপনা থেকে তৈরি হয়। পরে সে password দিয়ে mailbox যুক্ত করলে সেটাই আসল mailbox হয়ে যায়, আগের mail সব থেকে যায়।
+  - "শুধু ভেতরের" mailbox থেকে বাইরের ঠিকানায় mail পাঠানো যায় না, কারণ সহ এটা বলা হয়।
+- **Employee Directory থেকে মেলানো (নতুন):** প্রাপকের ঠিকানা Employee Directory-র কোনো Employee-র email-এর সাথে মিললে mail সবসময় ভেতরে যায়।
+  - তার Credence Mail বন্ধ থাকলেও যায়। mail তার জন্য জমা থাকে, তবে alert পাঠানো হয় না।
+  - Employee-র login না থাকলেও যায়। mail সেই Employee-র (employee id) নামে জমা থাকে। পরে তার login হলে সব mail তার mailbox-এ চলে যায়।
+  - cPanel দিয়ে যায় শুধু তখন, যখন ঠিকানাটা কোনো সক্রিয় Employee বা login-এর নয়, অথবা account block করা।
+  - Compose আর Mail Administration-এর "Check an address" কারণ দেখায়।
+- **Compose-এ দেখা যায়:** ঠিকানার নিচে লেখা আসে কতজন "inside CredenceHR" আর কতজন "through the mail server"। অফিসের কেউ Credence Mail-এ না থাকলে তার নামও সেখানে দেখায়।
+- **ছবি:** নিজের mail, অফিসের domain-এর mail, আর যাদের জন্য "Always from this sender" চাপা হয়েছে, তাদের mail-এর ছবি আর প্রতিবার "Show pictures" না চাপলেও দেখায়।
+- **সীমাবদ্ধতা:** ভেতরের mail শুধু Credence Mail-এ দেখা যায়। Outlook বা ফোনের mail app-এ cPanel mailbox খুললে সেখানে থাকে না।
+- **পরীক্ষা:** Dovecot আর SMTP test server দিয়ে ৩৯টা API পরীক্ষা পাস। SMTP server-এর log দিয়ে মিলিয়ে দেখা হয়েছে, ভেতরের প্রাপকের কাছে mail সত্যিই SMTP দিয়ে যায়নি।
+
+## ৫. আপনাদের যা করতে হবে
+
+1. **Repo private করা:** `credence-mail` repo → Settings → Danger Zone → Change visibility → **Private**।
+2. **Encryption key দেওয়া:** CredenceHR server-এর `.env`-এ `MAIL_ENCRYPTION_KEY=<৬৪ অক্ষরের random hex>` লিখুন। key বানানো যাবে `openssl rand -hex 32` দিয়ে।
+   - এই key হারালে সবাইকে আবার mailbox যুক্ত করতে হবে।
+3. **cPanel-এর সীমা:** এক IP থেকে কতটা IMAP সংযোগ চলে, hosting-কে জিজ্ঞেস করুন। দরকার হলে বাড়িয়ে নিন।
+4. **আসল mailbox দিয়ে পরীক্ষা:** এই পরিবেশ থেকে বাইরের mail server-এ সংযোগ করা যায় না, তাই আসল mailbox দিয়ে প্রথম পরীক্ষা আপনাদেরই করতে হবে।
+
+## ৬. যা যাচাই করা যাবে না
+- আসল `credencehousinglimited.com` mail server-এ login, পাঠানো আর পাওয়া।
+- cPanel-এর সংযোগের সীমায় আসল আচরণ।
+- ফোনে notification পৌঁছানো।
+
+## Groups
+
+Two kinds, both in `MailRoutes.ts` ("Groups") and `src/components/mail/MailGroups.tsx`.
+
+**Central groups** — Admin Panel → Mail Administration → Groups (`mail_groups` table).
+One address on one of our domains (e.g. `accounts-team@credencehousinglimited.com`)
+that reaches every member when written to from Credence Mail.
+
+- Members: addresses picked by hand, plus optionally every active employee or
+  everyone in some departments. The rules are read from the Employee Directory
+  at send time, so joiners and leavers need no editing.
+- Who may write: anyone on Credence Mail, only its members, or only listed people.
+  A refused sender gets a 403 before anything is saved; the compose preview says so too.
+- Delivery: `sendRouted` opens each group into its members; colleagues get it
+  inside CredenceHR, outside members through SMTP. The To / Cc lines keep the
+  group address, so Reply all goes back to the group. The group address itself
+  never goes to the mail server; mail from outside CredenceHR to it needs a cPanel
+  forwarder.
+- Permission: seeing groups = `mail_admin` "read"; adding / changing / removing =
+  the explicit-only `mail_groups` layer.
+
+**My groups** — Credence Mail → Tools → My groups (`mail_personal_groups` table).
+A person's own named list of addresses; picking it in To / Cc / Bcc adds every
+address. Self Service switch `users.can_use_mail_groups`, off by default.

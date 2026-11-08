@@ -61,7 +61,23 @@ export const TodayOverviewCard: React.FC<TodayOverviewCardProps> = ({ token, cla
 
   // Nothing worth flashing an empty shell for, and nothing to say at all if
   // there's no calendar entry ahead and nobody is out.
-  if (loading || !data) return null;
+  // Placeholder in the card's own shape while loading, so the Dashboard
+  // grid doesn't reflow when it arrives.
+  if (loading) {
+    return (
+      <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-pulse ${className}`}>
+        <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200 space-y-2">
+          <div className="h-4 w-20 rounded bg-slate-200" />
+          <div className="h-3 w-24 rounded bg-slate-100" />
+        </div>
+        <div className="p-6 space-y-2.5">
+          <div className="h-3.5 w-full rounded bg-slate-100" />
+          <div className="h-3.5 w-2/3 rounded bg-slate-100" />
+        </div>
+      </div>
+    );
+  }
+  if (!data) return null;
   if (!data.today_off && !data.next_off && data.on_leave_count === 0) return null;
 
   const named = data.on_leave_today.slice(0, MAX_NAMES);

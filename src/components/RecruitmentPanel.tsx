@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck, CalendarClock, Mail } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { StartJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
+import { LoadingBlock } from './LoadingBlock';
+import { InterviewModal, CandidateEmailModal, type RecruitmentAccess } from './RecruitmentInterview';
 
 interface RecruitmentPanelProps {
   token: string;
@@ -26,7 +28,33 @@ interface Candidate {
   source: string | null;
   status: string;
   notes: string | null;
+  // The scheduled interview, if any (candidate_interviews).
+  interview_id?: number | null;
+  interview_at?: string | null;
+  interview_mode?: 'in_person' | 'online' | 'phone' | null;
+  interview_venue?: string | null;
+  interview_link?: string | null;
+  // false = the interview changed after the last email to the candidate (or
+  // none was sent).
+  interview_informed?: boolean | null;
 }
+
+// A candidate's New Joiner Onboarding (HR Operations), from
+// /api/hr-ops/joiner-onboarding/by-candidate.
+interface CandidateOnboarding {
+  id: number;
+  onb_code: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'cancelled' | 'expired';
+  employee_code: string | null;
+}
+const ONBOARDING_CHIP: Record<CandidateOnboarding['status'], { label: string; cls: string }> = {
+  draft: { label: 'Onboarding: waiting for joiner', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  submitted: { label: 'Onboarding: submitted', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  rejected: { label: 'Onboarding: sent back', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  approved: { label: 'Joined', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled: { label: 'Onboarding: cancelled', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  expired: { label: 'Onboarding: expired', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+};
 
 const CANDIDATE_STATUSES = ['applied', 'shortlisted', 'interview_scheduled', 'interviewed', 'offered', 'hired', 'rejected'];
 
@@ -70,6 +98,43 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
   const [newCandEmail, setNewCandEmail] = useState('');
   const [newCandPhone, setNewCandPhone] = useState('');
   const [newCandSource, setNewCandSource] = useState('');
+
+  // New Joiner Onboarding, shown only to accounts with an onboarding layer
+  // in HR Operations (the server checks the same layers).
+  const [onbAccess, setOnbAccess] = useState<OnboardingAccess | null>(null);
+  const [onbByCandidate, setOnbByCandidate] = useState<Record<number, CandidateOnboarding>>({});
+  const [startingFor, setStartingFor] = useState<number | null>(null);
+  const canSeeOnboarding = !!onbAccess && (onbAccess.onboarding_create || onbAccess.onboarding_review || onbAccess.onboarding_approve);
+  const loadOnboarding = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/hr-ops/joiner-onboarding/by-candidate'), { headers: authHeaders });
+      if (res.ok) setOnbByCandidate(await res.json());
+    } catch {
+      // the chips just don't show
+    }
+  };
+  useEffect(() => {
+    fetch(apiUrl('/api/hr-ops/joiner-onboarding/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a: OnboardingAccess | null) => {
+        setOnbAccess(a);
+        if (a && (a.onboarding_create || a.onboarding_review || a.onboarding_approve)) loadOnboarding();
+      })
+      .catch(() => setOnbAccess(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Emailing candidates is its own explicit permission (layer "email_candidates").
+  const [access, setAccess] = useState<RecruitmentAccess | null>(null);
+  const [interviewFor, setInterviewFor] = useState<{ postingId: number; c: Candidate } | null>(null);
+  const [emailFor, setEmailFor] = useState<{ postingId: number; c: Candidate; kind: 'offered' | 'rejected' | 'custom' } | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/recruitment/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setAccess)
+      .catch(() => setAccess(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchPostings = async () => {
     setLoading(true);
@@ -195,10 +260,14 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update candidate');
+      const merged = { ...((candidatesByPosting[postingId] || []).find((c) => c.id === candidateId) || {}), ...data } as Candidate;
       setCandidatesByPosting((prev) => ({
         ...prev,
-        [postingId]: (prev[postingId] || []).map((c) => (c.id === candidateId ? data : c))
+        [postingId]: (prev[postingId] || []).map((c) => (c.id === candidateId ? { ...c, ...data } : c))
       }));
+      // Next step right away: set the interview, or tell the candidate.
+      if (status === 'interview_scheduled' && !merged.interview_id) setInterviewFor({ postingId, c: merged });
+      else if ((status === 'offered' || status === 'rejected') && access?.email_candidates && merged.email) setEmailFor({ postingId, c: merged, kind: status });
     } catch (err: any) {
       setError(err.message || 'Failed to update candidate');
     }
@@ -259,10 +328,7 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2.5">
           {postings.map((p) => {
@@ -324,8 +390,8 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
 
                     <div className="space-y-2">
                       {candidates.map((c) => (
-                        <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
-                          <div>
+                        <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-slate-100 px-3 py-2">
+                          <div className="min-w-0">
                             <p className="text-xs font-semibold text-slate-800 flex items-center gap-1">
                               {c.name}
                               {c.status === 'hired' && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
@@ -333,7 +399,63 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                             <p className="text-[11px] text-slate-400">
                               {c.email || '—'} · {c.phone || '—'} · {c.source || '—'}
                             </p>
+                            {c.status === 'interview_scheduled' && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setInterviewFor({ postingId: p.id, c })}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold hover:bg-indigo-100"
+                                >
+                                  <CalendarClock className="w-3 h-3" />
+                                  {c.interview_at
+                                    ? `${new Date(String(c.interview_at).replace(' ', 'T')).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}${c.interview_mode === 'online' ? ' · Online' : c.interview_mode === 'phone' ? ' · Phone' : c.interview_venue ? ` · ${c.interview_venue}` : ''}`
+                                    : 'Set interview time'}
+                                </button>
+                                {c.interview_id && c.email && c.interview_informed === false && (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-semibold">Candidate not emailed yet</span>
+                                )}
+                                {c.interview_id && c.interview_informed && <span className="inline-flex px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold">Candidate emailed</span>}
+                              </div>
+                            )}
+                            {c.status === 'hired' && canSeeOnboarding && (() => {
+                              const o = onbByCandidate[c.id];
+                              const reopen = !o || o.status === 'cancelled' || o.status === 'expired';
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  {o && (
+                                    <span className={`inline-flex whitespace-nowrap text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ONBOARDING_CHIP[o.status].cls}`}>
+                                      {ONBOARDING_CHIP[o.status].label} · {o.employee_code ? `${o.onb_code} → ${o.employee_code}` : o.onb_code}
+                                    </span>
+                                  )}
+                                  {reopen && onbAccess?.onboarding_create && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStartingFor(c.id)}
+                                      className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white"
+                                    >
+                                      <ClipboardCheck className="w-3 h-3" /> Start onboarding
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
+                          <div className="flex items-center gap-1.5">
+                          {(c.status === 'applied' || c.status === 'shortlisted') && (
+                            <button type="button" onClick={() => setInterviewFor({ postingId: p.id, c })} className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1">
+                              <CalendarClock className="w-3 h-3" /> Interview
+                            </button>
+                          )}
+                          {access?.email_candidates && c.email && (
+                            <button
+                              type="button"
+                              onClick={() => (c.status === 'interview_scheduled' && c.interview_id ? setInterviewFor({ postingId: p.id, c }) : setEmailFor({ postingId: p.id, c, kind: c.status === 'offered' || c.status === 'rejected' ? c.status : 'custom' }))}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"
+                              aria-label={`Email ${c.name}`}
+                            >
+                              <Mail className="w-3 h-3" /> Email
+                            </button>
+                          )}
                           <select
                             value={c.status}
                             onChange={(e) => updateCandidateStatus(p.id, c.id, e.target.value)}
@@ -345,6 +467,7 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                               </option>
                             ))}
                           </select>
+                          </div>
                         </div>
                       ))}
                       {candidates.length === 0 && <p className="text-xs text-slate-400 py-2">No candidates yet.</p>}
@@ -357,6 +480,19 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
           {postings.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No job postings yet.</p>}
         </div>
       )}
+      {interviewFor && (
+        <InterviewModal
+          token={token}
+          candidate={interviewFor.c}
+          access={access}
+          onClose={() => setInterviewFor(null)}
+          onChanged={() => fetchCandidates(interviewFor.postingId)}
+        />
+      )}
+      {emailFor && (
+        <CandidateEmailModal token={token} candidate={emailFor.c} kind={emailFor.kind} interviewId={null} onClose={() => setEmailFor(null)} />
+      )}
+      {startingFor !== null && <StartJoinerOnboarding token={token} candidateId={startingFor} onClose={() => setStartingFor(null)} onCreated={loadOnboarding} />}
     </div>
   );
 };

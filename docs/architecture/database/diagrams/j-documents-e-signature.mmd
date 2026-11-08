@@ -1,0 +1,63 @@
+erDiagram
+  document_events {
+    int id PK
+    int document_id FK
+    int user_id FK
+    int seq
+    varchar event
+    varchar ip
+    varchar user_agent
+  }
+  document_signatures {
+    int id PK
+    int document_id FK
+    int signer_user_id FK
+    varchar signed_name
+    timestamp signed_at
+  }
+  document_signers {
+    int id PK
+    int document_id FK
+    int signer_user_id FK
+    int step_order
+    varchar label
+    varchar status
+    varchar signed_name
+  }
+  esign_certificates {
+    int id PK
+    int company_id
+    mediumblob p12
+  }
+  esign_otps {
+    int id PK
+    int document_id FK
+    int user_id FK
+    varchar sent_to
+    datetime expires_at
+    int attempts
+    datetime locked_until
+  }
+  esign_settings {
+    int id PK
+    int company_id
+    tinyint otp_required
+    text otp_doc_types
+    tinyint require_read
+    tinyint email_signed
+    tinyint pki_sign
+  }
+  employee_documents {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  employee_documents ||--o{ document_events : "document_id"
+  users ||..o{ document_events : "user_id"
+  employee_documents ||--o{ document_signatures : "document_id"
+  users ||--o{ document_signatures : "signer_user_id"
+  employee_documents ||--o{ document_signers : "document_id"
+  users ||--o{ document_signers : "signer_user_id"
+  employee_documents ||--o{ esign_otps : "document_id"
+  users ||..o{ esign_otps : "user_id"

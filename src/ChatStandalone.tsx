@@ -4,8 +4,9 @@
  */
 
 import React, { Suspense, lazy } from 'react';
-import { User } from './types';
-import { AppLoader } from './components/AppLoader';
+import { User, chatAllowed } from './types';
+import { CallLayer } from './components/CallLayer';
+import { GroupCallLayer } from './components/GroupCallLayer';
 
 // Lazy-loaded the same way App.tsx loads it, so Chat's own Socket.IO client
 // stays out of the main app's entry bundle here too — this file is a
@@ -47,7 +48,19 @@ export default function ChatStandalone() {
         <p style={{ color: '#5f6368', fontSize: 14 }}>
           You need to sign in to CredenceHR first before opening Chat.
         </p>
-        <a href="/" style={{ color: '#7F00FF', fontWeight: 600, fontSize: 14 }}>
+        <a href="/" style={{ color: 'var(--g-accent, #7F00FF)', fontWeight: 600, fontSize: 14 }}>
+          Go to CredenceHR
+        </a>
+      </div>
+    );
+  }
+
+  // Module Access -> Chat turned off for this account.
+  if (!chatAllowed(user)) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: 'system-ui, sans-serif', padding: 24, textAlign: 'center' }}>
+        <p style={{ color: '#5f6368', fontSize: 14 }}>Chat is not turned on for your account. Ask your Superadmin.</p>
+        <a href="/" style={{ color: 'var(--g-accent, #7F00FF)', fontWeight: 600, fontSize: 14 }}>
           Go to CredenceHR
         </a>
       </div>
@@ -56,7 +69,12 @@ export default function ChatStandalone() {
 
   return (
     <div style={{ minHeight: '100vh' }}>
-      <Suspense fallback={<AppLoader />}>
+      {/* Calls started from this tab's chat (and calls coming in while it's
+          open) are handled here too — App.tsx's CallLayer lives in the
+          other tab. */}
+      {(user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
+      {(user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
+      <Suspense fallback={null}>
         <ChatPanel
           user={user}
           token={token}

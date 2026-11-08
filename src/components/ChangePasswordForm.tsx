@@ -7,6 +7,8 @@ import React, { useState } from 'react';
 import { ChevronLeft, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { PasswordInput } from './PasswordInput';
+import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 
 interface ChangePasswordFormProps {
   token: string;
@@ -36,8 +38,9 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
       setError('Enter your current password.');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters.');
+    const pwBad = passwordProblem(newPassword);
+    if (pwBad) {
+      setError(pwBad);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -102,8 +105,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
 
             <div className="space-y-3">
               <Field label="Current Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   required
@@ -113,24 +115,22 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                 />
               </Field>
               <Field label="New Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   autoComplete="new-password"
                   className="profile-field-input"
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                 />
               </Field>
               <Field label="Confirm New Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   autoComplete="new-password"
                   className="profile-field-input"
                   placeholder="Re-enter New Password"
@@ -145,7 +145,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                 type="submit"
                 disabled={saving}
                 className="w-full py-3 rounded-full text-white text-sm font-semibold shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(90deg, #7F00FF, #6300C6)' }}
+                style={{ background: 'linear-gradient(90deg, var(--g-accent, #7F00FF), var(--g-accent-hover, #6300C6))' }}
               >
                 {saving && <Spinner size={16} className="text-white" />}
                 Update Password

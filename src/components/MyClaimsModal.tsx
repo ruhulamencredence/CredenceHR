@@ -10,7 +10,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import ClaimLocationMap from './ClaimLocationMap';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyClaimsModalProps {
   token: string;
@@ -20,7 +20,7 @@ interface MyClaimsModalProps {
   onCheckOut?: () => void;
 }
 
-// User Dashboard -> "My Claims": the logged-in User's own full Movement Claim
+// User Dashboard -> "My Claims": the logged-in User's own full Check In/Out
 // history (not just today's/current one, unlike the compact status line on the
 // Claim card itself), newest first, each with its Check In/Out Approval Workflow
 // badge so a User can see exactly where their travel claim stands.
@@ -64,8 +64,8 @@ export default function MyClaimsModal({ token, onClose, onCheckOut }: MyClaimsMo
               <Route className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">My Claims</h3>
-              <p className="text-xs text-slate-500">Your Movement Claim history</p>
+              <h3 className="text-base font-bold text-slate-900">Check In/Out</h3>
+              <p className="text-xs text-slate-500">Your Check In/Out history</p>
             </div>
           </div>
           <button
@@ -78,13 +78,11 @@ export default function MyClaimsModal({ token, onClose, onCheckOut }: MyClaimsMo
 
         <div className="overflow-y-auto flex-1">
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : claims.length === 0 ? (
             <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
               <Inbox className="w-6 h-6 text-slate-300" />
-              <p className="text-sm">No claims yet — check in from the Movement Claim card when you head out.</p>
+              <p className="text-sm">No check in/out yet — check in from the Check In/Out card when you head out.</p>
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">

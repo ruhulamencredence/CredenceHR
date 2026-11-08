@@ -74,11 +74,11 @@ import { syncAllZkDevices, startZkSyncSchedule } from "./zkSync";
 
 **Register the module** — find this line (~1052):
 ```ts
-const ADMIN_MODULE_KEYS = ["projects", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "employees", "tracking"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "employees", "tracking"] as const;
 ```
 Change to:
 ```ts
-const ADMIN_MODULE_KEYS = ["projects", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "employees", "tracking", "office_attendance"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "employees", "tracking", "office_attendance"] as const;
 ```
 
 **Start the cron job** — inside `initDB()`, right after `dbPool = mysql.createPool({...})` finishes successfully (after `isMySQLConnected = true` is set), add:
@@ -151,7 +151,7 @@ app.get("/api/office-attendance", authenticateToken, requireModule("office_atten
 ## 4. types.ts edits
 
 ```ts
-export type AdminModuleKey = 'projects' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'employees' | 'tracking' | 'office_attendance';
+export type AdminModuleKey = 'projects' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'employees' | 'tracking' | 'office_attendance';
 ```
 And add to `ADMIN_MODULES`:
 ```ts

@@ -37,7 +37,7 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
         justifyContent: 'center',
         // Matches the logo's own gradient dark stop — no color flash
         // around the edges of the (rounded-square) logo tile.
-        background: '#3C1494',
+        background: 'var(--g-boot-bg, #3C1494)',
         opacity: fadingOut ? 0 : 1,
         transition: 'opacity 300ms ease-out',
       }}

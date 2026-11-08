@@ -8,7 +8,10 @@ import { Clock, Plus, Trash2, Save } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { DeliveryDateCondition, DeliveryConditionType, Project, Budget } from '../types';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
+import { SearchSelect } from './Combobox';
 interface DeliveryDateConditionsPanelProps {
   token: string;
 }
@@ -134,7 +137,7 @@ const ConditionTypeSection: React.FC<{
   };
 
   const deleteOverride = async (row: DeliveryDateCondition) => {
-    if (!window.confirm(`Remove this ${row.scope === 'project' ? 'Project' : 'Budget'} override? It will fall back to the Global setting above.`)) return;
+    if (!(await confirmDialog(`Remove this ${row.scope === 'project' ? 'Project' : 'Budget'} override? It will fall back to the Global setting above.`))) return;
     setDeletingId(row.id);
     try {
       const res = await fetch(apiUrl(`/api/delivery-date-conditions/${row.id}`), {
@@ -234,7 +237,7 @@ const ConditionTypeSection: React.FC<{
                 <label className="block text-[11px] text-slate-500 mb-1">
                   {overrideForm.scope === 'project' ? 'Project' : 'Budget'}
                 </label>
-                <select
+                <SearchSelect
                   value={overrideForm.scope_id}
                   onChange={(e) => setOverrideForm((f) => ({ ...f, scope_id: e.target.value }))}
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none"
@@ -243,7 +246,7 @@ const ConditionTypeSection: React.FC<{
                   {overrideForm.scope === 'project'
                     ? projects.map((p) => <option key={p.id} value={p.id}>{p.project_name}</option>)
                     : budgets.map((b) => <option key={b.id} value={b.id}>{b.budget_name}</option>)}
-                </select>
+                </SearchSelect>
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Minimum days notice</label>
@@ -357,9 +360,7 @@ export const DeliveryDateConditionsPanel: React.FC<DeliveryDateConditionsPanelPr
 
   if (loading) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-center py-12">
-        <Spinner />
-      </div>
+      <LoadingBlock />
     );
   }
 

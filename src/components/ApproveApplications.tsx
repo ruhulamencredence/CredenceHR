@@ -3,15 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
+import { AssetFulfillModal } from './AssetFulfillModal';
+import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
-import { UserClaimReference, ClaimRecord } from '../types';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { BillClaimReference, BillClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
+import { ClaimBillLines } from './ClaimBillLines';
+import { formatDate } from '../lib/formatDate';
+import { ApprovalHistory } from './ApprovalHistory';
+import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
+import { LoadingBlock } from './LoadingBlock';
+import { ApproverSignatureCard } from './ApproverSignatureCard';
 
+import { SearchSelect } from './Combobox';
+import { formatDuration } from '../lib/rideDuration';
+import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 interface ApproveApplicationsProps {
   token: string;
   onBack: () => void;
@@ -19,9 +34,9 @@ interface ApproveApplicationsProps {
 
 // One row from GET /api/my-approvals — see PendingApprovalsCard.tsx for the
 // original, narrower version of this same shape.
-interface MyApprovalItem {
+interface MyApprovalItem extends ClaimReviewFields {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -29,33 +44,139 @@ interface MyApprovalItem {
   requested_by_name: string | null;
   current_step: number | null;
   total_steps: number | null;
+  // No Supervisor or Approval Template set — listed because this is a Superadmin.
+  no_approver?: boolean;
+  // Nobody active is on its current Layer any more — a Superadmin decides.
+  layer_stuck?: boolean;
   created_at: string;
-  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
-  // this Conveyance Bill Claim's Amount was built from, each with its own
+  // Only present on a 'bill_claim' item — every Check In/Out (check-in/out)
+  // this Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
-  // deciding. Empty/absent when the claim has no Movement Claim attached
+  // deciding. Empty/absent when the claim has no Check In/Out attached
   // (a plain hand-entered Amount).
-  claim_refs?: UserClaimReference[];
+  claim_refs?: BillClaimReference[];
+  // Only on a 'bill_claim' item — the claim's bills (category / date / amount).
+  claim_items?: BillClaimItem[];
   // Running Approved Amount — set once an EARLIER Layer (e.g. the
   // Department/Direct Supervisor auto-layer at step 1) has already edited
-  // it on a still-pending 'user_claim'. Used as this Layer's pre-fill
+  // it on a still-pending 'bill_claim'. Used as this Layer's pre-fill
   // instead of the full Claim Amount, so a partial-approval edit carries
   // forward through the rest of the chain. Null until someone has edited it.
   source_approved_amount?: number | null;
+  // Only present on an 'asset_requisition' item — the full requisition
+  // (itemized line items, reason, urgency, target date, attachment) behind
+  // this item's one-line source_label, shown when the card is clicked. See
+  // GET /api/my-approvals's assetRequisitionDetails.
+  // Only on a 'vehicle_requisition' item: what the ride is for and when.
+  vehicle_requisition_details?: {
+    purpose: string;
+    pickup_location: string;
+    destination: string;
+    ride_date: string;
+    start_time: string;
+    estimated_duration_hours: number;
+  } | null;
+  asset_requisition_details?: {
+    asset_category: string;
+    reason: string;
+    urgency: 'low' | 'medium' | 'high';
+    target_date: string | null;
+    has_attachment: boolean;
+    attachment_filename: string | null;
+    items: { id?: number; item_name: string; purpose: string; unit: string; quantity: number; source?: string; original_quantity?: number | null }[];
+  } | null;
+  // True only for a 'vehicle_requisition' item sitting on its Template's
+  // FINAL Layer, when that Layer's Approver Type is 'vehicle_maintainer'
+  // (see server.ts's approval_template_steps.approver_type migration
+  // comment). Such a Layer skips Approve/Reject entirely — the card below
+  // shows "Assign Vehicle & Driver" instead, and submitting it both closes
+  // this approval and confirms the ride (PUT .../approve-and-assign in
+  // VehicleManagementRoutes.ts).
+  vehicle_maintainer_bypass?: boolean;
+  // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
+  // approver gets Fulfill & Hand Over instead of Approve/Reject.
+  asset_fulfiller_bypass?: boolean;
+  // Bill claim on its Template's 'conveyance_disburser' Layer — Approve
+  // here also pays it out (own Bill + voucher no).
+  conveyance_disburser_bypass?: boolean;
+  // This account was asked in as an ad-hoc approver: who asked, and why.
+  // Approve sends it back to them; Reject rejects it.
+  adhoc?: { added_by: number | null; added_by_name: string | null; note: string | null } | null;
+  // This account may ask one more person to approve first ("Add approver").
+  can_add_adhoc?: boolean;
+  // Requester's Supervisor Layer — may edit the items before approving.
+  can_edit_asset_items?: boolean;
+  // Only on an 'hr_action' item (HR Operations — Promotion, Increment,
+  // Transfer…): the Employee and every FROM -> TO change being approved.
+  hr_action_details?: {
+    action_label: string;
+    employee_name: string | null;
+    employee_code: string | null;
+    effective_date: string | null;
+    reason: string | null;
+    from: Record<string, any>;
+    to: Record<string, any>;
+    history: { action: string; by_name: string; step_label?: string | null; remarks?: string | null; at: string }[];
+  } | null;
 }
 
+// FROM -> TO rows for an HR action card.
+const HR_CHANGE_FIELDS: [string, string, boolean?][] = [
+  ['designation', 'Designation'],
+  ['department', 'Department'],
+  ['branch', 'Branch'],
+  ['supervisor', 'Supervisor'],
+  ['grade', 'Grade'],
+  ['gross_salary', 'Gross Salary', true],
+  ['probation_end_date', 'Probation Until'],
+  ['contract_end_date', 'Contract Until']
+];
+const hrChangeRows = (d: NonNullable<MyApprovalItem['hr_action_details']>) =>
+  HR_CHANGE_FIELDS.filter(([k]) => d.to[k] !== undefined && d.to[k] !== null && d.to[k] !== '').map(([k, label, isMoney]) => {
+    const f = (v: any) => (v === undefined || v === null || v === '' ? '—' : isMoney ? `৳${Number(v).toLocaleString('en-BD')}` : String(v));
+    return { label, from: f(d.from[k]), to: f(d.to[k]) };
+  });
+
+interface AvailableVehicle {
+  id: number;
+  vehicle_no: string;
+  model: string;
+}
+
+
+// Two letters for the requester's round tile on a phone card.
+const initialsOf = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+  t === 'bill_claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'
     ? 'Leave Application'
     : t === 'leave_reliever'
     ? 'Leave Application \u2014 Reliever Review'
+    : t === 'leave_direct'
+    ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
-    : 'Movement Claim';
+    : t === 'exit_clearance'
+    ? 'Exit Clearance'
+    : t === 'asset_requisition'
+    ? 'Asset Requisition'
+    : t === 'vehicle_requisition'
+    ? 'Vehicle Requisition'
+    : t === 'mobile_limit_request'
+    ? 'Mobile Limit Request'
+    : t === 'advance_request'
+    ? 'Loan / Advance Request'
+    : t === 'hr_action'
+    ? 'HR Action'
+    : 'Check In/Out';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar
 // like Leave Application/Timesheet, but NOT gated to Admin Panel access or any
@@ -65,42 +186,85 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // instead of a small card), because a Template Layer or a Leave Application's
 // Reliever can be ANY account, role='user' included. Pulls every request
 // currently waiting on this account across every workflow (Remote Attendance,
-// Conveyance Bill Claim, Timesheet Correction, Leave Application, and Leave
-// Application Reliever review) from GET /api/my-approvals and lets them
-// Approve/Reject right here. A 'leave_reliever' item is routed to its own
-// POST /api/leave-applications/:id/reliever-decision instead of the generic
-// POST /api/my-approvals/:id/act every other source_type uses, since it isn't
-// an approval_requests row yet — see the design note on GET /api/my-approvals
-// server-side.
+// Bill Claim, Timesheet Correction, Leave Application, and Leave
+// Application Reliever review, and Exit/Offboarding Clearance) from GET
+// /api/my-approvals and lets them Approve/Reject right here. A
+// 'leave_reliever' item is routed to its own POST
+// /api/leave-applications/:id/reliever-decision, and an 'exit_clearance' item
+// to its own POST /api/exit-clearance-items/:id/decision, instead of the
+// generic POST /api/my-approvals/:id/act every other source_type uses, since
+// neither is an approval_requests row — see the design note on GET
+// /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
-  // Same isNativeApp split as LeaveManagement.tsx / LeaveApprovals.tsx: the
+  usePhoneHeaderTitle('Approve Application');
+  // Phone: each request is a Directory-style card (tinted by how it stands)
+  // on the page instead of a row inside one big white panel.
+  const isPhone = useIsPhone();
+  // Same isNativeApp split as LeaveManage.tsx / Timesheet.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this
   // section there.
   const isNativeApp = Capacitor.isNativePlatform();
   const authHeaders = { Authorization: `Bearer ${token}` };
   const [items, setItems] = useState<MyApprovalItem[]>([]);
+  // Pending queue, or this account's own approve / reject history.
+  const [view, setView] = useState<'pending' | 'history'>('pending');
   const [loading, setLoading] = useState(true);
   const [actingKey, setActingKey] = useState<string | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  // Approved Amount draft for a 'user_claim' item — editable on EVERY Layer,
+  // Approved Amount draft for a 'bill_claim' item — editable on EVERY Layer,
   // not just the last one (so the Supervisor auto-layer, or any earlier
   // Template Layer, can partially-approve just like the final approver
   // always could). Pre-filled with source_approved_amount when an earlier
   // Layer already set one, otherwise the full Claim Amount (approve as
   // claimed by default). Remaining Amount is derived from this, never its
   // own state. Edits made on a non-final Layer are recorded as a running
-  // draft server-side (see updateUserClaimApprovedAmountDraft) and carry
+  // draft server-side (see updateBillClaimApprovedAmountDraft) and carry
   // forward as the next Layer's pre-fill.
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<string, string>>({});
-  // The referenced Movement Claim currently shown on the read-only location
+  const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
+  // "Add approver" popup (ad-hoc approver) for one item.
+  const [adhocFor, setAdhocFor] = useState<MyApprovalItem | null>(null);
+  // The referenced Check In/Out currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
-  // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
-  // Panel's Conveyance Bill Claim tab) already reuses for this.
-  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
+  // every other Bill Claim view (BillClaimCard, the Admin
+  // Panel's Bill Claim tab) already reuses for this.
+  const [viewingRef, setViewingRef] = useState<{ ref: BillClaimReference; item: MyApprovalItem } | null>(null);
+  // The Asset Requisition currently opened for full-details view — tapping
+  // anywhere on that item's card (source_type === 'asset_requisition') opens
+  // this, so the Supervisor/HR/Inventory approver can see every requested
+  // item (not just the asset_category summary in source_label) before
+  // deciding. Closed by the modal's own X/backdrop, not by acting on it —
+  // acting still happens from the card underneath.
+  const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
+  // asset_fulfiller_bypass item whose Fulfill & Hand Over form is open.
+  const [fulfilling, setFulfilling] = useState<MyApprovalItem | null>(null);
+  // Supervisor editing a requisition's items (AssetRequisitionEditItemsModal).
+  const [editingItems, setEditingItems] = useState<MyApprovalItem | null>(null);
 
-  const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
+  // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
+  // "Assign Vehicle & Driver" form below — the same driver list as every
+  // other Assign form (GET /api/vehicles/driver-picker): Vehicle Management
+  // -> Inventory -> Drivers with what each is doing now, or every account
+  // while that list is empty. Fetched on mount (cheap).
+  const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
+  const [driverCandidates, setDriverCandidates] = useState<DriverOption[]>([]);
+  const [assignForm, setAssignForm] = useState<Record<string, { vehicle_id: string; driver_user_id: string }>>({});
+
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const refToClaimRecord = (ref: BillClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
     user_id: item.requested_by,
     user_name: item.requested_by_name,
@@ -117,8 +281,10 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
     check_out_approval: ref.check_out_approval
   });
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/my-approvals'), { headers: authHeaders });
       if (res.ok) setItems(await res.json());
@@ -136,14 +302,28 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
 
   const keyFor = (item: MyApprovalItem) => `${item.source_type}-${item.id}`;
 
-  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected', approvedAmount?: number) => {
+  // Reject with "Allow re-claim" ticked, per item.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<string, boolean>>({});
+
+  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const key = keyFor(item);
+    // Bill Claim: Return / Reject tell the employee why.
+    if (item.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingKey(key);
     setMessage(null);
     try {
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${item.id}/reliever-decision`)
+          : item.source_type === 'leave_direct'
+          ? apiUrl(`/api/leave-applications/${item.id}/decision`)
+          : item.source_type === 'exit_clearance'
+          ? apiUrl(`/api/exit-clearance-items/${item.id}/decision`)
+          : item.source_type === 'hr_action'
+          ? apiUrl(`/api/hr-ops/actions/${item.id}/decision`)
           : apiUrl(`/api/my-approvals/${item.id}/act`);
       const res = await fetch(url, {
         method: 'POST',
@@ -151,12 +331,18 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
         body: JSON.stringify({
           action,
           remarks: remarksDraft[key] || undefined,
-          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[key] || undefined : undefined,
+          claim_version: item.source_type === 'bill_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'bill_claim' && action === 'rejected' ? !!reclaimDraft[key] : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
       setItems((prev) => prev.filter((i) => keyFor(i) !== key));
@@ -167,13 +353,50 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
     }
   };
 
+  // For a vehicle_maintainer_bypass item — the vehicle+driver form's own
+  // "submit" doubles as this Layer's Approve, so it goes through PUT
+  // .../approve-and-assign instead of POST /api/my-approvals/:id/act (see
+  // that route in VehicleManagementRoutes.ts). Removes the item from the
+  // list on success, same as handleAct.
+  const handleAssignAndApprove = async (item: MyApprovalItem) => {
+    const key = keyFor(item);
+    const form = assignForm[key];
+    if (!form?.vehicle_id || !form?.driver_user_id) {
+      setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
+      return;
+    }
+    setActingKey(key);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${item.source_id}/approve-and-assign`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          vehicle_id: Number(form.vehicle_id),
+          driver_user_id: Number(form.driver_user_id),
+          remarks: remarksDraft[key] || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this ride.');
+      setMessage({ type: 'success', text: 'Assigned — ride confirmed.' });
+      setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
+      setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: '', driver_user_id: '' } }));
+      setItems((prev) => prev.filter((i) => keyFor(i) !== key));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setActingKey(null);
+    }
+  };
+
   // Wraps handleAct('approved', ...) with the same Approved Amount validation
-  // the Admin Panel's Approvals tab uses — relevant for a 'user_claim' item
+  // the Admin Panel's Approvals tab uses — relevant for a 'bill_claim' item
   // on ANY Layer (Supervisor auto-layer included), not just the last one;
   // every other item just approves as-is.
-  const handleApprove = (item: MyApprovalItem) => {
+  const handleApprove = async (item: MyApprovalItem) => {
     const key = keyFor(item);
-    if (item.source_type === 'user_claim') {
+    if (item.source_type === 'bill_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
       const draft = approvedAmountDraft[key];
       const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
@@ -182,10 +405,26 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
         setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
         return;
       }
-      if (claimAmount != null && approvedAmount > claimAmount) {
-        setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
+      // A Layer may cut the amount but never raise it above what the previous Layer approved.
+      const cap = fallback != null ? Number(fallback) : null;
+      if (cap != null && approvedAmount > cap) {
+        setMessage({
+          type: 'error',
+          text:
+            item.source_approved_amount != null
+              ? `Approved Amount can't be more than ৳${cap.toLocaleString('en-BD')} — the amount the previous Layer approved.`
+              : "Approved Amount can't be more than the Claim Amount."
+        });
         return;
       }
+      if (
+        item.conveyance_disburser_bypass &&
+        !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${item.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+          title: 'Disburse conveyance',
+          confirmLabel: 'Disburse'
+        }))
+      )
+        return;
       handleAct(item, 'approved', approvedAmount);
     } else {
       handleAct(item, 'approved');
@@ -193,24 +432,20 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   };
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    // Phone: no page colour of its own (the header's glow shows through)
+    // and the title sits in the header (usePhoneHeaderTitle).
+    <div className="w-full min-h-[calc(100vh-4rem)] md:bg-[#dceeff] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'Approve Application']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Approve Application']} onBack={onBack} />
+          </div>
         )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
-            <div className="flex items-center gap-3">
+        <ApproverSignatureCard token={token} />
+        <div className={isPhone ? '' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-5 border-b border-slate-100 flex-wrap">
+            <div className="hidden md:flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5 text-blue-600" />
               </div>
@@ -226,16 +461,49 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                 <p className="text-xs text-slate-500">Requests waiting on your approval, across every workflow you're a part of.</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={load}
-              disabled={loading}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Approve Application">
+                {(
+                  [
+                    ['pending', 'Pending'],
+                    ['history', 'History']
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === key}
+                    onClick={() => setView(key)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                      view === key ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {label}
+                    {/* Phone: the count sits here, the title row is hidden. */}
+                    {key === 'pending' && items.length > 0 && (
+                      <span className={`md:hidden ml-1.5 px-1.5 rounded-full text-[11px] ${view === key ? 'bg-white/25' : 'bg-blue-100 text-blue-700'}`}>{items.length}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {view === 'pending' && (
+                <button
+                  type="button"
+                  onClick={load}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              )}
+            </div>
           </div>
 
+          {view === 'history' ? (
+            <ApprovalHistory token={token} />
+          ) : (
+          <>
           {message && (
             <div
               className={`mx-6 mt-4 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
@@ -248,21 +516,19 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
           )}
 
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
               <Inbox className="w-6 h-6 text-slate-300" />
               <p className="text-sm">Nothing waiting on you right now.</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className={isPhone ? 'space-y-2.5 pt-1' : 'divide-y divide-slate-100'}>
               {items.map((item) => {
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
                 // not just the last one — see the state comment above.
-                const editable = item.source_type === 'user_claim';
+                const editable = item.source_type === 'bill_claim' && !item.adhoc;
                 const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
                 // Pre-fill: an earlier Layer's running draft if one exists,
                 // otherwise the full Claim Amount.
@@ -277,23 +543,111 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                       })()
                     : null;
                 const remainingAmount = claimAmount != null && approvedAmount != null ? claimAmount - approvedAmount : null;
+                const isAssetRequisition = item.source_type === 'asset_requisition' && !!item.asset_requisition_details;
                 return (
-                  <div key={key} className="px-6 py-4">
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
-                      <div>
+                  <div
+                    key={key}
+                    className={`${
+                      isPhone
+                        ? `rounded-[28px] border border-white/70 p-3 bg-gradient-to-br shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] [&_input]:bg-white/70 ${
+                            item.no_approver || item.layer_stuck ? 'from-rose-100/70 via-white/50 to-pink-50/40' : 'from-amber-100/70 via-white/50 to-orange-50/40'
+                          }`
+                        : 'px-6 py-4'
+                    } ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
+                    onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
+                  >
+                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'justify-between flex-wrap'}`}>
+                      {isPhone && (
+                        <div className="relative shrink-0">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold ring-2 ring-white/80 shadow-sm ${
+                              item.no_approver || item.layer_stuck ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {initialsOf(item.requested_by_name || '?')}
+                          </div>
+                        </div>
+                      )}
+                      <div className="min-w-0 max-w-full">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-slate-800">{sourceTitle(item.source_type)}</span>
+                          <span className="text-sm font-semibold text-slate-800">
+                            {item.vehicle_maintainer_bypass
+                              ? 'Ride Request — Assign Vehicle'
+                              : item.asset_fulfiller_bypass
+                                ? 'Asset Requisition — Fulfill'
+                                : item.conveyance_disburser_bypass
+                                  ? 'Conveyance — Disburse'
+                                  : item.hr_action_details
+                                  ? `${item.hr_action_details.action_label} — ${item.hr_action_details.employee_name || ''}`
+                                  : sourceTitle(item.source_type)}
+                          </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {item.source_label}
+                          {item.hr_action_details
+                            ? `${item.hr_action_details.employee_code ? item.hr_action_details.employee_code + ' · ' : ''}Effective ${item.hr_action_details.effective_date || '—'}`
+                            : item.source_label}
                           {!editable && item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
                         </p>
+                        {item.vehicle_requisition_details && (
+                          <div className="mt-1.5 max-w-xl text-[11px] text-slate-600 space-y-0.5">
+                            <div>
+                              <span className="text-slate-400 font-semibold">When: </span>
+                              {formatDate(item.vehicle_requisition_details.ride_date)} · {item.vehicle_requisition_details.start_time} · Est.{' '}
+                              {formatDuration(item.vehicle_requisition_details.estimated_duration_hours)}
+                            </div>
+                            {item.vehicle_requisition_details.purpose && (
+                              <div className="whitespace-pre-line break-words">
+                                <span className="text-slate-400 font-semibold">Purpose: </span>
+                                {item.vehicle_requisition_details.purpose}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <p className="text-[11px] text-slate-400 mt-1">
                           From {item.requested_by_name || `User #${item.requested_by}`}
-                          {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
+                          {item.no_approver ? (
+                            <span className="text-amber-700 font-medium"> &middot; No approver set — you decide as Superadmin</span>
+                          ) : item.layer_stuck ? (
+                            <span className="text-amber-700 font-medium">
+                              {' '}
+                              &middot; Layer {item.current_step} of {item.total_steps} has nobody active — you decide as Superadmin
+                            </span>
+                          ) : item.total_steps ? (
+                            <> &middot; Layer {item.current_step} of {item.total_steps}</>
+                          ) : null}
+                          {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                         </p>
+                        {item.adhoc && (
+                          <div className="mt-2 max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                            <span className="font-semibold">{item.adhoc.added_by_name || 'An approver'} asks for your approval</span>
+                            {item.adhoc.note ? <>: “{item.adhoc.note}”</> : null}
+                            <span className="block text-amber-700 mt-0.5">Approve sends it back to {item.adhoc.added_by_name || 'them'}; Reject rejects the request.</span>
+                          </div>
+                        )}
 
-                        {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
+                        {item.hr_action_details && (
+                          <div className="mt-2 max-w-md">
+                            <div className="rounded-lg border border-slate-200 overflow-hidden text-[11px]">
+                              {hrChangeRows(item.hr_action_details).map((r) => (
+                                <div key={r.label} className="grid grid-cols-[90px_1fr] gap-2 px-2.5 py-1.5 border-b last:border-b-0 border-slate-100">
+                                  <span className="text-slate-400 font-semibold">{r.label}</span>
+                                  <span className="text-slate-700">
+                                    <span className="text-slate-400 line-through decoration-slate-300">{r.from}</span> → <span className="font-semibold text-slate-900">{r.to}</span>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {item.hr_action_details.reason && <p className="text-[11px] text-slate-500 mt-1.5">Reason: {item.hr_action_details.reason}</p>}
+                            {item.hr_action_details.history.filter((h) => h.action === 'approved').map((h, i) => (
+                              <p key={i} className="text-[11px] text-emerald-700 mt-1">
+                                ✓ {h.step_label ? `${h.step_label}: ` : ''}{h.by_name}{h.remarks ? ` — ${h.remarks}` : ''}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
+                        {item.source_type === 'bill_claim' && <ClaimBillLines items={item.claim_items} compact />}
+                        {item.source_type === 'bill_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                           <div className="mt-2 space-y-1 max-w-md">
                             {item.claim_refs.map((r) => (
                               <button
@@ -303,9 +657,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                                 title="View check-in/out location"
                                 className="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg transition-colors text-left"
                               >
-                                <span className="flex items-center gap-1 text-slate-600 min-w-0 truncate">
+                                <span className="flex items-center gap-1 text-slate-600 min-w-0">
                                   <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
-                                  Movement Claim &middot; {r.purpose}
+                                  <span className="truncate">
+                                    Check In/Out &middot; {r.purpose}
+                                    <span className="block text-[10px] text-slate-400 truncate">
+                                      {formatDate(r.check_in_at)} &middot; {new Date(r.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {r.check_out_at ? ` \u2192 ${new Date(r.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' \u2192 not checked out'}
+                                      {r.distance_km != null ? ` \u00b7 ${r.distance_km} km` : ''}
+                                    </span>
+                                  </span>
                                 </span>
                                 <span className="shrink-0 font-semibold text-slate-800">
                                   ৳{Number(r.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}
@@ -329,7 +690,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                             type="number"
                             step="0.01"
                             min={0}
-                            max={claimAmount ?? undefined}
+                            max={runningAmount ?? undefined}
                             value={draft ?? (runningAmount != null ? String(runningAmount) : '')}
                             onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                             className="w-full text-xs px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -342,45 +703,396 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                       </div>
                     )}
 
-                    <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Remarks (optional)"
-                        value={remarksDraft[key] || ''}
-                        onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
-                        className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
+                    {item.asset_fulfiller_bypass ? (
+                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                          <Package className="w-3 h-3 shrink-0 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
+                        </p>
                         <button
                           type="button"
-                          disabled={actingKey === key}
-                          onClick={() => handleAct(item, 'rejected')}
-                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
+                          onClick={() => setFulfilling(item)}
+                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors"
                         >
-                          <XCircle className="w-3.5 h-3.5" /> Reject
-                        </button>
-                        <button
-                          type="button"
-                          disabled={actingKey === key}
-                          onClick={() => handleApprove(item)}
-                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
-                        >
-                          {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                          Approve
+                          <Package className="w-3.5 h-3.5" /> Fulfill & Hand Over
                         </button>
                       </div>
-                    </div>
+                    ) : item.vehicle_maintainer_bypass ? (
+                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                          <Car className="w-3 h-3 shrink-0 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SearchSelect
+                            value={assignForm[key]?.vehicle_id || ''}
+                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: e.target.value, driver_user_id: prev[key]?.driver_user_id || '' } }))}
+                            className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            <option value="">Pick a vehicle…</option>
+                            {availableVehicles.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.model} ({v.vehicle_no})
+                              </option>
+                            ))}
+                          </SearchSelect>
+                          <SearchSelect
+                            value={assignForm[key]?.driver_user_id || ''}
+                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: prev[key]?.vehicle_id || '', driver_user_id: e.target.value } }))}
+                            className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            <option value="">Pick a driver…</option>
+                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id).map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {driverOptionLabel(d, assignForm[key]?.vehicle_id)}
+                              </option>
+                            ))}
+                          </SearchSelect>
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleAssignAndApprove(item)}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                            Assign & Confirm
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                      {item.source_type === 'bill_claim' && <ClaimChangesNotice item={item} className="mt-3" />}
+                      <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        {item.can_edit_asset_items && item.asset_requisition_details && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingItems(item)}
+                            className="flex items-center justify-center gap-1 text-xs px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold transition-colors"
+                          >
+                            <Package className="w-3.5 h-3.5" /> Edit items
+                          </button>
+                        )}
+                        {item.conveyance_disburser_bypass && (
+                          <input
+                            type="text"
+                            placeholder="Voucher no (blank = automatic)"
+                            title="Disburse approves this claim, puts it on its own Bill and records this voucher"
+                            value={voucherDraft[key] || ''}
+                            onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                            className="min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        )}
+                        <input
+                          type="text"
+                          aria-label="Remarks"
+                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
+                          value={remarksDraft[key] || ''}
+                          onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                          className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleAct(item, 'rejected')}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Reject
+                          </button>
+                          {item.source_type === 'bill_claim' && !item.adhoc && (
+                            <ReturnButton item={item} compact disabled={actingKey === key} onClick={() => handleAct(item, 'returned')} />
+                          )}
+                          {item.can_add_adhoc && (
+                            <button
+                              type="button"
+                              disabled={actingKey === key}
+                              onClick={() => setAdhocFor(item)}
+                              title="Ask one more person to approve before you decide"
+                              className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 font-semibold disabled:opacity-50 transition-colors"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Add approver
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleApprove(item)}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            {actingKey === key ? (
+                              <Spinner size={14} />
+                            ) : item.conveyance_disburser_bypass ? (
+                              <Wallet className="w-3.5 h-3.5" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            )}
+                            {item.conveyance_disburser_bypass ? 'Disburse' : 'Approve'}
+                          </button>
+                        </div>
+                      </div>
+                      {item.source_type === 'bill_claim' && (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <ReclaimTick item={item} checked={!!reclaimDraft[key]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [key]: v }))} />
+                        </div>
+                      )}
+                      </>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
+          </>
+          )}
         </div>
       </div>
+
+      {adhocFor && (
+        <AddAdhocApproverModal
+          token={token}
+          item={adhocFor}
+          onClose={() => setAdhocFor(null)}
+          onDone={(name) => {
+            const k = keyFor(adhocFor);
+            setAdhocFor(null);
+            setItems((prev) => prev.filter((i) => keyFor(i) !== k));
+            setMessage({ type: 'success', text: `Sent to ${name} for approval — it comes back to you after they approve.` });
+          }}
+        />
+      )}
+
+      {editingItems && (
+        <AssetRequisitionEditItemsModal
+          token={token}
+          requisitionId={Number(editingItems.source_id)}
+          requesterName={editingItems.requested_by_name}
+          items={editingItems.asset_requisition_details?.items || []}
+          onClose={() => setEditingItems(null)}
+          onSaved={() => {
+            setEditingItems(null);
+            setViewingAssetRequisition(null);
+            load();
+          }}
+        />
+      )}
+
+      {fulfilling && (
+        <AssetFulfillModal
+          token={token}
+          requisitionId={Number(fulfilling.source_id)}
+          mode="approve"
+          requesterName={fulfilling.requested_by_name}
+          items={fulfilling.asset_requisition_details?.items || []}
+          onClose={() => setFulfilling(null)}
+          onDone={() => {
+            const f = fulfilling;
+            setFulfilling(null);
+            setMessage({ type: 'success', text: 'Handed over — the employee has been notified to confirm it.' });
+            setItems((prev) => prev.filter((i) => keyFor(i) !== keyFor(f)));
+          }}
+        />
+      )}
 
       {viewingRef && (
         <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
       )}
+
+      {viewingAssetRequisition && viewingAssetRequisition.asset_requisition_details && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setViewingAssetRequisition(null); }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                  <Package className="w-4.5 h-4.5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Asset Requisition Details</h2>
+                  <p className="text-xs text-slate-500">
+                    From {viewingAssetRequisition.requested_by_name || `User #${viewingAssetRequisition.requested_by}`}
+                  </p>
+                </div>
+              </div>
+              {viewingAssetRequisition.can_edit_asset_items && (
+                <button
+                  type="button"
+                  onClick={() => setEditingItems(viewingAssetRequisition)}
+                  className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 shrink-0"
+                >
+                  Edit items
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setViewingAssetRequisition(null)}
+                aria-label="Close"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Category</div>
+                  <div className="text-slate-800">{viewingAssetRequisition.asset_requisition_details.asset_category}</div>
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Urgency</div>
+                  <div
+                    className={`inline-flex px-2 py-0.5 rounded-full font-semibold capitalize ${
+                      viewingAssetRequisition.asset_requisition_details.urgency === 'high'
+                        ? 'bg-rose-50 text-rose-700'
+                        : viewingAssetRequisition.asset_requisition_details.urgency === 'medium'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {viewingAssetRequisition.asset_requisition_details.urgency}
+                  </div>
+                </div>
+                {viewingAssetRequisition.asset_requisition_details.target_date && (
+                  <div>
+                    <div className="font-semibold text-slate-400 mb-0.5">Needed By</div>
+                    <div className="text-slate-800">{viewingAssetRequisition.asset_requisition_details.target_date}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="font-semibold text-slate-400 mb-0.5">Layer</div>
+                  <div className="text-slate-800">
+                    {viewingAssetRequisition.current_step} of {viewingAssetRequisition.total_steps}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1">Reason</div>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">{viewingAssetRequisition.asset_requisition_details.reason}</p>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-400 mb-1.5">
+                  Requested Items ({viewingAssetRequisition.asset_requisition_details.items.length})
+                </div>
+                <div className="space-y-1.5">
+                  {viewingAssetRequisition.asset_requisition_details.items.map((it, idx) => (
+                    <div key={idx} className="flex items-baseline justify-between gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      <div>
+                        <span className="font-medium text-slate-800">{it.item_name}</span>
+                        <span className="text-slate-500"> — {it.purpose}</span>
+                      </div>
+                      <span className="shrink-0 font-semibold text-slate-700">{Number(it.quantity)} {it.unit}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {viewingAssetRequisition.asset_requisition_details.has_attachment && (
+                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{viewingAssetRequisition.asset_requisition_details.attachment_filename}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+// "Add approver": ask one more person to approve this request before you
+// decide (POST /api/my-approvals/:id/adhoc). Liquid-glass popup (house style).
+const AddAdhocApproverModal: React.FC<{
+  token: string;
+  item: MyApprovalItem;
+  onClose: () => void;
+  onDone: (name: string) => void;
+}> = ({ token, item, onClose, onDone }) => {
+  const [people, setPeople] = useState<{ id: number; name: string; employee_id: string | null; designation: string | null; department: string | null }[] | null>(null);
+  const [pick, setPick] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/my-approvals/adhoc-candidates'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        const data = await r.json().catch(() => []);
+        if (!r.ok) throw new Error(data?.error || 'Could not load people.');
+        setPeople((Array.isArray(data) ? data : []).filter((p: any) => Number(p.id) !== Number(item.requested_by)));
+      })
+      .catch((e) => {
+        setPeople([]);
+        setError(e.message);
+      });
+  }, [token, item.requested_by]);
+  const send = async () => {
+    const who = people?.find((p) => String(p.id) === pick);
+    if (!who || !note.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/my-approvals/${item.id}/adhoc`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ approver_user_id: who.id, note: note.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not add the approver.');
+      onDone(who.name);
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[95] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
+      <div role="dialog" aria-label="Add an approver" onClick={(e) => e.stopPropagation()} className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md">
+        <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 rounded-full text-slate-600 hover:text-slate-900">
+          <X className="w-4 h-4" />
+        </button>
+        <div className="px-6 pt-6 pb-5">
+          <div className="liquid-glass-inset w-12 h-12 rounded-[16px] flex items-center justify-center mb-3">
+            <UserPlus className="w-6 h-6 text-violet-600" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">Add an approver</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {item.source_label} — from {item.requested_by_name || 'the employee'}. The person you pick approves first; then it comes back to you to decide.
+          </p>
+          <label className="block mt-4 text-xs font-semibold text-slate-700">Who should approve</label>
+          <SearchSelect
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+            disabled={people === null}
+            className="mt-1 w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 focus:outline-none"
+          >
+            <option value="">{people === null ? 'Loading…' : '— Select employee —'}</option>
+            {(people || []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {[p.name, p.employee_id, p.designation, p.department].filter(Boolean).join(' · ')}
+              </option>
+            ))}
+          </SearchSelect>
+          <label className="block mt-3 text-xs font-semibold text-slate-700">Why their approval is needed</label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={500}
+            placeholder="e.g. Please check the budget before I approve."
+            className="mt-1 w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 focus:outline-none"
+          />
+          {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
+          <button
+            type="button"
+            onClick={send}
+            disabled={busy || !pick || !note.trim()}
+            className="liquid-glass-button w-full mt-4 py-3 rounded-full font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Sending…' : 'Send for approval'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

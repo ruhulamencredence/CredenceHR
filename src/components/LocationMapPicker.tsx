@@ -48,7 +48,7 @@ const pinIcon = L.divIcon({
 // away from the center pin resizes the radius circle live.
 const handleIcon = L.divIcon({
   className: '',
-  html: `<div style="width:16px;height:16px;border-radius:50%;background:#ffffff;border:3px solid #7F00FF;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:ew-resize;"></div>`,
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#ffffff;border:3px solid var(--g-accent,#7F00FF);box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:ew-resize;"></div>`,
   iconSize: [16, 16],
   iconAnchor: [8, 8]
 });

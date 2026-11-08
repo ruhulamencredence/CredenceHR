@@ -90,11 +90,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
       try {
         status = (await Geolocation.requestPermissions()).location;
       } catch {
-        throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+        throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
       }
     }
     if (status !== 'granted') {
-      throw new Error('Location permission is required for a Movement Claim. Please allow location access and try again.');
+      throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
@@ -117,7 +117,7 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // check-in/check-out API call fires — lets the user see the point(s) on a map
 // before committing. On check-out, draws BOTH the original Check In point and
 // the current (Check Out) point with a line + distance between them, since a
-// Movement Claim is a point A -> point B travel record, not a fixed-site visit.
+// Check In/Out is a point A -> point B travel record, not a fixed-site visit.
 export default function ClaimMapConfirm({
   kind,
   purpose,
@@ -181,7 +181,7 @@ export default function ClaimMapConfirm({
       .bindPopup(kind === 'out' ? 'Checking out here' : 'You are here');
 
     if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: CLAIM_ZOOM });
+      map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: CLAIM_ZOOM });
     }
 
     setTimeout(() => {
@@ -220,7 +220,7 @@ export default function ClaimMapConfirm({
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasCheckIn) bounds.push([checkInCoords!.latitude, checkInCoords!.longitude]);
         if (bounds.length > 1) {
-          mapRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: CLAIM_ZOOM });
+          mapRef.current.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: CLAIM_ZOOM });
         } else {
           mapRef.current.panTo([fresh.latitude, fresh.longitude]);
         }
