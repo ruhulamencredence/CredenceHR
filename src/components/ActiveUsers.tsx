@@ -15,6 +15,7 @@ import { useHrApi, Notice, inputCls } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 import { Erp360SignInCard } from './Erp360SignInCard';
+import { WelcomeSlidesCard } from './WelcomeSlidesCard';
 
 interface Session {
   id: number;
@@ -273,6 +274,7 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
 
       <SessionSecurityCard api={api} onMsg={setMsg} />
       <Erp360SignInCard api={api} onMsg={setMsg} />
+      <WelcomeSlidesCard api={api} onMsg={setMsg} />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         {cards.map(([label, n, icon, tone]) => (

@@ -1505,6 +1505,16 @@ Unique: `token_hash`(token_hash)
 | `reason` | varchar(255) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
 
+### `welcome_slides_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK  | |
+| `enabled` | tinyint(1) | না | default 1 | |
+| `reset_at` | datetime | হ্যাঁ |  | |
+| `updated_by` | int | হ্যাঁ |  | |
+| `updated_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED on update CURRENT_TIMESTAMP | |
+
 ### `login_attempts`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

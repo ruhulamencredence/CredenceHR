@@ -51,6 +51,8 @@ try {
   // storage unavailable — it loads when first drawn instead
 }
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
+// Welcome slides, once per account (WelcomeSlides.tsx) — its own small chunk.
+const WelcomeSlides = lazy(retryImport(() => import('./components/WelcomeSlides')));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
@@ -461,6 +463,29 @@ export default function App() {
     }, 8000);
     return () => clearTimeout(t);
   }, [token]);
+
+  // First sign-in of an account: the welcome slides, once (WelcomeSlidesRoutes.ts
+  // decides — a Superadmin can switch them off or show them again to everyone).
+  const [showWelcome, setShowWelcome] = useState(false);
+  useEffect(() => {
+    setShowWelcome(false);
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(apiUrl('/api/welcome-slides/status'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && d?.show && setShowWelcome(true))
+        .catch(() => undefined);
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const finishWelcome = () => {
+    setShowWelcome(false);
+    if (token) void fetch(apiUrl('/api/welcome-slides/seen'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+  };
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     // Nothing saved from an earlier sign-in on this device is shown.
@@ -1850,6 +1875,13 @@ export default function App() {
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />
+
+      {/* An account's first sign-in: the welcome slides (WelcomeSlides.tsx). */}
+      {showWelcome && token && user && (
+        <Suspense fallback={null}>
+          <WelcomeSlides onDone={finishWelcome} />
+        </Suspense>
+      )}
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}

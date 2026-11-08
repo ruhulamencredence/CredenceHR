@@ -123,7 +123,8 @@
   "user_signatures",
   "users",
   "web_push_keys",
-  "web_push_subscriptions"
+  "web_push_subscriptions",
+  "welcome_slides_settings"
  ],
  "M. PEPM: MPR, Jobs, Budget & Materials": [
   "budget_items",

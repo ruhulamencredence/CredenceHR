@@ -755,3 +755,11 @@ CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 
 5. **Android:** ফোনের browser-এ পেজটা জিজ্ঞেস করে "Open in the CredenceHR app" নাকি "Continue in the browser"। app-এ খুললে `credencehr://sso/consume/<token>` (manifest intent-filter, `main.tsx` `appUrlOpen` / `getLaunchUrl`), তারপর app থেকে password sign-in-এর মতোই location ও device তথ্য সহ। app না থাকলে browser-এই চলে।
 6. **একাধিক application:** 360 ERP ছাড়াও যেকোনো application যোগ করা যায়, প্রত্যেকের **আলাদা** App ID ও App Secret, IP তালিকা, প্রতি মিনিটের সীমা, link-এর মেয়াদ আর চালু/বন্ধ। একটা বন্ধ করলে বা মুছলে বাকিগুলো চলে। জায়গা: Admin Panel → **Active Users → Partner app sign-in (SSO)** (শুধু Superadmin, API-ও `requireSuperAdmin`)। সেখানে Add application (নাম → Make its keys, secret একবারই দেখায়, শুধু hash থাকে), নাম বদল, New secret, Remove, আর application অনুযায়ী সাম্প্রতিক sign-in ও API call-এর log। partner-এর developer-দের জন্য পুরো guide: `docs/CredenceHR-SSO-API.md`।
 
+## Welcome slides (প্রথম sign-in-এ)
+
+কোনো account প্রথমবার CredenceHR খুললে (website বা app) চারটা পুরো-পর্দার slide একবার দেখায় (`src/components/WelcomeSlides.tsx`): **Welcome to CredenceHR**, **Check in from anywhere**, **Leave in two taps**, **You're all set!**। ছবি অ্যাপের নিজের animation (login-এর illustration, GPS, beach, plan)। → বা বাঁয়ে swipe = পরের, Back বা ডানে swipe = আগের, Skip = শেষ slide-এ, শেষে **Get started** = Dashboard। ফোনে পুরো পর্দা, বড় পর্দায় ঝাপসা পাতার উপর ফোন-মাপের card।
+
+- দেখা হয়ে গেলে (Get started, বা Esc) `users.welcome_seen_at` বসে — ওই account আর কোনো ফোন বা কম্পিউটারে দেখে না (`WelcomeSlidesRoutes.ts`: `GET /api/welcome-slides/status`, `POST /api/welcome-slides/seen`)। নতুন joiner-এর অস্থায়ী login (My Onboarding) কখনো দেখে না।
+- এই সুবিধা আসার আগে থেকে থাকা account-গুলোও একবার দেখে (তারা কেউ আগে দেখেনি)।
+- Admin Panel → **Active Users → Welcome slides** (শুধু Superadmin, API-ও `requireSuperAdmin`): সবার জন্য চালু/বন্ধ, কতজন দেখেছেন, আর **Show again to everyone** (`welcome_slides_settings.reset_at`) — বড় update-এর পর সবাই আবার একবার দেখেন।
+
