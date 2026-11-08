@@ -1,5 +1,5 @@
 import './lib/polyfills.ts';
-import {StrictMode, useEffect, useState} from 'react';
+import {StrictMode, Suspense, lazy, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import App, { dashboardCodeReady } from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
@@ -47,6 +47,32 @@ if (isPrivacyPolicy) document.title = 'Privacy Policy · CredenceHR';
 // (VerifyPage.tsx, ESignRoutes.ts): opened from a signed PDF's QR code by
 // people who have no account, so it skips <App /> like /privacy.
 const isVerify = /^\/verify(\/[A-Za-z0-9-]+)?\/?$/.test(window.location.pathname);
+// /sso/consume/<token> — opened from 360 ERP to come in already signed in
+// (SsoConsume.tsx, Erp360InboundSsoRoutes.ts). Its own small chunk.
+const ssoToken = /^\/sso\/consume\/([0-9a-fA-F]{64})\/?$/.exec(window.location.pathname)?.[1]?.toLowerCase() || null;
+const SsoConsume = lazy(() => import('./components/SsoConsume.tsx'));
+// The Android app opened by a credencehr://sso/consume/<token> link (a phone
+// browser's "Open in the CredenceHR app" on that page): go to the page above
+// inside the app. Each link only once — a reload must not reuse it.
+if (Capacitor.isNativePlatform()) {
+  const openSsoLink = (url?: string | null) => {
+    const t = /^credencehr:\/\/sso\/consume\/([0-9a-fA-F]{64})/i.exec(String(url || ''))?.[1]?.toLowerCase();
+    if (!t) return;
+    try {
+      if (sessionStorage.getItem('sso_link_done') === t) return;
+      sessionStorage.setItem('sso_link_done', t);
+    } catch {
+      // storage unavailable
+    }
+    window.location.replace(`/sso/consume/${t}`);
+  };
+  void import('@capacitor/app')
+    .then(({ App }) => {
+      void App.getLaunchUrl().then((r) => openSsoLink(r?.url)).catch(() => undefined);
+      void App.addListener('appUrlOpen', (e) => openSsoLink(e.url));
+    })
+    .catch(() => undefined);
+}
 
 // A new joiner's temporary login (HR Operations -> Onboarding -> New Joiners)
 // gets only "My Onboarding", never the normal app — so none of the app's
@@ -78,11 +104,17 @@ function Root() {
 const render = () =>
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <AppErrorBoundary>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}</AppErrorBoundary>
+      <AppErrorBoundary>
+        {ssoToken ? (
+          <Suspense fallback={null}>
+            <SsoConsume token={ssoToken} />
+          </Suspense>
+        ) : isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
+      </AppErrorBoundary>
     </StrictMode>,
   );
 // Signed in: keep index.html's "Loading…" screen up until the Dashboard's
 // code is ready (from the phone's cache that is a fraction of a second; never
 // more than 1.5 s), then draw — no skeleton flash on every open.
-if (!isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession()) void dashboardCodeReady(1500).then(render);
+if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession()) void dashboardCodeReady(1500).then(render);
 else render();

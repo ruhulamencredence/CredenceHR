@@ -1443,6 +1443,68 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `last_used_at` | datetime | হ্যাঁ |  | |
 
+### `api_clients`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `name` | varchar(100) | না |  | |
+| `app_id` | varchar(64) | না | UNI  | |
+| `secret_hash` | char(64) | না |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `allowed_ips` | text | হ্যাঁ |  | |
+| `allowed_routes` | varchar(255) | না | default sso.initiate | |
+| `rate_per_minute` | int | না | default 60 | |
+| `token_ttl_seconds` | int | না | default 120 | |
+| `secret_rotated_at` | datetime | হ্যাঁ |  | |
+| `last_used_at` | datetime | হ্যাঁ |  | |
+| `created_by` | int | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+
+Unique: `app_id`(app_id)
+
+### `api_access_logs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `client_id` | int | হ্যাঁ |  | |
+| `app_id` | varchar(64) | হ্যাঁ |  | |
+| `route` | varchar(100) | না |  | |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `status` | int | না |  | |
+| `message` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+
+### `sso_login_requests`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `client_id` | int | না |  | |
+| `user_id` | int | না |  | logical → `users` |
+| `token_hash` | char(64) | না | UNI  | |
+| `request_ip` | varchar(64) | হ্যাঁ |  | |
+| `expires_at` | datetime | না |  | |
+| `used_at` | datetime | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+
+Unique: `token_hash`(token_hash)
+
+### `sso_login_logs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int | না | PK auto_increment | |
+| `request_id` | int | হ্যাঁ |  | |
+| `client_id` | int | হ্যাঁ |  | |
+| `user_id` | int | হ্যাঁ |  | logical → `users` |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `platform` | varchar(10) | হ্যাঁ |  | |
+| `success` | tinyint(1) | না |  | |
+| `reason` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default CURRENT_TIMESTAMP DEFAULT_GENERATED | |
+
 ### `login_attempts`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

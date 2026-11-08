@@ -743,3 +743,15 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 ## Login পেজের animation ডিভাইসে রাখা
 
 Login পেজের illustration animation (`office-illustration.json`, ~৮৬৫ KB, gzip-এ অনেক ছোট) একটা আলাদা JSON ফাইল, যার নামে তার content-এর hash থাকে। প্রথমবার নামার পর browser-এর **Cache Storage**-এ (`credence-static-v1`) রাখা হয় (`src/lib/assetCache.ts`, `src/lib/authHeroAsset.ts`)। website, ফোনের browser, "Add to Home screen" আর Android অ্যাপ সব জায়গায় পরের বার network ছাড়াই দেখায়। সাধারণ HTTP cache-এর মতো এটা browser-এর জায়গা দরকার হলে মুছে যায় না। login অবস্থায় অ্যাপ খোলার ৮ সেকেন্ড পর একবার পেছনে নামিয়ে রাখে, তাই sign-out-এর পর login পেজে সাথে সাথে আসে। animation বদলালে নতুন hash হয়, নতুনটা নামে, পুরনোটা মুছে যায়। শুধু অ্যাপের স্থির ফাইল রাখা হয়, `/api`-এর কোনো data কখনো না।
+
+## 360 ERP থেকে CredenceHR-এ সরাসরি ঢোকা (SSO)
+
+CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 360 ERP-এর নিজের partner SSO নকশা হুবহু মেনে (`Erp360InboundSsoRoutes.ts`, `src/components/SsoConsume.tsx`):
+
+1. 360 ERP-এর **সার্ভার** (browser নয়) ডাকে `POST /api/v1/service/sso/initiate`, header `X-App-Id` / `X-App-Secret`, body `{ email, employee_id, name?, request_ip?, redirect_path? }`।
+2. API পাহারা যাচাই করে: HTTPS, client চালু, secret মেলে, IP অনুমোদিত, প্রতি মিনিটের সীমা বাকি, আর এই route (`sso.initiate`) এই client-কে দেওয়া। প্রতিটা call, ব্যর্থ হলেও, `api_access_logs`-এ লেখা হয়।
+3. মানুষটা মেলে **email আর Employee ID দুটো দিয়েই** (login email বা কর্মীর অফিস email), কর্মী সক্রিয় (`is_active`), account block নয় (Superadmin-এর block হয় না)। ৬৪ অক্ষরের এককালীন token তৈরি হয়, database-এ শুধু তার SHA-256 থাকে (`sso_login_requests`), মেয়াদ client-এর setting অনুযায়ী (ডিফল্ট ১২০ সেকেন্ড)। উত্তর `{ forward_url: <PUBLIC_APP_URL>/sso/consume/<token>, expires_in }`; অপ্রত্যাশিত ব্যর্থতায় সাধারণ বার্তা আর HTTP 500।
+4. 360 ERP browser-কে `forward_url`-এ পাঠায়। পেজটা token সাথে সাথে ঠিকানা থেকে সরিয়ে `POST /api/auth/sso/consume` ডাকে। token এক ধাপে "ব্যবহৃত" হয়, দ্বিতীয়বার কখনো চলে না। তারপর password sign-in-এর হুবহু একই `finishLogin()` চলে: block, App access, ফোনের সীমা, workspace, onboarding, কিছুই বাদ যায় না। সফল বা ব্যর্থ সব চেষ্টা `sso_login_logs`-এ লেখা হয়। সফল হলে সবসময় **Dashboard**, না মিললে কারণ সহ login পেজের বোতাম।
+5. **Android:** ফোনের browser-এ পেজটা জিজ্ঞেস করে "Open in the CredenceHR app" নাকি "Continue in the browser"। app-এ খুললে `credencehr://sso/consume/<token>` (manifest intent-filter, `main.tsx` `appUrlOpen` / `getLaunchUrl`), তারপর app থেকে password sign-in-এর মতোই location ও device তথ্য সহ। app না থাকলে browser-এই চলে।
+6. Credential বানানো: Admin Panel → **Active Users → 360 ERP sign-in** (শুধু Superadmin, API-ও `requireSuperAdmin`)। App ID ও App Secret তৈরি (secret একবারই দেখায়, শুধু hash থাকে), New secret, চালু/বন্ধ, 360 ERP সার্ভারের IP, প্রতি মিনিটের সীমা, link-এর মেয়াদ, আর সাম্প্রতিক sign-in ও API call-এর log।
+

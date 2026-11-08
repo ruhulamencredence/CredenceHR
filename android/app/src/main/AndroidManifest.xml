@@ -28,6 +28,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Sign-in from 360 ERP (SsoConsume.tsx): a phone browser's "Open in
+                 the CredenceHR app" opens credencehr://sso/consume/<token> here;
+                 main.tsx takes it (@capacitor/app appUrlOpen / getLaunchUrl). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="credencehr" android:host="sso" />
+            </intent-filter>
         </activity>
 
         <provider

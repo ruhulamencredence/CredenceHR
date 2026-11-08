@@ -105,6 +105,7 @@ import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerManagementDashboardRoutes } from "./ManagementDashboardRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
+import { ensureErp360InboundSsoSchema, registerErp360InboundSsoRoutes } from "./Erp360InboundSsoRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
@@ -298,6 +299,8 @@ async function initDB() {
     // User feedback about the app (FeedbackRoutes.ts).
     await ensureFeedbackSchema(dbPool);
     await ensureFingerprintSchema(dbPool);
+    // 360 ERP -> CredenceHR sign-in: partner apps, one-time links, logs.
+    await ensureErp360InboundSsoSchema(dbPool);
     // Approval requests with no approver yet (rehomeAwaitingApprovals).
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
@@ -3497,6 +3500,8 @@ async function startServer() {
     authenticateToken,
     queryDB
   });
+  // ...and the other way: 360 ERP -> CredenceHR (Erp360InboundSsoRoutes.ts).
+  registerErp360InboundSsoRoutes(app, { JWT_SECRET, authenticateToken, requireSuperAdmin, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
   // — kept in its own file (EmployeeTransferRoutes.ts), same reasoning as
