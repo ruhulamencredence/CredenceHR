@@ -25,11 +25,26 @@ const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').th
 // so the Dashboard opens without its placeholder on a signed-in phone.
 const loadUserPanel = retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
 let userPanelLoad: ReturnType<typeof loadUserPanel> | null = null;
-const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().catch((err) => {
+// The Dashboard component itself once its code has run — drawn directly
+// (no Suspense placeholder for a frame) when it is ready before the app's
+// first render.
+let LoadedUserPanel: Awaited<ReturnType<typeof loadUserPanel>>['default'] | null = null;
+const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().then((m) => {
+  LoadedUserPanel = m.default;
+  return m;
+}).catch((err) => {
   userPanelLoad = null; // let the next try download it again
   throw err;
 }));
 const UserPanel = lazy(preloadUserPanel);
+// A signed-in open waits for the Dashboard's code (main.tsx) — at most
+// `maxMs` — while index.html's own "Loading…" screen is up, so the phone
+// goes from that straight to the Dashboard (with its saved data), not
+// through the skeleton placeholder for a split second.
+export function dashboardCodeReady(maxMs: number): Promise<void> {
+  if (!userPanelLoad) return Promise.resolve();
+  return Promise.race([userPanelLoad.then(() => undefined), new Promise<void>((r) => setTimeout(r, maxMs))]).catch(() => undefined);
+}
 try {
   if (localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
 } catch {
@@ -113,6 +128,8 @@ import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
 
 export default function App() {
+  // Fixed for this mount: switching component type later would remount the Dashboard.
+  const [DashboardPanel] = useState(() => LoadedUserPanel || UserPanel);
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('mpr_user');
@@ -1713,7 +1730,7 @@ export default function App() {
           />
         ) : (
           <>
-            <UserPanel
+            <DashboardPanel
               token={token}
               user={user}
               claimsNavRequest={claimsNavRequest}

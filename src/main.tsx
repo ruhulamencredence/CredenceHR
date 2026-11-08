@@ -1,7 +1,7 @@
 import './lib/polyfills.ts';
 import {StrictMode, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import App, { dashboardCodeReady } from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
 import PrivacyPolicy from './components/PrivacyPolicy.tsx';
 import VerifyPage from './components/VerifyPage.tsx';
@@ -75,8 +75,14 @@ function Root() {
   return onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />;
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AppErrorBoundary>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}</AppErrorBoundary>
-  </StrictMode>,
-);
+const render = () =>
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <AppErrorBoundary>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}</AppErrorBoundary>
+    </StrictMode>,
+  );
+// Signed in: keep index.html's "Loading…" screen up until the Dashboard's
+// code is ready (from the phone's cache that is a fraction of a second; never
+// more than 1.5 s), then draw — no skeleton flash on every open.
+if (!isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession()) void dashboardCodeReady(1500).then(render);
+else render();
