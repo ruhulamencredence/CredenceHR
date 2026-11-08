@@ -48,6 +48,9 @@ fresh() {
   # also expect the usual departments.
   for _ in $(seq 1 30); do mysql_ -N "$DB_NAME" -e "SELECT 1 FROM departments LIMIT 0" >/dev/null 2>&1 && break; sleep 1; done
   mysql_ "$DB_NAME" -e "INSERT IGNORE INTO departments (id, name) VALUES (1,'Admin'),(2,'Finance'),(3,'HR'),(4,'MIS'),(5,'Transport')"
+  # Every account here is new, so the first-sign-in welcome slides
+  # (WelcomeSlidesRoutes.ts) would cover the page the browser suites click on.
+  mysql_ "$DB_NAME" -e "UPDATE welcome_slides_settings SET enabled = 0 WHERE id = 1"
 }
 
 # name | needs a fresh server | command

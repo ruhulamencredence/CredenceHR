@@ -62,11 +62,38 @@ network-এর লক খাটে না, শুধু ডিভাইসের
 নিজের ডিভাইসের ভুল অন্য ডিভাইসে account আটকায় না; আজেবাজে `trusted_devices` মান login ভাঙে না। Browser-এ: login-এর পর token
 থাকে, sign-out-এ মোছে না, পরের login-এ পাঠায়। Unit (fingerprint, onboarding), form E2E, multi-company, concurrency suite আবার চালানো হয়েছে।
 
-## ৪. ফাইল
+## ৪. ৮ নভেম্বরের ২০টা commit যাচাই
+
+360 ERP থেকে login (SSO), Partner app, Welcome slides, Calls, Employee Tracking, Management Dashboard, loading
+placeholder ইত্যাদি — merge করে আবার যাচাই:
+
+| যাচাই | ফল |
+|---|---|
+| Typecheck, production build, `docs:check` | পাস |
+| QA suite ১৩টা | **১৩/১৩ পাস** (নিচের সংশোধনের পর) |
+| Trusted-device login (`scripts/trusted-device-login.mts`) | ১৫/১৫ পাস |
+| SSO নিরাপত্তা (৪৫টা check): ভুল/নেই secret, অজানা App ID, email-ID না মিললে, blocked, non-HTTPS, IP তালিকা, বন্ধ app, প্রতি মিনিটের সীমা, নতুন secret-এ পুরনোটা বাতিল, app মুছলে link বাতিল, token একবারই, একসাথে ৩ বার → ১টাই সফল, মেয়াদ শেষ, link বানানোর পর blocked হলে বাতিল, secret/token শুধু hash, সব call log-এ; কর্মী বা login-ছাড়া কেউ Superadmin-এর SSO / Welcome slides সেটিং খুলতে পারে না; Disappearing switch কর্মী নিজে চালু করতে পারে না | সব পাস |
+| Browser: প্রথম login-এ Welcome slides (ফোন), Get started-এর পর আর আসে না; Superadmin-এর Active Users-এ দুটো কার্ড; SSO link → Dashboard, ঠিকানা থেকে token মুছে যায়, পুরনো link-এ পরিষ্কার বার্তা; JS error / 5xx ০ | ৯/৯ পাস |
+
+পাওয়া সমস্যা ও সংশোধন:
+
+- **GitHub CI কয়েকদিন ধরে লাল** — commit-এর দোষ নয়: `ubuntu-latest` এখন Ubuntu 26.04, সেখানে Playwright 1.56
+  Chromium বসাতে পারে না, তাই QA আর Docs sync test পর্যন্ত পৌঁছাত না। দুটো workflow `ubuntu-24.04`-এ বাঁধা হয়েছে।
+- **Welcome slides browser test আটকায়** — QA-র নতুন ডাটাবেসে সব account নতুন, তাই slides পাতা ঢেকে দেয় (e2e-forms,
+  pickers fail)। App ঠিক আছে; `tests/qa/run-all.sh` test ডাটাবেসে slides বন্ধ করে দেয়।
+
+সিদ্ধান্তের জন্য (বদলানো হয়নি):
+
+- Partner app দিয়ে **Superadmin-ও** password ছাড়া ঢুকতে পারে। কোনো partner-এর secret ফাঁস হলে Superadmin account-ও
+  খোলা যাবে। প্রস্তাব: SSO-তে Superadmin বন্ধ (দরকার হলে প্রতি app-এ আলাদা switch)।
+- Partner app-এ "Allowed IPs" খালি রাখলে যেকোনো IP থেকে চলে। প্রস্তাব: live-এ IP দেওয়া বাধ্যতামূলক।
+
+## ৫. ফাইল
 
 - `01-page-crawl-552.json` — প্রতিটা পাতা: কোথায় গেল, কত সময়, JS error, 4xx/5xx, overflow
 - `02-api-sweep-964-routes.json` — login-ছাড়া / কম-অনুমতিতে কী খোলে, ভুল ইনপুটে 500
 - `qa/*.json` — QA suite-এর ফল
+- `scripts/sso-partner-signin.mjs` — SSO / Welcome slides / Disappearing switch-এর নিরাপত্তা check (env: BASE, SA_EMAIL… — ফাইলের শুরুতে দেখুন)
 - `scripts/crawl.mjs`, `scripts/probes.mjs`, `scripts/probes2.mjs` — চালানোর script (ডাটাবেসের কপি আর port নিজের মতো দিন)
 
 পরিবেশের টীকা: টেস্টের container চলার মাঝে দুবার নিজে restart হয়েছিল, তখন MySQL বন্ধ হয়ে যায়; MySQL আবার চালু করে
