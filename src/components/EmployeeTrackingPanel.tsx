@@ -15,6 +15,7 @@ import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
 import { TrackingStayReport } from './TrackingStayReport';
 import { LiveFollowModal } from './LiveFollowModal';
+import { getChatSocket } from '../lib/chatSocket';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -56,6 +57,14 @@ interface EmployeeTrackingPanelProps {
 // see anything new; this just keeps "X min ago" honest and catches new pings
 // promptly without hammering the server.
 const LIVE_REFRESH_MS = 60_000;
+// "Live all": everyone on the map in live mode at once (the tracking "live"
+// layer, POST /api/tracking/live/watch-many). Renewed like Live Follow, ends
+// by itself after LIVE_ALL_MS — live mode is hard on the phones' batteries.
+const LIVE_ALL_RENEW_MS = 45_000;
+const LIVE_ALL_MS = 15 * 60_000;
+const LIVE_ALL_MAX = 100;
+// Live pings are gathered and drawn together this often (not one redraw per ping).
+const LIVE_ALL_FLUSH_MS = 2_000;
 
 // A user's dot turns from "recent" to "stale" grey after this many minutes of
 // silence — the device is still supposed to ping every 5-10 min, so 20 min of
@@ -198,6 +207,10 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const canEmailReports = useCanEmailReports();
   // Live Follow (LiveFollowModal) — who is open, if anyone.
   const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
+  // "Live all" — on until this time (ms), else null.
+  const [liveAllUntil, setLiveAllUntil] = useState<number | null>(null);
+  const [liveAllError, setLiveAllError] = useState<string | null>(null);
+  const [, setLiveAllTick] = useState(0);
   // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
   const [showStay, setShowStay] = useState(false);
   // The map filling the whole screen (button on the map, Esc to leave).
@@ -325,6 +338,79 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     if (!q) return live;
     return live.filter(p => (p.user_name || '').toLowerCase().includes(q));
   }, [live, searchQuery]);
+
+  // "Live all": put everyone on the map (as filtered, at most LIVE_ALL_MAX)
+  // in live mode, keep renewing, and move their markers as pings arrive.
+  const liveAllIdsRef = useRef<number[]>([]);
+  useEffect(() => {
+    if (!liveAllUntil || !canLive) return;
+    const ids = liveAllIdsRef.current;
+    if (!ids.length) return;
+    let stopped = false;
+    const watch = async () => {
+      try {
+        const res = await fetch(apiUrl('/api/tracking/live/watch-many'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ user_ids: ids })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not start live tracking.');
+        if (!stopped) setLiveAllError(null);
+      } catch (e: any) {
+        if (!stopped) setLiveAllError(e.message || 'Could not start live tracking.');
+      }
+    };
+    void watch();
+    const renew = setInterval(() => void watch(), LIVE_ALL_RENEW_MS);
+    // Pings over the socket, drawn together every LIVE_ALL_FLUSH_MS.
+    const pending = new Map<number, any>();
+    const socket = getChatSocket();
+    const onLoc = (d: any) => {
+      const id = Number(d?.user_id);
+      if (ids.includes(id)) pending.set(id, d);
+    };
+    socket?.on('tracking:location', onLoc);
+    const flush = setInterval(() => {
+      if (!pending.size) return;
+      const got = new Map(pending);
+      pending.clear();
+      setLive((prev) =>
+        prev.map((p) => {
+          const d = got.get(Number(p.user_id));
+          return d
+            ? { ...p, lat: Number(d.lat), lng: Number(d.lng), recorded_at: d.recorded_at, battery_pct: d.battery_pct ?? p.battery_pct, accuracy_m: d.accuracy_m ?? (p as any).accuracy_m }
+            : p;
+        })
+      );
+    }, LIVE_ALL_FLUSH_MS);
+    // Countdown on the button; off by itself when the time is up.
+    const tick = setInterval(() => {
+      setLiveAllTick((n) => n + 1);
+      if (Date.now() >= liveAllUntil) setLiveAllUntil(null);
+    }, 1000);
+    return () => {
+      stopped = true;
+      clearInterval(renew);
+      clearInterval(flush);
+      clearInterval(tick);
+      socket?.off('tracking:location', onLoc);
+      void fetch(apiUrl('/api/tracking/live/unwatch-many'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ user_ids: ids }),
+        keepalive: true
+      }).catch(() => undefined);
+    };
+  }, [liveAllUntil, canLive, token]);
+  const startLiveAll = () => {
+    liveAllIdsRef.current = Array.from(new Set(filteredLive.map((p) => Number(p.user_id)))).slice(0, LIVE_ALL_MAX);
+    if (!liveAllIdsRef.current.length) return;
+    setLiveAllError(null);
+    setLiveAllUntil(Date.now() + LIVE_ALL_MS);
+  };
+  const liveAllLeft = liveAllUntil ? Math.max(0, liveAllUntil - Date.now()) : 0;
+  const liveAllClock = `${Math.floor(liveAllLeft / 60000)}:${String(Math.floor((liveAllLeft % 60000) / 1000)).padStart(2, '0')}`;
 
   // Live board cards ------------------------------------------------------
   const employees = status?.employees || [];
@@ -564,9 +650,41 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
         const name = p.user_name || 'User';
         const icon = liveMarkerIcon(stale, name, photoUrls[p.user_id]);
         const marker = L.marker([Number(p.lat), Number(p.lng)], { icon }).addTo(layer);
-        marker.bindPopup(
-          `<div style="font-size:12px;"><b>${name}</b><br/>${agoLabel(p.recorded_at)}${p.battery_pct != null ? `<br/>Battery: ${p.battery_pct}%` : ''}</div>`
-        );
+        // Built as elements (a name is text, never HTML), with Live (opens
+        // Live Follow, needs the tracking "live" layer) and Path buttons.
+        const box = document.createElement('div');
+        box.style.fontSize = '12px';
+        box.style.minWidth = '150px';
+        const b = document.createElement('b');
+        b.textContent = name;
+        box.appendChild(b);
+        const info = document.createElement('div');
+        info.textContent = agoLabel(p.recorded_at);
+        box.appendChild(info);
+        if (p.battery_pct != null) {
+          const bat = document.createElement('div');
+          bat.textContent = `Battery: ${p.battery_pct}%`;
+          box.appendChild(bat);
+        }
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:6px;margin-top:8px';
+        const btn = (label: string, primary: boolean, onClick: () => void) => {
+          const el = document.createElement('button');
+          el.type = 'button';
+          el.textContent = label;
+          el.style.cssText = `flex:1;padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid ${primary ? '#059669' : '#cbd5e1'};background:${primary ? '#059669' : '#fff'};color:${primary ? '#fff' : '#334155'}`;
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            marker.closePopup();
+            onClick();
+          });
+          row.appendChild(el);
+        };
+        const who = { id: Number(p.user_id), name };
+        if (canLive) btn('● Live', true, () => setFollowing(who));
+        btn('Path', false, () => setSelectedUser(who));
+        box.appendChild(row);
+        marker.bindPopup(box);
         bounds.push([Number(p.lat), Number(p.lng)]);
       });
       // Re-fit only when who is shown changes, so the minute refresh doesn't
@@ -575,7 +693,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       if (bounds.length > 0 && sig !== lastFitRef.current) map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 15 });
       lastFitRef.current = sig;
     }
-  }, [filteredLive, history, selectedUser, photoUrls]);
+  }, [filteredLive, history, selectedUser, photoUrls, canLive]);
 
   const bars = status?.updates_per_minute || [];
   const barMax = Math.max(1, ...bars);
@@ -730,7 +848,31 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
+            {canLive && !selectedUser && (
+              <button
+                type="button"
+                onClick={() => (liveAllUntil ? setLiveAllUntil(null) : startLiveAll())}
+                disabled={!liveAllUntil && filteredLive.length === 0}
+                className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-full border shadow-sm text-xs font-semibold disabled:opacity-40 ${
+                  liveAllUntil ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+                title={
+                  liveAllUntil
+                    ? 'Stop live for everyone on the map'
+                    : `Live for everyone on the map (${Math.min(filteredLive.length, LIVE_ALL_MAX)}) for ${LIVE_ALL_MS / 60000} minutes — uses more of their phones' battery`
+                }
+                aria-pressed={!!liveAllUntil}
+              >
+                <Radio className={`w-3.5 h-3.5 ${liveAllUntil ? 'animate-pulse' : ''}`} />
+                {liveAllUntil ? `Live · ${liveAllClock}` : 'Live all'}
+              </button>
+            )}
           </div>
+          {liveAllUntil && (
+            <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-[1000] rounded-full bg-emerald-600/95 text-white text-[11px] font-medium px-3 py-1 shadow-sm">
+              {liveAllError ? liveAllError : `Live: ${liveAllIdsRef.current.length} on the map · positions move as they arrive`}
+            </div>
+          )}
 
           {!selectedUser && (
             <div className="absolute bottom-6 right-3 z-[1000] hidden sm:flex items-center gap-3 rounded-full bg-white/95 border border-slate-200 shadow-sm px-3 py-1.5 text-[11px] text-slate-600">

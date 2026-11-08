@@ -182,6 +182,67 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
     }
   );
 
+  // "Live all" on the Employee Tracking map: the same as /watch for several
+  // people at once (the ones on the map, at most WATCH_MANY_MAX), renewed by
+  // the page every RENEW like Live Follow. Each person must be in this
+  // account's tracking scope; the others are skipped. No trails — the map
+  // already shows everyone's latest position; pings then arrive over the
+  // socket ("tracking:location").
+  const WATCH_MANY_MAX = 100;
+  const idsFrom = (body: any): number[] =>
+    Array.from(new Set((Array.isArray(body?.user_ids) ? body.user_ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))).slice(
+      0,
+      WATCH_MANY_MAX
+    ) as number[];
+  app.post(
+    "/api/tracking/live/watch-many",
+    authenticateToken,
+    requireAdmin,
+    requireModule("tracking"),
+    requireModuleLayer("tracking", "live"),
+    async (req: any, res: any) => {
+      try {
+        const scope = await getTrackingScope(queryDB, req.user);
+        const ids = idsFrom(req.body).filter((id) => inTrackingScope(scope, id));
+        const me = Number(req.user.id);
+        const watching: { user_id: number; live_until: number | null }[] = [];
+        for (const userId of ids) {
+          let m = watchers.get(userId);
+          const wasLive = !!(m && activeWatchers(userId).length);
+          if (!m) watchers.set(userId, (m = new Map()));
+          m.set(me, Date.now() + WATCH_TTL_MS);
+          const until = await liveUntil(userId);
+          if (!wasLive) {
+            tellPhone(userId, until);
+            wakes.delete(userId);
+            wakePhone(userId, until);
+          } else if ((lastHeard.get(userId) || 0) < (wakes.get(userId)?.at || 0)) {
+            wakePhone(userId, until);
+          }
+          watching.push({ user_id: userId, live_until: until });
+        }
+        res.json({ watching, max: WATCH_MANY_MAX });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+  app.post(
+    "/api/tracking/live/unwatch-many",
+    authenticateToken,
+    requireAdmin,
+    requireModule("tracking"),
+    requireModuleLayer("tracking", "live"),
+    async (req: any, res: any) => {
+      const me = Number(req.user.id);
+      for (const userId of idsFrom(req.body)) {
+        watchers.get(userId)?.delete(me);
+        if ((await liveUntil(userId)) == null) tellPhone(userId, null);
+      }
+      res.json({ success: true });
+    }
+  );
+
   // Stop following (page closed). The phone drops back to normal once no one
   // else is watching and no ride is on.
   app.post(
