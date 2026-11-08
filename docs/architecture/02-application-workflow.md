@@ -744,6 +744,16 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 Login পেজের illustration animation (`office-illustration.json`, ~৮৬৫ KB, gzip-এ অনেক ছোট) একটা আলাদা JSON ফাইল, যার নামে তার content-এর hash থাকে। প্রথমবার নামার পর browser-এর **Cache Storage**-এ (`credence-static-v1`) রাখা হয় (`src/lib/assetCache.ts`, `src/lib/authHeroAsset.ts`)। website, ফোনের browser, "Add to Home screen" আর Android অ্যাপ সব জায়গায় পরের বার network ছাড়াই দেখায়। সাধারণ HTTP cache-এর মতো এটা browser-এর জায়গা দরকার হলে মুছে যায় না। login অবস্থায় অ্যাপ খোলার ৮ সেকেন্ড পর একবার পেছনে নামিয়ে রাখে, তাই sign-out-এর পর login পেজে সাথে সাথে আসে। animation বদলালে নতুন hash হয়, নতুনটা নামে, পুরনোটা মুছে যায়। শুধু অ্যাপের স্থির ফাইল রাখা হয়, `/api`-এর কোনো data কখনো না।
 
+## App খোলা: splash → প্রথম frame → launch animation
+
+App-এর icon কমলা (v3: `android/app/src/main/res/mipmap-*`, adaptive background `#F47920`; website / "Add to Home screen": `public/icons/*`, `public/favicon.png`)। অ্যাপের ভেতরের রং আগের মতো বেগুনি।
+
+Android app খুললে তিনটা ধাপ, প্রথম দুটোর ছবি হুবহু এক, তাই মাঝখানে কিছু বদলায় না (আগের হালকা বেগুনি ঝলক নেই):
+
+1. **Native splash** (`drawable*/splash.png`, সব density, port / land, night): কমলা gradient (160°, `#ff9238` → `#f47920` → `#e2600e`), মাঝখানে icon 112 dp, নিচ থেকে 124 dp উপরে 120 × 3 dp-এর খালি loading track (সাদা 25%)।
+2. **WebView-এর প্রথম frame** (`index.html` `#mpr-boot-spinner`): একই gradient, icon (WebP, HTML-এর ভেতরেই — কোনো request লাগে না) আর track, CSS px-এ একই মাপে। JS নামার আগেই দেখায়; website-এও লোড হওয়ার সময় এটাই দেখায়।
+3. **Launch animation** (`src/components/BootIntroAnimation.tsx`, শুধু native app — `shouldShowBootIntro()`): design-এর "Option B" — icon মিলিয়ে যায়, CREDENCE-এর অক্ষর একে একে ওঠে, ধূসর wedge D-এর ওপর উল্টে বসে, সাদা বিন্দু বড় হয়ে HR badge হয়, একটা ring ছড়ায়, প্রথম frame থেকেই একটা loading line ভরে, তারপর splash অ্যাপের ওপর থেকে মিলিয়ে যায় (৪.৩ সেকেন্ড)। একবারই চলে, প্রতি app চালুতে একবার (পাতা নিজে reload হলে — account বদল, নতুন deploy — আবার না; `sessionStorage` `chr_boot_intro_played`)। ছুঁলে সঙ্গে সঙ্গে বন্ধ। ফোনে "Reduce motion / Remove animations" চালু থাকলে কিছু নড়ে না: icon থেকে পুরো logo-তে আলতো বদল, তারপর মিলিয়ে যায় (১.২ সেকেন্ড)। অক্ষর, wedge, HR-এর ছবি `src/assets/boot/`-এ। animation চলার সময় নিচে অ্যাপ লোড হতে থাকে।
+
 ## 360 ERP থেকে CredenceHR-এ সরাসরি ঢোকা (SSO)
 
 CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 360 ERP-এর নিজের partner SSO নকশা হুবহু মেনে (`Erp360InboundSsoRoutes.ts`, `src/components/SsoConsume.tsx`):

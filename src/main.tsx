@@ -1,5 +1,5 @@
 import './lib/polyfills.ts';
-import {StrictMode, Suspense, lazy, useEffect, useState} from 'react';
+import {StrictMode, Suspense, lazy, useCallback, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import App, { dashboardCodeReady } from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
@@ -13,6 +13,7 @@ import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
 import { installChunkReload } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
+import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
 
 // Multi-company: every /api call carries the picked company (src/lib/company.ts).
 installCompanyHeader();
@@ -87,7 +88,27 @@ const onboardingSession = (): { token: string; user: User } | null => {
     return null;
   }
 };
+// The app's launch animation (BootIntroAnimation.tsx), over the normal app:
+// once per app start — not again when the page reloads itself (account
+// switch, a new deploy), which keeps the same session storage.
+const BOOT_INTRO_KEY = 'chr_boot_intro_played';
+let bootIntroDecided: boolean | undefined; // asked once (StrictMode asks twice)
+const bootIntroDue = () => {
+  if (bootIntroDecided !== undefined) return bootIntroDecided;
+  bootIntroDecided = shouldShowBootIntro();
+  if (bootIntroDecided) {
+    try {
+      if (sessionStorage.getItem(BOOT_INTRO_KEY)) bootIntroDecided = false;
+      else sessionStorage.setItem(BOOT_INTRO_KEY, '1');
+    } catch {
+      // storage unavailable — play it
+    }
+  }
+  return bootIntroDecided;
+};
 function Root() {
+  const [intro, setIntro] = useState(bootIntroDue);
+  const endIntro = useCallback(() => setIntro(false), []);
   const [onb, setOnb] = useState(onboardingSession);
   useEffect(() => {
     const check = () => setOnb(onboardingSession());
@@ -98,7 +119,12 @@ function Root() {
       window.removeEventListener('storage', check);
     };
   }, []);
-  return onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />;
+  return (
+    <>
+      {onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />}
+      {intro && <BootIntroAnimation onDone={endIntro} />}
+    </>
+  );
 }
 
 const render = () =>
