@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// 360 ERP -> CredenceHR single sign-on: someone already signed in to 360 ERP
-// opens CredenceHR without typing a password. The mirror image of
+// Partner app -> CredenceHR single sign-on (360 ERP first, any number of
+// other applications too — each with its own App ID / App Secret, IPs,
+// limits and switch): someone already signed in to that app opens CredenceHR
+// without typing a password. Full guide for a partner's developers:
+// docs/CredenceHR-SSO-API.md. The mirror image of
 // Erp360SsoRoutes.ts (CredenceHR -> 360 ERP) and of 360 ERP's own partner
 // SSO flow:
 //
@@ -31,8 +34,9 @@
 //      attempt, good or bad, is written to sso_login_logs. The person lands
 //      on the Dashboard; anything wrong sends them to the login page.
 //
-// Credentials are made in Admin Panel -> Active Users -> "360 ERP sign-in"
-// (Superadmin only): the secret is shown once and only its hash is kept.
+// Applications are added in Admin Panel -> Active Users -> "Partner app
+// sign-in (SSO)" (Superadmin only): each gets its own App ID and App Secret;
+// the secret is shown once and only its hash is kept.
 
 import crypto from "crypto";
 import type { Express } from "express";
@@ -56,7 +60,7 @@ export async function ensureErp360InboundSsoSchema(dbPool: any): Promise<void> {
     try {
       await dbPool.query(sql);
     } catch (err: any) {
-      if (!/Duplicate column|already exists/i.test(err.message)) console.warn("⚠️ 360 ERP sign-in schema: " + err.message);
+      if (!/Duplicate column|already exists/i.test(err.message)) console.warn("⚠️ partner sign-in schema: " + err.message);
     }
   };
   // The partner apps allowed to call this server's service API.
@@ -171,7 +175,11 @@ const publicBase = (req: any) => {
 };
 
 const newSecret = () => crypto.randomBytes(48).toString("base64url"); // 64 characters
-const newAppId = () => `erp360_${crypto.randomBytes(8).toString("hex")}`;
+// App ID: a readable prefix from the app's name + 16 random hex characters.
+const newAppId = (name: string) => {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 16) || "app";
+  return `${slug}_${crypto.randomBytes(8).toString("hex")}`;
+};
 
 export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
   const { authenticateToken, requireSuperAdmin, queryDB } = deps;
@@ -263,7 +271,7 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
       void accessLog(clientId, appId, ROUTE_INITIATE, ip, 200, `link made for user ${ids[0]}`);
       res.json({ forward_url: `${publicBase(req)}/sso/consume/${token}`, expires_in: ttl });
     } catch (err: any) {
-      console.error("360 ERP sign-in initiate failed:", err?.message);
+      console.error("Partner sign-in initiate failed:", err?.message);
       void accessLog(clientId, appId || null, ROUTE_INITIATE, ip, 500, "unexpected error");
       res.status(500).json({ message: "Something went wrong. Please try again." });
     }
@@ -280,7 +288,7 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
     }
     if (!/^[0-9a-f]{64}$/.test(token)) {
       void loginLog(null, null, null, ip, platform, false, "malformed token");
-      return res.status(400).json({ error: "This sign-in link is not valid. Please open CredenceHR from 360 ERP again." });
+      return res.status(400).json({ error: "This sign-in link is not valid. Please open CredenceHR again from the app you came from." });
     }
     try {
       const hash = sha256(token);
@@ -290,7 +298,7 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
       const row = rows[0];
       if (!row || Number(upd?.affectedRows ?? 0) !== 1) {
         void loginLog(row ? Number(row.id) : null, row ? Number(row.client_id) : null, row ? Number(row.user_id) : null, ip, platform, false, row ? "link used or expired" : "unknown token");
-        return res.status(401).json({ error: "This sign-in link has expired or was already used. Please open CredenceHR from 360 ERP again.", code: "SSO_LINK_EXPIRED" });
+        return res.status(401).json({ error: "This sign-in link has expired or was already used. Please open CredenceHR again from the app you came from.", code: "SSO_LINK_EXPIRED" });
       }
       const users: any[] = (await queryDB("/*unscoped*/ SELECT * FROM users WHERE id = ?", [Number(row.user_id)])) || [];
       const user = users[0];
@@ -310,10 +318,11 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
         status.code = c;
         return origStatus(c);
       };
-      await finishLogin(deps, req, res, user, { via: "erp360" });
+      const app: any[] = (await queryDB("SELECT name FROM api_clients WHERE id = ?", [Number(row.client_id)]).catch(() => [])) || [];
+      await finishLogin(deps, req, res, user, { via: "sso", sso_app: app[0]?.name || null });
       void loginLog(Number(row.id), Number(row.client_id), Number(user.id), ip, platform, status.code < 400, status.code < 400 ? "signed in" : `refused (${status.code})`);
     } catch (err: any) {
-      console.error("360 ERP sign-in consume failed:", err?.message);
+      console.error("Partner sign-in consume failed:", err?.message);
       void loginLog(null, null, null, ip, platform, false, "unexpected error");
       if (!res.headersSent) res.status(500).json({ error: "Something went wrong. Please sign in with your password." });
     }
@@ -338,11 +347,14 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
       const clients: any[] = (await queryDB("SELECT * FROM api_clients ORDER BY id")) || [];
       const logins: any[] =
         (await queryDB(
-          `/*unscoped*/ SELECT l.id, l.success, l.reason, l.ip, l.platform, l.created_at, u.name AS user_name
-             FROM sso_login_logs l LEFT JOIN users u ON u.id = l.user_id
-            ORDER BY l.id DESC LIMIT 50`
+          `/*unscoped*/ SELECT l.id, l.client_id, c.name AS app_name, l.success, l.reason, l.ip, l.platform, l.created_at, u.name AS user_name
+             FROM sso_login_logs l LEFT JOIN users u ON u.id = l.user_id LEFT JOIN api_clients c ON c.id = l.client_id
+            ORDER BY l.id DESC LIMIT 100`
         )) || [];
-      const calls: any[] = (await queryDB("SELECT id, app_id, ip, status, message, created_at FROM api_access_logs ORDER BY id DESC LIMIT 50")) || [];
+      const calls: any[] =
+        (await queryDB(
+          "SELECT l.id, l.client_id, c.name AS app_name, l.app_id, l.ip, l.status, l.message, l.created_at FROM api_access_logs l LEFT JOIN api_clients c ON c.id = l.client_id ORDER BY l.id DESC LIMIT 100"
+        )) || [];
       res.json({
         clients: clients.map(clientView),
         logins,
@@ -357,8 +369,9 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
   // New credentials: the secret is shown in this answer only.
   app.post("/api/system/sso-clients", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
-      const name = String(req.body?.name || "360 ERP").trim().slice(0, 100) || "360 ERP";
-      const appId = newAppId();
+      const name = String(req.body?.name || "").trim().slice(0, 100);
+      if (!name) return res.status(400).json({ error: "Give the application a name (e.g. 360 ERP)." });
+      const appId = newAppId(name);
       const secret = newSecret();
       await queryDB("INSERT INTO api_clients (name, app_id, secret_hash, created_by, secret_rotated_at) VALUES (?, ?, ?, ?, NOW())", [name, appId, sha256(secret), req.user.id]);
       res.json({ app_id: appId, secret });
@@ -390,7 +403,10 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
       if (ips.some((s: string) => !/^[0-9a-fA-F:.]+$/.test(s))) return res.status(400).json({ error: "Allowed IPs: IP addresses only, separated by commas." });
       const rate = Math.min(1000, Math.max(1, Math.round(Number(b.rate_per_minute) || DEFAULT_RATE_PER_MINUTE)));
       const ttl = Math.min(600, Math.max(30, Math.round(Number(b.token_ttl_seconds) || DEFAULT_TTL_SECONDS)));
-      await queryDB("UPDATE api_clients SET is_active = ?, allowed_ips = ?, rate_per_minute = ?, token_ttl_seconds = ? WHERE id = ?", [
+      const name = String(b.name ?? "").trim().slice(0, 100);
+      if (!name) return res.status(400).json({ error: "The application needs a name." });
+      await queryDB("UPDATE api_clients SET name = ?, is_active = ?, allowed_ips = ?, rate_per_minute = ?, token_ttl_seconds = ? WHERE id = ?", [
+        name,
         b.is_active ? 1 : 0,
         ips.join(", ") || null,
         rate,
@@ -400,6 +416,20 @@ export function registerErp360InboundSsoRoutes(app: Express, deps: Deps) {
       const rows: any[] = (await queryDB("SELECT * FROM api_clients WHERE id = ?", [id])) || [];
       if (!rows[0]) return res.status(404).json({ error: "Not found." });
       res.json({ client: clientView(rows[0]) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Remove an application: its App ID stops working at once and any link it
+  // made that isn't used yet is dropped. Its log rows stay (with its id).
+  app.delete("/api/system/sso-clients/:id", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const r: any = await queryDB("DELETE FROM api_clients WHERE id = ?", [id]);
+      if (Number(r?.affectedRows ?? 1) !== 1) return res.status(404).json({ error: "Not found." });
+      await queryDB("DELETE FROM sso_login_requests WHERE client_id = ? AND used_at IS NULL", [id]).catch(() => undefined);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

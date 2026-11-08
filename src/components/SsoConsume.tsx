@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// <site>/sso/consume/<token> — where 360 ERP sends someone to open
+// <site>/sso/consume/<token> — where a partner app (360 ERP or another,
+// each with its own keys) sends someone to open
 // CredenceHR already signed in (Erp360InboundSsoRoutes.ts). The token is
 // taken out of the address bar at once, spent on POST /api/auth/sso/consume
 // (one use, ~2 minutes), and the person lands on the Dashboard — the same
@@ -130,13 +131,13 @@ const SsoConsume: React.FC<{ token: string }> = ({ token }) => {
           <>
             <div className="mt-4 mx-auto w-8 h-8 rounded-full border-[3px] border-violet-200 border-t-violet-600 animate-spin" aria-hidden="true" />
             <p className="text-sm text-slate-600 mt-3" role="status">
-              Signing you in from 360 ERP…
+              Signing you in…
             </p>
           </>
         )}
         {phase === 'choose' && (
           <>
-            <p className="text-sm text-slate-600 mt-2">Open CredenceHR from 360 ERP</p>
+            <p className="text-sm text-slate-600 mt-2">Open CredenceHR</p>
             <div className="mt-5 flex flex-col gap-2.5">
               <button type="button" onClick={openInApp} className="liquid-glass-button rounded-full px-5 py-2.5 text-sm font-semibold text-white bg-violet-600">
                 Open in the CredenceHR app
