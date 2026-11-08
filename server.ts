@@ -3877,7 +3877,19 @@ async function startServer() {
 
   apiNotFoundAndErrors(app);
 
-  if (process.env.NODE_ENV !== "production") {
+  // The Vite dev server (no bundling, nothing cached, hundreds of small
+  // requests per open, a full reload whenever the network comes back) is
+  // for working on the code only. The built server (npm start / pm2 ->
+  // dist/server.cjs) always serves the built app with its year-long asset
+  // cache — even if NODE_ENV was left unset — unless NODE_ENV=development is
+  // asked for explicitly. A phone app pointed at a dev server re-downloads the
+  // whole program on every open (the Dashboard skeleton every time).
+  const builtServer = /server\.cjs$/i.test(String(process.argv[1] || "")) || (typeof __filename !== "undefined" && /server\.cjs$/i.test(__filename));
+  const devServer = process.env.NODE_ENV === "development" || (process.env.NODE_ENV !== "production" && !builtServer);
+  if (devServer) {
+    console.warn(
+      "\n*** DEV MODE: the Vite dev server is answering the web app — slow, nothing is cached. On a live server run `npm run build` then `npm start` (or `npm run pm2:start`). ***\n"
+    );
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: { server: httpServer } },
       appType: "spa",
