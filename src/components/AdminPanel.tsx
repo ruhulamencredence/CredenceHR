@@ -785,7 +785,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
-    return users.filter((u) => {
+    // Your own account, then the Superadmin, at the top — not on whichever
+    // page the alphabetical order happens to put them.
+    const pin = (u: (typeof users)[number]) => (u.id === user.id ? 0 : u.role === 'superadmin' ? 1 : 2);
+    return [...users].sort((a, b) => pin(a) - pin(b)).filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
       if (accessFilter && !accessFilter.match(u)) return false;
       if (userDeptFilter) {
@@ -799,7 +802,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter, user.id]);
   // Only one page of the (filtered) accounts is drawn at a time.
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(50);
