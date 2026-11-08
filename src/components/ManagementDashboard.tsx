@@ -484,20 +484,6 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
           </div>
 
           <div className="flex flex-col gap-5 min-w-0" style={{ flex: '1 1 340px', maxWidth: 460 }}>
-            <section className="bg-[#1e1b2e] text-white rounded-[20px] p-5 flex flex-col gap-3">
-              <h2 className="text-[15px] font-bold">Needs attention</h2>
-              {data.attention.length === 0 && <p className="text-sm text-[#c9c4dc]">Nothing needs attention right now.</p>}
-              {data.attention.map((n, i) => (
-                <button key={i} type="button" onClick={() => setOpen((n.target as DrawerKey) || 'headcount')} className="w-full text-left flex gap-2.5 items-start px-3 py-2.5 bg-[#2b2740] hover:bg-[#35304d] rounded-[14px]">
-                  <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: dot[n.level] }} />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-[13px] font-semibold">{n.title}</span>
-                    <span className="text-xs text-[#c9c4dc]">{n.detail} · open →</span>
-                  </span>
-                </button>
-              ))}
-            </section>
-
             <section className={card}>
               <h2 className="text-[15px] font-bold">Workforce</h2>
               {[
@@ -548,6 +534,20 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                   <span className="text-[#5b5570]">{l}</span>
                   <span className="font-bold">{v}</span>
                 </div>
+              ))}
+            </section>
+
+            <section className="bg-[#1e1b2e] text-white rounded-[20px] p-5 flex flex-col gap-3">
+              <h2 className="text-[15px] font-bold">Needs attention</h2>
+              {data.attention.length === 0 && <p className="text-sm text-[#c9c4dc]">Nothing needs attention right now.</p>}
+              {data.attention.map((n, i) => (
+                <button key={i} type="button" onClick={() => setOpen((n.target as DrawerKey) || 'headcount')} className="w-full text-left flex gap-2.5 items-start px-3 py-2.5 bg-[#2b2740] hover:bg-[#35304d] rounded-[14px]">
+                  <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: dot[n.level] }} />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-[13px] font-semibold">{n.title}</span>
+                    <span className="text-xs text-[#c9c4dc]">{n.detail} · open →</span>
+                  </span>
+                </button>
               ))}
             </section>
           </div>
