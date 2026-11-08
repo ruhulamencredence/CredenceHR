@@ -2,13 +2,16 @@ package com.mprtracker.app;
 
 import android.Manifest;
 import android.content.ActivityNotFoundException;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Rational;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebResourceError;
@@ -60,6 +63,27 @@ public class MainActivity extends BridgeActivity {
     public void onPause() {
         onScreen = false;
         super.onPause();
+    }
+
+    // Leaving the app (Home / Recents) during a video call: keep the call in
+    // the phone's picture-in-picture window, like WhatsApp. The page then
+    // shows only the video (CallLayer.tsx, "pictureInPicture").
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (!CallAudioPlugin.videoCallOn() || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            enterPictureInPictureMode(new PictureInPictureParams.Builder().setAspectRatio(new Rational(9, 16)).build());
+        } catch (Exception ignored) {
+            // Picture-in-picture turned off for the app, or not supported:
+            // the call goes on in the background (CallService).
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPip, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(inPip, newConfig);
+        CallAudioPlugin.pictureInPictureChanged(inPip);
     }
 
     // Opened from the incoming-call notification (Accept / tap): hand the

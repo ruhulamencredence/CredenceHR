@@ -18,6 +18,7 @@ interface CallAudioPlugin {
   cancelIncoming(o: { callId: string }): Promise<void>;
   addListener(event: 'callAction', cb: (d: { callId: string; action: 'accept' | 'open' }) => void): Promise<{ remove: () => void }>;
   addListener(event: 'callHangup', cb: () => void): Promise<{ remove: () => void }>;
+  addListener(event: 'pictureInPicture', cb: (d: { on: boolean }) => void): Promise<{ remove: () => void }>;
 }
 
 const CallAudio = registerPlugin<CallAudioPlugin>('CallAudio');
@@ -84,6 +85,21 @@ export function onCallHangup(cb: () => void): () => void {
   let handle: { remove: () => void } | null = null;
   let gone = false;
   CallAudio.addListener('callHangup', cb)
+    .then((h) => (gone ? h.remove() : (handle = h)))
+    .catch(() => undefined);
+  return () => {
+    gone = true;
+    handle?.remove();
+  };
+}
+
+/** The app went into / came out of the phone's picture-in-picture window
+ *  (MainActivity: leaving the app during a video call). */
+export function onPictureInPicture(cb: (on: boolean) => void): () => void {
+  if (!callAudioAvailable()) return () => undefined;
+  let handle: { remove: () => void } | null = null;
+  let gone = false;
+  CallAudio.addListener('pictureInPicture', (d) => cb(!!d?.on))
     .then((h) => (gone ? h.remove() : (handle = h)))
     .catch(() => undefined);
   return () => {

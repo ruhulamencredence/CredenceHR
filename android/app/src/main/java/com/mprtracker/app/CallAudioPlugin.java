@@ -64,6 +64,22 @@ public class CallAudioPlugin extends Plugin {
         call.resolve(r);
     }
 
+    // A video call is on (start with video .. stop): leaving the app then
+    // goes to picture-in-picture (MainActivity.onUserLeaveHint).
+    private static volatile boolean videoOn = false;
+
+    static boolean videoCallOn() {
+        return videoOn;
+    }
+
+    static void pictureInPictureChanged(boolean on) {
+        CallAudioPlugin p = instance;
+        if (p == null) return;
+        JSObject d = new JSObject();
+        d.put("on", on);
+        p.notifyListeners("pictureInPicture", d);
+    }
+
     // Hang up tapped on the ongoing-call notification (CallService): the page
     // ends the call. With no page listening, just put everything back.
     static void hangupFromNotification(Context context) {
@@ -101,6 +117,7 @@ public class CallAudioPlugin extends Plugin {
         boolean video = Boolean.TRUE.equals(call.getBoolean("video", wantSpeaker));
         // Keep the call going when the app is left (Home, screen off).
         CallService.start(getContext(), video);
+        videoOn = video;
         try {
             AudioManager am = audio();
             if (!active) {
@@ -218,7 +235,19 @@ public class CallAudioPlugin extends Plugin {
     }
 
     private void release() {
+        videoOn = false;
         CallService.stop(getContext());
+        // Call over while in picture-in-picture: close that small window.
+        final android.app.Activity a = getActivity();
+        if (a != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            a.runOnUiThread(() -> {
+                try {
+                    if (a.isInPictureInPictureMode()) a.moveTaskToBack(false);
+                } catch (Exception ignored) {
+                    // best effort
+                }
+            });
+        }
         if (!active) return;
         active = false;
         speaker = false;
