@@ -60,7 +60,7 @@ android/, capacitor.config.ts  ← APK বিল্ডের জন্য (৬ �
 তাই নতুন server-এ শুধু:
 1. খালি database বানান (নাম `.env`-এর `DB_NAME`-এর মতো)।
 2. `.env` ঠিক করুন (নিচে ৩ নং ধাপ)।
-3. `npm install` → `npm run build` → `npm start` (বা `npm run dev`)।
+3. `npm install` → `npm run build` → `npm start`। (`npm run dev` শুধু কোডে কাজ করার জন্য। live server-এ এটা চালালে কিছুই cache হয় না, মোবাইল অ্যাপ প্রতিবার খোলার সময় পুরো প্রোগ্রাম আবার নামায়।)
 
 Log-এ দেখাবে: `✅ Empty database: created the base tables from schema.sql.`
 
@@ -135,6 +135,7 @@ npm run dev
 npm run build     # frontend build (dist/) + server.ts কে dist/server.cjs এ bundle করে
 npm start          # dist/server.cjs চালায় (production)
 ```
+`npm start` (`dist/server.cjs`) সবসময় build করা app দেয়, `/assets/*` এক বছরের cache সহ, `NODE_ENV` দেওয়া না থাকলেও। শুধু `NODE_ENV=development` দিলে Vite dev server চলে। Dev server চললে log-এ `*** DEV MODE ***` লেখা আসে। live server-এ এটা দেখলে বুঝবেন ভুল ভাবে চলছে।
 Production সার্ভার হিসেবে permanently চালাতে PM2 ব্যবহার করতে পারেন:
 ```bash
 npm install -g pm2

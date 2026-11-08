@@ -11,7 +11,7 @@
 //               default, and copy an account's Module Access from one company
 //               to others (shared-service HR).
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, Copy, Crown, Globe, ImagePlus, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
 import { PlatformWorkspaces } from './PlatformWorkspaces';
 import { Spinner } from './Spinner';
@@ -21,6 +21,10 @@ import { useMyCompanies } from '../lib/company';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+
+// Accounts per page in Who can work where.
+const ACCESS_PAGE = 50;
+
 interface Company {
   id: number;
   name: string;
@@ -281,6 +285,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [groupName, setGroupName] = useState('');
   const [users, setUsers] = useState<AccessUser[] | null>(null);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersBusy, setUsersBusy] = useState(false);
   const [edit, setEdit] = useState<Company | 'new' | null>(null);
   const [copyFor, setCopyFor] = useState<AccessUser | null>(null);
   const [removing, setRemoving] = useState<Company | null>(null);
@@ -298,14 +304,41 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
         setPlatformAdmin(!!d.is_platform_admin);
       })
       .catch((e) => setMsg({ type: 'error', text: e.message }));
-    api
-      .get('/api/system/company-access')
-      .then((d) => setUsers(d.users))
-      .catch(() => setUsers([]));
   }, [api]);
   useEffect(() => {
     load();
   }, [load]);
+
+  // Who can work where: a page of accounts at a time, searched on the server,
+  // and only once the tab is opened.
+  const usersReq = useRef(0);
+  const loadUsers = useCallback(
+    (search: string, from: number) => {
+      const n = ++usersReq.current;
+      setUsersBusy(true);
+      api
+        .get(`/api/system/company-access?limit=${ACCESS_PAGE}&offset=${from}&q=${encodeURIComponent(search.trim())}`)
+        .then((d) => {
+          if (n !== usersReq.current) return;
+          setUsersTotal(Number(d.total) || 0);
+          setUsers((list) => (from === 0 ? d.users : [...(list || []), ...d.users]));
+        })
+        .catch((e) => {
+          if (n !== usersReq.current) return;
+          if (from === 0) setUsers([]);
+          setMsg({ type: 'error', text: e.message });
+        })
+        .finally(() => {
+          if (n === usersReq.current) setUsersBusy(false);
+        });
+    },
+    [api]
+  );
+  useEffect(() => {
+    if (tab !== 'access') return;
+    const t = setTimeout(() => loadUsers(q, 0), q ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [tab, q, loadUsers]);
 
   const saveAccess = async (u: AccessUser, ids: number[], def: number | null) => {
     try {
@@ -336,7 +369,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
 
   if (!companies) return <LoadingBlock />;
   const active = companies.filter((c) => c.is_active);
-  const shown = (users || []).filter((u) => !q.trim() || [u.name, u.email].some((v) => String(v || '').toLowerCase().includes(q.trim().toLowerCase())));
+  const shown = users || [];
 
   return (
     <div className="space-y-4">
@@ -460,6 +493,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input className={`${inputCls} pl-8`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an account…" />
           </div>
+          {!users && <LoadingBlock />}
+          {users && (
           <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 text-slate-500">
@@ -563,7 +598,21 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                 })}
               </tbody>
             </table>
+            {!shown.length && !usersBusy && <div className="px-3 py-6 text-center text-xs text-slate-500">No account found.</div>}
           </div>
+          )}
+          {users && (
+            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+              <span>
+                Showing {shown.length} of {usersTotal}
+              </span>
+              {shown.length < usersTotal && (
+                <button type="button" className={btnGhost} disabled={usersBusy} onClick={() => loadUsers(q, shown.length)}>
+                  {usersBusy ? 'Loading…' : 'Show more'}
+                </button>
+              )}
+            </div>
+          )}
           <p className="text-[11px] text-slate-500">
             Module Access itself is set per company in Users → Module Access, while that company is selected in the header. The Superadmin can enter every company.
             “Whole-group directory”: Employee Directory lists the mother and every sister company's employees together, without switching company.
@@ -596,7 +645,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           onDone={(t) => {
             setCopyFor(null);
             setMsg({ type: 'success', text: t });
-            load();
+            loadUsers(q, 0);
           }}
         />
       )}
