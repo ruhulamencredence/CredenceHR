@@ -21,6 +21,24 @@ erDiagram
     varchar module_key
     int company_id
   }
+  api_access_logs {
+    int id PK
+    int client_id
+    varchar app_id
+    varchar route
+    varchar ip
+    int status
+    varchar message
+  }
+  api_clients {
+    int id PK
+    varchar name
+    varchar app_id
+    tinyint is_active
+    text allowed_ips
+    varchar allowed_routes
+    int rate_per_minute
+  }
   employee_template_assignments {
     int id PK
     int employee_user_id FK
@@ -102,6 +120,23 @@ erDiagram
     int web_idle_minutes
     int app_days
     int app_idle_days
+  }
+  sso_login_logs {
+    int id PK
+    int user_id FK
+    int request_id
+    int client_id
+    varchar ip
+    varchar platform
+    tinyint success
+  }
+  sso_login_requests {
+    int id PK
+    int user_id FK
+    int client_id
+    varchar request_ip
+    datetime expires_at
+    datetime used_at
   }
   startup_migrations {
     varchar name PK
@@ -185,6 +220,11 @@ erDiagram
     varchar user_agent
     timestamp last_used_at
   }
+  welcome_slides_settings {
+    int id PK
+    tinyint enabled
+    datetime reset_at
+  }
   approval_templates {
     int id PK
   }
@@ -203,6 +243,8 @@ erDiagram
   users ||..o{ payroll_access_log : "user_id"
   users ||..o{ platform_visits : "user_id"
   users ||--o{ profile_photo_requests : "user_id"
+  users ||..o{ sso_login_logs : "user_id"
+  users ||..o{ sso_login_requests : "user_id"
   users ||..o{ user_app_access : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_devices : "user_id"
