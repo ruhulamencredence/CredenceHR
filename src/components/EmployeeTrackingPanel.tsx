@@ -782,13 +782,17 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       )}
 
       {/* The map fills the width; title, search, tools, the KPI card and the
-          legend float over it (Analytics "Realtime" style). */}
-      <div className="relative">
+          legend float over it (Analytics "Realtime" style). `isolate`: those
+          float at z-[1000] (above Leaflet's own layers) — kept inside the map,
+          so a popup opened over the page (Chat, Alerts…) stays on top of them.
+          The outer box too (the "Right now" card sits beside the map in it) —
+          but not in full screen, where the map itself must cover the page. */}
+      <div className={mapFull ? 'relative' : 'relative isolate'}>
         <div
           className={
             mapFull
-              ? 'fixed inset-0 z-[1040] bg-white'
-              : 'relative rounded-2xl overflow-hidden border border-slate-200 h-[420px] sm:h-[480px] lg:h-[max(560px,calc(100vh-260px))]'
+              ? 'fixed inset-0 z-[1040] bg-white isolate'
+              : 'relative isolate rounded-2xl overflow-hidden border border-slate-200 h-[420px] sm:h-[480px] lg:h-[max(560px,calc(100vh-260px))]'
           }
         >
           <div ref={mapContainerRef} className="w-full h-full bg-slate-100" />
