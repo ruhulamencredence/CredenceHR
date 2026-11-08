@@ -451,6 +451,17 @@ export default function App() {
     })();
   }, []);
 
+  // Signed in: keep the login screen's animation on the device (downloaded
+  // once, in the background), so the login screen after a sign-out shows it
+  // straight away — website, phone browser, "Add to Home screen" and the app.
+  useEffect(() => {
+    if (!token) return;
+    const t = setTimeout(() => {
+      void import('./lib/authHeroAsset').then((m) => m.keepAuthHeroOnDevice()).catch(() => undefined);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [token]);
+
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     // Nothing saved from an earlier sign-in on this device is shown.
     clearScreenCache();
