@@ -20,7 +20,8 @@ import java.util.List;
 // speaker (earpiece) — or the loudspeaker for a video call — and turns the
 // screen off while the phone is held to the ear (proximity sensor), like the
 // phone's own dialer. setSpeaker() switches between the two; stop() puts
-// everything back when the call ends.
+// everything back when the call ends. While a call is on, CallService keeps
+// it running when the app is left (Home, another app, screen off).
 @CapacitorPlugin(name = "CallAudio")
 public class CallAudioPlugin extends Plugin {
 
@@ -63,6 +64,18 @@ public class CallAudioPlugin extends Plugin {
         call.resolve(r);
     }
 
+    // Hang up tapped on the ongoing-call notification (CallService): the page
+    // ends the call. With no page listening, just put everything back.
+    static void hangupFromNotification(Context context) {
+        CallAudioPlugin p = instance;
+        if (p != null && p.hasListeners("callHangup")) {
+            p.notifyListeners("callHangup", new JSObject());
+        } else {
+            CallService.stop(context);
+            if (p != null) p.release();
+        }
+    }
+
     // The page rings / answered by itself: take the phone's call screen away.
     @PluginMethod
     public void cancelIncoming(PluginCall call) {
@@ -85,6 +98,9 @@ public class CallAudioPlugin extends Plugin {
     @PluginMethod
     public void start(PluginCall call) {
         boolean wantSpeaker = Boolean.TRUE.equals(call.getBoolean("speaker", false));
+        boolean video = Boolean.TRUE.equals(call.getBoolean("video", wantSpeaker));
+        // Keep the call going when the app is left (Home, screen off).
+        CallService.start(getContext(), video);
         try {
             AudioManager am = audio();
             if (!active) {
@@ -202,6 +218,7 @@ public class CallAudioPlugin extends Plugin {
     }
 
     private void release() {
+        CallService.stop(getContext());
         if (!active) return;
         active = false;
         speaker = false;

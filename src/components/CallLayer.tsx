@@ -25,7 +25,7 @@ import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera } from 'lucide-react';
-import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, cancelIncomingCallScreen } from '../lib/callAudio';
+import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, onCallHangup, cancelIncomingCallScreen } from '../lib/callAudio';
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
@@ -558,6 +558,16 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     if (callIdRef.current) getChatSocket()?.emit('call:end', { callId: callIdRef.current });
     cleanup(phase === 'outgoing' ? 'Call cancelled' : 'Call ended');
   };
+  const hangUpRef = useRef(hangUp);
+  hangUpRef.current = hangUp;
+  // Hang up on the "Call in progress" notification (app left mid-call).
+  useEffect(
+    () =>
+      onCallHangup(() => {
+        if (callIdRef.current) hangUpRef.current();
+      }),
+    []
+  );
   const toggleMute = () => {
     const next = !muted;
     localRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));

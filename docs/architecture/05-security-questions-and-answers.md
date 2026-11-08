@@ -162,3 +162,6 @@
 
 **প্রশ্ন: কেউ chat-এ disappearing messages চালু করে কথোপকথনের প্রমাণ মুছে ফেলতে পারে কি?**
 উত্তর: শুধু তাঁরাই পারেন যাঁদের Superadmin Module Access-এ "Disappearing messages" switch দিয়েছেন — শুরুতে কারোরই নেই। switch ছাড়া অপশনটা দেখায় না, আর server-এ চাইলেও 403 আসে (`ChatRoutes.ts`)। বন্ধ করা সবসময় যায়। কোনো switch না দিলে কোম্পানির সব chat-এর রেকর্ড থাকে।
+
+**প্রশ্ন: কল চলার সময় অ্যাপ থেকে বের হলে কি অ্যাপ গোপনে মাইক বা ক্যামেরা চালু রাখে?**
+উত্তর: শুধু চলমান কলের সময়, আর তখন সবসময় একটা "Call in progress" notification দেখা যায় (`CallService.java`)। Android-ও নিজের মাইক/ক্যামেরা চিহ্ন দেখায়। কল শেষ হলে বা notification-এর Hang up চাপলে service বন্ধ হয়ে যায়। কল ছাড়া এই service কখনো চলে না।

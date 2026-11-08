@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio } from '../lib/callAudio';
+import { callAudioAvailable, onCallHangup, setCallSpeaker, startCallAudio, stopCallAudio } from '../lib/callAudio';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 
@@ -394,6 +394,17 @@ export const GroupCallLayer: React.FC<{ token: string; userId: number; userName:
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, [call]);
+
+  // Hang up on the "Call in progress" notification (app left mid-call).
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
+  useEffect(
+    () =>
+      onCallHangup(() => {
+        if (callRef.current) leaveRef.current();
+      }),
+    []
+  );
 
   // Leaving the page mid-call: tell the others.
   useEffect(() => {
