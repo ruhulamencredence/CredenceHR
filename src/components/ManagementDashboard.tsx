@@ -2,10 +2,50 @@
 // ManagementDashboardRoutes.ts): the whole company for one month, compared
 // with the month before. Every card and row opens a details panel on the
 // right with the breakdown behind it, and the panel exports to Excel.
+// Each details panel (and the Workforce / Recruitment / Fleet cards) has an
+// "Open …" button to the page the numbers come from, in a new browser tab —
+// only for pages this account may open (AdminPanel's `pageLink`).
+
+// A page the dashboard can send someone to: an Admin Panel tab key, or
+// 'payroll' (the Payroll page).
+export type DashPage =
+  | 'employees'
+  | 'attendance_reports'
+  | 'office_attendance'
+  | 'payroll'
+  | 'leave_applications'
+  | 'approvals'
+  | 'target_reports'
+  | 'disbursement'
+  | 'bill_claim'
+  | 'mprs'
+  | 'reports'
+  | 'recruitment'
+  | 'vehicle_management'
+  | 'asset_management';
+// null: this account can't open that page. href: its address (opened in a
+// new tab); go: open it in place (the phone app, which has no addresses).
+export type DashPageLink = { href: string | null; go: () => void } | null;
+const PAGE_LABEL: Record<DashPage, string> = {
+  employees: 'Employees',
+  attendance_reports: 'Monthly Attendance Report',
+  office_attendance: 'Office Attendance',
+  payroll: 'Payroll',
+  leave_applications: 'Leave Applications',
+  approvals: 'Approvals',
+  target_reports: 'Target Reports',
+  disbursement: 'Conveyance Disbursement',
+  bill_claim: 'Bill Claim',
+  mprs: 'MPR Numbers',
+  reports: 'PEPM Reports',
+  recruitment: 'Recruitment',
+  vehicle_management: 'Vehicle Management',
+  asset_management: 'Asset Management'
+};
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { X, Download, RefreshCw } from 'lucide-react';
+import { X, Download, RefreshCw, ExternalLink } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { LoadingBlock } from './LoadingBlock';
@@ -43,6 +83,17 @@ interface Dash {
 }
 
 type DrawerKey = 'headcount' | 'attendance' | 'salary' | 'leave' | 'approvals' | 'targets' | 'money' | 'projects';
+// Where each details panel's numbers come from (first pages the account can open are shown).
+const DRAWER_PAGES: Record<DrawerKey, DashPage[]> = {
+  headcount: ['employees'],
+  attendance: ['attendance_reports', 'office_attendance'],
+  salary: ['payroll'],
+  leave: ['leave_applications'],
+  approvals: ['approvals'],
+  targets: ['target_reports'],
+  money: ['payroll', 'disbursement', 'bill_claim'],
+  projects: ['mprs', 'reports']
+};
 interface Drawer {
   kicker: string;
   title: string;
@@ -77,7 +128,35 @@ const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString
 const card = 'bg-white border border-[#e7e3f3] rounded-[20px] p-5 flex flex-col gap-3';
 const rowBtn = 'w-full text-left rounded-lg px-1.5 -mx-1.5 py-1 hover:bg-violet-50/70 transition-colors';
 
-export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
+export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: DashPage) => DashPageLink }> = ({ token, pageLink }) => {
+  // "Open <page>" buttons for the pages this account may open.
+  const pageButtons = (pages: DashPage[], dark = false) => {
+    const links = pages.map((p) => ({ p, l: pageLink?.(p) ?? null })).filter((x) => x.l);
+    if (!links.length) return null;
+    return (
+      <div className="flex flex-wrap gap-2">
+        {links.map(({ p, l }) => {
+          const cls = `inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-[13px] font-semibold border ${
+            dark ? 'border-[#d9d2f5] text-[#6d28d9] bg-white hover:bg-violet-50' : 'border-[#e7e3f3] text-[#6d28d9] hover:bg-violet-50'
+          }`;
+          const label = (
+            <>
+              Open {PAGE_LABEL[p]} <ExternalLink className="w-3.5 h-3.5" />
+            </>
+          );
+          return l!.href ? (
+            <a key={p} href={l!.href} target="_blank" rel="noopener noreferrer" className={cls} title="Opens in a new tab">
+              {label}
+            </a>
+          ) : (
+            <button key={p} type="button" onClick={l!.go} className={cls}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [depts, setDepts] = useState<string[]>([]);
   const [data, setData] = useState<Dash | null>(null);
@@ -504,6 +583,7 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                   <span className="font-bold">{v}</span>
                 </div>
               ))}
+              {pageButtons(['employees'])}
             </section>
 
             <section className={card}>
@@ -520,6 +600,7 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                   </div>
                 ));
               })()}
+              {pageButtons(['recruitment'])}
             </section>
 
             <section className={card}>
@@ -535,6 +616,7 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                   <span className="font-bold">{v}</span>
                 </div>
               ))}
+              {pageButtons(['vehicle_management', 'asset_management'])}
             </section>
 
             <section className="bg-[#1e1b2e] text-white rounded-[20px] p-5 flex flex-col gap-3">
@@ -597,6 +679,9 @@ export const ManagementDashboard: React.FC<{ token: string }> = ({ token }) => {
                 </div>
               ))}
             </div>
+            {open && pageLink && DRAWER_PAGES[open].some((p) => pageLink(p)) && (
+              <div className="px-6 pt-4">{pageButtons(DRAWER_PAGES[open], true)}</div>
+            )}
             <div className="px-6 py-4 border-t border-[#ece9f5] flex gap-2.5">
               <button type="button" onClick={exportDrawer} disabled={drawer.rows.length === 0} className="flex-1 h-11 rounded-xl bg-[#6d28d9] text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
                 <Download className="w-4 h-4" /> Export Excel

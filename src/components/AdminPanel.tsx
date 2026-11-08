@@ -26,6 +26,8 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
+import { selfViewToPath } from '../lib/selfUrl';
+import type { DashPage, DashPageLink } from './ManagementDashboard';
 import { LoadingBlock } from './LoadingBlock';
 import { retryImport } from '../lib/chunkReload';
 
@@ -4922,7 +4924,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
-      {activeTab === 'management_dashboard' && canSee('management_dashboard') && <ManagementDashboard token={token} />}
+      {activeTab === 'management_dashboard' && canSee('management_dashboard') && (
+        <ManagementDashboard
+          token={token}
+          pageLink={(page: DashPage): DashPageLink => {
+            // Only pages this account may open (same checks as the menu).
+            if (page === 'payroll') {
+              if (!(isSuperAdmin || canSee('payroll')) || !adminUrlEnabled()) return null;
+              return { href: selfViewToPath('payroll'), go: () => undefined };
+            }
+            if (!ADMIN_TAB_KEYS.has(page) || !isTabVisible(page)) return null;
+            return { href: adminUrlEnabled() ? adminTabToPath(page) : null, go: () => setActiveTab(page as any) };
+          }}
+        />
+      )}
       {employeeOf && canSee('employees') && (
         <UserEmployeeModal
           token={token}
