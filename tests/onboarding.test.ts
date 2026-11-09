@@ -307,7 +307,7 @@ describe("approve (live server)", () => {
       personal_email: first.data.personal.personal_email
     });
     const preview = await call("GET", `/api/hr-ops/joiner-onboarding/${second.id}`, admin.token);
-    assert.deepEqual(new Set(preview.body.duplicates.map((d: any) => d.field)), new Set(["NID", "Mobile", "Email"]));
+    assert.deepEqual(new Set(preview.body.duplicates.map((d: any) => d.field)), new Set(["NID", "Mobile (filled in by the joiner)", "Email (filled in by the joiner)"]));
     const r = await call("POST", `/api/hr-ops/joiner-onboarding/${second.id}/approve`, admin.token);
     assert.equal(r.code, 409);
     assert.ok(r.body.duplicates.every((d: any) => d.match.includes(first.name)), JSON.stringify(r.body.duplicates));
