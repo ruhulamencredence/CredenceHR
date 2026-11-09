@@ -864,6 +864,10 @@ export interface User {
   employee_active?: boolean;
   // Department of the linked Employee record (Users page filter).
   department?: string | null;
+  // Employee ID and designation of the linked Employee record (every picker
+  // shows "Name · Employee ID · Designation · Department" — personLabel()).
+  employee_code?: string | null;
+  designation?: string | null;
   blocked_reason?: string | null;
   blocked_at?: string | null;
   // Admin Dashboard in the mother company shows every company of the group.
@@ -2169,6 +2173,7 @@ export interface ChatDirectoryUser {
   // From the employee record (blank for accounts with none).
   department?: string | null;
   designation?: string | null;
+  employee_code?: string | null;
 }
 
 export interface ChatRoom {

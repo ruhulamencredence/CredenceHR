@@ -8,6 +8,7 @@ import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface ClaimsPanelProps {
   token: string;
   users: User[];
@@ -106,7 +107,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
             >
               <option value="">All Users</option>
               {users.filter((u) => u.role === 'user').map((u) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>
           </div>

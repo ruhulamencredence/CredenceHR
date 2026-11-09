@@ -16,6 +16,7 @@ import { formatDate } from '../lib/formatDate';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem extends ClaimReviewFields {
@@ -584,9 +585,7 @@ useLiveRefresh(() => load());
                         >
                           <option value="">Pick a driver…</option>
                           {driverCandidates.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
+                            <option key={d.id} value={d.id}>{personLabel(d)}</option>
                           ))}
                         </SearchSelect>
                         <button

@@ -566,7 +566,7 @@ export const ForwardPopup: React.FC<{
   // People already in a direct chat show as that chat, not twice.
   const withDirect = new Set(rooms.filter((r) => r.type === 'direct' && r.other_participant).map((r) => r.other_participant!.id));
   const roomRows = rooms.filter((r) => !words || roomName(r).toLowerCase().includes(words));
-  const people = directory.filter((d) => d.id !== meId && !withDirect.has(d.id) && (!words || d.name.toLowerCase().includes(words)));
+  const people = directory.filter((d) => d.id !== meId && !withDirect.has(d.id) && (!words || [d.name, d.employee_code, d.designation, d.department].some((v) => String(v || '').toLowerCase().includes(words))));
   const toggle = (key: string) =>
     setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : p.length >= FORWARD_MAX ? p : [...p, key]));
   const send = async () => {
@@ -625,7 +625,7 @@ export const ForwardPopup: React.FC<{
         <div className="liquid-glass-inset rounded-[20px] px-3 py-2 text-xs text-slate-600 line-clamp-2">{preview}</div>
         <div className="relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input className={`${inputCls.replace('text-sm', 'text-base sm:text-sm')} pl-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search chats and people" />
+          <input className={`${inputCls.replace('text-sm', 'text-base sm:text-sm')} pl-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search chats, people, ID or department" />
         </div>
         <p className="text-[11px] text-slate-500">Pick up to {FORWARD_MAX} chats · {picked.length} picked</p>
         <div className="liquid-glass-inset rounded-[20px] max-h-[45vh] overflow-y-auto py-1">
@@ -645,7 +645,7 @@ export const ForwardPopup: React.FC<{
             )
           )}
           {people.length > 0 && <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase text-slate-400">Other people</div>}
-          {people.slice(0, 60).map((d) => row(`u:${d.id}`, <UserAvatar userId={d.id} name={d.name} token={token} className="w-9 h-9 text-xs" />, d.name, d.email || ''))}
+          {people.slice(0, 60).map((d) => row(`u:${d.id}`, <UserAvatar userId={d.id} name={d.name} token={token} className="w-9 h-9 text-xs" />, d.name, [d.employee_code, d.designation, d.department].filter(Boolean).join(' · ') || d.email || ''))}
           {!roomRows.length && !people.length && <p className="px-3 py-4 text-xs text-slate-400 text-center">No match.</p>}
         </div>
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}

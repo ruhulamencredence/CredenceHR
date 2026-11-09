@@ -13,6 +13,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface ExitOffboardingPanelProps {
   token: string;
 }
@@ -388,9 +389,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
               >
                 <option value="">Select…</option>
                 {activePeople(users, newUserId).map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
+                  <option key={u.id} value={u.id}>{personLabel(u)}</option>
                 ))}
               </SearchSelect>
             </div>

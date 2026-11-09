@@ -31,6 +31,7 @@ import { useIsPhone, useScrolling } from '../lib/useScrolling';
 import { SearchSelect } from './Combobox';
 import { DurationPicker } from './DurationPicker';
 import { getCurrentCoords } from './ClaimCard';
+import { personLabel } from '../lib/personLabel';
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
 // Nothing is sent until the person presses "জমা দিন" on the card.
@@ -214,7 +215,7 @@ const LeaveDraftCard: React.FC<{ token: string; draft: LeaveDraft; onDone: Draft
           <SearchSelect value={reliever} onChange={(e) => setReliever(e.target.value)} className={field}>
             <option value="">— বেছে নিন —</option>
             {draft.relievers.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
+              <option key={r.id} value={r.id}>{personLabel(r)}</option>
             ))}
           </SearchSelect>
         </label>

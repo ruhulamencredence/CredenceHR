@@ -25,6 +25,7 @@ import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } fro
 import { runsBackgroundJobs } from "./jobRunner";
 import { leaveDayCount } from "./leaveDayCount";
 
+import { attachPersonInfo } from "./personInfo";
 // Carry-forward at the year rollover: category (balance key) -> most days that
 // carry over, and each account's balance from just before the rollover.
 interface LeaveCarry {
@@ -1141,7 +1142,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   app.get("/api/leave-applications/relievers", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const relievers = await queryDB("SELECT id, name FROM users WHERE id != ? ORDER BY name ASC", [req.user.id]);
-      res.json(relievers);
+      res.json(await attachPersonInfo(queryDB, relievers));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

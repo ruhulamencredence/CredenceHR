@@ -30,6 +30,7 @@ import { NewBillClaimModal } from './NewBillClaimModal';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface ConveyanceBillPanelProps {
   token: string;
   users: User[];
@@ -507,7 +508,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
               >
                 <option value="">All Users</option>
                 {plainUsers.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
+                  <option key={u.id} value={u.id}>{personLabel(u)}</option>
                 ))}
               </SearchSelect>
             </div>
@@ -731,7 +732,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
               >
                 <option value="">Select employee</option>
                 {behalfCandidates.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
+                  <option key={u.id} value={u.id}>{personLabel(u)}</option>
                 ))}
               </SearchSelect>
               <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Bill Claim.</p>
