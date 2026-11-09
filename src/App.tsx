@@ -1212,10 +1212,11 @@ export default function App() {
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
-      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision)$/.test(title)) {
+      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision|Loan Ready to Pay)$/.test(title)) {
         try {
           sessionStorage.setItem('payroll_tab', 'loans');
-          sessionStorage.setItem('loans_subtab', 'approvals');
+          // "Loan Ready to Pay" (LoanPlan.ts) opens the To Pay list.
+          sessionStorage.setItem('loans_subtab', title === 'Loan Ready to Pay' ? 'topay' : 'approvals');
         } catch {
           // storage unavailable
         }

@@ -611,7 +611,8 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
     const adv: any[] = await queryDB("SELECT * FROM employee_advances").catch(() => []);
     const advBy = groupRows<number>(adv, (r) => Number(r.employee_id));
     for (const f of facts.values()) {
-      const act = (advBy.get(f.employee_id) || []).filter((a: any) => a.status === "active");
+      // Only money actually paid out is owed (LoanPlan.ts).
+      const act = (advBy.get(f.employee_id) || []).filter((a: any) => a.status === "active" && (a.disbursement_status || "paid") === "paid");
       const remaining = act.map((a: any) => Math.max(0, Number(a.total_amount || 0) - Number(a.paid_amount || 0)));
       f.loan_outstanding = remaining.reduce((s, x) => s + x, 0);
       f.active_loans = act.length;

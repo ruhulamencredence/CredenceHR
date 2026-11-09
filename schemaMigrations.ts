@@ -26,6 +26,7 @@ import { ensureEmployee360Schema } from "./HrOps360Routes";
 import { ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { ensureLoanRequestSchema } from "./LoanRequestRoutes";
+import { ensureLoanPlanSchema } from "./LoanPlan";
 import { ensureProfilePhotoRequestSchema } from "./profileRoutes";
 import { ensureMobileBillSchema } from "./MobileBillRoutes";
 import { ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
@@ -100,6 +101,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensurePayrollSchema(dbPool);
   await ensurePayrollApprovalSchema(dbPool);
   await ensureLoanRequestSchema(dbPool);
+  // Paying loans out and their repayment plans (LoanPlan.ts).
+  await ensureLoanPlanSchema(dbPool);
   // Profile photo approval (profileRoutes.ts) — after user_profile_details.
   await ensureProfilePhotoRequestSchema(dbPool);
   // Payroll -> Allowance & Adjustment (PayrollItemsRoutes.ts) — after

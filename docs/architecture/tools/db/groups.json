@@ -188,6 +188,7 @@
   "hr_emp_family",
   "hr_emp_training",
   "hr_employee_service",
+  "loan_events",
   "projects",
   "server_profiles"
  ],

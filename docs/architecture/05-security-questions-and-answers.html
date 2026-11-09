@@ -104,6 +104,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>লোনের টাকা কে দেয়, কীভাবে প্রমাণ থাকে?</td>
+<td>অনুমোদনের পর লোন "Waiting for payment" থাকে, বেতন থেকে কাটা হয় না। শুধু Accounts Pay layer-ধারী (বা Superadmin) টাকা দিয়ে "Mark as paid" দেন — তারিখ, মাধ্যম, reference সহ; বেতনের বাইরে ফেরতও তাঁরাই গোনেন। প্রতিটা ধাপ (কে, কবে, কত, কীভাবে) <code>loan_events</code>-এ, কর্মী নিজের History দেখেন। <code>LoanPlan.ts</code>, টেস্ট <code>docs/test-logs/2026-11-09/scripts/loan-payout-plan.mjs</code> (৪০/৪০)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>একজন একাই বেতন বানিয়ে পরিশোধ করতে পারে?</td>
 <td>না। HR বানায় → Audit অনুমোদন → Accounts পরিশোধ। যে বেতন চালিয়েছে/বদলেছে বা submit করেছে সে অনুমোদন দিতে পারে না; যে চালিয়েছে, submit বা অনুমোদন করেছে সে পরিশোধ করতে পারে না। Audit/Accounts "View only" layer পায় (দেখে, বদলাতে পারে না)। Audit Manager টেস্ট ৪৯/৪৯ পাস (<code>test-logs/2026-10-25/06-audit-manager-retest.log</code>)। ব্যতিক্রম: Superadmin।</td>
 <td>⚠️</td>
