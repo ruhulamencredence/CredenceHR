@@ -17,6 +17,8 @@ import { SearchSelect } from './Combobox';
 
 export interface RecruitmentAccess {
   email_candidates: boolean;
+  /** Correct a candidate's name / email / phone / source (layer "edit_candidates"). */
+  edit_candidates?: boolean;
   mail_ready: boolean;
 }
 
@@ -589,5 +591,88 @@ export const InterviewModal: React.FC<{
         />
       )}
     </>
+  );
+};
+
+// Correct a candidate's details (layer "edit_candidates"). While their New
+// Joiner Onboarding is still open, the server updates its copy too.
+export interface EditableCandidate {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  source: string | null;
+}
+export const CandidateEditModal: React.FC<{
+  token: string;
+  candidate: EditableCandidate;
+  hasOnboarding: boolean;
+  onClose: () => void;
+  onSaved: (c: EditableCandidate & Record<string, any>) => void;
+}> = ({ token, candidate, hasOnboarding, onClose, onSaved }) => {
+  const [name, setName] = useState(candidate.name || '');
+  const [email, setEmail] = useState(candidate.email || '');
+  const [phone, setPhone] = useState(candidate.phone || '');
+  const [source, setSource] = useState(candidate.source || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/job-candidates/${candidate.id}/details`), {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, phone, source })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not save.');
+      onSaved(data);
+    } catch (err: any) {
+      setError(err.message || 'Could not save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <GlassModal
+      title="Edit candidate"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+            Cancel
+          </button>
+          <button type="button" disabled={saving || !name.trim()} onClick={save} className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className={labelCls}>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Phone</label>
+          <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Source</label>
+          <input value={source} onChange={(e) => setSource(e.target.value)} className={inputCls} />
+        </div>
+        {hasOnboarding && (
+          <p className="liquid-glass-inset rounded-2xl px-3 py-2 text-[11px] text-slate-600">
+            Their onboarding is still open — its name, email and phone are corrected too (HR's review and the duplicate check use them).
+          </p>
+        )}
+        {error && <div className="text-xs text-rose-600">{error}</div>}
+      </div>
+    </GlassModal>
   );
 };

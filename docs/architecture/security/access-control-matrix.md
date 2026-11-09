@@ -33,7 +33,7 @@
 | MPR Edit Log | `editlog` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Exit / Offboarding | `exit_offboarding` | `read` Exit / Offboarding<br>🔒`exit_dues` Exit — Dues from other modules<br>🔒`exit_pdf` Exit — Clearance & Settlement PDF<br>🔒`exit_clearance_setup` Exit — Clearance Departments setup |
 | Performance Management | `performance_management` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Recruitment (ATS) | `recruitment` | `read` Recruitment (postings, candidates, interviews)<br>🔒`email_candidates` Email candidates |
+| Recruitment (ATS) | `recruitment` | `read` Recruitment (postings, candidates, interviews)<br>🔒`email_candidates` Email candidates<br>🔒`edit_candidates` Edit candidate details |
 | Grievance & Disciplinary | `grievance_disciplinary` | শুধু মডিউলের অনুমতি (layer নেই) |
 | HR Analytics | `hr_analytics` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Management Dashboard | `management_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |

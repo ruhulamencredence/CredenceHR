@@ -150,6 +150,28 @@ export const OnboardingShell: React.FC<{ token: string; user: User }> = ({ token
     load();
   }, [load]);
 
+  // While the details are with HR, keep checking: sent back, approved or
+  // cancelled shows up here by itself (approved / cancelled sign the joiner
+  // out to the normal login) — no need to sign out and in again. Only while
+  // submitted: the form is read-only then, so nothing typed is lost.
+  const waiting = app?.status === 'submitted';
+  useEffect(() => {
+    if (!waiting) return;
+    const t = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 20000);
+    const onBack = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onBack);
+    window.addEventListener('focus', onBack);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', onBack);
+      window.removeEventListener('focus', onBack);
+    };
+  }, [waiting, load]);
+
   const left = daysLeft(app?.expires_in_seconds ?? null);
 
   return (

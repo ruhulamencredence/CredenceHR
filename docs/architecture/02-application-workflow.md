@@ -166,7 +166,11 @@ flowchart LR
 ```
 
 ফাইল: `RecruitmentRoutes.ts`, `OnboardingSelfServiceRoutes.ts`, `HROperationsRoutes.ts`, `ExitOffboardingRoutes.ts`, `EmployeeRecordsGuard.ts`।
+
+জমা দেওয়ার পর joiner-এর My Onboarding পাতা নিজে থেকে HR-এর সিদ্ধান্ত দেখে নেয় (২০ সেকেন্ড পরপর, আর অ্যাপ / ট্যাব সামনে এলে; `OnboardingShell.tsx`): ফেরত দিলে সাথে সাথে HR-এর কারণ আর খোলা ফর্ম দেখায়, approve বা cancel হলে লগইন পাতায় নিয়ে যায় — sign out করে আবার ঢুকতে হয় না।
 Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্ঘ্য, কীভাবে (সামনাসামনি venue / online link / ফোন), interviewer আর candidate-এর জন্য নোট দিয়ে interview ঠিক করেন। পরে সময় বা জায়গা বদলানো, interviewer বদলানো বা বাতিল করা যায় — প্রতিটি বদল কারণসহ `candidate_interview_events`-এ থাকে (আগের → নতুন), আর interviewer-কে bell alert ("Interview scheduled / moved / place changed / cancelled") যায়। Candidate-কে email পাঠানো আলাদা অনুমতি (Recruitment → **Email candidates**, কাউকে আপনাআপনি দেওয়া হয় না): বদলের পরেই খসড়া খোলে (বদলানো যায়), interview-এর email-এর সাথে calendar invite (`.ics`, বাতিল হলে CANCEL) যায়, প্রতিটি email (পাঠানো / ব্যর্থ) `candidate_emails`-এ থাকে। শেষ বদলের পরে email না গেলে তালিকায় "Candidate not emailed yet" দেখায়। Offer / Regret / অন্য বার্তাও একইভাবে পাঠানো যায়। SMTP চালু না থাকলে কিছু পাঠানো যায় না, বাকি সব চলে।
+
+Candidate-এর ভুল তথ্য (নাম, email, ফোন, source) Recruitment থেকেই ঠিক করা যায়: প্রতিটা candidate-এর পাশে **Edit** (আলাদা অনুমতি Recruitment → **Edit candidate details**, `edit_candidates`, কাউকে আপনাআপনি দেওয়া হয় না; `PUT /api/job-candidates/:id/details`)। Candidate-এর New Joiner Onboarding খোলা থাকলে (draft / submitted / sent back) onboarding রেকর্ডের নাম, email, ফোন আর অস্থায়ী login-এর নামও একসাথে ঠিক হয় — HR-এর review আর "Already on file" যাচাই সেগুলোই দেখে। Joined হয়ে গেলে Employee রেকর্ড বদলায় না (সেটা Employees থেকে)।
 
 গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি **কর্মী নন** (`all_employees`-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 `ONBOARDING_ONLY`)।
 
