@@ -473,7 +473,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </form>
           ) : (
           <>
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <form className="space-y-4" onSubmit={handleSubmit} autoComplete={isNativeApp ? 'off' : undefined}>
             <div>
               <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
                 Login ID
@@ -481,8 +481,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               <input
                 type="text"
                 required
-                name="username"
-                autoComplete="username"
+                // On the app, Android's Autofill (saved passwords) jumped in on
+                // every letter and closed the keyboard — so the app's fields
+                // don't ask for it (the native WebView has autofill off too,
+                // MainActivity.java). The website keeps the browser's own.
+                name={isNativeApp ? 'chr-login-id' : 'username'}
+                autoComplete={isNativeApp ? 'off' : 'username'}
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
@@ -507,8 +511,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 <PasswordInput
                   required
                   iconColor="var(--g-text-muted)"
-                  name="password"
-                  autoComplete="current-password"
+                  name={isNativeApp ? 'chr-login-key' : 'password'}
+                  autoComplete={isNativeApp ? 'off' : 'current-password'}
                   enterKeyHint="go"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
