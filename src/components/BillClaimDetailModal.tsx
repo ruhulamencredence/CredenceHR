@@ -69,7 +69,7 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
   // clipped to that ancestor's box instead, which is what was pushing this
   // modal under BottomNav. Escaping to document.body via a portal sidesteps
   // that ancestor entirely (same fix as NewBillClaimModal/
-  // AttendanceMapConfirm/ClaimMapConfirm).
+  // AttendanceMapConfirm/CheckInOutMap).
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
       <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto">

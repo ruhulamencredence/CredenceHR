@@ -686,6 +686,99 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
   box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.45) !important;
 }
 
+/*
+  Orange theme — the default (Profile -> Appearance -> "Orange";
+  lib/backgroundTheme.ts sets <html data-ui="orange">): CredenceHR's brand
+  orange (#F47920, the app icon and launch screen) in place of violet across
+  the whole app — header, sidebar, banners, buttons, links, focus rings.
+  Like Minimal Mono, Tailwind v4's violet / purple / fuchsia scales are
+  remapped here, so every utility of those colours turns orange at once;
+  blue / indigo and the green / amber / red status colours stay.
+*/
+html[data-ui="orange"] {
+  --or-50: #fff6ef;
+  --or-100: #ffebdb;
+  --or-200: #ffd4b3;
+  --or-300: #ffb580;
+  --or-400: #ff9238;
+  --or-500: #f47920;
+  --or-600: #e2600e;
+  --or-700: #bf4d0a;
+  --or-800: #983d0c;
+  --or-900: #7a330e;
+  --or-950: #421805;
+
+  --g-bg: #fff8f3;
+  --g-bg-gradient: linear-gradient(180deg, #fffaf6 0%, #fff4ec 55%, #ffeee2 100%);
+  --g-accent: #e8650f;
+  --g-accent-rgb: 232, 101, 15;
+  --g-accent-hover: #c95409;
+  --g-accent-soft: #fff1e6;
+  --g-accent-100: #ffebdb;
+  --g-accent-200: #ffd4b3;
+  --g-accent-300: #ffb580;
+  --g-accent-400: #ff9238;
+  --g-accent-500: #f47920;
+  --g-accent-600: #e2600e;
+  --g-accent-700: #bf4d0a;
+  --g-accent-800: #983d0c;
+  --g-accent-900: #7a330e;
+  --g-accent-950: #5a2509;
+  --g-accent-975: #421805;
+  --g-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+
+  /* Phone header + the welcome banner under it, the sidebar (white text). */
+  --g-header-gradient: linear-gradient(160deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+  --g-banner-1: #ff9238;
+  --g-banner-2: #f47920;
+  --g-banner-3: #e2600e;
+  --g-sidebar-bg: linear-gradient(165deg, rgba(244, 121, 32, 0.97) 0%, rgba(226, 96, 14, 0.97) 55%, rgba(191, 77, 10, 0.98) 100%);
+
+  --g-avatar-1: #f47920;
+  --g-avatar-2: #ff9238;
+  --g-avatar-3: #ffb580;
+  --g-avatar-4: #bf4d0a;
+  --g-avatar-5: #e2600e;
+  --g-badge-check: #ffb580;
+  --g-boot-bg: #f47920;
+  --g-chart-5: #f47920;
+
+  /* Welcome slides, tutorials, Management Dashboard buttons. */
+  --g-cta-1: #e8650f;
+  --g-cta-2: #ff9a4d;
+  --g-cta-dark-1: #983d0c;
+  --g-cta-dark-2: #e2600e;
+  --g-cta-text: #c95409;
+  --g-cta-soft: #fff4ec;
+  --g-cta-ring: #ffd9bd;
+  --g-cta-track: #f6d6c0;
+  --g-slides-bg: linear-gradient(175deg, #fffaf6 0%, #fff3ea 55%, #ffeadb 100%);
+  --g-slides-blob: radial-gradient(circle at 35% 30%, #fff0e3, #ffd9bd 55%, #ffc39a);
+
+  /* The phone pages' top glow (.page-glow): warm orange + peach. */
+  --glow-a: 255, 190, 140;
+  --glow-b: 255, 214, 190;
+  --page-flat: #fcf8f5;
+}
+html[data-ui="orange"] {
+  --color-violet-50: var(--or-50); --color-violet-100: var(--or-100); --color-violet-200: var(--or-200); --color-violet-300: var(--or-300); --color-violet-400: var(--or-400); --color-violet-500: var(--or-500); --color-violet-600: var(--or-600); --color-violet-700: var(--or-700); --color-violet-800: var(--or-800); --color-violet-900: var(--or-900); --color-violet-950: var(--or-950);
+  --color-purple-50: var(--or-50); --color-purple-100: var(--or-100); --color-purple-200: var(--or-200); --color-purple-300: var(--or-300); --color-purple-400: var(--or-400); --color-purple-500: var(--or-500); --color-purple-600: var(--or-600); --color-purple-700: var(--or-700); --color-purple-800: var(--or-800); --color-purple-900: var(--or-900); --color-purple-950: var(--or-950);
+  --color-fuchsia-50: var(--or-50); --color-fuchsia-100: var(--or-100); --color-fuchsia-200: var(--or-200); --color-fuchsia-300: var(--or-300); --color-fuchsia-400: var(--or-400); --color-fuchsia-500: var(--or-500); --color-fuchsia-600: var(--or-600); --color-fuchsia-700: var(--or-700); --color-fuchsia-800: var(--or-800); --color-fuchsia-900: var(--or-900); --color-fuchsia-950: var(--or-950);
+}
+/* Sign-in page: the glow behind it turns warm. */
+html[data-ui="orange"] .auth-glow {
+  background: radial-gradient(ellipse 900px 650px at 50% 55%, rgba(255, 255, 255, 0.92) 0%, rgba(255, 212, 179, 0.45) 45%, rgba(255, 255, 255, 0) 72%) !important;
+}
+/* Fixed violet bits written straight into a few pages. */
+html[data-ui="orange"] .bg-\[\#7F00FF\] { background-color: var(--g-accent) !important; }
+html[data-ui="orange"] .bg-\[\#e4d4ff\] { background-color: #ffe3cf !important; }
+/* The orange logo on the orange phone header: white. */
+html[data-ui="orange"] .hdr-logo-on-colour { filter: brightness(0) invert(1); }
+/* Maps: violet routes / pins / circles in orange. */
+html[data-ui="orange"] .leaflet-container path[stroke="#7F00FF" i] { stroke: #e8650f; }
+html[data-ui="orange"] .leaflet-container path[fill="#7F00FF" i] { fill: #e8650f; }
+html[data-ui="orange"] .leaflet-container [fill="#7F00FF" i] { fill: #e8650f; }
+
 /* Chat: a quoted message flashes when its reply's quote is tapped (ChatPanel.tsx). */
 .chat-flash { background-color: rgba(var(--g-accent-rgb, 127, 0, 255), 0.12); }
 

@@ -67,8 +67,8 @@ export const TOURS: Tour[] = [
     can: (u) => su(u) || !!u.can_view_movement_claims,
     steps: [
       { title: 'Check In / Check Out', text: 'Going out for office work — a client, a site, the bank? Check in when you get there and out when you leave.' },
-      { sel: ['[data-tour="claim-form"]'], title: 'Check in here', text: 'Pick the purpose and tap Check In. Your location and time are saved with it.' },
-      { sel: ['[data-tour="claim-add"]'], title: 'Add Check In/Out', text: 'Tap here when you arrive, and again to check out.' },
+      { sel: ['[data-tour="claim-form"]'], title: 'Check in here', text: 'Write the purpose and tap Check In — a map opens with you on it. Your location and time are saved.' },
+      { sel: ['[data-tour="claim-add"]'], title: 'Add Check In/Out', text: 'Tap here: a map opens with you on it. Write the purpose and Check In — later the same button checks you out.' },
       { sel: ['[data-tour="claim-list"]'], title: 'Your visits', text: 'Open ones wait for a Check Out; completed ones become your claim and go for approval.' }
     ]
   },

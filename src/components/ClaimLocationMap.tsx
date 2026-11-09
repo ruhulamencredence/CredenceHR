@@ -19,7 +19,7 @@ interface ClaimLocationMapProps {
 
 const CLAIM_ZOOM = 15;
 
-// Same green "start" / blue "current or destination" pins ClaimMapConfirm.tsx uses
+// Same green "start" / blue "current or destination" pins the Check In/Out confirm used
 // while checking in/out, reused here so a completed Claim's history looks the same
 // visual language as the live confirm screen did.
 const startPinIcon = L.divIcon({
@@ -46,7 +46,7 @@ const endPinIcon = L.divIcon({
 
 // User Dashboard -> My Claims -> tap any claim: shows exactly where that Movement
 // Claim's Check In happened (and Check Out too, if it's already completed) on a map,
-// with the same point A -> point B line + distance ClaimMapConfirm shows live while
+// with the same point A -> point B line + distance CheckInOutMap.tsx shows live while
 // checking out. Read-only — just a Close button, no confirm/submit here.
 export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);

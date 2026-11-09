@@ -43,6 +43,8 @@ const EmployeeDirectory = React.lazy(() => import('./EmployeeDirectory').then((m
 const NoticeBoard = React.lazy(() => import('./NoticeBoard').then((m) => ({ default: m.NoticeBoard })));
 const Timesheet = React.lazy(() => import('./Timesheet').then((m) => ({ default: m.Timesheet })));
 const ClaimCard = React.lazy(() => import('./ClaimCard').then((m) => ({ default: m.ClaimCard })));
+// Check In/Out on the full-screen map (phone) — loaded when it opens.
+const CheckInOutMap = React.lazy(() => import('./CheckInOutMap'));
 const MyClaimsCard = React.lazy(() => import('./MyClaimsCard').then((m) => ({ default: m.MyClaimsCard })));
 const BillClaimCard = React.lazy(() => import('./BillClaimCard').then((m) => ({ default: m.BillClaimCard })));
 import { BottomNav } from './BottomNav';
@@ -1329,6 +1331,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // time that form reports a successful Check In/Out, so MyClaimsCard's list
   // refetches without needing a full page reload.
   const [showClaimFormSheet, setShowClaimFormSheet] = useState(false);
+  // "Checked in — have a safe trip!" after the Check In/Out map closes (phone).
+  const [claimToast, setClaimToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!claimToast) return;
+    const t = setTimeout(() => setClaimToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [claimToast]);
   const [claimListRefreshKey, setClaimListRefreshKey] = useState(0);
   // Scroll target for the "Job Entry Details" section — used when a Job in the Jobs
   // list is tapped, so the (now-filtered) table is brought into view automatically.
@@ -3488,62 +3497,28 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </button>
       )}
 
-      {/* Check In/Out popup — opened by the floating button above. Same
-          ClaimCard form used inline on desktop, presented as a popup on
-          mobile instead. Bumps claimListRefreshKey on every successful Check
-          In/Out so the list underneath is current the moment this is closed.
-          Portal'd straight onto document.body and built with the same
-          header/scroll-body shell as AttendanceMapConfirm/ClaimMapConfirm —
-          this sheet used to sit plain-`fixed` inside the dashboard tree's
-          `overflow-hidden` ancestor, which on a lot of Android WebViews
-          clipped it to that ancestor's box instead of the true screen,
-          pushing the bottom of the form under BottomNav. */}
-      {showClaimFormSheet &&
-        createPortal(
-          <div
-            className="md:hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2"
-            style={{
-              paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-              paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
+      {/* Check In/Out on the full-screen map (CheckInOutMap.tsx, like Book a
+          Ride's map) — opened by the floating "Add Check In/Out" button
+          above and by a still-open claim's Check Out in the list. It knows
+          by itself whether it's a Check In or a Check Out. */}
+      {showClaimFormSheet && (
+        <React.Suspense fallback={null}>
+          <CheckInOutMap
+            token={token}
+            onClose={() => setShowClaimFormSheet(false)}
+            onDone={(_kind, text) => {
+              setShowClaimFormSheet(false);
+              setClaimListRefreshKey((k) => k + 1);
+              setClaimToast(text);
             }}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div
-              className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col"
-              style={{ maxHeight: '100%' }}
-            >
-              <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="bg-blue-50 text-blue-600 p-2 rounded-xl border border-blue-100">
-                    <Route className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-bold text-slate-900">Add Check In/Out</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowClaimFormSheet(false)}
-                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-5 overflow-y-auto min-h-0">
-                <React.Suspense fallback={<div className="flex justify-center py-10"><Spinner size={22} /></div>}>
-                <ClaimCard
-                  token={token}
-                  onSuccess={(kind) => {
-                    setClaimListRefreshKey((k) => k + 1);
-                    // Check In: leave the sheet open — the user will likely
-                    // Check Out from right here later. Check Out: the claim
-                    // is finished, so close it back to the list instead of
-                    // leaving an empty/idle form sitting on screen.
-                    if (kind === 'out') setShowClaimFormSheet(false);
-                  }}
-                />
-                </React.Suspense>
-              </div>
+          />
+        </React.Suspense>
+      )}
+      {claimToast &&
+        createPortal(
+          <div className="md:hidden fixed inset-x-4 z-[70] flex justify-center pointer-events-none" style={{ top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 72px)' }}>
+            <div className="liquid-glass liquid-glass-in rounded-full px-4 py-2.5 text-[13px] font-semibold text-emerald-800" role="status">
+              {claimToast}
             </div>
           </div>,
           document.body

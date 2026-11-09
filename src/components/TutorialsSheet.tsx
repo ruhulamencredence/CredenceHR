@@ -42,7 +42,7 @@ export const TutorialsSheet: React.FC<{ user: User; onClose: () => void }> = ({ 
             </button>
           </div>
           <div className="liquid-glass-inset h-1.5 rounded-full mt-3 overflow-hidden">
-            <div className="h-full rounded-full transition-all" style={{ width: `${tours.length ? (n / tours.length) * 100 : 0}%`, background: 'linear-gradient(90deg, #6d28d9, #c084fc)' }} />
+            <div className="h-full rounded-full transition-all" style={{ width: `${tours.length ? (n / tours.length) * 100 : 0}%`, background: 'linear-gradient(90deg, var(--g-cta-1, #6d28d9), var(--g-cta-2, #c084fc))' }} />
           </div>
           <div className="mt-3 flex flex-col gap-2">
             {tours.map((t) => {
