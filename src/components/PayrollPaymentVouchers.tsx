@@ -19,7 +19,7 @@ import { Banknote, FileSpreadsheet, Landmark, Printer, Smartphone } from 'lucide
 import { apiUrl } from '../lib/api';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { LoadingBlock } from './LoadingBlock';
 
@@ -129,7 +129,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
       ws['!cols'] = [5, 12, 24, 18, 18, 18, 22, 14].map((wch) => ({ wch }));
       XLSX.utils.book_append_sheet(wb, ws, sheetName(g, used));
     }
-    XLSX.writeFile(wb, all ? `Salary-Vouchers-${month}.xlsx` : `Salary-Voucher-${month}-${safe(list[0].title)}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, all ? `Salary-Vouchers-${month}.xlsx` : `Salary-Voucher-${month}-${safe(list[0].title)}.xlsx`);
   };
 
   const pdfFor = async (list: Group[], all: boolean, mode: 'save' | 'email' = 'save') => {

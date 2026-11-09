@@ -29,6 +29,7 @@
 
 import type { Express } from "express";
 import { GoogleGenAI, type Content, type FunctionDeclaration } from "@google/genai";
+import { salaryPeriodFor } from "./PayrollRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -37,6 +38,10 @@ interface AiAssistantDeps {
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
   todayInDhaka: () => string;
+  // The server's own layer check (requireModuleLayer's rule) — used where
+  // a report's page checks a layer its API doesn't, so the Assistant shows
+  // only what the page would.
+  hasModuleLayer: (user: any, moduleKey: string, layer: string) => Promise<boolean>;
 }
 
 // A page the client can open. kind:target is understood by AiAssistant.tsx.
@@ -54,6 +59,13 @@ interface Ctx {
   flags: Record<string, boolean>;
   today: string;
   canExport: boolean; // users.can_export_assistant_reports (Superadmin always)
+  // Payroll -> Salary month setting (salary_month_settings): from which
+  // salary month which start day applies. Attendance questions about "this
+  // month" / "salary month" use the salary month's dates, not the calendar's.
+  salaryStarts: { start_day: number; effective_month: string }[];
+  // The question said "salary month" (set by localAnswer, which rewrites
+  // those words before matching).
+  salaryAsked?: boolean;
 }
 
 interface ToolResult {
@@ -61,8 +73,52 @@ interface ToolResult {
   text: string; // ready-made Bangla answer (local engine)
   data?: any; // compact facts (Gemini engine)
   actions?: AssistantAction[];
-  draft?: LeaveDraft;
+  draft?: AssistantDraft;
   report?: AssistantReport;
+}
+
+// A form the Assistant filled in but did NOT submit — the chat shows it as an
+// editable card and only the person's own button posts it, to the same API
+// (with all its checks) the page itself uses.
+export type AssistantDraft = LeaveDraft | RideDraft | CorrectionDraft | MovementDraft;
+
+// Check In/Out -> a live GPS Check In (purpose) or Check Out of the open
+// claim. The card takes the device's location when its button is pressed
+// and posts to /api/claims/check-in or /api/claims/:id/check-out — both
+// stamp "now", so nothing can be back-dated.
+export interface MovementDraft {
+  kind: "movement_claim";
+  mode: "check_in" | "check_out";
+  purpose: string;
+  remarks: string;
+  claim_id: number | null; // the open claim (check_out)
+  since: string | null; // when it was checked in
+}
+
+// Book a Ride -> POST /api/vehicles/requisitions.
+export interface RideDraft {
+  kind: "ride_booking";
+  purpose: string;
+  pickup_location: string;
+  destination: string;
+  ride_date: string;
+  start_time: string; // HH:MM
+  estimated_duration_hours: number;
+  self_drive: boolean;
+  self_drive_note: string | null; // why self-drive is off for them, if it is
+  today: string;
+}
+
+// Timesheet -> Correct Attendance -> POST /api/attendance/corrections.
+export interface CorrectionDraft {
+  kind: "attendance_correction";
+  attendance_date: string;
+  check_in: string; // HH:MM or ""
+  check_out: string; // HH:MM or ""
+  remarks: string;
+  // The project(s) it can be filed under, with that day's times on record.
+  options: { project_id: number; name: string; check_in: string; check_out: string }[];
+  today: string;
 }
 
 // A leave application the Assistant filled in but did NOT submit: the chat
@@ -94,7 +150,7 @@ export interface AssistantReport {
 interface Answer {
   reply: string;
   actions: AssistantAction[];
-  draft?: LeaveDraft;
+  draft?: AssistantDraft;
   report?: AssistantReport;
   // Gemini only: which tool / how-to entry answered, kept so the local engine
   // can answer the same question itself later (see "Learning" below).
@@ -102,8 +158,9 @@ interface Answer {
 }
 
 const SELF_FLAGS = [
-  "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
-  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book"
+  "can_view_movement_claims", "can_view_bill_claims", "can_view_timesheet", "can_view_leave_application",
+  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book",
+  "can_use_attendance"
 ] as const;
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -147,6 +204,22 @@ const st = (s: any) => STATUS_BN[String(s || "").toLowerCase()] || String(s || "
 
 const isSuper = (c: Ctx) => c.role === "superadmin";
 const hasMod = (c: Ctx, k: string) => isSuper(c) || c.modules.includes(k);
+
+// The asker's login has no Employee record, so there is nothing of "their
+// own" (attendance, late days, loans…). Someone who manages Employees — a
+// Superadmin above all — is told how to link it themselves; anyone else to
+// ask HR.
+const notLinked = (c: Ctx, what: string): ToolResult => {
+  const self = hasMod(c, "employees");
+  return {
+    ok: true,
+    text: self
+      ? `আপনার login কোনো Employee record-এর সাথে যুক্ত নয়, তাই আপনার নিজের ${what} নেই। আপনি নিজেই যুক্ত করতে পারেন: Admin Panel → Employees → আপনার নামের সারিতে **Link Existing** (🔗) → এই login বাছুন (আপনার Employee record না থাকলে আগে "Add Employee")।`
+      : `আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই আপনার নিজের ${what} দেখানো যাচ্ছে না। HR-কে বলুন আপনার Employee record-এ এই login যুক্ত করে দিতে।`,
+    data: { linked: false, can_link_self: self },
+    actions: self ? [{ label: "Employees খুলুন", nav: "admin:employees" }] : []
+  };
+};
 // Same people who see the Admin (HR) Dashboard — AdminDashboardRoutes.ts gate.
 const canDash = (c: Ctx) => isSuper(c) || c.role === "admin" || c.modules.includes("admin_dashboard");
 
@@ -167,12 +240,12 @@ const HELP: HelpEntry[] = [
   { id: "leave_apply", title: "ছুটির আবেদন", keys: ["leave apply", "apply leave", "chuti apply", "ছুটি apply", "ছুটির আবেদন কীভাবে", "chutir abedon", "leave application kivabe", "chuti nibo", "chuti nite", "leave nibo", "ছুটি নেব", "ছুটি নিতে", "ছুটির আবেদন", "leave application", "ছুটি চাই", "chuti chai"],
     steps: "মেনু → Leave & Attendance → **Leave Application** → \"New Leave Application\"। ছুটির ধরন, তারিখ আর কারণ দিন, দরকার হলে Reliever বেছে Submit করুন। আবেদন আপনার supervisor / approval chain-এ যাবে।",
     nav: "self:leaveApplication", can: (c) => isSuper(c) || c.flags.can_view_leave_application || c.flags.can_view_my_leave },
-  { id: "movement_claim", title: "Movement Claim", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
-    steps: "মেনু → Requests & Claims → **Movement Claims**। কাজে বের হওয়ার সময় Check In, ফেরার সময় Check Out দিন — লোকেশন নিজে থেকে বসে যায়।",
+  { id: "movement_claim", title: "Check In/Out", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
+    steps: "মেনু → Requests & Claims → **Check In/Out**। কাজে বের হওয়ার সময় Check In, ফেরার সময় Check Out দিন — লোকেশন নিজে থেকে বসে যায়।",
     nav: "claims:movementClaims", can: (c) => isSuper(c) || c.flags.can_view_movement_claims },
-  { id: "conveyance", title: "Conveyance Bill Claim", keys: ["conveyance", "কনভেয়েন্স", "bill claim", "বিল জমা", "bill dibo", "যাতায়াত বিল", "transport bill"],
-    steps: "মেনু → Requests & Claims → **Conveyance Bill Claim** → New Claim। তারিখ, খরচের ধরন, টাকা আর বিবরণ দিয়ে জমা দিন। Transport হলে আগের Movement check-in/out রেফারেন্স হিসেবে বেছে নিতে পারবেন।",
-    nav: "claims:conveyanceBill", can: (c) => isSuper(c) || c.flags.can_view_conveyance_claims || c.modules.includes("conveyance") },
+  { id: "bill_claim", title: "Bill Claim", keys: ["conveyance", "কনভেয়েন্স", "bill claim", "বিল জমা", "bill dibo", "যাতায়াত বিল", "transport bill"],
+    steps: "মেনু → Requests & Claims → **Bill Claim** → New Claim। তারিখ, খরচের ধরন, টাকা আর বিবরণ দিয়ে জমা দিন। Transport হলে আগের Movement check-in/out রেফারেন্স হিসেবে বেছে নিতে পারবেন।",
+    nav: "claims:billClaim", can: (c) => isSuper(c) || c.flags.can_view_bill_claims || c.modules.includes("bill_claim") },
   { id: "timesheet", title: "Timesheet", keys: ["timesheet", "টাইমশিট"],
     steps: "মেনু → Leave & Attendance → **Timesheet**।", nav: "self:timesheet", can: (c) => isSuper(c) || c.flags.can_view_timesheet },
   { id: "asset", title: "Asset চাওয়া", keys: ["asset", "অ্যাসেট", "laptop", "ল্যাপটপ", "computer", "কম্পিউটার", "চেয়ার", "furniture"],
@@ -300,8 +373,8 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → Employee Management → **Employee Tracking**। **Live** — এখন কে কোথায় (location পাঠাচ্ছেন যাঁরা); **Stay Report** — দিনে কোথায় কতক্ষণ ছিলেন; **Live Follow** — একজনকে চলতি অবস্থায় দেখা (আলাদা অনুমতি লাগে)। কর্মীর ফোনে tracking চালু থাকতে হয়।",
     nav: "admin:tracking", can: (c) => hasMod(c, "tracking") },
   { id: "claims_admin", title: "Claim অনুমোদন ও বিল পরিশোধ (HR / Accounts)", keys: ["claim approve", "bill approve", "bill disburse", "disbursement", "ডিসবার্সমেন্ট", "বিল পরিশোধ", "bill pay", "claim policy", "bill claim policy", "conveyance limit"],
-    steps: "মেনু → Payroll & Claims:\n• **Movement Claims** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
-    nav: "admin:conveyance", can: (c) => ["claims", "conveyance", "disbursement"].some((k) => hasMod(c, k)) },
+    steps: "মেনু → Payroll & Claims:\n• **Check In/Out** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
+    nav: "admin:bill_claim", can: (c) => ["claims", "bill_claim", "disbursement"].some((k) => hasMod(c, k)) },
   { id: "asset_admin", title: "Asset Management (HR / Store)", keys: ["asset management", "asset assign", "asset dibo", "asset return", "asset ferot", "অ্যাসেট দেওয়া", "asset inventory", "নতুন asset", "add asset", "asset claim"],
     steps: "মেনু → HR Operations → Facilities → **Asset Management**:\n• **Approvals** — কর্মীদের asset requisition অনুমোদন ও হাতে দেওয়া (Fulfill)।\n• **Claims** — কর্মী \"এটা আমার কাছে আছে\" দাবি করলে মিলিয়ে নিশ্চিত করা।\n• **Inventory** — asset যোগ, কাকে দেওয়া, ফেরত নেওয়া (Settings থেকে \"Show Inventory tab\" চালু থাকতে হয়)।",
     nav: "admin:asset_management", can: (c) => hasMod(c, "asset_management") },
@@ -361,7 +434,8 @@ const HELP: HelpEntry[] = [
 // menu); buttons it couldn't use are dropped.
 function canNav(c: Ctx, nav: string): boolean {
   if (isSuper(c)) return true;
-  const [kind, target] = nav.split(":");
+  // "admin:attendance_reports#custom" = that page on one tab: the page's rule.
+  const [kind, target] = nav.split("#")[0].split(":");
   const f = c.flags;
   if (kind === "self") {
     switch (target) {
@@ -376,7 +450,7 @@ function canNav(c: Ctx, nav: string): boolean {
       default: return true;
     }
   }
-  if (kind === "claims") return target === "movementClaims" ? f.can_view_movement_claims : f.can_view_conveyance_claims || c.modules.includes("conveyance");
+  if (kind === "claims") return target === "movementClaims" ? f.can_view_movement_claims : f.can_view_bill_claims || c.modules.includes("bill_claim");
   if (kind === "admin") return target === "dashboard" ? c.role === "admin" || c.modules.includes("admin_dashboard") : c.modules.includes(target);
   if (kind === "hrops") return c.modules.includes("hr_operations");
   return true; // home, profile, support:request
@@ -388,6 +462,24 @@ const helpAction = (h: HelpEntry): AssistantAction[] => (h.nav ? [{ label: `${h.
 // ---------------------------------------------------------------------------
 // The account's own API, called with the account's own token.
 // ---------------------------------------------------------------------------
+// Set when the routes are registered (see AiAssistantDeps.hasModuleLayer).
+let layerCheck: ((user: any, moduleKey: string, layer: string) => Promise<boolean>) | null = null;
+const layerOk = async (c: Ctx, moduleKey: string, layer: string) => isSuper(c) || (!!layerCheck && (await layerCheck(c.req.user, moduleKey, layer).catch(() => false)));
+
+// Same as callApi, for the report APIs that take a POST body.
+async function callApiPost(req: any, path: string, body: any): Promise<{ ok: boolean; status: number; body: any }> {
+  const port = req.socket?.localPort;
+  const headers: Record<string, string> = { Authorization: String(req.headers.authorization || ""), "Content-Type": "application/json" };
+  if (req.headers["x-company-id"]) headers["X-Company-Id"] = String(req.headers["x-company-id"]);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(30000) });
+    const out = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, body: out };
+  } catch {
+    return { ok: false, status: 0, body: null };
+  }
+}
+
 async function callApi(req: any, path: string): Promise<{ ok: boolean; status: number; body: any }> {
   const port = req.socket?.localPort;
   const headers: Record<string, string> = { Authorization: String(req.headers.authorization || "") };
@@ -400,6 +492,35 @@ async function callApi(req: any, path: string): Promise<{ ok: boolean; status: n
     return { ok: false, status: 0, body: null };
   }
 }
+
+// Reports & Insights (ReportsInsightsRoutes.ts) report keys.
+const REPORT_KEYS = ["attendance_summary", "attendance_daily", "remote_attendance", "movement_claims", "bill_claims", "bill_claim_categories", "conveyance_bills", "bill_disbursements",
+  "leave_applications", "leave_taken", "asset_register", "asset_assignments", "asset_requisitions", "vehicle_rides", "vehicle_utilization"];
+// HR Operations -> Employee Reports ready-made lists (the same configs as
+// HrOpsReports.tsx's presets). payroll: needs the Payroll module too — the
+// API leaves those columns out otherwise.
+const HR_PRESETS: Record<string, { title: string; payroll?: boolean; config: Record<string, any> }> = {
+  salary_register: { title: "Salary register", payroll: true, config: { columns: ["name", "employee_code", "designation", "department", "grade", "basic_salary", "gross_salary", "last_increment_date", "last_increment_percent", "net_paid_year"] } },
+  loans_outstanding: { title: "Loans outstanding", payroll: true, config: { columns: ["name", "department", "loan_outstanding", "active_loans", "loan_installment", "installments_left"], filters: [{ key: "loan_outstanding", op: "gt", value: 0 }] } },
+  training_summary: { title: "Training summary", config: { columns: ["name", "department", "trainings", "training_count", "training_hours", "training_cost", "last_training_date"] } },
+  pending_documents: { title: "Pending documents", config: { columns: ["name", "employee_code", "department", "missing_documents", "expired_documents"], filters: [{ key: "missing_documents_count", op: "gt", value: 0 }] } },
+  missing_documents_by_type: { title: "Missing documents by type", config: { columns: ["name", "department", "missing_documents"], group_by: "missing_documents", filters: [{ key: "missing_documents_count", op: "gt", value: 0 }] } },
+  nominee_gaps: { title: "Nominee / emergency contact gaps", config: { columns: ["name", "department", "nominee_status", "nominees", "has_emergency_contact"], match: "any", filters: [{ key: "nominee_status", op: "neq", value: "OK" }, { key: "has_emergency_contact", op: "is_false" }] } },
+  education_levels: { title: "Education levels", config: { columns: ["name", "designation", "department", "highest_degree", "institutes"], group_by: "highest_level" } },
+  experience_bands: { title: "Experience bands", config: { columns: ["name", "designation", "department", "prior_experience_years", "service_years", "total_experience_years"], group_by: "total_experience_band" } },
+  unverified_records: { title: "Experience / education not verified", config: { columns: ["name", "department", "experience_unverified", "experience_no_certificate", "education_unverified", "education_no_certificate"], match: "any", filters: [{ key: "experience_unverified", op: "gt", value: 0 }, { key: "education_unverified", op: "gt", value: 0 }] } },
+  no_education: { title: "No education recorded", config: { columns: ["name", "employee_code", "designation", "department", "joining_date"], filters: [{ key: "education_records", op: "eq", value: 0 }] } },
+  joined_from_company: { title: "Joined from which company", config: { columns: ["name", "employee_code", "designation", "department", "last_company", "previous_companies", "prior_experience_years"], group_by: "previous_companies" } },
+  probation_ending: { title: "Probation ending (60 days)", config: { columns: ["name", "designation", "department", "joining_date", "probation_end_date", "supervisor"], filters: [{ key: "service_status", op: "eq", value: "probation" }, { key: "probation_end_date", op: "next_days", value: 60 }] } },
+  birthdays_this_month: { title: "Birthdays this month", config: { columns: ["name", "designation", "department", "date_of_birth", "age"], filters: [{ key: "birth_month", op: "eq", value: new Date().toLocaleString("en-US", { month: "long", timeZone: "Asia/Dhaka" }) }] } },
+  anniversaries_this_month: { title: "Work anniversaries this month", config: { columns: ["name", "designation", "department", "joining_date", "service_years"], filters: [{ key: "joining_month", op: "eq", value: new Date().toLocaleString("en-US", { month: "long", timeZone: "Asia/Dhaka" }) }] } },
+  assets_with_employees: { title: "Assets with employees", config: { columns: ["name", "department", "assets_held", "asset_names"], filters: [{ key: "assets_held", op: "gt", value: 0 }] } },
+  blood_group_directory: { title: "Blood group directory", config: { columns: ["name", "department", "blood_group", "mobile"], group_by: "blood_group" } },
+  headcount_list: { title: "Headcount by department", config: { columns: ["name", "employee_code", "designation", "department", "joining_date"], group_by: "department" } },
+  leave_summary: { title: "Leave summary", config: { columns: ["name", "department", "casual_taken", "casual_balance", "sick_taken", "sick_balance", "lwp_taken", "leave_pending", "leave_remaining"] } },
+  claims_summary: { title: "Claims & conveyance", config: { columns: ["name", "department", "claims_count", "claims_claimed", "claims_approved", "claims_pending", "conveyance_paid", "movement_km"] } },
+  monthly_attendance: { title: "Monthly attendance", config: { columns: ["name", "department", "att_working", "att_present", "att_leave", "att_absent", "att_late", "att_extreme_late", "att_percent"] } }
+};
 
 const NO_ACCESS: ToolResult = { ok: false, text: "এই তথ্য দেখার অনুমতি আপনার account-এ নেই। দরকার হলে HR / Superadmin-কে বলুন।", data: { error: "no_access" } };
 const FAILED: ToolResult = { ok: false, text: "দুঃখিত, এই মুহূর্তে তথ্যটা আনতে পারছি না। একটু পরে আবার চেষ্টা করুন।", data: { error: "failed" } };
@@ -436,6 +557,31 @@ const MONTH_WORDS: [RegExp, number][] = [
 const toAsciiDigits = (s: string) => s.replace(/[০-৯]/g, (d) => String(BN_DIGITS.indexOf(d)));
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const addDays = (isoDate: string, n: number) => new Date(Date.parse(isoDate + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+
+// The salary month's dates, the same way Payroll works them out
+// (PayrollRoutes.ts getSalaryPeriod): with a 26th start, "2026-11" runs
+// 26 Oct – 25 Nov, and a month always starts the day after the one before
+// it ended. Start day 1 (the default) is the calendar month.
+const salaryStartDay = (c: Ctx, ym: string) => {
+  let d = 1;
+  for (const s of c.salaryStarts || []) if (s.effective_month <= ym) d = Number(s.start_day) || 1;
+  return Math.min(28, Math.max(1, d));
+};
+const salaryPeriod = (c: Ctx, ym: string) => {
+  const own = salaryPeriodFor(ym, salaryStartDay(c, ym));
+  const prev = monthShift(ym, -1);
+  return { start: addDays(salaryPeriodFor(prev, salaryStartDay(c, prev)).end, 1), end: own.end };
+};
+// The salary month a date falls in (26 Oct is already November's).
+const salaryMonthOf = (c: Ctx, date: string) => {
+  const cal = date.slice(0, 7);
+  for (const m of [cal, monthShift(cal, 1)]) {
+    const p = salaryPeriod(c, m);
+    if (p.start <= date && date <= p.end) return m;
+  }
+  return cal;
+};
+const salaryMonthStartsLater = (c: Ctx) => (c.salaryStarts || []).some((s) => Number(s.start_day) > 1);
 const validDate = (y: number, m: number, d: number) => m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
 
 function monthOf(word: string): number | null {
@@ -532,13 +678,214 @@ export function parseLeaveRequest(text: string, today: string) {
   return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
+// Clock times in free text: "10:30", "10.30", "10 ta", "৩টায়", "3pm",
+// "bikel 3 tay" (afternoon/evening/night words make it PM). Each with where
+// it was found, so "in 9:10 out 6" can tell In from Out.
+export function parseClockTimes(text: string): { at: number; hm: string }[] {
+  const t = ` ${toAsciiDigits(String(text || "").toLowerCase())} `;
+  const out: { at: number; hm: string }[] = [];
+  const rx = /(?:^|[^\d:.])(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|ta|টা|tay|টায়|tar|টার|baje|বাজে|o'?clock)?(?![\d])/g;
+  for (const m of t.matchAll(rx)) {
+    const h0 = +m[1];
+    const min = m[2] ? +m[2] : 0;
+    if (!m[2] && !m[3]) continue; // a bare number is a date or a count, not a time
+    if (h0 > 23 || min > 59) continue;
+    const at = (m.index || 0) + m[0].indexOf(m[1]);
+    const near = t.slice(Math.max(0, at - 14), at);
+    let h = h0;
+    const pm = /p\.?m/.test(m[3] || "") || /(bikel|bikal|বিকাল|বিকেল|sondha|shondha|সন্ধ্যা|rat|raat|রাত|evening|night)\s*$/.test(near);
+    const noon = /(dupur|দুপুর|noon)\s*$/.test(near);
+    if ((pm && h < 12) || (noon && h <= 4)) h += 12;
+    if (/a\.?m/.test(m[3] || "") && h === 12) h = 0;
+    out.push({ at, hm: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` });
+  }
+  return out;
+}
+
+// "kal sokal 10 tay office theke gulshan jabo client meeting er jonno 2 ghonta"
+// -> a Book a Ride draft. Only fills the card; the person checks it.
+export function parseRideRequest(text: string, today: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।]/g, " ").replace(/\s+/g, " ")} `;
+  const date = parseLeaveRequest(raw, today).start_date || today;
+  const time = parseClockTimes(raw)[0]?.hm || "";
+  let hours = 0;
+  const hm = /(\d+(?:\.\d+)?)\s*(?:ghonta|ghonta|ghanta|ঘণ্টা|ঘন্টা|hours?|hrs?|h)\b/.exec(t);
+  const mm = /(\d{1,3})\s*(?:min|mins|minutes?|minit|মিনিট)\b/.exec(t);
+  if (hm) hours = +hm[1];
+  else if (mm) hours = Math.round((+mm[1] / 60) * 100) / 100;
+  else if (/half ?day|হাফ ডে|অর্ধেক দিন|ordhek din/.test(t)) hours = 4;
+  else if (/full ?day|sara ?din|সারা দিন|সারাদিন|puro din|পুরো দিন/.test(t)) hours = 8;
+  const self_drive = /nije (?:chalabo|chalai|drive)|self ?drive|নিজে চালা|i(?:'ll| will) drive|nijei chalabo/.test(t);
+  // Places: "A theke B (jabo)" / "from A to B" / "B jabo" / "to B".
+  const STOP = new Set(["jabo", "যাব", "যাবো", "jete", "যেতে", "jaite", "porjonto", "পর্যন্ত", "er", "এর", "jonno", "জন্য", "lagbe", "লাগবে", "gari", "গাড়ি", "car", "ride",
+    "book", "বুক", "koro", "করো", "kore", "করে", "dao", "দাও", "chai", "চাই", "at", "kal", "কাল", "aj", "আজ", "sokal", "সকাল", "bikel", "বিকেল", "dupur", "দুপুর", "rat", "রাত",
+    "on", "for", "please", "plz", "ekta", "একটা", "and", "ar", "আর", "e", "te", "তে", "এ", "theke", "থেকে", "from", "to"]);
+  const cleanPlace = (words: string[]) => {
+    const keep = words.filter((w) => w && !STOP.has(w) && !/^\d/.test(w) && !monthOf(w) && !/^(ta|টা|tay|টায়|am|pm|ghonta|ঘণ্টা|hours?|min|half|full|day)$/.test(w));
+    const v = keep.slice(0, 4).join(" ").trim();
+    return v ? v.replace(/(^|\s)\S/g, (x) => x.toUpperCase()) : "";
+  };
+  const words = toAsciiDigits(raw).replace(/[,।]/g, " ").split(/\s+/).filter(Boolean);
+  const low = words.map((w) => w.toLowerCase());
+  let pickup = "";
+  let destination = "";
+  const from = low.findIndex((w) => w === "from");
+  const to = low.findIndex((w, i) => w === "to" && i > from);
+  const theke = low.findIndex((w) => w === "theke" || w === "থেকে");
+  if (from >= 0 && to > from) {
+    pickup = cleanPlace(low.slice(from + 1, to));
+    destination = cleanPlace(low.slice(to + 1, to + 5));
+  } else if (theke > 0) {
+    pickup = cleanPlace(low.slice(Math.max(0, theke - 3), theke).filter((w) => !/^\d/.test(w)));
+    destination = cleanPlace(low.slice(theke + 1, theke + 5).join(" ").split(/\s(?:jabo|যাব|যাবো|jete|যেতে|porjonto|পর্যন্ত|er|এর|e|te|তে)\s/)[0].split(" "));
+  }
+  if (!destination) {
+    const j = low.findIndex((w) => ["jabo", "যাব", "যাবো", "jete", "যেতে"].includes(w));
+    // "banani jabo", "gulshane jabo": the place words right before "jabo"
+    // (request words like "lagbe" dropped first, then a trailing "-e/-te").
+    if (j > 0) {
+      const before = low.slice(Math.max(0, j - 3), j).filter((w) => !STOP.has(w) && !/^\d/.test(w) && !monthOf(w)).slice(-2);
+      destination = cleanPlace(before.map((w) => (w.length > 5 ? w.replace(/(te|তে)$/, "").replace(/([a-z]{4,})e$/, "$1") : w)));
+    }
+    const toOnly = low.findIndex((w) => w === "to");
+    if (!destination && toOnly >= 0) destination = cleanPlace(low.slice(toOnly + 1, toOnly + 4));
+  }
+  const pre = /^(.{3,80}?)\s*(?:er jonno|এর জন্য|jonno|জন্য|kaje|কাজে)(?:\s|$)/i.exec(raw.replace(/[,।]/g, " "));
+  const post = /(?:\bfor|purpose|udde?shyo|উদ্দেশ্য)\s*[:\-]?\s+(.{3,80}?)\s*$/i.exec(raw);
+  let purpose = ((pre && pre[1].split(/\s(?:theke|থেকে|jabo|যাব|tay|টায়|ta|টা)\s/).pop()) || (post && post[1]) || "").trim();
+  if (purpose && /^\d/.test(purpose)) purpose = "";
+  return { ride_date: date, start_time: time, estimated_duration_hours: hours || 1, pickup_location: pickup, destination, purpose, self_drive };
+}
+
+// "gotokal check in dite bhule gechi 9:10 e ashchi 6 tay ber hoyechi" -> a
+// Correct Attendance draft. "kal" here means yesterday (a correction is
+// never for a day still to come).
+export function parseCorrectionRequest(text: string, today: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase())} `;
+  const words = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।!?]/g, " ")} `;
+  let date = parseLeaveRequest(raw, today).start_date || "";
+  if (/\s(gotokal|গতকাল|yesterday)\s/.test(words) || (date && date > today && /\s(kal|kalke|কাল|কালকে)\s/.test(words))) date = addDays(today, -1);
+  if (!date || date > today) date = /\s(aj|ajke|আজ|আজকে|today)\s/.test(words) || !date ? today : addDays(today, -1);
+  const times = parseClockTimes(raw);
+  // Each time goes with the nearer In / Out word, before or after it
+  // ("in 9:15", "9:10 e ashchi", "6 tay ber hoyechi").
+  // Every spelling of "came in" / "went out" (also after spelling fixes:
+  // ashchi / ashche / esechi / eshechilam, ber hoyechi / beriye / chole gechi).
+  const IN = /(\bin\b|ইন|check ?in|ঢুক|dhuk|entry|enter|এসেছি|এসেছিলাম|এসে|আসছি|আসি|প্রবেশ|arrive|\b(?:ashchi|ashche|aschi|asche|asci|ashi|ashlam|aslam|ashchilam|eshechi|esechi|esheche|eseche|eshechilam|esechilam|eshe|ese|pouchechi|pouchaichi)\b|পৌঁছ)/g;
+  const OUT = /(\bout\b|আউট|check ?out|বের|\bber\b|\bberi\w*|chole|চলে|left\b|bahir|বাহির)/g;
+  const posOf = (rx: RegExp) => [...t.matchAll(rx)].map((m) => m.index || 0);
+  const inAt = posOf(IN);
+  const outAt = posOf(OUT);
+  const dist = (list: number[], at: number) => Math.min(Infinity, ...list.map((p) => Math.abs(p - at)));
+  let check_in = "";
+  let check_out = "";
+  for (const x of times) {
+    const di = dist(inAt, x.at);
+    const dout = dist(outAt, x.at);
+    if (Math.min(di, dout) > 30) continue;
+    if (dout < di && !check_out) check_out = x.hm;
+    else if (di <= dout && !check_in) check_in = x.hm;
+  }
+  // "9:10 e ashchi, 6 tay ber": an Out before the In with no am/pm said is the evening.
+  if (check_in && check_out && check_out < check_in && +check_out.slice(0, 2) < 12 && +check_out.slice(0, 2) + 12 > +check_in.slice(0, 2)) {
+    check_out = `${String(+check_out.slice(0, 2) + 12).padStart(2, "0")}${check_out.slice(2)}`;
+  }
+  if (!check_in && !check_out && times.length) {
+    check_in = times[0].hm;
+    if (times[1]) check_out = times[1].hm;
+  }
+  const why = /(?:karon|কারণ|because|reason)\s*[:\-]?\s+(.{3,150})$/i.exec(raw)?.[1] ||
+    (/(bhule|ভুলে|forgot|vule|mone chilo na|মনে ছিল না|network|নেটওয়ার্ক|gps|phone|ফোন|charge|চার্জ)/i.test(raw) ? raw.trim() : "");
+  return { attendance_date: date, check_in, check_out, remarks: why.slice(0, 250) };
+}
+
+// "client er office e jacchi movement check in koro" / "pouche gechi
+// movement check out" -> which way and the purpose in their words.
+export function parseMovementRequest(text: string) {
+  const raw = String(text || "").trim();
+  const t = ` ${raw.toLowerCase().replace(/[,।!?]/g, " ").replace(/\s+/g, " ")} `;
+  const out = /(check ?out|চেক আউট|pouch|পৌঁছ|reached|kaj shesh|কাজ শেষ|fir(?:e|i)chi|ফিরে|ফিরছি|firlam|back to office|end|শেষ)/.test(t);
+  const action = out ? "check_out" : /(check ?in|চেক ইন|start|শুরু|shuru|jacchi|যাচ্ছি|jabo|যাব|going|ber hocchi|বের হচ্ছি)/.test(t) ? "check_in" : "";
+  // The clause with "jacchi / যাচ্ছি / going" (else the words after
+  // "purpose / for / jonno"), minus the request words. Word by word: \b
+  // doesn't see Bangla letters.
+  const VERB = /(jacchi|যাচ্ছি|jabo|যাব|যাবো|jete hobe|যেতে হবে|going to|going|যাচ্ছিলাম)/i;
+  const clauses = raw.split(/[,।;]/).map((x) => x.trim()).filter(Boolean);
+  const post = /(?:purpose|uddeshyo|উদ্দেশ্য|\bfor\b|jonno|জন্য)\s*[:\-]?\s+(.{3,120})$/i.exec(raw);
+  const pick = clauses.find((x) => VERB.test(x)) || (post && post[1]) || "";
+  const FILL = new Set(["movement", "মুভমেন্ট", "claim", "ক্লেইম", "ক্লেম", "koro", "করো", "kore", "করে", "dao", "দাও", "please", "plz", "start", "ekta", "একটা", "a", "an", "the",
+    "amar", "আমার", "ami", "আমি", "now", "ekhon", "এখন", "e", "te", "তে", "এ", "jacchi", "যাচ্ছি", "jabo", "যাব", "যাবো", "going", "to", "hobe", "হবে", "jete", "যেতে", "i'm", "im", "am", "for"]);
+  let purpose = pick
+    .replace(/check ?in|check ?out|চেক ইন|চেক আউট/gi, " ")
+    .split(/\s+/)
+    .filter((w) => w && !FILL.has(w.toLowerCase()))
+    .join(" ")
+    .trim();
+  if (purpose) purpose = purpose.charAt(0).toUpperCase() + purpose.slice(1);
+  return { action, purpose: action === "check_out" ? "" : purpose.slice(0, 255) };
+}
+
+// Attendance questions with conditions, for the Report Builder:
+// "aj 9:05 er pore ke ke asche", "6 tar age ke ber hoye geche", "ei mase 3
+// bar er beshi late kara", "check out den nai kara", "8 ghontar kom kaj",
+// "department wise ei maser late". Returns the builder's arguments (empty
+// when the question has no condition the builder adds anything for).
+export function parseAttendanceQuestion(text: string) {
+  const raw = String(text || "");
+  const t = ` ${toAsciiDigits(raw.toLowerCase()).replace(/[,।!?]/g, " ").replace(/\s+/g, " ")} `;
+  const out: Record<string, any> = {};
+  const OUTW = /(ber|বের|out|আউট|chole|চলে|left|leave kor|gese|geche|গেছে|beriye|বেরিয়ে|bahir)/;
+  const INW = /(asche|asc?he|esheche|eseche|এসেছে|আসছে|aschhe|in\b|ইন|dhuk|ঢুক|came|arrive|reached|pouch)/;
+  for (const x of parseClockTimes(raw)) {
+    const after = t.slice(x.at, x.at + 28);
+    const around = t.slice(Math.max(0, x.at - 26), x.at + 30);
+    const isAfter = /(por|pore|পরে|pare|after|beyond|late)/.test(after) && !/(age|আগে|before)/.test(after.split(/(por|pore|পরে|after)/)[0]);
+    const isBefore = /(age|আগে|before|er age|এর আগে)/.test(after);
+    const isOut = OUTW.test(around) && !(INW.test(around) && !OUTW.test(after));
+    // "6 tar age ber hoyeche": a leaving time of 1–8 o'clock without
+    // "sokal / am" is in the evening.
+    let hmv = x.hm;
+    const h = Number(hmv.slice(0, 2));
+    if (isOut && h >= 1 && h <= 8 && !/(sokal|সকাল|\bam\b|a\.m)/.test(around)) hmv = `${String(h + 12).padStart(2, "0")}${hmv.slice(2)}`;
+    if (isOut) out[isAfter ? "out_after" : "out_before"] = hmv;
+    else if (isBefore) out.in_before = x.hm;
+    else out.in_after = x.hm;
+  }
+  if (/(onek deri|অনেক দেরি|extreme)/.test(t)) out.late = "extreme";
+  else if (/(\blate\b|deri|দেরি|লেট)/.test(t) && !out.in_after) out.late = "any";
+  if (/(absent|অনুপস্থিত|anupasthit|asheni|আসেনি|ase nai)/.test(t)) out.status = "absent";
+  else if (/(chuti|ছুটি|on leave|leave e)/.test(t)) out.status = "leave";
+  if (/(check ?out (?:den|dey|dei)? ?(?:ni|nai|nai)|out (?:den|dey) ?n[ai]|check-?out দেয়নি|আউট দেয়নি|missing (?:out|check ?out)|forgot to check out|check out kore ni)/.test(t)) out.missing_out = true;
+  const hrs = /(\d+(?:\.\d+)?)\s*(?:ghontar|ghonta|ঘণ্টার|ঘণ্টা|hours?|hrs?)\s*(kom|কম|less|under|er kom|beshi|বেশি|more|over)/.exec(t);
+  if (hrs) out[/kom|কম|less|under/.test(hrs[2]) ? "max_hours" : "min_hours"] = Number(hrs[1]);
+  if (/(overtime|ওভারটাইম|\bot\b)/.test(t)) out.overtime = true;
+  if (/(early leave|agei ber|আগেই বের|তাড়াতাড়ি বের|taratari ber|left early)/.test(t)) out.early_leave = true;
+  const n = /(\d+)\s*(?:bar|বার|times?|din|দিন|dine)\s*(?:er|এর)?\s*(?:beshi|বেশি|or more|\+|ba tar beshi|বা তার বেশি)/.exec(t) || /(?:more than|at least|kompokkhe)\s*(\d+)/.exec(t);
+  if (n) {
+    out.view = "summary";
+    out.group_by = "employee";
+    out.min_count = Number(n[1]);
+  }
+  if (/(department wise|department onujayi|department hisabe|ডিপার্টমেন্ট অনুযায়ী|বিভাগ অনুযায়ী|বিভাগভিত্তিক|by department)/.test(t)) { out.view = "summary"; out.group_by = "department"; }
+  else if (/(employee wise|কর্মী অনুযায়ী|kar koto|কার কত|per person|by employee)/.test(t)) { out.view = "summary"; out.group_by = "employee"; }
+  else if (/(din wise|date wise|দিনভিত্তিক|প্রতিদিন|daily|by date|dine dine)/.test(t)) { out.view = "summary"; out.group_by = "date"; }
+  // "Sales department-er late" (not "late department wise": that groups).
+  const dept = /([a-z&]{2,}|[ঀ-৿]{2,})\s+(?:department|dept|বিভাগ|বিভাগের|ডিপার্টমেন্ট)(?!\s*(?:wise|onujayi|hisabe|অনুযায়ী|ভিত্তিক))/.exec(t)?.[1];
+  const NOT_DEPT = /^(wise|onujayi|hisabe|sob|সব|kon|কোন|er|এর|late|লেট|deri|দেরি|absent|leave|chuti|ছুটি|ajker|আজকের|maser|মাসের|report|ei|এই|all|every|each|protiti|প্রতিটি)$/;
+  if (dept && !NOT_DEPT.test(dept)) out.department = dept;
+  return out;
+}
+
 // "Rahim er chuti koto" -> "rahim": the word(s) right before a separate
 // "er" / "-এর" / "এর" ("ajker" and "মাসের" are not names).
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
 const nameBefore = (t: string) => {
   const m = /([a-z.]{2,}(?:\s+[a-z.]{2,})?)\s+er\s/.exec(t) || /([\u0980-\u09ff]{2,}(?:\s+[\u0980-\u09ff]{2,})?)(?:-এর|\s+এর)\s/.exec(t);
   // "attendance er obostha": a word the assistant knows as a topic isn't a name.
-  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w) && !topicWords().has(w));
+  // "october er hajira": a month is not a name either.
+  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w) && !topicWords().has(w) && !monthOf(w));
   return words.slice(-1)[0] || "";
 };
 
@@ -629,16 +976,28 @@ const TOOLS: Tool[] = [
   },
   {
     name: "my_attendance_summary",
-    description: "The asking employee's own attendance for a salary month: present, absent, leave and late days. Optional month_year 'YYYY-MM' (default current month).",
+    description: "The asking employee's own attendance for a salary month: present, absent, leave and late days. Optional month_year: the SALARY month's 'YYYY-MM' (default: the salary month today falls in; with a 26th start, '2026-11' = 26 Oct – 25 Nov).",
     params: { month_year: { type: "string", description: "Month as YYYY-MM; omit for the current month." } },
     run: async (c, args) => {
       const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : "";
       const r = await callApi(c.req, `/api/my-attendance-summary${ym ? `?month_year=${ym}` : ""}`);
       if (!r.ok) return fail(r.status);
       const s = r.body || {};
-      if (s.linked === false) return { ok: true, text: "আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই হাজিরার হিসাব দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (s.linked === false) {
+        const note = notLinked(c, "হাজিরা");
+        // Someone who reads attendance reports most likely wants everyone's:
+        // the same (salary) month for the whole company, by Department.
+        if (!hasMod(c, "attendance_reports")) return note;
+        const sm = /^\d{4}-\d{2}$/.test(String(s.month_year || "")) ? String(s.month_year) : ym || salaryMonthOf(c, c.today);
+        const p = salaryPeriod(c, sm);
+        const all = await TOOLS.find((x) => x.name === "attendance_custom_report")!.run(c, {
+          from: p.start, to: p.end > c.today ? c.today : p.end, view: "summary", group_by: "department", salary_month: sm
+        });
+        if (!all.ok) return note;
+        return { ...all, text: `${note.text}\n\nনিচে **পুরো কোম্পানির** হাজিরা:\n${all.text}`, data: { linked: false, company: all.data }, actions: [...(note.actions || []), ...(all.actions || [])] };
+      }
       const text =
-        `${bnMonth(String(s.month_year || ym))}-এর হাজিরা (${bnDate(s.period_start)} – ${bnDate(s.period_end)}):\n` +
+        `${salaryMonthStartsLater(c) ? "বেতনের মাস " : ""}${bnMonth(String(s.month_year || ym))}-এর হাজিরা (${bnDate(s.period_start)} – ${bnDate(s.period_end)}):\n` +
         `• উপস্থিত: **${bn(s.present_days ?? 0)} দিন**\n• ছুটি: ${bn(s.leave_days ?? 0)} দিন\n• অনুপস্থিত: ${bn(s.absent_days ?? 0)} দিন\n` +
         `• দেরি (late): **${bn(s.late_count ?? 0)} বার**${Number(s.late_deduction_days) ? ` — এর জন্য ${bn(s.late_deduction_days)} দিন কাটা যেতে পারে` : ""}\n` +
         `• এখন পর্যন্ত কর্মদিবস: ${bn(s.working_days_so_far ?? 0)} / ${bn(s.working_days ?? 0)}`;
@@ -650,11 +1009,12 @@ const TOOLS: Tool[] = [
     description: "The asking employee's OWN late dates between two dates (YYYY-MM-DD), default the current month. Not for questions about other employees — use late_on_date for that.",
     params: { from: { type: "string", description: "Start date YYYY-MM-DD" }, to: { type: "string", description: "End date YYYY-MM-DD" } },
     run: async (c, args) => {
-      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : c.today.slice(0, 8) + "01";
+      // Default: the salary month so far.
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : salaryPeriod(c, salaryMonthOf(c, c.today)).start;
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.to || "")) ? String(args.to) : c.today;
       const r = await callApi(c.req, `/api/my-late-days?from=${from}&to=${to}`);
       if (!r.ok) return fail(r.status);
-      if (r.body?.linked === false) return { ok: true, text: "আপনার login এখনো Employee record-এর সাথে যুক্ত নয়, তাই দেরির হিসাব দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (r.body?.linked === false) return notLinked(c, "দেরির হিসাব");
       // { days: { 'YYYY-MM-DD': 'delay' | 'extreme' } }
       const days = Object.entries((r.body?.days || {}) as Record<string, string>).sort(([a], [b]) => a.localeCompare(b));
       if (!days.length) return { ok: true, text: `${bnDate(from)} থেকে ${bnDate(to)} পর্যন্ত আপনার কোনো দেরি নেই। 👍`, data: { from, to, days: [] } };
@@ -671,10 +1031,10 @@ const TOOLS: Tool[] = [
   },
   {
     name: "my_claims",
-    description: "The asking employee's own movement claims and conveyance bill claims with status.",
-    available: (c) => isSuper(c) || c.flags.can_view_movement_claims || c.flags.can_view_conveyance_claims || c.modules.includes("conveyance"),
+    description: "The asking employee's own movement claims and bill claims with status.",
+    available: (c) => isSuper(c) || c.flags.can_view_movement_claims || c.flags.can_view_bill_claims || c.modules.includes("bill_claim"),
     run: async (c) => {
-      const [m, u] = await Promise.all([callApi(c.req, "/api/claims/mine"), callApi(c.req, "/api/user-claims/mine")]);
+      const [m, u] = await Promise.all([callApi(c.req, "/api/claims/mine"), callApi(c.req, "/api/bill-claims/mine")]);
       if (!m.ok && !u.ok) return fail(m.status === 403 && u.status === 403 ? 403 : 500);
       const parts: string[] = [];
       const data: any = {};
@@ -684,18 +1044,18 @@ const TOOLS: Tool[] = [
         const pend = rows.filter((x) => x.status === "pending");
         data.bill_claims = { total: rows.length, pending: pend.length, pending_amount: pend.reduce((s, x) => s + (Number(x.amount) || 0), 0), recent: rows.slice(0, 5).map((x) => ({ date: x.claim_date, category: x.category, amount: x.amount, status: x.status })) };
         parts.push(rows.length
-          ? `**Conveyance / Bill claim:** মোট ${bn(rows.length)}টি, অপেক্ষমাণ ${bn(pend.length)}টি (${money(data.bill_claims.pending_amount)})\n` + rows.slice(0, 4).map((x) => `• ${bnDate(x.claim_date)} — ${x.category || "Bill"} ${money(x.amount)}: ${st(x.status)}`).join("\n")
-          : "**Conveyance / Bill claim:** কোনো claim নেই।");
-        actions.push({ label: "Conveyance Bill খুলুন", nav: "claims:conveyanceBill" });
+          ? `**Bill Claim:** মোট ${bn(rows.length)}টি, অপেক্ষমাণ ${bn(pend.length)}টি (${money(data.bill_claims.pending_amount)})\n` + rows.slice(0, 4).map((x) => `• ${bnDate(x.claim_date)} — ${x.category || "Bill"} ${money(x.amount)}: ${st(x.status)}`).join("\n")
+          : "**Bill Claim:** কোনো claim নেই।");
+        actions.push({ label: "Bill Claim খুলুন", nav: "claims:billClaim" });
       }
       if (m.ok) {
         const rows: any[] = Array.isArray(m.body) ? m.body : [];
         const open = rows.filter((x) => x.check_in_at && !x.check_out_at).length;
         data.movement_claims = { total: rows.length, open_check_ins: open, by_status: rows.reduce((a: any, x) => ((a[x.status] = (a[x.status] || 0) + 1), a), {}) };
         parts.push(rows.length
-          ? `**Movement claim:** মোট ${bn(rows.length)}টি${open ? `, ${bn(open)}টিতে এখনো Check Out দেওয়া হয়নি` : ""}।`
-          : "**Movement claim:** কোনো claim নেই।");
-        actions.push({ label: "Movement Claims খুলুন", nav: "claims:movementClaims" });
+          ? `**Check in/out:** মোট ${bn(rows.length)}টি${open ? `, ${bn(open)}টিতে এখনো Check Out দেওয়া হয়নি` : ""}।`
+          : "**Check in/out:** কোনো claim নেই।");
+        actions.push({ label: "Check In/Out খুলুন", nav: "claims:movementClaims" });
       }
       return { ok: true, text: parts.join("\n\n"), data, actions };
     }
@@ -707,7 +1067,7 @@ const TOOLS: Tool[] = [
       const r = await callApi(c.req, "/api/my-loans");
       if (!r.ok) return fail(r.status);
       const b = r.body || {};
-      if (b.linked === false) return { ok: true, text: "আপনার login এখনো Employee record-এর সাথে যুক্ত নয়। HR-কে জানান।", data: { linked: false } };
+      if (b.linked === false) return notLinked(c, "loan / advance-এর হিসাব");
       const loans: any[] = (b.loans || []).filter((l: any) => l.status === "active");
       const reqs: any[] = (b.requests || []).filter((x: any) => x.status === "pending");
       const due = loans.reduce((s, l) => s + Math.max(0, (Number(l.total_amount) || 0) - (Number(l.paid_amount) || 0)), 0);
@@ -817,6 +1177,657 @@ const TOOLS: Tool[] = [
       return { ok: true, text, draft, data: { drafted: true, submitted: false, leave_type: leaveType, start_date: start, end_date: end, purpose: draft.purpose, note: "Shown to the user as a form; they must review it and press Submit themselves." } };
     }
   },
+  {
+    name: "prepare_ride_booking",
+    description:
+      "Fill in (do NOT submit) a Book a Ride request (an office car) for the asking employee. The app shows it as an editable card and the employee submits it themselves. " +
+      "Use when they ask to book / need a car or ride. Resolve relative dates against today. start_time 24-hour HH:MM.",
+    params: {
+      pickup_location: { type: "string", description: "Where from, as they said it (e.g. 'Head Office')" },
+      destination: { type: "string", description: "Where to" },
+      ride_date: { type: "string", description: "YYYY-MM-DD" },
+      start_time: { type: "string", description: "HH:MM, 24-hour" },
+      estimated_duration_hours: { type: "number", description: "How long they need the car, in hours (0.25 to 240); omit if not said" },
+      purpose: { type: "string", description: "Why, short, in their words" },
+      self_drive: { type: "boolean", description: "true if they will drive themselves" }
+    },
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const date = isDate(args?.ride_date) && String(args.ride_date) >= c.today ? String(args.ride_date) : c.today;
+      const time = /^\d{1,2}:\d{2}$/.test(String(args?.start_time || "")) ? String(args.start_time).padStart(5, "0") : "";
+      const hours = Number(args?.estimated_duration_hours);
+      let selfNote: string | null = null;
+      let selfDrive = !!args?.self_drive;
+      if (selfDrive) {
+        const chk = await callApi(c.req, `/api/vehicles/self-drive-check?ride_date=${date}`);
+        if (chk.ok && chk.body && !chk.body.allowed) {
+          selfDrive = false;
+          selfNote = String(chk.body.reason || "Self-drive isn't allowed for this ride.");
+        }
+      }
+      const draft: RideDraft = {
+        kind: "ride_booking",
+        purpose: String(args?.purpose || "").slice(0, 300),
+        pickup_location: String(args?.pickup_location || "").slice(0, 200),
+        destination: String(args?.destination || "").slice(0, 200),
+        ride_date: date,
+        start_time: time,
+        estimated_duration_hours: Number.isFinite(hours) && hours > 0 ? Math.min(240, hours) : 1,
+        self_drive: selfDrive,
+        self_drive_note: selfNote,
+        today: c.today
+      };
+      const missing = [!draft.pickup_location && "কোথা থেকে", !draft.destination && "কোথায়", !time && "সময়", !draft.purpose && "উদ্দেশ্য"].filter(Boolean);
+      const text = `গাড়ির requisition-এর খসড়া তৈরি করেছি — ${bnDate(date)}${time ? `, ${bn(time)}` : ""}${draft.destination ? `, ${draft.destination}` : ""}। ` +
+        (missing.length ? `${missing.join(", ")} দিয়ে দিন, ` : "") + "নিচে সব দেখে **Book করুন** চাপুন। আপনি না চাপলে কিছু জমা হবে না।";
+      return { ok: true, text, draft, data: { drafted: true, submitted: false, ...draft, note: "Shown to the user as a form; they must review it and press Book themselves." } };
+    }
+  },
+  {
+    name: "prepare_attendance_correction",
+    description:
+      "Fill in (do NOT submit) a Timesheet attendance correction (Correct Attendance: set a day's In / Out time, e.g. forgot to check in) for the asking employee. " +
+      "The app shows an editable card; the employee submits it. attendance_date YYYY-MM-DD, never in the future ('kal' about a past punch means yesterday). Times 24-hour HH:MM.",
+    params: {
+      attendance_date: { type: "string", description: "The day to correct, YYYY-MM-DD" },
+      check_in: { type: "string", description: "In time HH:MM, 24-hour; omit if not said" },
+      check_out: { type: "string", description: "Out time HH:MM, 24-hour; omit if not said" },
+      remarks: { type: "string", description: "Why, short, in their words" }
+    },
+    available: (c) => isSuper(c) || (c.flags.can_use_attendance && c.flags.can_view_timesheet),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const date = isDate(args?.attendance_date) && String(args.attendance_date) <= c.today ? String(args.attendance_date) : c.today;
+      const [mine, projects, me] = await Promise.all([callApi(c.req, "/api/attendance/mine"), callApi(c.req, "/api/projects/all"), callApi(c.req, "/api/auth/me")]);
+      if (!mine.ok && mine.status === 403) return NO_ACCESS;
+      const hhmm = (v: any) => /(\d{2}):(\d{2})/.exec(String(v || ""))?.slice(1, 3).join(":") || "";
+      const day = (Array.isArray(mine.body) ? mine.body : []).filter((r: any) => String(r.attendance_date).slice(0, 10) === date);
+      const all = Array.isArray(projects.body) ? projects.body : [];
+      const pinned = Number(me.body?.user?.attendance_project_id ?? me.body?.attendance_project_id) || 0;
+      // The account's own check-in Projects (Module Access -> Remote
+      // Attendance) when it has a list; the server checks the day again.
+      const listedProjects: any[] = Array.isArray(me.body?.attendance_projects) && me.body?.attendance_projects_limited ? me.body.attendance_projects : [];
+      const nameOf = (id: number) => all.find((p: any) => Number(p.id) === id)?.project_name || `Project #${id}`;
+      const rowOf = (id: number) => day.find((r: any) => Number(r.project_id) === id);
+      const options = pinned
+        ? [{ project_id: pinned, name: nameOf(pinned), check_in: hhmm(day[0]?.check_in_at), check_out: hhmm(day[0]?.check_out_at) }]
+        : listedProjects.length
+          ? listedProjects.map((p: any) => ({ project_id: Number(p.id), name: String(p.name), check_in: hhmm(rowOf(Number(p.id))?.check_in_at), check_out: hhmm(rowOf(Number(p.id))?.check_out_at) }))
+        : day.length
+          ? day.filter((r: any) => Number(r.project_id) > 0).map((r: any) => ({ project_id: Number(r.project_id), name: r.project_name || nameOf(Number(r.project_id)), check_in: hhmm(r.check_in_at), check_out: hhmm(r.check_out_at) }))
+          : [];
+      const fallback = options.length ? options : all.slice(0, 200).map((p: any) => ({ project_id: Number(p.id), name: String(p.project_name), check_in: "", check_out: "" }));
+      const draft: CorrectionDraft = {
+        kind: "attendance_correction",
+        attendance_date: date,
+        check_in: /^\d{1,2}:\d{2}$/.test(String(args?.check_in || "")) ? String(args.check_in).padStart(5, "0") : fallback[0]?.check_in || "",
+        check_out: /^\d{1,2}:\d{2}$/.test(String(args?.check_out || "")) ? String(args.check_out).padStart(5, "0") : fallback[0]?.check_out || "",
+        remarks: String(args?.remarks || "").slice(0, 250),
+        options: fallback,
+        today: c.today
+      };
+      const onRecord = day[0] ? `রেকর্ডে আছে ইন ${bn(hhmm(day[0].check_in_at) || "—")}, আউট ${bn(hhmm(day[0].check_out_at) || "—")}। ` : "ওই দিনের কোনো হাজিরা রেকর্ডে নেই। ";
+      const text = `${bnDate(date)}-এর হাজিরা ঠিক করার খসড়া তৈরি করেছি। ${onRecord}নিচে ইন / আউট সময় আর কারণ দেখে **Submit করুন** চাপুন — এটা অনুমোদনের জন্য যাবে; আপনি না চাপলে কিছু জমা হবে না।`;
+      return { ok: true, text, draft, data: { drafted: true, submitted: false, attendance_date: date, check_in: draft.check_in, check_out: draft.check_out, on_record: day.map((r: any) => ({ project: r.project_name, in: hhmm(r.check_in_at), out: hhmm(r.check_out_at) })), note: "Shown to the user as a form; they must review it and press Submit themselves." } };
+    }
+  },
+  {
+    name: "prepare_movement_claim",
+    description:
+      "Check In/Out (GPS travel record for office work): prepare (do NOT submit) a Check In with a purpose when they are heading out (client visit, bank, site…), " +
+      "or a Check Out of their open claim when they have reached / finished. The card takes the phone's location when the employee presses its button. " +
+      "action: check_in | check_out (omit to decide from whether a claim is open).",
+    params: {
+      action: { type: "string", description: "check_in or check_out" },
+      purpose: { type: "string", description: "Where / why they are going, short, their words (check_in)" },
+      remarks: { type: "string", description: "Optional note" }
+    },
+    available: (c) => isSuper(c) || c.flags.can_view_movement_claims,
+    run: async (c, args) => {
+      const st = await callApi(c.req, "/api/claims/status");
+      if (!st.ok && st.status === 403) return NO_ACCESS;
+      const open = st.ok && st.body && st.body.id ? st.body : null;
+      const want = args?.action === "check_out" || args?.action === "check_in" ? String(args.action) : open ? "check_out" : "check_in";
+      const remarks = String(args?.remarks || "").slice(0, 300);
+      const nav = [{ label: "Check In/Out খুলুন", nav: "claims:movementClaims" }];
+      if (want === "check_out" && !open) {
+        return { ok: true, text: "আপনার কোনো Check In খোলা নেই — আগে Check In করতে হবে। কোথায় যাচ্ছেন বললে Check In-এর কার্ড দিয়ে দেব।", data: { open_claim: null }, actions: nav };
+      }
+      if (open) {
+        const since = String(open.check_in_at || "");
+        const draft: MovementDraft = { kind: "movement_claim", mode: "check_out", purpose: String(open.purpose || ""), remarks, claim_id: Number(open.id), since };
+        const pre = want === "check_in" ? "আগের Check In এখনো খোলা — নতুনটা শুরু করার আগে সেটার Check Out করতে হবে। " : "";
+        return {
+          ok: true,
+          text: `${pre}খোলা Check In: **${draft.purpose}** (Check In ${bnDate(since.slice(0, 10))} ${bn(since.slice(11, 16))})। পৌঁছে বা কাজ শেষে নিচে **Check Out** চাপুন — তখনকার লোকেশন নেওয়া হবে।`,
+          draft,
+          data: { drafted: true, submitted: false, mode: "check_out", open_claim: { purpose: draft.purpose, since }, note: "The card takes the phone's location when they press Check Out." }
+        };
+      }
+      const draft: MovementDraft = { kind: "movement_claim", mode: "check_in", purpose: String(args?.purpose || "").slice(0, 255), remarks, claim_id: null, since: null };
+      return {
+        ok: true,
+        text: `Check In তৈরি${draft.purpose ? ` — **${draft.purpose}**` : ""}। ${draft.purpose ? "" : "কোথায় / কেন যাচ্ছেন লিখে দিন, "}বের হওয়ার সময় নিচে **Check In** চাপুন — তখনকার লোকেশন নেওয়া হবে। আপনি না চাপলে কিছু জমা হবে না।`,
+        draft,
+        data: { drafted: true, submitted: false, mode: "check_in", purpose: draft.purpose, note: "The card takes the phone's location when they press Check In." }
+      };
+    }
+  },
+  // ---- Reports (each through the report's own API with the asker's token,
+  // so the asker sees exactly what that report page would show them) ----
+  {
+    name: "company_report",
+    description:
+      "Run one of the Reports & Insights reports (the API checks the module and Department scope): " +
+      "attendance_summary (per person: working / present / absent / leave / late %), attendance_daily (day-by-day log), remote_attendance (GPS check-in/out with distance), " +
+      "movement_claims, bill_claims, bill_claim_categories (bill claims by category), conveyance_bills, bill_disbursements (paid / unpaid bills), " +
+      "leave_applications, leave_taken (leave days by type per person), asset_register, asset_assignments (handover history), asset_requisitions, vehicle_rides (ride history), vehicle_utilization. " +
+      "from / to YYYY-MM-DD (default this month), optional department, employee (name or ID), status.",
+    params: {
+      report: { type: "string", description: "One of the report keys above" },
+      from: { type: "string", description: "YYYY-MM-DD" },
+      to: { type: "string", description: "YYYY-MM-DD" },
+      department: { type: "string", description: "Department name (optional)" },
+      employee: { type: "string", description: "Employee name or ID (optional)" },
+      status: { type: "string", description: "Status filter (optional)" }
+    },
+    available: (c) => isSuper(c) || c.role === "admin" || c.modules.length > 0,
+    run: async (c, args) => {
+      const key = String(args?.report || "").trim();
+      if (!REPORT_KEYS.includes(key)) return { ok: false, text: "কোন রিপোর্ট চান বুঝতে পারিনি — যেমন: হাজিরার সারাংশ, ছুটির ধরন অনুযায়ী, bill claim, disbursement, asset register, ride history।", data: { error: "unknown_report", reports: REPORT_KEYS } };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const body = {
+        key,
+        from: isDate(args?.from) ? args.from : `${c.today.slice(0, 7)}-01`,
+        to: isDate(args?.to) ? args.to : c.today,
+        department: String(args?.department || ""),
+        employee: String(args?.employee || ""),
+        status: String(args?.status || "")
+      };
+      const r = await callApiPost(c.req, "/api/reports-insights/run", body);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || "রিপোর্টটা চালানো গেল না।"), data: { error: r.body?.error } } : fail(r.status);
+      const cols: { key: string; label: string }[] = r.body?.columns || [];
+      const rows: any[] = r.body?.rows || [];
+      const summary: { label: string; value: any }[] = r.body?.summary || [];
+      const show = cols.slice(0, 5);
+      const line = (x: any) => "• " + show.map((col) => x[col.key]).filter((v) => v !== null && v !== undefined && v !== "").map(String).join(" · ");
+      const period = r.body?.from ? ` (${bnDate(r.body.from)} – ${bnDate(r.body.to)})` : "";
+      const text =
+        `**${r.body?.title || key}**${period}${body.department ? ` — ${body.department}` : ""}\n` +
+        (summary.length ? summary.map((x) => `${x.label}: **${typeof x.value === "number" ? bn(x.value) : x.value}**`).join(" · ") + "\n" : "") +
+        (rows.length ? rows.slice(0, 15).map(line).join("\n") + (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)}টি সারি (পুরোটা PDF / Excel-এ)` : "") : "এই সময়ে কিছু নেই।");
+      return {
+        ok: true,
+        text,
+        data: { report: key, from: r.body?.from, to: r.body?.to, summary, rows: rows.slice(0, 60), total_rows: rows.length },
+        actions: [{ label: "Reports & Insights খুলুন", nav: "admin:reports_insights" }],
+        report: report(String(r.body?.title || key), `${key}-${body.from}-${body.to}`, cols.map((x) => x.label), rows.map((x) => cols.map((col) => (x[col.key] === null || x[col.key] === undefined ? "" : typeof x[col.key] === "number" ? x[col.key] : String(x[col.key])))),
+          [["Period", r.body?.from ? `${enDate(r.body.from)} – ${enDate(r.body.to)}` : "-"], ...(body.department ? [["Department", body.department] as [string, string]] : []), ...summary.map((x) => [x.label, String(x.value)] as [string, string])])
+      };
+    }
+  },
+  {
+    name: "attendance_custom_report",
+    description:
+      "Attendance Report Builder: answer any attendance question with conditions, per person per day, over a period (from / to YYYY-MM-DD, default today; at most 92 days). " +
+      "Conditions: in_after / in_before / out_before / out_after (HH:MM 24-hour), status (present | absent | leave | holiday | weekend), late (any | delay | extreme), " +
+      "missing_out (true = checked in but no check-out), min_hours / max_hours (work hours), overtime (true), early_leave (true = left before shift / office end), office_end (HH:MM, default 18:00). " +
+      "view detail (rows) or summary with group_by employee | department | designation | date | weekday; min_count with count_of (late | absent | leave | missing_out | early_leave | overtime_days | present) keeps only groups with at least that many — e.g. 'late 3+ times this month' = view summary, group_by employee, late any, min_count 3. department / employee narrow it.",
+    params: {
+      from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" },
+      in_after: { type: "string", description: "HH:MM" }, in_before: { type: "string", description: "HH:MM" }, out_before: { type: "string", description: "HH:MM" }, out_after: { type: "string", description: "HH:MM" },
+      status: { type: "string", description: "present | absent | leave | holiday | weekend" }, late: { type: "string", description: "any | delay | extreme" },
+      missing_out: { type: "boolean", description: "Checked in, no check-out" }, min_hours: { type: "number", description: "Worked at least" }, max_hours: { type: "number", description: "Worked less than" },
+      overtime: { type: "boolean", description: "Worked past the shift / office end" }, early_leave: { type: "boolean", description: "Left before the shift / office end" }, office_end: { type: "string", description: "HH:MM" },
+      view: { type: "string", description: "detail | summary" }, group_by: { type: "string", description: "employee | department | designation | date | weekday" },
+      min_count: { type: "number", description: "Only groups with at least this many (summary)" }, count_of: { type: "string", description: "What min_count counts" },
+      department: { type: "string", description: "Department (optional)" }, employee: { type: "string", description: "Name or employee ID (optional)" }
+    },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const hm = (v: any) => (/^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v).padStart(5, "0") : "");
+      // "3 bar er beshi late" with no period = this month so far.
+      const from = isDate(args?.from) ? String(args.from) : Number(args?.min_count) > 0 ? `${c.today.slice(0, 7)}-01` : c.today;
+      const to = isDate(args?.to) ? String(args.to) : isDate(args?.from) ? from : c.today;
+      const conds: any[] = [];
+      if (hm(args?.in_after)) conds.push({ field: "in_time", op: "after", value: hm(args.in_after) });
+      if (hm(args?.in_before)) conds.push({ field: "in_time", op: "before", value: hm(args.in_before) });
+      if (hm(args?.out_before)) conds.push({ field: "out_time", op: "before", value: hm(args.out_before) });
+      if (hm(args?.out_after)) conds.push({ field: "out_time", op: "after", value: hm(args.out_after) });
+      if (["present", "absent", "leave", "holiday", "weekend"].includes(String(args?.status))) conds.push({ field: "status", op: "in", value: [String(args.status)] });
+      if (args?.late === "delay" || args?.late === "extreme") conds.push({ field: "late", op: "in", value: [String(args.late)] });
+      else if (args?.late === "any") conds.push({ field: "late", op: "in", value: ["delay", "extreme"] });
+      if (args?.missing_out === true) conds.push({ field: "missing_out", op: "is_true", value: true });
+      if (Number(args?.min_hours) > 0) conds.push({ field: "work_hours", op: "gte", value: Number(args.min_hours) });
+      if (Number(args?.max_hours) > 0) conds.push({ field: "work_hours", op: "lt", value: Number(args.max_hours) });
+      if (args?.overtime === true) conds.push({ field: "overtime_minutes", op: "gt", value: 0 });
+      if (args?.early_leave === true) conds.push({ field: "early_leave_minutes", op: "gt", value: 0 });
+      const view = args?.view === "summary" || args?.min_count ? "summary" : "detail";
+      const groupBy = ["employee", "department", "designation", "date", "weekday"].includes(String(args?.group_by)) ? String(args.group_by) : "employee";
+      const countOf = ["late", "absent", "leave", "missing_out", "early_leave", "overtime_days", "present", "delay", "extreme"].includes(String(args?.count_of))
+        ? String(args.count_of)
+        : args?.late ? "late" : args?.status === "absent" ? "absent" : args?.status === "leave" ? "leave" : args?.missing_out ? "missing_out" : args?.early_leave ? "early_leave" : args?.overtime ? "overtime_days" : "days";
+      const body = {
+        from, to, conditions: conds, match: "all", view, group_by: groupBy,
+        having: Number(args?.min_count) > 0 ? { metric: countOf, op: "gte", value: Number(args.min_count) } : null,
+        sort: view === "summary" ? countOf : "",
+        office_end: hm(args?.office_end) || "18:00",
+        departments: [], employee: String(args?.employee || "")
+      };
+      const r = await callApiPost(c.req, "/api/attendance/report/custom", body);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: { error: r.body?.error } } : fail(r.status);
+      const dq = String(args?.department || "").trim().toLowerCase();
+      const sm = /^\d{4}-\d{2}$/.test(String(args?.salary_month || "")) ? String(args.salary_month) : "";
+      const when = (sm && salaryMonthStartsLater(c) ? `বেতনের মাস ${bnMonth(sm)}, ` : "") + (from === to ? bnDate(from) : `${bnDate(from)} – ${bnDate(to)}`);
+      const condText = [
+        hm(args?.in_after) && `${bn(hm(args.in_after))}-এর পরে এসেছেন`, hm(args?.in_before) && `${bn(hm(args.in_before))}-এর আগে এসেছেন`,
+        hm(args?.out_before) && `${bn(hm(args.out_before))}-এর আগে বের হয়েছেন`, hm(args?.out_after) && `${bn(hm(args.out_after))}-এর পরে বের হয়েছেন`,
+        args?.status === "absent" && "অনুপস্থিত", args?.status === "leave" && "ছুটিতে", args?.status === "present" && "উপস্থিত",
+        args?.late === "extreme" ? "অনেক দেরি" : args?.late === "delay" ? "দেরি" : args?.late === "any" ? "দেরি / অনেক দেরি" : "",
+        args?.missing_out && "check-out দেননি", Number(args?.max_hours) > 0 && `${bn(args.max_hours)} ঘণ্টার কম কাজ`, Number(args?.min_hours) > 0 && `${bn(args.min_hours)} ঘণ্টা বা বেশি কাজ`,
+        args?.overtime && "overtime", args?.early_leave && "আগেই বের হয়েছেন"
+      ].filter(Boolean).join(", ");
+      if (view === "summary") {
+        const groups: any[] = (r.body?.groups || []).filter((g: any) => !dq || String(g.key || "").toLowerCase().includes(dq) || String(g.department || "").toLowerCase().includes(dq));
+        const BY: Record<string, string> = { employee: "কর্মী", department: "Department", designation: "পদ", date: "দিন", weekday: "বার" };
+        const text = `**হাজিরা — ${when}**${condText ? ` (${condText})` : ""}, ${BY[groupBy]} অনুযায়ী${body.having ? `, ${bn(body.having.value)} বা বেশি` : ""}: ${bn(groups.length)}টি\n` +
+          groups.slice(0, 15).map((g) => `• **${g.key}**${g.department && groupBy === "employee" ? ` (${g.department})` : ""}: উপস্থিত ${bn(g.present)}, অনুপস্থিত ${bn(g.absent)}, ছুটি ${bn(g.leave)}, দেরি ${bn(g.late)}${g.extreme ? ` (অনেক ${bn(g.extreme)})` : ""}${g.missing_out ? `, check-out নেই ${bn(g.missing_out)}` : ""}${g.early_leave ? `, আগে বের ${bn(g.early_leave)}` : ""}${g.overtime_days ? `, overtime ${bn(g.overtime_days)} দিন (${bn(g.total_ot_hours)} ঘণ্টা)` : ""}${g.avg_in ? `, গড় ইন ${bn(g.avg_in)}` : ""}`).join("\n") +
+          (groups.length > 15 ? `\n…আরও ${bn(groups.length - 15)}টি (পুরোটা PDF / Excel-এ)` : "") + (groups.length ? "" : "এই শর্তে কেউ নেই।");
+        return {
+          ok: true, text, data: { from, to, group_by: groupBy, groups: groups.slice(0, 40) },
+          actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports#custom" }],
+          report: report("Attendance Report", `Attendance-Report-${from}-${to}`, [BY[groupBy], ...(groupBy === "employee" ? ["Department"] : []), "Employees", "Days", "Present", "Absent", "Leave", "Late", "Extreme", "No check-out", "Left early", "Overtime days", "Avg in", "Avg out", "Avg hours", "OT hours", "Attendance %"],
+            groups.map((g) => [g.key, ...(groupBy === "employee" ? [g.department || ""] : []), g.employees, g.days, g.present, g.absent, g.leave, g.late, g.extreme, g.missing_out, g.early_leave, g.overtime_days, g.avg_in || "", g.avg_out || "", g.avg_hours ?? "", g.total_ot_hours, g.attendance_pct ?? ""]),
+            [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
+        };
+      }
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !dq || String(x.department || "").toLowerCase().includes(dq));
+      const line = (x: any) => `• **${x.employee_name}**${x.department ? ` — ${x.department}` : ""}${from !== to ? `, ${bnDate(x.date)}` : ""}: ${x.status === "present" ? `ইন ${bn(x.in_time || "—")}, আউট ${bn(x.out_time || "—")}${x.late !== "none" ? (x.late === "extreme" ? " · অনেক দেরি" : " · দেরি") : ""}` : x.status === "absent" ? "অনুপস্থিত" : x.status === "leave" ? `ছুটি${x.leave_type ? ` (${x.leave_type})` : ""}` : x.status}`;
+      const text = `**হাজিরা — ${when}**${condText ? ` (${condText})` : ""}: ${bn(rows.length)}টি\n` + (rows.length ? rows.slice(0, 20).map(line).join("\n") + (rows.length > 20 ? `\n…আরও ${bn(rows.length - 20)}টি (পুরোটা PDF / Excel-এ)` : "") : "এই শর্তে কেউ নেই।");
+      return {
+        ok: true, text, data: { from, to, total: rows.length, rows: rows.slice(0, 50).map((x) => ({ date: x.date, name: x.employee_name, department: x.department, status: x.status, in: x.in_time, out: x.out_time, late: x.late, hours: x.work_hours })) },
+        actions: [{ label: "Attendance Report Builder খুলুন", nav: "admin:attendance_reports#custom" }],
+        report: report("Attendance Report", `Attendance-Report-${from}-${to}`, ["Date", "Name", "Employee ID", "Department", "Status", "In", "Out", "Hours", "Late", "Minutes late", "Left early (min)", "Overtime (min)", "No check-out"],
+          rows.map((x) => [x.date, x.employee_name, x.employee_code, x.department, x.status, x.in_time || "", x.out_time || "", x.work_hours ?? "", x.late === "none" ? "" : x.late, x.late_minutes || "", x.early_leave_minutes || "", x.overtime_minutes || "", x.missing_out ? "Yes" : ""]),
+          [["Period", `${enDate(from)} – ${enDate(to)}`], ...(condText ? [["Conditions", condText] as [string, string]] : [])])
+      };
+    }
+  },
+  {
+    name: "attendance_department_summary",
+    description: "Monthly Attendance Report -> Department Summary: per department Present / Absent / Leave / Delay / Extreme Delay and attendance %, for one day (date) or a whole month (month YYYY-MM, person-days).",
+    params: { date: { type: "string", description: "YYYY-MM-DD for one day" }, month: { type: "string", description: "YYYY-MM for a whole month" } },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month || "")) ? String(args.month) : "";
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : "";
+      const q = month ? `mode=month&year=${month.slice(0, 4)}&month=${Number(month.slice(5, 7))}` : `mode=day&date=${date || c.today}`;
+      const r = await callApi(c.req, `/api/attendance/report/department-summary?${q}`);
+      if (!r.ok) return fail(r.status);
+      const d: any[] = r.body?.departments || [];
+      const t = r.body?.total || {};
+      const when = month ? bnMonth(month) : bnDate(date || c.today);
+      const pct = (v: any) => (v == null ? "—" : `${bn(v)}%`);
+      const text = `**Department অনুযায়ী হাজিরা — ${when}**${month ? " (person-days)" : ""}\n` +
+        d.map((x) => `• **${x.department}** (${bn(x.employees)} জন): উপস্থিত ${bn(x.present)}, অনুপস্থিত ${bn(x.absent)}, ছুটি ${bn(x.leave)}, দেরি ${bn(x.delay)}, অনেক দেরি ${bn(x.extreme)} — ${pct(x.attendance_pct)}`).join("\n") +
+        `\nমোট: উপস্থিত ${bn(t.present || 0)}, অনুপস্থিত ${bn(t.absent || 0)}, ছুটি ${bn(t.leave || 0)}, দেরি ${bn(t.delay || 0)}, অনেক দেরি ${bn(t.extreme || 0)} — ${pct(t.attendance_pct)}`;
+      return {
+        ok: true, text, data: { when: month || date || c.today, departments: d, total: t },
+        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports#dept" }],
+        report: report("Department Attendance Summary", `Department-Attendance-${month || date || c.today}`, ["Department", "Employees", "Present", "Absent", "Leave", "Delay", "Extreme Delay", "Attendance %"],
+          [...d.map((x) => [x.department, x.employees, x.present, x.absent, x.leave, x.delay, x.extreme, x.attendance_pct ?? ""]), ["All departments", t.employees, t.present, t.absent, t.leave, t.delay, t.extreme, t.attendance_pct ?? ""]],
+          [[month ? "Month" : "Date", month || enDate(date || c.today)]])
+      };
+    }
+  },
+  {
+    name: "payroll_salary_sheet",
+    description: "Payroll -> Approval -> Salary sheet: every employee's salary for a month — gross, deductions, net, absent / late cuts, held, change from last month. month_year YYYY-MM (default this month). Optional name / department to narrow.",
+    params: { month_year: { type: "string", description: "YYYY-MM" }, name: { type: "string", description: "Employee name / ID or department (optional)" } },
+    available: (c) => hasMod(c, "payroll"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const r = await callApi(c.req, `/api/payroll/approval/${month}/salary-sheet`);
+      if (!r.ok) return fail(r.status);
+      const q = String(args?.name || "").trim().toLowerCase();
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !q || [x.employee_name, x.employee_code, x.department, x.designation].some((v) => String(v || "").toLowerCase().includes(q)));
+      if (!rows.length) return { ok: true, text: `${bnMonth(month)}-এর কোনো বেতন${q ? ` "${args.name}"-এর` : ""} পাওয়া যায়নি।`, data: { month, rows: [] } };
+      const sum = (k: string) => rows.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+      const tk = (v: number) => `৳${bn(Math.round(v).toLocaleString("en-IN"))}`;
+      const held = rows.filter((x) => x.status === "held");
+      const cut = rows.filter((x) => x.absent_deduction > 0 || x.late_deduction > 0).sort((a, b) => b.absent_deduction + b.late_deduction - a.absent_deduction - a.late_deduction);
+      const text = `**বেতন — ${bnMonth(month)}**${q ? ` (${args.name})` : ""}: ${bn(rows.length)} জন, Gross ${tk(sum("gross"))}, কর্তন ${tk(sum("total_deduction"))}, Net **${tk(sum("net"))}**` +
+        (held.length ? `\nহোল্ডে: ${held.map((x) => x.employee_name).join(", ")}` : "") +
+        (cut.length ? `\nঅনুপস্থিতি / দেরিতে কাটা সবচেয়ে বেশি:\n` + cut.slice(0, 8).map((x) => `• ${x.employee_name} — ${tk(x.absent_deduction + x.late_deduction)} (অনুপস্থিত ${bn(x.absent_days)}, LWP ${bn(x.lwp_days)}, late ${bn(x.late_count)})`).join("\n") : "") +
+        (rows.length <= 10 ? "\n" + rows.map((x) => `• ${x.employee_name}: Gross ${tk(x.gross)}, Net ${tk(x.net)}`).join("\n") : "");
+      return {
+        ok: true, text, data: { month, count: rows.length, gross: sum("gross"), net: sum("net"), deductions: sum("total_deduction"), held: held.map((x) => x.employee_name), rows: rows.slice(0, 40).map((x) => ({ name: x.employee_name, department: x.department, gross: x.gross, deductions: x.total_deduction, net: x.net, last_net: x.last_net, status: x.status })) },
+        actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Salary Sheet", `Salary-Sheet-${month}`, ["Employee ID", "Name", "Department", "Working", "Present", "Absent", "Leave", "LWP", "Late", "Gross", "Absent / late cut", "Other deductions", "Total deduction", "Net", "Last month net", "Status"],
+          rows.map((x) => [x.employee_code, x.employee_name, x.department, x.working_days, x.present_days, x.absent_days, x.leave_days, x.lwp_days, x.late_count, x.gross, x.absent_deduction + x.late_deduction, x.tax + x.pf + x.advance + x.other_deduction + x.extra_deduction, x.total_deduction, x.net, x.last_net ?? "", x.status]),
+          [["Month", month]])
+      };
+    }
+  },
+  {
+    name: "payroll_month_comparison",
+    description: "Payroll -> Approval -> Month comparison: this month's salaries vs last month (or vs a month) — total difference, who is new, who left (with exit reason), and why each person's net changed. month_year YYYY-MM (default this month), vs YYYY-MM optional.",
+    params: { month_year: { type: "string", description: "YYYY-MM" }, vs: { type: "string", description: "YYYY-MM to compare with (optional)" } },
+    available: (c) => hasMod(c, "payroll"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const vs = /^\d{4}-\d{2}$/.test(String(args?.vs || "")) ? `?vs=${args.vs}` : "";
+      const r = await callApi(c.req, `/api/payroll/approval/${month}/compare${vs}`);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
+      const b = r.body;
+      const tk = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}৳${bn(Math.abs(Math.round(v)).toLocaleString("en-IN"))}`;
+      const people: any[] = b.people || [];
+      const nw = people.filter((x) => x.kind === "new");
+      const left = people.filter((x) => x.kind === "left");
+      const changed = people.filter((x) => x.kind === "changed");
+      const text = `**বেতনের তুলনা — ${bnMonth(b.month_year)} বনাম ${bnMonth(b.previous_month)}**\n` +
+        `Net ${tk(b.summary.last_net).replace("+", "")} → ${tk(b.summary.this_net).replace("+", "")}, পার্থক্য **${tk(b.summary.diff)}**${b.summary.diff_pct != null ? ` (${bn(b.summary.diff_pct)}%)` : ""}\n` +
+        (b.bridge || []).map((x: any) => `• ${x.label}: ${tk(x.amount)}`).join("\n") +
+        (nw.length ? `\nনতুন: ${nw.map((x) => `${x.employee_name} (${x.why})`).join("; ")}` : "") +
+        (left.length ? `\nচলে গেছেন / বেতন হয়নি: ${left.map((x) => `${x.employee_name} (${x.why})`).join("; ")}` : "") +
+        (changed.length ? `\nসবচেয়ে বেশি বদল:\n` + changed.slice(0, 6).map((x) => `• ${x.employee_name} ${tk(x.diff)} — ${x.reasons.filter((y: any) => y.effect).map((y: any) => `${y.label} ${tk(y.effect)}${y.note ? ` (${y.note})` : ""}`).join("; ")}`).join("\n") : "");
+      return {
+        ok: true, text, data: { month: b.month_year, vs: b.previous_month, summary: b.summary, bridge: b.bridge, new: nw.map((x) => ({ name: x.employee_name, why: x.why, net: x.this_net })), left: left.map((x) => ({ name: x.employee_name, why: x.why, last_net: x.last_net })), changed: changed.slice(0, 30).map((x) => ({ name: x.employee_name, diff: x.diff, reasons: x.reasons })) },
+        actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Payroll Month Comparison", `Payroll-Comparison-${b.month_year}-vs-${b.previous_month}`, ["Employee ID", "Name", "Department", "Type", `Net ${b.previous_month}`, `Net ${b.month_year}`, "Difference", "Why"],
+          people.map((x) => [x.employee_code, x.employee_name, x.department, x.kind, x.last_net ?? "", x.this_net ?? "", x.diff, x.why || x.reasons.map((y: any) => `${y.label} ${y.effect || ""}${y.note ? ` (${y.note})` : ""}`).join("; ")]),
+          [["Month", b.month_year], ["Compared with", b.previous_month], ["Difference", String(b.summary.diff)]])
+      };
+    }
+  },
+  {
+    name: "employee_records_report",
+    description:
+      "HR Operations -> Employee Reports (ready-made lists): salary_register (needs Payroll too), loans_outstanding (Payroll too), training_summary, pending_documents, missing_documents_by_type, nominee_gaps, " +
+      "education_levels, experience_bands, unverified_records, no_education, joined_from_company, probation_ending, birthdays_this_month, anniversaries_this_month, assets_with_employees, blood_group_directory, headcount_list, leave_summary, claims_summary, monthly_attendance.",
+    params: { preset: { type: "string", description: "One of the list names above" }, department: { type: "string", description: "Department (optional)" } },
+    available: (c) => hasMod(c, "hr_operations"),
+    run: async (c, args) => {
+      const key = String(args?.preset || "").trim();
+      const p = HR_PRESETS[key];
+      if (!p) return { ok: false, text: "কোন তালিকা চান বুঝতে পারিনি — যেমন salary register, pending documents, nominee, training, blood group directory।", data: { error: "unknown_preset", presets: Object.keys(HR_PRESETS) } };
+      const r = await callApiPost(c.req, "/api/hr-ops/reports/run", { filters: [], match: "all", group_by: null, month: "current", year: "current", include_inactive: false, ...p.config });
+      if (!r.ok) return fail(r.status);
+      const cols: any[] = r.body?.columns || [];
+      const dept = String(args?.department || "").trim().toLowerCase();
+      const rows: any[] = (r.body?.rows || []).filter((x: any) => !dept || String(x.department || "").toLowerCase().includes(dept));
+      const val = (v: any) => (Array.isArray(v) ? v.join(", ") : v === true ? "Yes" : v === false ? "No" : v ?? "");
+      const groups: any[] = r.body?.groups || [];
+      const text = `**${p.title}** — ${bn(rows.length)} জন${dept ? ` (${args.department})` : ""}\n` +
+        (groups.length && !dept ? groups.slice(0, 12).map((g) => `• ${g.key}: ${bn(g.count)} জন`).join("\n") + "\n" : "") +
+        rows.slice(0, 15).map((x) => "• " + cols.slice(0, 4).map((col) => val(x[col.key])).filter((v) => v !== "").join(" · ")).join("\n") +
+        (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)} জন (পুরোটা PDF / Excel-এ)` : "") +
+        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো আপনার account-এ Payroll না থাকায় দেখানো হয়নি।)");
+      return {
+        ok: true, text, data: { preset: key, total: rows.length, groups: groups.slice(0, 20), rows: rows.slice(0, 40).map((x) => Object.fromEntries(cols.map((col) => [col.label, val(x[col.key])]))) },
+        actions: [{ label: "HR Operations → Reports খুলুন", nav: "hrops:reports" }],
+        report: report(p.title, `${key}-${c.today}`, cols.map((col) => col.label), rows.map((x) => cols.map((col) => { const v = val(x[col.key]); return typeof v === "number" ? v : String(v); })))
+      };
+    }
+  },
+  {
+    name: "mobile_bill_report",
+    description: "Mobile Bill: the company's SIMs and bills for a month or range — total billed, over the limit (who, by how much), unpaid, SIM count by operator. from / to YYYY-MM (default this month).",
+    params: { from: { type: "string", description: "YYYY-MM" }, to: { type: "string", description: "YYYY-MM" } },
+    available: (c) => hasMod(c, "mobile_bill"),
+    run: async (c, args) => {
+      const to = /^\d{4}-\d{2}$/.test(String(args?.to || "")) ? String(args.to) : c.today.slice(0, 7);
+      const from = /^\d{4}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : to;
+      const r = await callApi(c.req, `/api/mobile-bill/report?from=${from}&to=${to}`);
+      if (!r.ok) return fail(r.status);
+      const sims: any[] = r.body?.sims || [];
+      const bills: any[] = r.body?.bills || [];
+      const simById = new Map<number, any>(sims.map((x) => [Number(x.id), x]));
+      const over = bills.filter((b) => b.limit_amount > 0 && b.amount > b.limit_amount).sort((a, b) => b.amount - b.limit_amount - (a.amount - a.limit_amount));
+      const tk = (v: number) => `৳${bn(Math.round(v).toLocaleString("en-IN"))}`;
+      const who = (b: any) => simById.get(b.sim_id)?.employee?.name || simById.get(b.sim_id)?.phone_number || `SIM #${b.sim_id}`;
+      const total = bills.reduce((a, b) => a + b.amount, 0);
+      const text = `**Mobile Bill — ${bnMonth(from)}${from !== to ? ` থেকে ${bnMonth(to)}` : ""}**: SIM ${bn(sims.length)}টি, বিল ${bn(bills.length)}টি, মোট ${tk(total)}, অপরিশোধিত ${bn(bills.filter((b) => !b.paid).length)}টি` +
+        (over.length ? `\nসীমার বেশি:\n` + over.slice(0, 10).map((b) => `• ${who(b)} (${b.month}) — ${tk(b.amount)}, সীমা ${tk(b.limit_amount)}, বেশি ${tk(b.amount - b.limit_amount)}`).join("\n") : "\nকেউ সীমার বেশি নয়।");
+      return {
+        ok: true, text, data: { from, to, sims: sims.length, bills: bills.length, total, over_limit: over.slice(0, 30).map((b) => ({ who: who(b), month: b.month, amount: b.amount, limit: b.limit_amount })) },
+        actions: [{ label: "Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
+        report: report("Mobile Bill Report", `Mobile-Bill-${from}-${to}`, ["Month", "Phone", "Employee", "Department", "Operator", "Limit", "Bill", "Over limit", "Paid"],
+          bills.map((b) => { const sm = simById.get(b.sim_id) || {}; return [b.month, sm.phone_number || "", sm.employee?.name || "", sm.employee?.department || "", sm.operator || "", b.limit_amount, b.amount, Math.max(0, b.amount - b.limit_amount), b.paid ? "Yes" : "No"]; }),
+          [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "tracking_overview",
+    description: "Employee Tracking: who is sending their location now (live) and who isn't, with why (tracking off, no recent ping, standing still) — only the people this account may track.",
+    available: (c) => hasMod(c, "tracking"),
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/tracking/status");
+      if (!r.ok) return fail(r.status);
+      const emps: any[] = r.body?.employees || [];
+      const on = emps.filter((x) => x.tracked);
+      const off = emps.filter((x) => !x.tracked);
+      const text = `**Employee Tracking — এখন**: ট্র্যাকিং-এ ${bn(on.length)} জন, নেই ${bn(off.length)} জন (গত ${bn(r.body?.live_minutes || 20)} মিনিটে লোকেশন)।` +
+        (on.length ? "\nট্র্যাকিং-এ:\n" + on.slice(0, 15).map((x) => `• ${x.name}${x.department ? ` — ${x.department}` : ""}${x.minutes_ago != null ? `, ${bn(x.minutes_ago)} মিনিট আগে` : ""}${x.standing_still ? " · এক জায়গায় দাঁড়িয়ে" : ""}`).join("\n") : "") +
+        (off.length ? "\nনেই:\n" + off.slice(0, 15).map((x) => `• ${x.name} — ${x.reason || "লোকেশন আসেনি"}`).join("\n") : "");
+      return {
+        ok: true, text, data: { tracked: on.length, not_tracked: off.length, people: emps.slice(0, 60).map((x) => ({ name: x.name, department: x.department, tracked: x.tracked, minutes_ago: x.minutes_ago, reason: x.reason })) },
+        actions: [{ label: "Employee Tracking খুলুন", nav: "admin:tracking" }],
+        report: report("Employee Tracking Status", `Tracking-${c.today}`, ["Name", "Employee ID", "Department", "Tracked now", "Minutes ago", "Standing still", "Why not"],
+          emps.map((x) => [x.name, x.employee_id || "", x.department || "", x.tracked ? "Yes" : "No", x.minutes_ago ?? "", x.standing_still ? "Yes" : "", x.tracked ? "" : x.reason || ""]))
+      };
+    }
+  },
+  {
+    name: "tracking_stay_report",
+    description: "Employee Tracking -> Stay Report for one person: where they stayed and how long, between from and to (YYYY-MM-DD, default today), 09:00–18:00. name = the person.",
+    params: { name: { type: "string", description: "Person's name or employee ID" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "tracking"),
+    run: async (c, args) => {
+      const q = String(args?.name || "").trim().toLowerCase();
+      if (!q) return { ok: false, text: "কার Stay Report চান? নাম লিখুন — যেমন \"Rahim-এর আজকের stay report\"।", data: { error: "need_name" } };
+      const st = await callApi(c.req, "/api/tracking/status");
+      if (!st.ok) return fail(st.status);
+      const hit = (st.body?.employees || []).find((x: any) => [x.name, x.employee_id].some((v) => String(v || "").toLowerCase().includes(q)));
+      if (!hit?.user_id) return { ok: true, text: `"${args.name}" নামে আপনার দেখার মধ্যে কাউকে পাওয়া যায়নি।`, data: { results: [] } };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : from;
+      const r = await callApi(c.req, `/api/tracking/stay-report?user_id=${hit.user_id}&from=${from}&to=${to}`);
+      if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
+      const stays: any[] = r.body?.stays || r.body?.rows || r.body?.days?.flatMap((d: any) => d.stays || []) || [];
+      const place = (x: any) => x.place || x.address || x.label || (x.lat ? `${Number(x.lat).toFixed(4)}, ${Number(x.lng).toFixed(4)}` : "—");
+      const mins = (x: any) => Number(x.minutes ?? x.duration_minutes ?? 0);
+      const text = `**${hit.name}-এর Stay Report** (${bnDate(from)}${to !== from ? ` – ${bnDate(to)}` : ""}):\n` +
+        (stays.length ? stays.slice(0, 15).map((x) => `• ${enTime(x.from || x.start || x.started_at)}–${enTime(x.to || x.end || x.ended_at)} ${place(x)}${mins(x) ? ` (${bn(mins(x))} মিনিট)` : ""}`).join("\n") : "এই সময়ে কোথাও থামার রেকর্ড নেই।");
+      return {
+        ok: true, text, data: { name: hit.name, from, to, stays: stays.slice(0, 40) },
+        actions: [{ label: "Employee Tracking খুলুন", nav: "admin:tracking" }],
+        report: report("Stay Report", `Stay-${hit.name}-${from}`, ["From", "To", "Place", "Minutes"], stays.map((x) => [String(x.from || x.start || x.started_at || ""), String(x.to || x.end || x.ended_at || ""), place(x), mins(x)]), [["Employee", hit.name], ["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "duty_roster_overview",
+    description: "Duty Roster: who works which shift and who is Off, for a date range (from / to YYYY-MM-DD, default the next 7 days); name narrows to a person or department.",
+    params: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, name: { type: "string", description: "Person or department (optional)" } },
+    available: (c) => hasMod(c, "duty_roster"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : addDays(from, 6);
+      const [r, sh] = await Promise.all([callApi(c.req, `/api/roster?from=${from}&to=${to}`), callApi(c.req, "/api/roster/shifts")]);
+      if (!r.ok) return fail(r.status);
+      const shiftName = new Map<number, string>((Array.isArray(sh.body) ? sh.body : sh.body?.shifts || []).map((x: any) => [Number(x.id), `${x.name || x.title || "Shift"}${x.start_time ? ` ${enTime(x.start_time)}–${enTime(x.end_time)}` : ""}`]));
+      const q = String(args?.name || "").trim().toLowerCase();
+      const emps: any[] = (r.body?.employees || []).filter((e: any) => !q || [e.name, e.department, e.employee_code].some((v) => String(v || "").toLowerCase().includes(q)));
+      const withRoster = emps.filter((e) => Object.keys(e.days || {}).length);
+      const dates: string[] = [];
+      for (let d = from; d <= to && dates.length < 31; d = addDays(d, 1)) dates.push(d);
+      const cell = (e: any, d: string) => { const x = e.days?.[d]; return !x ? "" : x.is_off ? "Off" : shiftName.get(Number(x.shift_id)) || "Shift"; };
+      const text = `**Duty Roster — ${bnDate(from)} থেকে ${bnDate(to)}**${q ? ` (${args.name})` : ""}: ${bn(withRoster.length)} জনের roster আছে, ${bn(emps.length - withRoster.length)} জনের নেই।\n` +
+        withRoster.slice(0, 12).map((e) => `• ${e.name}: ` + dates.map((d) => cell(e, d)).map((v, i) => (v ? `${bn(dates[i].slice(8))}-${v}` : "")).filter(Boolean).join(", ")).join("\n");
+      return {
+        ok: true, text, data: { from, to, people: withRoster.slice(0, 40).map((e) => ({ name: e.name, department: e.department, days: Object.fromEntries(dates.map((d) => [d, cell(e, d)])) })) },
+        actions: [{ label: "Duty Roster খুলুন", nav: "admin:duty_roster" }],
+        report: report("Duty Roster", `Roster-${from}-${to}`, ["Name", "Department", ...dates], emps.map((e) => [e.name, e.department || "", ...dates.map((d) => cell(e, d))]), [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "break_report",
+    description: "Break Time report: breaks taken between from / to (YYYY-MM-DD, default today) — who took how many and how long, who went over the allowed minutes, who is on a break now.",
+    params: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "break_time"),
+    run: async (c, args) => {
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : c.today;
+      const to = isDate(args?.to) ? String(args.to) : from;
+      const r = await callApi(c.req, `/api/breaks/report?from=${from}&to=${to}`);
+      if (!r.ok) return fail(r.status);
+      const sum: any[] = r.body?.summary || [];
+      const now: any[] = r.body?.on_break_now || [];
+      const allowed = Number(r.body?.rules?.allowed_minutes) || 0;
+      const name = (x: any) => x.name || x.employee_name || x.user_name || "—";
+      const minsOf = (x: any) => Number(x.minutes ?? x.total_minutes ?? 0);
+      const over = sum.filter((x) => x.over || (allowed && minsOf(x) > allowed));
+      const text = `**Break — ${bnDate(from)}${to !== from ? ` – ${bnDate(to)}` : ""}**: ${bn(sum.length)} জন break নিয়েছেন${allowed ? `, অনুমতি ${bn(allowed)} মিনিট` : ""}।` +
+        (now.length ? `\nএখন break-এ: ${now.map(name).join(", ")}` : "") +
+        (over.length ? `\nসময়ের বেশি:\n` + over.slice(0, 10).map((x) => `• ${name(x)} — ${bn(minsOf(x))} মিনিট`).join("\n") : "") +
+        (sum.length && !over.length ? "\nকেউ সময়ের বেশি নেননি।" : "");
+      return {
+        ok: true, text, data: { from, to, people: sum.slice(0, 40), on_break_now: now.map(name), allowed_minutes: allowed },
+        actions: [{ label: "Break Time খুলুন", nav: "admin:break_time" }],
+        report: report("Break Report", `Breaks-${from}-${to}`, ["Name", "Department", "Breaks", "Minutes", "Over"], sum.map((x) => [name(x), x.department || "", Number(x.count ?? x.breaks ?? 0), minsOf(x), x.over || (allowed && minsOf(x) > allowed) ? "Yes" : ""]), [["From", from], ["To", to]])
+      };
+    }
+  },
+  {
+    name: "pepm_report",
+    description:
+      "PEPM reports: kind = mpr_entries (MPR entries: count, quantity / amount by project, latest), budget_submission (Budget Submission Status per project: submitted / not; budget = name, default the latest), dispatch (Dispatch Material rows sent / received). " +
+      "from / to YYYY-MM-DD for mpr_entries (default this month).",
+    params: { kind: { type: "string", description: "mpr_entries | budget_submission | dispatch" }, budget: { type: "string", description: "Budget name (budget_submission)" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    available: (c) => hasMod(c, "reports"),
+    run: async (c, args) => {
+      const kind = String(args?.kind || "mpr_entries");
+      const nav = [{ label: "Reports খুলুন", nav: "admin:reports" }];
+      if (kind === "budget_submission") {
+        const bl = await callApi(c.req, "/api/budgets");
+        const list: any[] = Array.isArray(bl.body) ? bl.body : [];
+        const q = String(args?.budget || "").trim().toLowerCase();
+        const b = (q && list.find((x) => String(x.budget_name || "").toLowerCase().includes(q))) || [...list].sort((a, b2) => Number(b2.id) - Number(a.id))[0];
+        if (!b) return { ok: true, text: "কোনো Budget পাওয়া যায়নি।", data: { budgets: [] } };
+        const r = await callApi(c.req, `/api/reports/budget-submission-status?budget_id=${b.id}`);
+        if (!r.ok) return fail(r.status);
+        const ps: any[] = r.body?.projects || [];
+        const STATUS: Record<string, string> = { submitted: "জমা হয়েছে", not_submitted: "জমা হয়নি", partial: "আংশিক" };
+        const text = `**Budget Submission — ${r.body?.budget?.budget_name || b.budget_name}**\n` + ps.map((p) => `• ${p.project_name}: ${STATUS[p.status] || p.status}${p.entry_count ? `, entry ${bn(p.entry_count)}` : ""}${(p.submitters || []).length ? ` (${p.submitters.map((x: any) => x.name || x).join(", ")})` : ""}`).join("\n");
+        return { ok: true, text, data: { budget: b.budget_name, projects: ps }, actions: nav,
+          report: report("Budget Submission Status", `Budget-Submission-${b.id}`, ["Project", "Status", "Items", "Jobs", "Entries", "Last entry"], ps.map((p) => [p.project_name, p.status, p.budget_item_count, p.job_count, p.entry_count, p.last_entry_at || ""]), [["Budget", String(r.body?.budget?.budget_name || b.budget_name)]]) };
+      }
+      if (kind === "dispatch") {
+        const r = await callApi(c.req, "/api/mpr-dispatch/rows?view=all");
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = r.body?.rows || [];
+        const received = rows.filter((x) => x.received_at || x.status === "received");
+        const text = `**Dispatch Material**${r.body?.all ? "" : " (শুধু আপনার)"}: মোট ${bn(rows.length)}টি সারি, গ্রহণ হয়েছে ${bn(received.length)}টি, বাকি ${bn(rows.length - received.length)}টি।` +
+          (rows.length ? "\n" + rows.slice(0, 12).map((x) => `• ${x.mpr_no || x.mrf_no || ""} ${x.item_name || x.description || ""} — ${x.project_name || ""}${x.received_at ? " ✓" : ""}`).join("\n") : "");
+        return { ok: true, text, data: { total: rows.length, received: received.length, rows: rows.slice(0, 40) }, actions: nav,
+          report: report("Dispatch Material", `Dispatch-${c.today}`, ["MPR No", "Item", "Project", "Qty", "Sent", "Received"], rows.map((x) => [x.mpr_no || x.mrf_no || "", x.item_name || x.description || "", x.project_name || "", x.quantity ?? x.qty ?? "", x.dispatched_at || x.created_at || "", x.received_at || ""])) };
+      }
+      // MPR entries: the Reports page needs the Reports module and its
+      // Read layer; the entries API itself also serves everyone their own and
+      // every Admin all, so the Assistant checks the page's rule first.
+      if (!(isSuper(c) || (c.modules.includes("reports") && (await layerOk(c, "reports", "read"))))) return NO_ACCESS;
+      const r = await callApi(c.req, "/api/entries?scope=all");
+      if (!r.ok) return fail(r.status);
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(args?.from) ? String(args.from) : `${c.today.slice(0, 7)}-01`;
+      const to = isDate(args?.to) ? String(args.to) : c.today;
+      const rows: any[] = (Array.isArray(r.body) ? r.body : []).filter((e: any) => { const d = String(e.entry_date || "").slice(0, 10); return d >= from && d <= to; });
+      const byProject = new Map<string, number>();
+      for (const e of rows) byProject.set(e.project_name || `Project #${e.project_id}`, (byProject.get(e.project_name || `Project #${e.project_id}`) || 0) + 1);
+      const text = `**MPR Entries — ${bnDate(from)} থেকে ${bnDate(to)}**: মোট ${bn(rows.length)}টি\n` + [...byProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([p, n]) => `• ${p}: ${bn(n)}টি`).join("\n");
+      return { ok: true, text, data: { from, to, total: rows.length, by_project: Object.fromEntries(byProject) }, actions: nav,
+        report: report("MPR Entries", `MPR-Entries-${from}-${to}`, ["Date", "Project", "MPR No", "Item", "Qty", "Unit", "Entered by"], rows.map((e) => [String(e.entry_date || "").slice(0, 10), e.project_name || "", e.mpr_no || "", e.item_name || e.particulars || "", e.quantity ?? "", e.unit || "", e.user_name || e.created_by_name || ""]), [["From", from], ["To", to]]) };
+    }
+  },
+  {
+    name: "management_dashboard_overview",
+    description: "Management Dashboard for a month (YYYY-MM, default this month): headcount, attendance %, late %, salary, people on leave, approvals waiting / stuck, targets, joiners / leavers, and what needs attention.",
+    params: { month: { type: "string", description: "YYYY-MM" } },
+    available: (c) => hasMod(c, "management_dashboard"),
+    run: async (c, args) => {
+      const month = /^\d{4}-\d{2}$/.test(String(args?.month || "")) ? String(args.month) : c.today.slice(0, 7);
+      const r = await callApi(c.req, `/api/management-dashboard?month=${month}`);
+      if (!r.ok) return fail(r.status);
+      const k = r.body?.kpis || {};
+      const att: any[] = r.body?.attention || [];
+      const tk = (v: number) => `৳${bn(Math.round(v || 0).toLocaleString("en-IN"))}`;
+      const text = `**Management Dashboard — ${bnMonth(month)}**\n` +
+        `• কর্মী: ${bn(k.headcount?.value ?? 0)}${k.headcount?.prev != null ? ` (আগের মাসে ${bn(k.headcount.prev)})` : ""}\n` +
+        `• হাজিরা: ${bn(k.attendance?.value ?? 0)}%${k.attendance?.late_pct != null ? `, দেরি ${bn(k.attendance.late_pct)}%` : ""}\n` +
+        `• বেতন: ${k.salary?.value ? tk(k.salary.value) : "এখনো চালানো হয়নি"}${k.salary?.prev ? ` (আগের মাসে ${tk(k.salary.prev)})` : ""}\n` +
+        `• আজ ছুটিতে: ${bn(k.on_leave_today?.value ?? 0)}, কাল ${bn(k.on_leave_today?.tomorrow ?? 0)}, অপেক্ষমাণ ছুটির আবেদন ${bn(k.on_leave_today?.pending ?? 0)}\n` +
+        `• অনুমোদনের অপেক্ষায়: ${bn(k.approvals?.waiting ?? 0)} (আটকে ${bn(k.approvals?.stuck ?? 0)})` +
+        (k.targets?.value != null ? `\n• Target: ${bn(k.targets.value)}%` : "") +
+        (att.length ? "\nনজর দরকার:\n" + att.slice(0, 6).map((x: any) => `• ${x.text || x.title || x.message || JSON.stringify(x)}`).join("\n") : "");
+      return { ok: true, text, data: { month, kpis: k, attention: att.slice(0, 10) }, actions: [{ label: "Management Dashboard খুলুন", nav: "admin:management_dashboard" }] };
+    }
+  },
+  {
+    name: "grievance_overview",
+    description: "Grievance & Disciplinary: complaints by status (open / under investigation / resolved), who raised against whom (as the module shows), and disciplinary actions — for an account that manages them.",
+    available: (c) => hasMod(c, "grievance_disciplinary"),
+    run: async (c) => {
+      const [g, d] = await Promise.all([callApi(c.req, "/api/grievances"), callApi(c.req, "/api/disciplinary-actions")]);
+      if (!g.ok) return fail(g.status);
+      const gs: any[] = Array.isArray(g.body) ? g.body : [];
+      const ds: any[] = d.ok && Array.isArray(d.body) ? d.body : [];
+      const byStatus = new Map<string, number>();
+      for (const x of gs) byStatus.set(String(x.status || "open"), (byStatus.get(String(x.status || "open")) || 0) + 1);
+      const text = `**Grievance**: মোট ${bn(gs.length)}টি — ${[...byStatus.entries()].map(([s2, n]) => `${s2} ${bn(n)}`).join(", ") || "কিছু নেই"}\n` +
+        gs.filter((x) => !["resolved", "closed", "rejected"].includes(String(x.status))).slice(0, 10).map((x) => `• #${x.id} ${x.subject || x.title || x.category || ""} — ${x.status}${x.raised_by_name ? `, ${x.raised_by_name}` : ""}`).join("\n") +
+        `\n**Disciplinary action**: ${bn(ds.length)}টি` + (ds.length ? "\n" + ds.slice(0, 8).map((x) => `• ${x.employee_name || x.name || ""} — ${x.action_type || x.type || ""} (${String(x.action_date || x.created_at || "").slice(0, 10)})`).join("\n") : "");
+      return { ok: true, text, data: { grievances: gs.length, by_status: Object.fromEntries(byStatus), disciplinary: ds.length }, actions: [{ label: "Grievance & Disciplinary খুলুন", nav: "admin:grievance_disciplinary" }],
+        report: report("Grievances", `Grievances-${c.today}`, ["No", "Subject", "Category", "Status", "Raised by", "Against", "Date"], gs.map((x) => [x.id, x.subject || x.title || "", x.category || "", x.status || "", x.raised_by_name || "", x.against_name || x.respondent_name || "", String(x.created_at || "").slice(0, 10)])) };
+    }
+  },
+  {
+    name: "activity_log",
+    description: "Logs: kind = payroll (Payroll Activity Log: who opened Payroll and what they did), entry_edits (PEPM entry edit history), office_punches (office device In / Out punches for a date, default today).",
+    params: { kind: { type: "string", description: "payroll | entry_edits | office_punches" }, date: { type: "string", description: "YYYY-MM-DD (office_punches)" } },
+    available: (c) => hasMod(c, "payroll") || hasMod(c, "editlog") || hasMod(c, "office_attendance"),
+    run: async (c, args) => {
+      const kind = String(args?.kind || "payroll");
+      if (kind === "office_punches") {
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : c.today;
+        const r = await callApi(c.req, `/api/office-attendance?from=${date}&to=${date}`);
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = Array.isArray(r.body) ? r.body : r.body?.rows || [];
+        const text = `**Office device punches — ${bnDate(date)}**: ${bn(rows.length)}টি\n` + rows.slice(0, 15).map((x) => `• ${x.employee_name || x.name || x.device_user_pin || ""} — ইন ${enTime(x.check_in_at || x.first_in || x.punch_time)}${x.check_out_at || x.last_out ? `, আউট ${enTime(x.check_out_at || x.last_out)}` : ""}`).join("\n");
+        return { ok: true, text, data: { date, rows: rows.slice(0, 40) }, actions: [{ label: "Office Attendance খুলুন", nav: "admin:office_attendance" }],
+          report: report("Office Punches", `Office-Punches-${date}`, ["Name", "PIN", "In", "Out", "Device"], rows.map((x) => [x.employee_name || x.name || "", x.device_user_pin || x.pin || "", String(x.check_in_at || x.first_in || x.punch_time || ""), String(x.check_out_at || x.last_out || ""), x.device_name || ""]), [["Date", date]]) };
+      }
+      if (kind === "entry_edits") {
+        const r = await callApi(c.req, "/api/entries/edit-history");
+        if (!r.ok) return fail(r.status);
+        const rows: any[] = Array.isArray(r.body) ? r.body : [];
+        const text = `**Entry edit history**: ${bn(rows.length)}টি বদল\n` + rows.slice(0, 12).map((x) => `• ${String(x.edited_at || x.created_at || "").slice(0, 16)} — ${x.edited_by_name || x.user_name || ""}: ${x.field_name || x.field || ""} ${x.old_value ?? ""} → ${x.new_value ?? ""}`).join("\n");
+        return { ok: true, text, data: { total: rows.length, rows: rows.slice(0, 40) }, actions: [{ label: "Edit Log খুলুন", nav: "admin:editlog" }],
+          report: report("Entry Edit History", `Edit-History-${c.today}`, ["When", "By", "Entry", "Field", "Old", "New"], rows.map((x) => [String(x.edited_at || x.created_at || ""), x.edited_by_name || x.user_name || "", x.entry_id ?? "", x.field_name || x.field || "", String(x.old_value ?? ""), String(x.new_value ?? "")])) };
+      }
+      const r = await callApi(c.req, "/api/payroll/access-log");
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = r.body?.rows || [];
+      const text = `**Payroll Activity Log** (সর্বশেষ):\n` + rows.slice(0, 15).map((x) => `• ${String(x.created_at || "").slice(0, 16)} — ${x.user_name}: ${x.area}${x.detail ? ` (${x.detail})` : ""}`).join("\n");
+      return { ok: true, text, data: { rows: rows.slice(0, 40).map((x) => ({ at: x.created_at, who: x.user_name, kind: x.kind, area: x.area, detail: x.detail })) }, actions: [{ label: "Payroll খুলুন", nav: "self:payroll" }],
+        report: report("Payroll Activity Log", `Payroll-Log-${c.today}`, ["When", "Who", "Kind", "What", "Detail", "IP"], rows.map((x) => [String(x.created_at || ""), x.user_name || "", x.kind || "", x.area || "", x.detail || "", x.ip || ""])) };
+    }
+  },
   // ---- The asker's own things (each reads the asker's own API) ----
   {
     name: "my_pending_approvals",
@@ -827,7 +1838,7 @@ const TOOLS: Tool[] = [
       const rows: any[] = Array.isArray(r.body) ? r.body : [];
       if (!rows.length) return { ok: true, text: "এই মুহূর্তে আপনার অনুমোদনের অপেক্ষায় কিছু নেই। 👍", data: { pending: 0 }, actions: [{ label: "Approve Application খুলুন", nav: "self:approveApplications" }] };
       const KIND: Record<string, string> = {
-        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Movement claim", user_claim: "Conveyance bill",
+        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Check in/out", bill_claim: "Conveyance bill",
         attendance: "হাজিরা", attendance_correction: "হাজিরা সংশোধন", asset_requisition: "Asset requisition", vehicle_requisition: "গাড়ির requisition",
         mobile_limit_request: "Mobile limit", advance_request: "Loan / advance", exit_clearance: "Exit clearance", hr_action: "Personnel action"
       };
@@ -856,7 +1867,7 @@ const TOOLS: Tool[] = [
       const full = isSuper(c) || c.flags.can_view_service_book;
       const sb = full ? await callApi(c.req, "/api/hr-ops/my/service-book") : null;
       const e = sb?.ok ? sb.body?.employee : null;
-      if (!me && !e) return { ok: true, text: "আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই তথ্য দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      if (!me && !e) return notLinked(c, "Employee তথ্য");
       const months = Number(e?.service_length_months);
       const lines = [
         `• Employee ID: **${e?.employee_code || me?.employee_id || "—"}**`,
@@ -874,7 +1885,7 @@ const TOOLS: Tool[] = [
         text: `**${c.name}**\n` + lines.join("\n") + note,
         data: { employee_id: e?.employee_code || me?.employee_id, designation: e?.designation || me?.designation, department: e?.department || me?.department, branch: e?.branch || me?.branch,
           supervisor: e?.supervisor || me?.supervisor_name || null, ...(full ? { joining_date: e?.joining_date || null, service_months: Number.isFinite(months) ? months : null, job_base: e?.job_base || null, probation_end_date: e?.probation_end_date || null, confirmation_date: e?.confirmation_date || null } : { service_book: "not_enabled" }) },
-        actions: full ? [{ label: "My Service Book খুলুন", nav: "self:myLetters" }] : []
+        actions: full ? [{ label: "My Service Book খুলুন", nav: "profile:service_book" }] : []
       };
     }
   },
@@ -1139,23 +2150,61 @@ const TOOLS: Tool[] = [
   },
   {
     name: "employee_attendance",
-    description: "HR (Monthly Attendance Report access): one employee's attendance for a month — present, absent, holiday days, and late days when the Late list is allowed. name = part of their name; month_year 'YYYY-MM' (default this month).",
-    params: { name: { type: "string", description: "Employee name (or part of it)." }, month_year: { type: "string", description: "YYYY-MM; default this month." } },
+    description: "HR (Monthly Attendance Report access): one employee's attendance — present, absent, leave, holiday days, and late days when the Late list is allowed. name = part of their name. A calendar month by default (month_year 'YYYY-MM', default this month); when the user asks for the SALARY month, pass from / to (the salary month's dates) and salary_month instead.",
+    params: {
+      name: { type: "string", description: "Employee name (or part of it)." },
+      month_year: { type: "string", description: "Calendar month YYYY-MM; default this month." },
+      from: { type: "string", description: "Salary month start YYYY-MM-DD (only for a salary month)." },
+      to: { type: "string", description: "Salary month end YYYY-MM-DD." },
+      salary_month: { type: "string", description: "The salary month's YYYY-MM (with from / to)." }
+    },
     available: (c) => hasMod(c, "attendance_reports"),
     run: async (c, args) => {
       const q = String(args?.name || "").trim().toLowerCase();
       if (q.length < 2) return { ok: false, text: "কার হাজিরা চান? নাম লিখুন — যেমন \"Rahim-এর এ মাসের হাজিরা\"।" };
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      // A salary month (from / to) can span two calendar months: each one's
+      // Monthly Attendance Report is read and only the days in range counted.
+      const ranged = isDate(args?.from) && isDate(args?.to) && String(args.from) <= String(args.to);
       const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
-      const [y, m] = ym.split("-").map(Number);
-      const r = await callApi(c.req, `/api/attendance/report/monthly?year=${y}&month=${m}`);
-      if (!r.ok) return fail(r.status);
-      const hits: any[] = (r.body?.users || []).filter((u: any) => String(u.user_name || "").toLowerCase().includes(q)).slice(0, 3);
-      if (!hits.length) return { ok: true, text: `${bnMonth(ym)}-এর রিপোর্টে "${args.name}" নামে কাউকে পাওয়া যায়নি (আপনার দেখার department-এর বাইরে হতে পারে)।`, data: { results: [] } };
+      const sm = /^\d{4}-\d{2}$/.test(String(args?.salary_month || "")) ? String(args.salary_month) : "";
+      const lastDay = (m: string) => { const [y, mo] = m.split("-").map(Number); return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`; };
+      const from = ranged ? String(args.from) : `${ym}-01`;
+      const toFull = ranged ? String(args.to) : lastDay(ym);
+      const to = toFull > c.today ? c.today : toFull;
+      const months: string[] = [];
+      for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = monthShift(m, 1)) months.push(m);
+      const people = new Map<number, { user_id: number; user_name: string; department: string; present: number; absent: number; leave: number; holiday: number }>();
+      for (const m of months) {
+        const [y, mo] = m.split("-").map(Number);
+        const r = await callApi(c.req, `/api/attendance/report/monthly?year=${y}&month=${mo}`);
+        if (!r.ok) return fail(r.status);
+        for (const u of (r.body?.users || []).filter((x: any) => String(x.user_name || "").toLowerCase().includes(q))) {
+          const k = people.get(Number(u.user_id)) || { user_id: Number(u.user_id), user_name: String(u.user_name), department: String(u.department || ""), present: 0, absent: 0, leave: 0, holiday: 0 };
+          if (!ranged) {
+            k.present += Number(u.present_days) || 0;
+            k.absent += Number(u.absent_days) || 0;
+            k.leave += Number(u.leave_days) || 0;
+            k.holiday += Number(u.holiday_days) || 0;
+          } else {
+            for (const d of u.days || []) {
+              if (!d?.date || d.date < from || d.date > to || d.future || d.before_joining) continue;
+              if (d.present) k.present++;
+              else if (d.day_type) k.holiday++;
+              else if (d.leave_type) k.leave++;
+              else k.absent++;
+            }
+          }
+          people.set(k.user_id, k);
+        }
+      }
+      const hits = [...people.values()].slice(0, 3);
+      const label = ranged ? `${sm ? `বেতনের মাস ${bnMonth(sm)}, ` : ""}${bnDate(from)} – ${bnDate(to)}` : bnMonth(ym);
+      if (!hits.length) return { ok: true, text: `${label}-এর রিপোর্টে "${args.name}" নামে কাউকে পাওয়া যায়নি (আপনার দেখার department-এর বাইরে হতে পারে)।`, data: { results: [] } };
       // Late days only through the Late list (its own layer).
       const lates = new Map<number, { delay: number; extreme: number }>();
-      const end = ym === c.today.slice(0, 7) ? c.today : `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
       let lateAllowed = true;
-      for (let d = `${ym}-01`; d <= end && lateAllowed; d = addDays(d, 1)) {
+      for (let d = from; d <= to && lateAllowed; d = addDays(d, 1)) {
         const lr = await callApi(c.req, `/api/attendance/report/late?date=${d}`);
         if (lr.status === 403) { lateAllowed = false; break; }
         for (const x of lr.body?.late || []) {
@@ -1166,14 +2215,14 @@ const TOOLS: Tool[] = [
           lates.set(h.user_id, k);
         }
       }
-      const text = `${bnMonth(ym)}-এর হাজিরা:\n` + hits.map((u) => {
+      const text = `${label}-এর হাজিরা:\n` + hits.map((u) => {
         const l = lates.get(u.user_id);
-        return `• **${u.user_name}**${u.department ? ` (${u.department})` : ""} — উপস্থিত ${bn(u.present_days)} দিন, অনুপস্থিত ${bn(u.absent_days)}, ছুটির দিন ${bn(u.holiday_days)}` +
+        return `• **${u.user_name}**${u.department ? ` (${u.department})` : ""} — উপস্থিত ${bn(u.present)} দিন, অনুপস্থিত ${bn(u.absent)}, ছুটি ${bn(u.leave)}, ছুটির দিন ${bn(u.holiday)}` +
           (lateAllowed ? `, দেরি ${bn(l?.delay || 0)}${l?.extreme ? ` (অনেক দেরি ${bn(l.extreme)})` : ""}` : "");
       }).join("\n");
       return {
         ok: true, text,
-        data: { month: ym, results: hits.map((u) => ({ name: u.user_name, department: u.department, present: u.present_days, absent: u.absent_days, holidays: u.holiday_days, ...(lateAllowed ? { late: lates.get(u.user_id)?.delay || 0, extreme_late: lates.get(u.user_id)?.extreme || 0 } : {}) })) },
+        data: { from, to, ...(sm ? { salary_month: sm } : { month: ym }), results: hits.map((u) => ({ name: u.user_name, department: u.department, present: u.present, absent: u.absent, leave: u.leave, holidays: u.holiday, ...(lateAllowed ? { late: lates.get(u.user_id)?.delay || 0, extreme_late: lates.get(u.user_id)?.extreme || 0 } : {}) })) },
         actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }]
       };
     }
@@ -2012,15 +3061,153 @@ const HOW = ["ki kore", "কী করে", "কি করে", "kivabe", "kibha
 
 interface Intent { tool: string; keys: string[]; args?: (t: string, c: Ctx) => any }
 
+const THIS_MONTH = ["this month", "ei mas", "ei mash", "এই মাস", "চলতি মাস", "ei month", "e mase", "e mashe"];
+// "Salary month" / "my salary month" — the salary month we are in now.
+const SALARY_MONTH = ["salary month", "salary mas", "salary mash", "বেতনের মাস", "বেতন মাস", "beton er mas", "beton er mash", "betoner mas", "payroll month", "স্যালারি মাস", "স্যালারি মান্থ"];
 const LAST_MONTH = ["last month", "gotomash", "gotomas", "goto mash", "goto mas", "গত মাস", "আগের মাস", "previous month", "ager mas", "ager mash"];
 
+// "gotomas", "ei bochor", "october", "aj" -> a period for the report tools
+// (nothing said = the tool's own default, this month).
+const periodOf = (t: string, c: Ctx): { from?: string; to?: string; month?: string; date?: string; month_year?: string } => {
+  const ym = c.today.slice(0, 7);
+  const lastDay = (m: string) => { const [y, mo] = m.split("-").map(Number); return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`; };
+  if (hasAny(t, LAST_MONTH)) { const m = monthShift(ym, -1); return { from: `${m}-01`, to: lastDay(m), month: m, month_year: m }; }
+  if (hasAny(t, ["this year", "ei bochor", "ei bochhor", "এই বছর", "এ বছর", "e bochor", "চলতি বছর"])) return { from: `${ym.slice(0, 4)}-01-01`, to: c.today };
+  if (hasAny(t, [" aj ", " ajke ", " আজ ", " আজকে ", " today "])) return { from: c.today, to: c.today, date: c.today };
+  if (hasAny(t, ["gotokal", "গতকাল", "yesterday"])) { const d = addDays(c.today, -1); return { from: d, to: d, date: d }; }
+  // Week = Saturday to Friday (the office week here).
+  const weekStart = addDays(c.today, -((new Date(`${c.today}T00:00:00Z`).getUTCDay() + 1) % 7));
+  if (hasAny(t, ["last week", "goto soptah", "gotosoptah", "goto saptah", "গত সপ্তাহ", "ager soptah", "আগের সপ্তাহ"])) return { from: addDays(weekStart, -7), to: addDays(weekStart, -1) };
+  if (hasAny(t, ["this week", "ei soptah", "ei saptah", "এই সপ্তাহ", "চলতি সপ্তাহ", "ei week"])) return { from: weekStart, to: c.today };
+  if (hasAny(t, THIS_MONTH)) return { from: `${ym}-01`, to: c.today, month: ym, month_year: ym };
+  // "28 october" / "october 28" / "২৮ অক্টোবর" -> that one day.
+  const words = toAsciiDigits(t).trim().split(" ");
+  for (let i = 0; i < words.length; i++) {
+    const m = monthOf(words[i].replace(/(er|এর|-এর|e|তে)$/, ""));
+    if (!m) continue;
+    const dm = /^(\d{1,2})(?:st|nd|rd|th|ই|শে|তারিখ)?$/.exec(words[i - 1] || "") || /^(\d{1,2})(?:st|nd|rd|th|ই|শে|তারিখ)?$/.exec(words[i + 1] || "");
+    const dd = dm ? Number(dm[1]) : 0;
+    if (dd >= 1 && dd <= 31) {
+      const [ty, tm] = ym.split("-").map(Number);
+      const mm = `${m > tm ? ty - 1 : ty}-${String(m).padStart(2, "0")}`;
+      const d = `${mm}-${String(dd).padStart(2, "0")}`;
+      if (d <= lastDay(mm)) return { from: d, to: d, date: d, month: mm, month_year: mm };
+    }
+  }
+  for (const w of t.trim().split(" ")) {
+    const m = monthOf(w.replace(/(er|এর|-এর|e|তে)$/, ""));
+    if (m) {
+      const [ty, tm] = ym.split("-").map(Number);
+      const y = m > tm ? ty - 1 : ty;
+      const mm = `${y}-${String(m).padStart(2, "0")}`;
+      return { from: `${mm}-01`, to: mm === ym ? c.today : lastDay(mm), month: mm, month_year: mm };
+    }
+  }
+  return {};
+};
+// For Gemini: which dates the salary months cover (only when they don't
+// follow the calendar).
+const salaryMonthNote = (c: Ctx) => {
+  if (!salaryMonthStartsLater(c)) return "";
+  const cur = salaryMonthOf(c, c.today);
+  const p = salaryPeriod(c, cur);
+  const prev = monthShift(cur, -1);
+  const q = salaryPeriod(c, prev);
+  return (
+    `Salary months don't follow the calendar here: the current salary month ${cur} runs ${p.start} to ${p.end}; the previous one, ${prev}, ran ${q.start} to ${q.end}. ` +
+    `The asker's OWN attendance (my_attendance_summary, my_late_days) always counts by salary month: "this month" / "last month" there mean these salary months (month_year = the salary month's YYYY-MM; my_late_days gets these from / to). ` +
+    `Reports on OTHER people (employee_attendance, attendance_custom_report) count calendar months as the report pages do — use these salary-month dates there only when the user says "salary month" / "বেতনের মাস" (employee_attendance: from, to, salary_month). Say the dates in the answer.\n`
+  );
+};
+
+// Attendance questions and SALARY months (Payroll -> Salary month setting).
+//   own — the asker's own attendance: a month is always a salary month, as
+//         My Attendance has always counted it.
+//   hr  — reports on others (Monthly Attendance, Report Builder): a month is
+//         the calendar month, as the report pages count it, unless the
+//         question says "salary month" — then Payroll's dates.
+// "this month" = the salary month today is in, "last month" the one before,
+// "october" = the October salary month. A day, a week or a year stays as
+// periodOf reads it.
+const salaryAskedIn = (t: string, c: Ctx) => !!c.salaryAsked || hasAny(t, SALARY_MONTH);
+const attPeriodOf = (t: string, c: Ctx, scope: "own" | "hr" = "own"): { from?: string; to?: string; month?: string; date?: string; month_year?: string; salary_month?: string } => {
+  if (scope === "hr" && !salaryAskedIn(t, c)) return periodOf(t, c);
+  const cur = salaryMonthOf(c, c.today);
+  const whole = (ym: string) => {
+    const p = salaryPeriod(c, ym);
+    return { from: p.start, to: p.end > c.today ? c.today : p.end, month: ym, month_year: ym, salary_month: ym };
+  };
+  if (hasAny(t, LAST_MONTH) || /(goto|gato|last|previous|ager|আগের|গত)\s*(salary|স্যালারি|বেতন|beton|payroll)/.test(t)) return whole(monthShift(cur, -1));
+  if (hasAny(t, THIS_MONTH)) return whole(cur);
+  const p = periodOf(t, c);
+  if (p.month && !p.date) return whole(p.month);
+  if (salaryAskedIn(t, c)) return whole(cur);
+  return p;
+};
+
+// One intent per ready-made report, so a question goes straight to it.
+const reportIntent = (report: string, keys: string[]): Intent => ({ tool: "company_report", keys, args: (t, c) => ({ report, ...periodOf(t, c) }) });
+const presetIntent = (preset: string, keys: string[]): Intent => ({ tool: "employee_records_report", keys, args: () => ({ preset }) });
+
 const INTENTS: Intent[] = [
+  reportIntent("leave_taken", ["leave taken", "leave by type", "ছুটির ধরন অনুযায়ী", "কে কত ছুটি নিয়েছে", "ke koto chuti niyeche", "kar koto chuti nise", "kon dhoroner chuti"]),
+  reportIntent("bill_disbursements", ["disbursement", "ডিসবার্স", "bill payment report", "koto taka deya baki", "কত টাকা দেওয়া বাকি", "bill paid"]),
+  reportIntent("bill_claim_categories", ["category wise claim", "claim by category", "ক্যাটাগরি অনুযায়ী claim", "category onujayi bill"]),
+  reportIntent("bill_claims", ["bill claim report", "বিল ক্লেইম রিপোর্ট", "conveyance claim report", "sobar bill claim", "কোম্পানির bill claim"]),
+  reportIntent("conveyance_bills", ["conveyance bill list", "conveyance bill report", "কনভেয়েন্স বিলের তালিকা"]),
+  reportIntent("movement_claims", ["movement claim report", "sobar movement", "মুভমেন্ট রিপোর্ট", "movement report"]),
+  reportIntent("asset_register", ["asset register", "asset list", "সব asset", "অ্যাসেট রেজিস্টার", "company r asset"]),
+  reportIntent("asset_assignments", ["asset handover", "asset hostantor", "হস্তান্তরের ইতিহাস", "handover history"]),
+  reportIntent("asset_requisitions", ["asset requisition report", "asset er abedon", "অ্যাসেটের আবেদন"]),
+  reportIntent("vehicle_rides", ["ride history", "গাড়ির ইতিহাস", "ride report", "koyta ride hoyeche", "কয়টা ride"]),
+  reportIntent("vehicle_utilization", ["vehicle utilization", "gari koto cholse", "গাড়ি কত চলেছে", "utilization"]),
+  reportIntent("attendance_summary", ["attendance summary", "hajira summary", "মাসের হাজিরা রিপোর্ট", "attendance report sobar"]),
+  reportIntent("remote_attendance", ["remote attendance report", "gps attendance", "remote check in report"]),
+  reportIntent("leave_applications", ["leave application report", "ছুটির আবেদনের রিপোর্ট"]),
+  { tool: "attendance_custom_report", keys: ["er pore ke ke asche", "এর পরে কে কে এসেছে", "er age ke ber", "এর আগে কে বের", "check out den nai", "চেক আউট দেয়নি", "ghontar kom kaj", "ঘণ্টার কম কাজ", "bar er beshi late", "বারের বেশি দেরি", "custom attendance report", "attendance report builder"],
+    args: (t, c) => ({ ...parseAttendanceQuestion(t), ...attPeriodOf(t, c, "hr") }) },
+  { tool: "attendance_department_summary", keys: ["department summary", "department wise attendance", "department onujayi hajira", "বিভাগ অনুযায়ী হাজিরা", "department e koto absent", "department wise absent", "ডিপার্টমেন্ট অনুযায়ী"],
+    args: (t, c) => { const p = periodOf(t, c); return p.date ? { date: p.date } : p.month ? { month: p.month } : hasAny(t, ["mas", "month", "মাস"]) ? { month: c.today.slice(0, 7) } : {}; } },
+  { tool: "payroll_month_comparison", keys: ["salary comparison", "beton er tulona", "বেতনের তুলনা", "salary difference", "beton keno barlo", "ager maser sathe beton", "বেতন কেন বাড়ল", "বেতন কেন কমল", "payroll comparison"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
+  { tool: "payroll_salary_sheet", keys: ["salary sheet", "বেতনের শীট", "salary list", "beton koto gese", "বেতন কত গেছে", "kar koto beton", "কার কত বেতন"], args: (t, c) => ({ month_year: periodOf(t, c).month_year }) },
+  presetIntent("salary_register", ["salary register", "বেতন রেজিস্টার"]),
+  presetIntent("loans_outstanding", ["loan outstanding", "কার কত লোন বাকি", "loan baki sobar", "sobar loan"]),
+  presetIntent("training_summary", ["training summary", "ট্রেনিং রিপোর্ট", "training report"]),
+  presetIntent("pending_documents", ["pending document", "কাগজ বাকি", "document missing", "documents pending"]),
+  presetIntent("missing_documents_by_type", ["missing document by type", "কোন কাগজ বাকি"]),
+  presetIntent("nominee_gaps", ["nominee", "নমিনি", "emergency contact nai"]),
+  presetIntent("education_levels", ["education level", "শিক্ষাগত যোগ্যতা", "education report"]),
+  presetIntent("experience_bands", ["experience band", "অভিজ্ঞতা অনুযায়ী", "experience report"]),
+  presetIntent("unverified_records", ["not verified", "verify hoyni", "যাচাই হয়নি"]),
+  presetIntent("joined_from_company", ["ager company", "আগের কোম্পানি", "previous company"]),
+  presetIntent("probation_ending", ["probation ending", "probation shesh", "প্রবেশন শেষ"]),
+  presetIntent("blood_group_directory", ["blood group list", "রক্তের গ্রুপের তালিকা", "blood group directory", "kar blood group"]),
+  presetIntent("assets_with_employees", ["assets with employees", "kar kache asset", "কার কাছে asset"]),
+  { tool: "mobile_bill_report", keys: ["mobile bill report", "মোবাইল বিলের রিপোর্ট", "sim bill report", "limit er beshi", "সীমার বেশি বিল", "mobile bill koto"], args: (t, c) => { const p = periodOf(t, c); return p.month ? { from: p.month, to: p.month } : {}; } },
+  { tool: "tracking_overview", keys: ["tracking e ke ache", "কে ট্র্যাকিং", "tracking status", "location pathacche", "লোকেশন পাঠাচ্ছে", "ke track e"] },
+  { tool: "tracking_stay_report", keys: ["stay report", "কোথায় ছিল", "kothay chilo"], args: (t, c) => ({ name: nameBefore(t), ...periodOf(t, c) }) },
+  { tool: "duty_roster_overview", keys: ["duty roster", "রোস্টার", "kar kon shift", "কার কোন শিফট", "shift ke"], args: (t, c) => periodOf(t, c) },
+  { tool: "break_report", keys: ["break report", "ব্রেক রিপোর্ট", "ke break e", "কে ব্রেকে", "break niyeche"], args: (t, c) => periodOf(t, c) },
+  { tool: "pepm_report", keys: ["mpr entry", "এমপিআর", "mpr report"], args: (t, c) => ({ kind: "mpr_entries", ...periodOf(t, c) }) },
+  { tool: "pepm_report", keys: ["budget submission", "বাজেট জমা", "budget submit"], args: () => ({ kind: "budget_submission" }) },
+  { tool: "pepm_report", keys: ["dispatch", "ডিসপ্যাচ"], args: () => ({ kind: "dispatch" }) },
+  { tool: "management_dashboard_overview", keys: ["management dashboard", "ম্যানেজমেন্ট ড্যাশবোর্ড", "company overview", "কোম্পানির অবস্থা", "companyr obostha"], args: (t, c) => ({ month: periodOf(t, c).month }) },
+  { tool: "grievance_overview", keys: ["grievance", "অভিযোগ", "disciplinary", "শাস্তিমূলক"] },
+  { tool: "activity_log", keys: ["payroll log", "payroll e ke dhukeche", "payroll activity"], args: () => ({ kind: "payroll" }) },
+  { tool: "activity_log", keys: ["edit log", "edit history", "এডিট লগ"], args: () => ({ kind: "entry_edits" }) },
+  { tool: "activity_log", keys: ["device punch", "office punch", "মেশিনের পাঞ্চ", "punch log"], args: (t, c) => ({ kind: "office_punches", date: periodOf(t, c).date }) },
+  // Forms the Assistant fills (cards the person submits) — in INTENTS so a
+  // wording Gemini answered with them is learned: the local engine then fills
+  // the same card with its own reading of the question.
+  { tool: "prepare_movement_claim", keys: ["movement check in", "movement check out", "movement claim start", "মুভমেন্ট চেক ইন", "মুভমেন্ট চেক আউট"], args: (t) => parseMovementRequest(t) },
+  { tool: "prepare_ride_booking", keys: ["book a ride", "gari book", "car book", "গাড়ি বুক", "gari lagbe", "গাড়ি লাগবে", "car lagbe", "ride book"], args: (t, c) => parseRideRequest(t, c.today) },
+  { tool: "prepare_attendance_correction", keys: ["timesheet edit", "attendance correction", "hajira thik", "হাজিরা ঠিক", "check in dite bhule", "চেক ইন দিতে ভুলে", "punch dite bhule"], args: (t, c) => parseCorrectionRequest(t, c.today) },
   { tool: "my_leave_balance", keys: ["leave balance", "balance", "ব্যালেন্স", "chuti koto", "chuti baki", "koto chuti", "ছুটি কত", "কত ছুটি", "ছুটি বাকি", "বাকি ছুটি", "leave baki", "leave koto", "leave left", "how many leave", "কয় দিন ছুটি", "koydin chuti"] },
   { tool: "my_leave_applications", keys: ["leave status", "amar leave", "আমার ছুটির আবেদন", "আবেদনের অবস্থা", "application status", "approve hoyeche", "অনুমোদন হয়েছে", "approved hoise", "leave ki holo", "ছুটির কী হল", "ছুটির কি হলো", "my leave", "leave application"] },
   { tool: "my_late_days", keys: ["kon din late", "কোন দিন দেরি", "কোন কোন দিন", "late days", "which days late", "late er din", "দেরির দিন", "কবে দেরি", "kobe late"],
-    args: (t, c) => (hasAny(t, LAST_MONTH) ? (() => { const ym = monthShift(c.today.slice(0, 7), -1); const [y, m] = ym.split("-").map(Number); return { from: `${ym}-01`, to: `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}` }; })() : {}) },
+    args: (t, c) => { const p = attPeriodOf(t, c); return p.from ? { from: p.from, to: p.to } : {}; } },
   { tool: "my_attendance_summary", keys: ["attendance", "হাজিরা", "hajira", "present", "উপস্থিত", "absent", "অনুপস্থিত", "late", "দেরি", "লেট", "deri", "এটেন্ডেন্স", "অ্যাটেনডেন্স"],
-    args: (t, c) => (hasAny(t, LAST_MONTH) ? { month_year: monthShift(c.today.slice(0, 7), -1) } : {}) },
+    args: (t, c) => { const p = attPeriodOf(t, c); return p.month ? { month_year: p.month } : {}; } },
   { tool: "my_claims", keys: ["claim", "ক্লেইম", "ক্লেম", "bill", "বিল", "conveyance", "কনভেয়েন্স", "movement", "মুভমেন্ট"] },
   { tool: "my_loans", keys: ["loan", "লোন", "ঋণ", "advance", "অ্যাডভান্স", "অগ্রিম", "কিস্তি", "kisti", "installment"] },
   { tool: "my_tasks", keys: ["task", "টাস্ক", "amar kaj", "আমার কাজ", "কাজ বাকি", "kaj baki"] },
@@ -2039,7 +3226,11 @@ const INTENTS: Intent[] = [
   { tool: "employee_leave_balance", keys: [" er chuti koto", " er leave balance", "এর ছুটি কত", "-এর ছুটি কত", " er koto chuti", "এর কত ছুটি", " er chuti baki", "এর ছুটি বাকি"],
     args: (t) => ({ name: nameBefore(t) }) },
   { tool: "employee_attendance", keys: [" er hajira", "এর হাজিরা", "-এর হাজিরা", " er attendance", "এর attendance", " er present", "koydin absent", "কয়দিন অনুপস্থিত", " er late", "এর দেরি"],
-    args: (t, c) => ({ name: nameBefore(t), month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined }) },
+    args: (t, c) => {
+      // "Nasrin er salary month er hajira": Payroll's dates; else the calendar month.
+      const p = attPeriodOf(t, c, "hr");
+      return p.salary_month ? { name: nameBefore(t), from: p.from, to: p.to, salary_month: p.salary_month } : { name: nameBefore(t), month_year: p.month || (hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined) };
+    } },
   { tool: "stuck_applications", keys: ["atke ache", "আটকে আছে", "stuck", "din dhore pending", "দিন ধরে পেন্ডিং", "din dhore pore", "অনেকদিন পড়ে", "onekdin pending", "3 din", "৩ দিন"],
     args: (t) => { const n = /(\d{1,2})\s*(?:din|দিন|days?)/.exec(toAsciiDigits(t))?.[1]; return { days: n ? Number(n) : 3 }; } },
   { tool: "exits_overview", keys: ["ke ke chole jacche", "কে কে চলে যাচ্ছে", "exit list", "exit koyta", "কয়টা exit", "offboarding", "অফবোর্ডিং", "resign koreche", "রিজাইন করেছে", "kar clearance", "কার clearance", "settlement baki", "সেটেলমেন্ট বাকি", "last working day ke"] },
@@ -2114,7 +3305,7 @@ const INTENTS: Intent[] = [
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
-const OWN_TOOL: Record<string, string> = { late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
+const OWN_TOOL: Record<string, string> = { employee_attendance: "my_attendance_summary", late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
 
 const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "kemon achen", "কেমন আছ", "good morning", "শুভ সকাল",
   "ki khobor", "কী খবর", "কি খবর", "ki obostha apnar", "valo achen", "ভালো আছেন", "how are you"];
@@ -2137,6 +3328,41 @@ const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটি�
 const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
 const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
 
+// Asking for an office car ("gari lagbe", "book a ride", "car book koro") —
+// not asking about one already booked ("gari kothay", "ride status").
+const RIDE_WORDS = ["gari", "gaari", "গাড়ি", "গাড়ী", "car", "ride", "রাইড", "vehicle", "ভেহিকেল", "microbus", "মাইক্রো"];
+const RIDE_ASK = ["book", "বুক", "lagbe", "লাগবে", "chai", "চাই", "dorkar", "দরকার", "nibo", "নেব", "nite", "নিতে", "need", "want", "requisition", "রিকুইজিশন", "jabo", "যাব", "যাবো", "pathao", "পাঠাও"];
+const RIDE_STATUS = ["status", "স্ট্যাটাস", "kothay", "কোথায়", "ki holo", "কী হল", "কি হলো", "approve", "অনুমোদন", "koyta", "কয়টা", "list", "তালিকা", "cancel", "বাতিল", "driver ke", "কে চালাবে"];
+// An attendance question the Report Builder answers: a clock time with
+// came / left, no check-out, work hours, overtime, early leave, "N times",
+// or attendance by department / person / day. Plain "aj ke absent" /
+// "aj ke late" keep their own answers.
+const wantsAttendanceQuery = (t: string, raw: string) => {
+  const att = /(asche|asc?he|এসেছে|আসছে|eseche|esheche|ber|বের|out|আউট|in time|ইন টাইম|attendance|হাজিরা|hajira|late|দেরি|deri|লেট|absent|অনুপস্থিত|check ?out|check ?in|overtime|ওভারটাইম|ghonta|ঘণ্টা|hours?|chole|চলে|left|came|arrive|ঢুক|dhuk)/.test(t);
+  if (!att) return false;
+  const p = parseAttendanceQuestion(raw);
+  // "goto maser kara late / absent chilo": who, over a month — a list of
+  // people (a single day stays with the day's own late / absent answers).
+  const who = hasAny(t, ["kara", "কারা", "ke ke", "কে কে", "kon kon", "কোন কোন", "who "]);
+  const overMonth = hasAny(t, LAST_MONTH) || hasAny(t, THIS_MONTH) || hasAny(t, SALARY_MONTH);
+  return !!(p.in_after || p.in_before || p.out_before || p.out_after || p.missing_out || p.min_hours || p.max_hours || p.overtime || p.early_leave || p.min_count || p.group_by || (p.department && (p.status || p.late)) || (who && overMonth && (p.late || p.status)));
+};
+// Starting / ending a Check In/Out ("movement check in koro", "client
+// visit e jacchi movement", "pouche gechi movement check out") — not asking
+// about past claims ("movement claim koto", "kototi").
+const wantsMovement = (t: string) =>
+  hasAny(t, ["movement", "মুভমেন্ট"]) &&
+  hasAny(t, ["check in", "checkin", "check out", "checkout", "চেক ইন", "চেক আউট", "start", "শুরু", "shuru", "jacchi", "যাচ্ছি", "jabo", "যাব", "pouch", "পৌঁছ", "kaj shesh", "কাজ শেষ", "end", "koro", "করো", "dao", "দাও", "kore", "করে"]) &&
+  !hasAny(t, ["koto", "কত", "kototi", "কতটি", "koyta", "কয়টা", "list", "তালিকা", "history", "ki holo", "কী হল", "status", "total", "মোট", "km", "কিলো", "kivabe", "কিভাবে", "কীভাবে", "report", "রিপোর্ট", "sobar", "সবার"]);
+const wantsRide = (t: string) => hasAny(t, RIDE_WORDS) && hasAny(t, RIDE_ASK) && !hasAny(t, RIDE_STATUS);
+// Correcting a day's In / Out ("check in dite bhule gechi", "timesheet edit",
+// "hajira thik kore dao") — not asking what the timesheet shows.
+const CORRECTION_WORDS = ["timesheet", "টাইমশিট", "correction", "কারেকশন", "correct attendance", "attendance thik", "hajira thik", "হাজিরা ঠিক", "attendance edit", "edit attendance",
+  "in time", "out time", "ইন টাইম", "আউট টাইম", "check in", "checkin", "check out", "checkout", "চেক ইন", "চেক আউট", "punch", "পাঞ্চ"];
+const CORRECTION_ASK = ["thik", "ঠিক", "correct", "edit", "এডিট", "bhule", "ভুলে", "vule", "forgot", "missed", "miss", "dite pari nai", "দিতে পারিনি", "korte pari nai", "করতে পারিনি",
+  "bosao", "বসাও", "add", "dao", "দাও", "kore dao", "করে দাও", "change", "বদল", "update", "lagbe", "লাগবে"];
+const wantsCorrection = (t: string) => hasAny(t, CORRECTION_WORDS) && hasAny(t, CORRECTION_ASK) && !hasAny(t, ["status", "স্ট্যাটাস", "ki holo", "কী হল", "approve hoyeche", "অনুমোদন হয়েছে"]);
+
 // The keyword engine: an answer when the question matches something, else null.
 async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   const t = norm(message);
@@ -2145,6 +3371,34 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   if (hasAny(t, HUMAN_WORDS)) {
     const r = await TOOLS.find((x) => x.name === "request_human_support")!.run(c, {});
     return { reply: r.text, actions: r.actions || [] };
+  }
+
+  // "aj 9:05 er pore ke ke asche", "6 tar age ke ber hoye geche", "ei mase
+  // 3 bar er beshi late kara" -> the Attendance Report Builder.
+  if (wantsAttendanceQuery(t, message) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "attendance_custom_report")!;
+    if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
+    const r = await tool.run(c, { ...parseAttendanceQuestion(message), ...attPeriodOf(t, c, "hr") });
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+  }
+  // "client visit e jacchi movement check in koro" -> a Check In/Out card
+  if (wantsMovement(t) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "prepare_movement_claim")!;
+    if (!toolAvailable(tool, c)) return { reply: "Check In/Out আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+    const r = await tool.run(c, parseMovementRequest(message));
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), draft: r.draft };
+  }
+  // "kal 10 tay gulshan jabo gari lagbe" -> a Book a Ride draft card
+  if (wantsRide(t) && !asksHow) {
+    const r = await TOOLS.find((x) => x.name === "prepare_ride_booking")!.run(c, parseRideRequest(message, c.today));
+    return { reply: r.text, actions: [], draft: r.draft };
+  }
+  // "gotokal check in dite bhule gechi 9:10 e ashchi" -> a Correct Attendance draft card
+  if (wantsCorrection(t) && !asksHow) {
+    const tool = TOOLS.find((x) => x.name === "prepare_attendance_correction")!;
+    if (!toolAvailable(tool, c)) return { reply: "Timesheet / হাজিরা ঠিক করা আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+    const r = await tool.run(c, parseCorrectionRequest(message, c.today));
+    return { reply: r.text, actions: [], draft: r.draft };
   }
 
   // "20 oct family problem niye leave application kore dao" -> a draft card
@@ -2178,7 +3432,11 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     if (kind) {
       const tool = TOOLS.find((x) => x.name === kind)!;
       if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
-      const r = await tool.run(c, { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined });
+      // The same period rules as the intent (calendar month; Payroll's dates
+      // when "salary month" is said).
+      const intent = INTENTS.find((i) => i.tool === kind);
+      const args = kind === "employee_attendance" && intent?.args ? { ...intent.args(t, c), name: other } : { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined };
+      const r = await tool.run(c, args);
       return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
     }
   }
@@ -2203,13 +3461,16 @@ async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
     // "amar / ami … late" is about the asker's own days, not everyone's
     // (the same for tasks, targets and rides).
     const own = OWN_TOOL[scored[0].i.tool];
-    const intent = own && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
+    // "october er hajira" names a month, not a person: the asker's own.
+    const noName = scored[0].i.tool === "employee_attendance" && !nameBefore(t);
+    const intent = own && (noName || hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "]))
       ? INTENTS.find((i) => i.tool === own)!
       : scored[0].i;
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
-    const r = await tool.run(c, intent.args ? intent.args(t, c) : {});
-    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+    // Form tools read the question as typed ("9.10" is a time, not "9 10").
+    const r = await tool.run(c, intent.args ? intent.args(intent.tool.startsWith("prepare_") ? message : t, c) : {});
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report, draft: r.draft };
   }
   if (help.length) {
     return { reply: help.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions: help.flatMap(helpAction) };
@@ -2225,6 +3486,13 @@ const blockedHelpAnswer = (h: HelpEntry): Answer => ({
 
 // Keyword match, then the same with misspelt words corrected.
 async function matchWithSpelling(c: Ctx, message: string): Promise<Answer | null> {
+  // A form request is read as typed (spelling fixes would change the
+  // reason / place words that go into the card).
+  const asTyped = norm(message);
+  if (wantsMovement(asTyped) || wantsRide(asTyped) || wantsCorrection(asTyped)) {
+    const r = await matchLocal(c, message);
+    if (r) return r;
+  }
   const fixed = fixSpelling(message);
   if (fixed !== norm(message)) {
     const r = await matchLocal(c, fixed);
@@ -2257,11 +3525,22 @@ async function answerLearned(c: Ctx, message: string, hit: LearnedRow): Promise<
   if (!tool) return { reply: "", actions: [] };
   if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
   const intent = INTENTS.find((i) => i.tool === tool.name);
-  const r = await tool.run(c, { ...(intent?.args ? intent.args(t, c) : {}), ...(hit.args || {}) });
-  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+  const r = await tool.run(c, { ...(intent?.args ? intent.args(message, c) : {}), ...(hit.args || {}) });
+  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report, draft: r.draft };
 }
 
 async function localAnswer(c: Ctx, message: string, history: { role: string; text: string }[] = []): Promise<Answer> {
+  // "amar salary month er attendance" is about attendance in the salary
+  // month we are in, not about Payroll: read it as "ei maser attendance"
+  // (attPeriodOf turns "ei mas" into the salary month's dates).
+  if (hasAny(norm(message), SALARY_MONTH) && /(attendance|hajira|হাজিরা|present|absent|late|deri|দেরি|লেট|উপস্থিত|অনুপস্থিত|এটেন্ডেন্স|অ্যাটেনডেন্স|in time|out time|check ?in|check ?out|চেক ইন|চেক আউট|overtime|ওভারটাইম|ghonta|ঘণ্টা|asche|এসেছে|ber hoy|বের)/i.test(message)) {
+    // "goto / last / আগের salary month" -> the salary month before.
+    message = message
+      .replace(/(goto|gato|last|previous|ager|আগের|গত)?\s*(salary|স্যালারি|বেতনের|বেতন|beton\s*er|betoner|payroll)\s*(month|mash|mas|মাস|মান্থ)(\s*(er|এর))?/gi, (_m, prev) => (prev ? " gotomaser " : " ei maser "))
+      .replace(/\s+/g, " ")
+      .trim();
+    c = { ...c, salaryAsked: true };
+  }
   const t = norm(message);
   // A question that is (nearly) one Gemini answered, or a built-in example,
   // goes the way it went then — when this account may use that answer.
@@ -2312,18 +3591,34 @@ async function localAnswer(c: Ctx, message: string, history: { role: string; tex
 //     every word the engine knows before giving up.
 // ---------------------------------------------------------------------------
 const LEARNABLE = new Set(INTENTS.map((i) => i.tool));
-const LEARN_ARG_KEYS = new Set(["section", "field", "mode"]);
+const LEARN_ARG_KEYS = new Set(["section", "field", "mode", "report", "preset", "kind"]);
 interface LearnedRow { question: string; tool: string | null; help_id: string | null; args: Record<string, any> | null; grams: Set<string> }
 // Built-in examples: questions worded the way people actually ask, each
 // with what answers it ("help:<id>" = a how-to entry). Known from the start,
 // before Gemini has taught anything; what Gemini teaches is added on top.
 const TRAINING: [string, string, Record<string, any>?][] = [
+  ["e bochor ke koto casual leave niyeche", "company_report", { report: "leave_taken" }], ["এই মাসে কত টাকার bill দেওয়া বাকি", "company_report", { report: "bill_disbursements" }],
+  ["kon gari koto cholse ei mase", "company_report", { report: "vehicle_utilization" }], ["asset register dekhao", "company_report", { report: "asset_register" }],
+  ["aj 9:05 er pore ke ke asche", "attendance_custom_report"], ["আজ ৬টার আগে কে কে বের হয়ে গেছে", "attendance_custom_report"], ["ei mase 3 bar er beshi late kara korse", "attendance_custom_report"],
+  ["gotokal check out den nai kara", "attendance_custom_report"], ["who came after 9:15 today", "attendance_custom_report"], ["ei soptahe 8 ghontar kom kaj korse ke", "attendance_custom_report"],
+  ["department wise ajker hajira", "attendance_department_summary"], ["ei mase kon department e beshi absent", "attendance_department_summary"],
+  ["gotomaser sathe beton er parthokko", "payroll_month_comparison"], ["এ মাসে বেতন কেন বেড়েছে", "payroll_month_comparison"], ["salary sheet dekhao", "payroll_salary_sheet"],
+  ["kar kar document jama dewa baki", "employee_records_report", { preset: "pending_documents" }], ["blood group onujayi talika", "employee_records_report", { preset: "blood_group_directory" }],
+  ["mobile bill e ke limit er beshi korse", "mobile_bill_report"], ["ekhon ke ke tracking e ache", "tracking_overview"], ["ajke ke break e", "break_report"],
+  ["management dashboard er summary dao", "management_dashboard_overview"], ["kon project budget submit koreni", "pepm_report", { kind: "budget_submission" }],
+  ["client visit e jacchi movement check in koro", "prepare_movement_claim"], ["movement claim check in kore dao", "prepare_movement_claim"], ["মুভমেন্ট চেক ইন করো ব্যাংকে যাচ্ছি", "prepare_movement_claim"],
+  ["pouche gechi movement check out koro", "prepare_movement_claim"], ["movement claim shesh koro", "prepare_movement_claim"], ["start a movement claim for site visit", "prepare_movement_claim"],
+  ["kal sokal 10 tay office theke gulshan jabo gari lagbe", "prepare_ride_booking"], ["ekta gari book kore dao", "prepare_ride_booking"], ["আমার একটা গাড়ি লাগবে", "prepare_ride_booking"],
+  ["book a car for tomorrow 3pm", "prepare_ride_booking"], ["client meeting e jete hobe car dorkar", "prepare_ride_booking"], ["গাড়ি বুক করে দাও", "prepare_ride_booking"],
+  ["gotokal check in dite bhule gechi", "prepare_attendance_correction"], ["amar timesheet edit kore dao", "prepare_attendance_correction"], ["হাজিরা ঠিক করে দাও", "prepare_attendance_correction"],
+  ["out time bosano hoyni", "prepare_attendance_correction"], ["i forgot to check out yesterday", "prepare_attendance_correction"], ["punch dite pari nai attendance correction lagbe", "prepare_attendance_correction"],
   ["amar koydin chuti ache", "my_leave_balance"], ["ar koto din leave nite parbo", "my_leave_balance"], ["আমি আর কয়দিন ছুটি নিতে পারব", "my_leave_balance"],
   ["casual leave koyta ache", "my_leave_balance"], ["sick leave baki ache koto", "my_leave_balance"], ["how many days off do i have", "my_leave_balance"],
   ["amar dorkhaster ki obostha", "my_leave_applications"], ["chutir abedon approve hoyeche ki", "my_leave_applications"], ["আমার ছুটি মঞ্জুর হয়েছে কি", "my_leave_applications"],
   ["is my leave approved", "my_leave_applications"], ["leave reject hoise keno", "my_leave_applications"],
   ["ei mase koydin office e aschi", "my_attendance_summary"], ["এই মাসে কয়দিন অফিসে এসেছি", "my_attendance_summary"], ["amar in time out time", "my_attendance_summary"],
   ["koydin deri te aschi", "my_attendance_summary"], ["how many days was i late this month", "my_attendance_summary"], ["amar absent koto din", "my_attendance_summary"],
+  ["amar salary month er attendance report", "my_attendance_summary"], ["বেতনের মাসের হাজিরা", "my_attendance_summary"], ["beton er maser hajira koto", "my_attendance_summary"], ["october er hajira", "my_attendance_summary"],
   ["kon kon din late hoyeche", "my_late_days"], ["কোন দিনগুলোতে দেরি হয়েছে", "my_late_days"], ["which dates was i late", "my_late_days"],
   ["amar taka kobe pabo bill er", "my_claims"], ["আমার বিলের টাকা কবে পাব", "my_claims"], ["claim er taka paid hoise", "my_claims"], ["my claim status", "my_claims"],
   ["amar loan koto baki", "my_loans"], ["আমার লোনের কিস্তি কত", "my_loans"], ["advance er taka koto kete nibe", "my_loans"], ["how much loan is left", "my_loans"],
@@ -2364,7 +3659,7 @@ const TRAINING: [string, string, Record<string, any>?][] = [
   ["appraisal er obostha", "performance_overview"], ["মূল্যায়ন কতদূর", "performance_overview"],
   ["ki ki kaj pending ache admin er", "admin_pending_work"], ["আমার টেবিলে কী কী বাকি", "admin_pending_work"],
   ["chuti nite chaile ki korte hobe", "help:leave_apply"], ["ছুটি নিতে হলে কী করব", "help:leave_apply"], ["how can i take leave", "help:leave_apply"],
-  ["bill kemne jomadibo", "help:conveyance"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:conveyance"], ["how to claim travel cost", "help:conveyance"],
+  ["bill kemne jomadibo", "help:bill_claim"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:bill_claim"], ["how to claim travel cost", "help:bill_claim"],
   ["field e jaoar somoy ki korbo", "help:movement_claim"], ["বাইরে কাজে গেলে চেক ইন কীভাবে", "help:movement_claim"],
   ["laptop lagbe ki korbo", "help:asset"], ["নতুন ল্যাপটপ চাইব কীভাবে", "help:asset"], ["how do i request a laptop", "help:asset"],
   ["gari lagbe kivabe chaibo", "help:vehicle"], ["অফিসের গাড়ি কীভাবে নেব", "help:vehicle"],
@@ -2521,33 +3816,89 @@ const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-flash-lite-latest,gem
   .split(",").map((m) => m.trim()).filter(Boolean);
 const GEMINI_CALL_TIMEOUT_MS = 20000;
 let preferredModel = 0;
-let gemini: GoogleGenAI | null = null;
-const geminiClient = () => {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!key) return null;
-  if (!gemini) gemini = new GoogleGenAI({ apiKey: key });
-  return gemini;
+// Several API keys (each from its own Google Cloud project, so each has its
+// own quota) may be given: GEMINI_API_KEYS="key1,key2,key3" (GEMINI_API_KEY
+// may also hold a comma-separated list). One key is used at a time; when its
+// quota is used up (429 / RESOURCE_EXHAUSTED) it rests — 15 minutes at
+// first, doubling up to 6 hours while it stays used up — and the next key
+// takes over at once, inside the same question. Only when every key is used
+// up does the local engine answer on its own (no 20 s wait per question).
+// One good answer resets a key.
+interface GeminiKey { label: string; ai: GoogleGenAI; pausedUntil: number; pauseMs: number }
+let geminiKeys: GeminiKey[] | null = null;
+let currentKey = 0;
+const keyPool = (): GeminiKey[] => {
+  if (!geminiKeys) {
+    const raw = [process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY].filter(Boolean).join(",");
+    const keys = [...new Set(raw.split(/[,\s]+/).map((k) => k.trim()).filter(Boolean))];
+    geminiKeys = keys.map((key, i) => ({ label: `key ${i + 1} (…${key.slice(-4)})`, ai: new GoogleGenAI({ apiKey: key }), pausedUntil: 0, pauseMs: 0 }));
+    if (keys.length > 1) console.log(`AI Assistant: ${keys.length} Gemini API keys — the next one takes over when one's quota is used up`);
+  }
+  return geminiKeys;
 };
+// The key in use (the first one not resting); null when no key is set.
+const geminiClient = (): GoogleGenAI | null => {
+  const pool = keyPool();
+  if (!pool.length) return null;
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (currentKey + i) % pool.length;
+    if (Date.now() >= pool[idx].pausedUntil) {
+      if (idx !== currentKey) console.log(`AI Assistant: now using Gemini ${pool[idx].label}`);
+      currentKey = idx;
+      return pool[idx].ai;
+    }
+  }
+  return pool[currentKey].ai;
+};
+const keyOf = (ai?: GoogleGenAI | null) => keyPool().find((k) => k.ai === ai) || keyPool()[currentKey];
 
-// Every model said "quota used up" (429 / RESOURCE_EXHAUSTED): Gemini is not
-// asked again for a while and the local engine answers on its own (no 20 s
-// wait per question). 15 minutes at first, doubling up to 6 hours while it
-// stays used up; one good answer resets it.
+// Every key used up: Gemini is not asked again until one has rested.
 const QUOTA = /\b429\b|RESOURCE_EXHAUSTED|quota|rate limit/i;
-let geminiPausedUntil = 0;
-let geminiPauseMs = 0;
-const geminiPaused = () => Date.now() < geminiPausedUntil;
-function pauseGemini() {
-  geminiPauseMs = Math.min(6 * 60 * 60_000, geminiPauseMs ? geminiPauseMs * 2 : 15 * 60_000);
-  geminiPausedUntil = Date.now() + geminiPauseMs;
-  console.warn(`AI Assistant: Gemini quota used up — answering locally for ${Math.round(geminiPauseMs / 60_000)} min`);
+const geminiPaused = () => keyPool().length > 0 && keyPool().every((k) => Date.now() < k.pausedUntil);
+// This key's quota is used up: it rests, the next one takes over. Returns
+// true when another key is still available.
+function pauseGemini(ai?: GoogleGenAI | null): boolean {
+  const k = keyOf(ai);
+  if (!k) return false;
+  k.pauseMs = Math.min(6 * 60 * 60_000, k.pauseMs ? k.pauseMs * 2 : 15 * 60_000);
+  k.pausedUntil = Date.now() + k.pauseMs;
+  const more = !geminiPaused();
+  console.warn(`AI Assistant: Gemini ${k.label} quota used up — resting ${Math.round(k.pauseMs / 60_000)} min${more ? ", switching to the next key" : "; every key used up, answering locally"}`);
+  if (more) geminiClient();
+  return more;
 }
-function geminiWorked() {
-  geminiPauseMs = 0;
-  geminiPausedUntil = 0;
+function geminiWorked(ai?: GoogleGenAI | null) {
+  const k = keyOf(ai);
+  if (!k) return;
+  k.pauseMs = 0;
+  k.pausedUntil = 0;
 }
 
-async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
+// Tries the models with the key in use; a key whose quota is used up hands
+// over to the next key for the same request.
+async function generateWithFallback(_ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
+  for (let n = 0; n < Math.max(1, keyPool().length); n++) {
+    const ai = geminiClient();
+    if (!ai) break;
+    try {
+      const resp = await generateWithModels(ai, req);
+      geminiWorked(ai);
+      return resp;
+    } catch (err: any) {
+      if (err?.quotaExhausted) {
+        err.alreadyPaused = true;
+        if (pauseGemini(ai)) continue;
+      }
+      throw err;
+    }
+  }
+  const e: any = new Error("every Gemini key is used up");
+  e.quotaExhausted = true;
+  e.alreadyPaused = true;
+  throw e;
+}
+
+async function generateWithModels(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
   let lastErr: any = null;
   let allQuota = true;
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
@@ -2586,11 +3937,13 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   const system =
     `You are "Credence Assistant", the helper inside CredenceHR, an HR app used by Credence Housing Limited in Bangladesh.\n` +
     `Today is ${c.today}. You are talking to ${c.name} (role: ${c.role}).\n` +
+    salaryMonthNote(c) +
     `Rules:\n` +
     `- Reply in the user's language; default to Bangla. Banglish questions get Bangla answers. Be short and friendly; use bullet lines for lists.\n` +
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
+    `- When a tool says linked: false (the login has no Employee record): if can_link_self is true (a Superadmin / Employees manager) say how to link it themselves (Admin Panel → Employees → their row → "Link Existing"; add an Employee record first if there is none) — never tell them to ask HR; and if the tool also gave company figures, give those. Write only Bangla or English — no other script.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
-    `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
+    `- You can only read and guide, with these exceptions that fill a form card in the chat (never submit anything): apply for leave -> prepare_leave_application ("জমা দিন"); book an office car / ride -> prepare_ride_booking ("Book করুন"); correct a day's In / Out time on the Timesheet (forgot to check in / out, wrong time) -> prepare_attendance_correction ("Submit করুন"); start / end a Check In/Out (heading out for office work, reached / finished) -> prepare_movement_claim ("Check In" / "Check Out" — the card takes the phone's location then). The employee reviews the card and presses its button. Never say it was applied, booked or submitted — say the draft is ready below to check and submit. Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access. When app_help returns several entries, answer with the one that fits the question best and keep its steps, order and button names as written (you may translate into the user's language) — don't merge entries into a process of your own or add steps that aren't there.\n` +
@@ -2604,7 +3957,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     { role: "user", parts: [{ text: message }] }
   ];
   const actions: AssistantAction[] = [];
-  let draft: LeaveDraft | undefined;
+  let draft: AssistantDraft | undefined;
   let rep: AssistantReport | undefined;
   // How-to answers are given exactly as written in HELP (menu paths and
   // button names must not be paraphrased): when app_help is all Gemini
@@ -2664,6 +4017,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
 // ---------------------------------------------------------------------------
 export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const { authenticateToken, queryDB, getAdminModules, todayInDhaka } = deps;
+  layerCheck = deps.hasModuleLayer;
   learnedQuery = queryDB;
   void queryDB(`/*unscoped*/ CREATE TABLE IF NOT EXISTS assistant_learned (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -2692,8 +4046,12 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     // Chat is on unless turned off (users.can_use_chat).
     flags.can_use_chat = Number(row.can_use_chat ?? 1) !== 0;
     const modules = row.role === "superadmin" ? [] : await getAdminModules(u.id).catch(() => []);
+    const salaryStarts = ((await queryDB("SELECT start_day, effective_month FROM salary_month_settings ORDER BY effective_month ASC, id ASC").catch(() => [])) || []).map((s: any) => ({
+      start_day: Number(s.start_day) || 1,
+      effective_month: String(s.effective_month || "").slice(0, 7)
+    }));
     return { req, userId: u.id, name: String(row.name || ""), role: String(row.role || ""), modules, flags, today: todayInDhaka(),
-      canExport: row.role === "superadmin" || !!Number(row.can_export_assistant_reports || 0) };
+      canExport: row.role === "superadmin" || !!Number(row.can_export_assistant_reports || 0), salaryStarts };
   };
 
   const recent = new Map<number, number[]>();
@@ -2705,10 +4063,232 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     return list.length > 30;
   };
 
+  // Voice (Module Access -> "AI Assistant — voice", users.can_use_assistant_voice,
+  // off by default; Superadmin always). Needs Gemini: the recording is sent to
+  // Google to be written down and is never stored here.
+  const voiceAllowed = async (c: Ctx) => {
+    if (c.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_use_assistant_voice FROM users WHERE id = ?", [c.userId]).catch(() => [])) || [];
+    return !!rows[0] && Number(rows[0].can_use_assistant_voice || 0) === 1;
+  };
+
   app.get("/api/assistant/status", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
-    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c) });
+    const voice = !!geminiClient() && (await voiceAllowed(c));
+    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c), voice });
+  });
+
+  // How to switch "thinking" off differs by model family: Gemini 3 takes
+  // thinkingLevel MINIMAL, Gemini 2.5 thinkingBudget 0, some take neither
+  // (they answer 400 INVALID_ARGUMENT). Each model's working one is kept.
+  const THINK_OFF: (Record<string, any> | null)[] = [{ thinkingLevel: "MINIMAL" }, { thinkingBudget: 0 }, null];
+  const thinkOffFor = new Map<string, number>();
+
+  // POST /api/assistant/transcribe { audio_base64, mime_type } -> { text }:
+  // a spoken question (WAV from the page, at most ~1 minute) written down as
+  // it was said — Bangla in Bangla script, English in English.
+  app.post("/api/assistant/transcribe", authenticateToken, async (req: any, res: any) => {
+    const c = await loadCtx(req);
+    if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
+    if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
+    if (!geminiClient()) return res.status(503).json({ error: "ভয়েস এখন চালু নেই — লিখে প্রশ্ন করুন।" });
+    if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
+    const data = typeof req.body?.audio_base64 === "string" ? req.body.audio_base64 : "";
+    const mime = String(req.body?.mime_type || "audio/wav");
+    if (!data) return res.status(400).json({ error: "No recording." });
+    if (!/^audio\/(wav|x-wav|mp3|mpeg|aac|ogg|flac|webm|mp4)/.test(mime)) return res.status(400).json({ error: "Unsupported recording." });
+    if (Buffer.byteLength(data, "base64") > 4 * 1024 * 1024) return res.status(400).json({ error: "রেকর্ডিং অনেক লম্বা — এক মিনিটের মধ্যে বলুন।" });
+    const bytes = Buffer.byteLength(data, "base64");
+    // A 16 kHz mono WAV is 32 000 bytes a second (other formats: unknown).
+    const secs = /wav/.test(mime) ? Math.round(Math.max(0, bytes - 44) / 32000) : null;
+    if (secs !== null && secs < 1) return res.status(400).json({ error: "কিছু শোনা যায়নি — মাইক চেপে আবার বলুন।" });
+    const t0 = Date.now();
+    const deadline = t0 + 28000;
+    const prompt =
+      "Transcribe this short recording: a question to an HR app assistant. " +
+      "Bangla in Bangla script, English words in English, Banglish as it is spoken. " +
+      "Reply with only the words that were said, once — no notes, quotes or repetition. If nothing is said, reply with nothing.";
+    // Fast models first. Each try is short, the reply is capped (a model that
+    // starts repeating itself on noise or silence would otherwise run until
+    // the deadline), and "thinking" is off — writing down speech needs none.
+    const models = (process.env.GEMINI_TRANSCRIBE_MODEL || "gemini-flash-lite-latest,gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
+    const why: string[] = [];
+    let quota = 0;
+    let allQuota = false;
+    // A key whose quota is used up hands over to the next key (time allowing).
+    for (let kn = 0; kn < Math.max(1, keyPool().length); kn++) {
+      const ai = geminiClient()!;
+      const whyStart = why.length;
+      quota = 0;
+      for (const model of models) {
+        const firstTry = thinkOffFor.get(model) ?? 0;
+        for (let ti = firstTry; ti < THINK_OFF.length; ti++) {
+          const left = deadline - Date.now();
+          if (left < 3000) break;
+          const think = THINK_OFF[ti];
+          try {
+            const resp: any = await ai.models.generateContent({
+              model,
+              contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime.split(";")[0], data } }, { text: prompt }] }],
+              config: {
+                temperature: 0,
+                maxOutputTokens: 300,
+                ...(think ? { thinkingConfig: think } : {}),
+                httpOptions: { timeout: Math.min(14000, left) }
+              } as any
+            });
+            thinkOffFor.set(model, ti);
+            let text = String(resp?.text || "").replace(/\s+/g, " ").trim();
+            // A reply that repeats one phrase over and over: keep it once.
+            const rep = /^(.{4,80}?)(?:\s*\1){2,}/.exec(text);
+            if (rep) text = rep[1].trim();
+            geminiWorked(ai);
+            console.log(
+              `AI Assistant: transcribed ${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? ` (${secs} s)` : ""} with ${model}` +
+                ` (${think ? JSON.stringify(think) : "default thinking"}) in ${Date.now() - t0} ms`
+            );
+            return res.json({ text: text.slice(0, 1000) });
+          } catch (err: any) {
+            const msg = String(err?.message || err).slice(0, 160);
+            // This model doesn't take that way of turning thinking off: the next way.
+            if (ti < THINK_OFF.length - 1 && /INVALID_ARGUMENT|\b400\b/.test(msg) && !/API key/i.test(msg)) continue;
+            if (QUOTA.test(msg)) quota++;
+            why.push(`${model}${think ? ` ${JSON.stringify(think)}` : ""}: ${msg}`);
+            break;
+          }
+        }
+      }
+      allQuota = quota > 0 && quota === why.length - whyStart;
+      if (allQuota && pauseGemini(ai) && deadline - Date.now() > 5000) continue;
+      break;
+    }
+    console.warn(
+      `AI Assistant: transcribe failed after ${Date.now() - t0} ms (${Math.round(bytes / 1024)} KB ${mime}${secs !== null ? `, ${secs} s` : ""}) — ${why.join(" | ") || "no time left"}`
+    );
+    if (allQuota) {
+      return res.status(503).json({ error: "এখন ভয়েস ব্যস্ত (Gemini-র সীমা শেষ) — কিছুক্ষণ পর চেষ্টা করুন বা লিখে প্রশ্ন করুন।" });
+    }
+    if (Date.now() >= deadline - 3000) return res.status(504).json({ error: "উত্তর আসতে বেশি সময় লাগছে — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+    res.status(502).json({ error: "কথাটা বোঝা গেল না — আবার বলুন বা লিখে প্রশ্ন করুন।" });
+  });
+
+  // POST /api/assistant/speak { text } -> audio/wav: the answer read out by
+  // Gemini's voice — used only when the device has no Bangla voice of its own.
+  // Which voice (TTS) models this key can use: GEMINI_TTS_MODEL first, then
+  // every model Google lists whose name has "tts" (flash before pro), looked
+  // up once an hour — Google renames these, so names aren't guessed. The one
+  // that last worked is tried first; a piece read in the last 10 minutes is
+  // sent again at once.
+  const TTS_FROM_ENV = (process.env.GEMINI_TTS_MODEL || "").split(",").map((m) => m.trim()).filter(Boolean);
+  const TTS_GUESS = ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts", "gemini-2.5-pro-preview-tts"];
+  let ttsModels: string[] = [];
+  let ttsListedAt = 0;
+  let preferredTtsModel = "";
+  const ttsModelList = async (ai: GoogleGenAI): Promise<string[]> => {
+    if (ttsModels.length && Date.now() - ttsListedAt < 60 * 60_000) return ttsModels;
+    const found: string[] = [];
+    try {
+      const pager: any = await (ai.models as any).list({ config: { pageSize: 200 } });
+      for await (const m of pager) {
+        const name = String(m?.name || "").replace(/^models\//, "");
+        const actions: string[] = m?.supportedActions || [];
+        if (/tts/i.test(name) && (!actions.length || actions.includes("generateContent"))) found.push(name);
+      }
+    } catch (err: any) {
+      console.warn("AI Assistant: could not list Gemini models:", String(err?.message || err).slice(0, 160));
+    }
+    const rank = (n: string) => (/flash/.test(n) ? 0 : 1) + (/preview/.test(n) ? 0.1 : 0);
+    found.sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
+    ttsModels = [...new Set([...TTS_FROM_ENV, ...found, ...(found.length ? [] : TTS_GUESS)])];
+    ttsListedAt = Date.now();
+    console.log(`AI Assistant: voice models available: ${ttsModels.join(", ") || "none"}`);
+    return ttsModels;
+  };
+  const ttsCache = new Map<string, { at: number; wav: Buffer }>();
+  // The voices a person may pick in the Assistant (src/lib/assistantVoice.ts
+  // shows the same list); anything else falls back to GEMINI_TTS_VOICE.
+  const TTS_VOICES = new Set(["Kore", "Aoede", "Leda", "Despina", "Callirrhoe", "Sulafat", "Achernar", "Vindemiatrix", "Zephyr", "Puck", "Achird", "Charon", "Algieba", "Umbriel", "Sadachbia"]);
+  app.post("/api/assistant/speak", authenticateToken, async (req: any, res: any) => {
+    const c = await loadCtx(req);
+    if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
+    if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
+    const ai = geminiClient();
+    if (!ai) return res.status(503).json({ error: "Voice is not available." });
+    const text = String(req.body?.text || "").replace(/[*_#`>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
+    if (!text) return res.status(400).json({ error: "Nothing to read." });
+    const voiceName = TTS_VOICES.has(String(req.body?.voice || "")) ? String(req.body.voice) : process.env.GEMINI_TTS_VOICE || "Kore";
+    const cacheKey = `${voiceName}|${text}`;
+    const hit = ttsCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < 10 * 60_000) {
+      res.setHeader("Content-Type", "audio/wav");
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(hit.wav);
+    }
+    const list = await ttsModelList(ai);
+    const order = preferredTtsModel && list.includes(preferredTtsModel) ? [preferredTtsModel, ...list.filter((m) => m !== preferredTtsModel)] : list;
+    const why: string[] = [];
+    const t0 = Date.now();
+    // The voice models' quota is separate from the chat's: a key whose voice
+    // quota is used up just hands this piece to the next key (no rest).
+    const pool = keyPool();
+    const keysInOrder = [...pool.slice(currentKey), ...pool.slice(0, currentKey)];
+    for (const key of keysInOrder) {
+      const ai = key.ai;
+      const whyStart = why.length;
+      let quota = 0;
+      for (const model of order.slice(0, 4)) {
+        if (Date.now() - t0 > 40000) break;
+        try {
+          const resp: any = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts: [{ text }] }],
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+              httpOptions: { timeout: 30000 }
+            } as any
+          });
+          const part = resp?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
+          if (!part) throw new Error("no audio in the reply");
+          const pcm = Buffer.from(part.inlineData.data, "base64");
+          const rate = Number(/rate=(\d+)/.exec(String(part.inlineData.mimeType || ""))?.[1]) || 24000;
+          // 16-bit mono PCM -> WAV.
+          const head = Buffer.alloc(44);
+          head.write("RIFF", 0);
+          head.writeUInt32LE(36 + pcm.length, 4);
+          head.write("WAVE", 8);
+          head.write("fmt ", 12);
+          head.writeUInt32LE(16, 16);
+          head.writeUInt16LE(1, 20);
+          head.writeUInt16LE(1, 22);
+          head.writeUInt32LE(rate, 24);
+          head.writeUInt32LE(rate * 2, 28);
+          head.writeUInt16LE(2, 32);
+          head.writeUInt16LE(16, 34);
+          head.write("data", 36);
+          head.writeUInt32LE(pcm.length, 40);
+          const wav = Buffer.concat([head, pcm]);
+          if (preferredTtsModel !== model) console.log(`AI Assistant: reading aloud with ${model} (${Date.now() - t0} ms)`);
+          preferredTtsModel = model;
+          ttsCache.set(cacheKey, { at: Date.now(), wav });
+          if (ttsCache.size > 80) ttsCache.delete(ttsCache.keys().next().value as string);
+          res.setHeader("Content-Type", "audio/wav");
+          res.setHeader("Cache-Control", "no-store");
+          return res.send(wav);
+        } catch (err: any) {
+          const msg = String(err?.message || err).slice(0, 200);
+          why.push(`${key.label} ${model}: ${msg}`);
+          if (QUOTA.test(msg)) quota++;
+          if (/API key/i.test(msg)) break;
+        }
+      }
+      if (!(quota > 0 && quota === why.length - whyStart) || Date.now() - t0 > 40000) break;
+    }
+    console.warn(`AI Assistant: speak failed after ${Date.now() - t0} ms (${text.length} chars) — ${why.join(" | ") || "no voice model"}`);
+    // Google may have renamed the models: list them again on the next try.
+    ttsListedAt = 0;
+    res.status(502).json({ error: "Could not read the answer aloud." });
   });
 
   app.post("/api/assistant/chat", authenticateToken, async (req: any, res: any) => {
@@ -2734,7 +4314,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
         out = await localAnswer(c, message, history);
       }
     } catch (err: any) {
-      if (err?.quotaExhausted) pauseGemini();
+      if (err?.quotaExhausted) { if (!err.alreadyPaused) pauseGemini(); }
       else console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
       out = await localAnswer(c, message, history);
     }
@@ -2743,6 +4323,16 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     // The full table goes only to accounts allowed to download it, and only
     // when there's something in it.
     const rep = c.canExport && out.report && out.report.rows.length ? { ...out.report, rows: out.report.rows.slice(0, 5000) } : null;
-    res.json({ reply: out.reply, actions, engine, draft: out.draft || null, report: rep });
+    res.json({ reply: cleanReply(out.reply), actions, engine, draft: out.draft || null, report: rep });
   });
+}
+
+// Gemini now and then slips a word of another script into a Bangla answer
+// ("record-의"): the Korean possessive becomes "-এর", anything else in
+// Korean / Japanese / Chinese / Cyrillic / Arabic script is dropped.
+function cleanReply(text: string): string {
+  return String(text || "")
+    .replace(/-?의/g, "-এর")
+    .replace(/[\u1100-\u11FF\u3040-\u30FF\u3130-\u318F\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF]+/g, "")
+    .replace(/[ \t]{2,}/g, " ");
 }

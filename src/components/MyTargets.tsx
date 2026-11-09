@@ -15,6 +15,7 @@ import { ArrowLeft, Plus, Target as TargetIcon } from 'lucide-react';
 import { User } from '../types';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { periodLabel, ProgressBar, takePendingTargetId, Target, TargetCard, TargetDrawer, TargetForm, targetApi, TeamMember } from './TargetParts';
 import { LoadingBlock } from './LoadingBlock';
 
@@ -29,6 +30,7 @@ type Tab = 'mine' | 'team';
 const FINISHED = new Set(['rejected', 'cancelled', 'closed']);
 
 export const MyTargets: React.FC<{ token: string; user: User; onBack?: () => void }> = ({ token, onBack }) => {
+  usePhoneHeaderTitle('My Targets');
   const isNativeApp = Capacitor.isNativePlatform();
   const [access, setAccess] = useState<Access | null>(null);
   const [mine, setMine] = useState<Target[] | null>(null);
@@ -95,9 +97,10 @@ export const MyTargets: React.FC<{ token: string; user: User; onBack?: () => voi
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Targets']} />}
-        <div className="flex items-center justify-between gap-3 mb-4 mt-2 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Targets']} /></div>}
+        <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
+          <div className="hidden md:flex items-center gap-2">
             {onBack && (
               <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />

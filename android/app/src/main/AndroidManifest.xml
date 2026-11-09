@@ -21,10 +21,21 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Sign-in from 360 ERP (SsoConsume.tsx): a phone browser's "Open in
+                 the CredenceHR app" opens credencehr://sso/consume/<token> here;
+                 main.tsx takes it (@capacitor/app appUrlOpen / getLaunchUrl). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="credencehr" android:host="sso" />
             </intent-filter>
         </activity>
 
@@ -54,6 +65,39 @@
             android:name=".LiveTrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- Everyday Employee Tracking, reported natively so it keeps going
+             in the background / after the app is swiped away. -->
+        <service
+            android:name=".DutyTrackingService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="location" />
+        <!-- A chat call in progress keeps going when the app is left (CallService.java):
+             "Ongoing call" notification, with Hang up. -->
+        <service
+            android:name=".CallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
+        <receiver
+            android:name=".CallService$HangupReceiver"
+            android:exported="false" />
+        <!-- Incoming chat call: Decline from the notification (IncomingCall.java). -->
+        <receiver
+            android:name=".IncomingCall$DeclineReceiver"
+            android:exported="false" />
+        <!-- Employee Tracking's repeating wake-up (works in Doze). -->
+        <receiver
+            android:name=".DutyAlarmReceiver"
+            android:exported="false" />
+        <!-- Tracking that was on starts again after a phone restart / app update. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
@@ -78,6 +122,14 @@
          tracking" notification) after the app is swiped away. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- The ongoing-call service (CallService.java), Android 14+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Employee Tracking starts again after the phone restarts (BootReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Asks to let CredenceHR off battery optimisation, so the phone does
+         not stop tracking in the background. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Android 13+ requires this to show that foreground-service
          notification at all. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -91,5 +143,12 @@
          audio routing during a call. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Screen off while a call is held to the ear (CallAudioPlugin.java). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Incoming chat call over the lock screen (IncomingCall.java). On
+         Android 14+ the user may have to allow it in the app's settings;
+         without it the call still rings as a heads-up notification. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

@@ -19,7 +19,7 @@ interface ClaimLocationMapProps {
 
 const CLAIM_ZOOM = 15;
 
-// Same green "start" / blue "current or destination" pins ClaimMapConfirm.tsx uses
+// Same green "start" / blue "current or destination" pins the Check In/Out confirm used
 // while checking in/out, reused here so a completed Claim's history looks the same
 // visual language as the live confirm screen did.
 const startPinIcon = L.divIcon({
@@ -46,7 +46,7 @@ const endPinIcon = L.divIcon({
 
 // User Dashboard -> My Claims -> tap any claim: shows exactly where that Movement
 // Claim's Check In happened (and Check Out too, if it's already completed) on a map,
-// with the same point A -> point B line + distance ClaimMapConfirm shows live while
+// with the same point A -> point B line + distance CheckInOutMap.tsx shows live while
 // checking out. Read-only — just a Close button, no confirm/submit here.
 export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +96,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
   }, []);
 
   // Rendered via a portal straight onto document.body instead of in place —
-  // same reasoning as NewConveyanceClaimModal: one of this popup's callers
+  // same reasoning as NewBillClaimModal: one of this popup's callers
   // (MyClaimsCard.tsx's mobile "liquid glass" card) has a backdrop-blur-xl
   // ancestor, which the CSS spec makes a containing block for any
   // `position: fixed` descendant (same as `transform`/`filter`) — without
@@ -104,7 +104,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
   // viewport, drifting/clipping as the card's own height changed with its
   // content. A portal escapes that ancestor entirely, for every caller.
   return createPortal(
-    // z-[60] — deliberately above the Movement Claims page's own floating
+    // z-[60] — deliberately above the Check In/Out page's own floating
     // "Add Check In/Out" button and its Check In/Out sheet (both z-50 in
     // UserPanel.tsx). At equal z-50 this popup and that button sit in the
     // same stacking context, so the button — mounted later in the DOM —
@@ -119,7 +119,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
               <MapPin className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-slate-900">Movement Location</h3>
+              <h3 className="text-base font-bold text-slate-900">Check In/Out Location</h3>
               <p className="text-xs text-slate-500 truncate">{claim.purpose}</p>
             </div>
           </div>

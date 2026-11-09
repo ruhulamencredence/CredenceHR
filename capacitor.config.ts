@@ -4,44 +4,44 @@
 // relative /api/... call already resolves to the right backend (see
 // src/lib/api.ts) with zero extra configuration.
 //
-// Capacitor can only bake ONE fixed URL into a given APK build — there's no
-// native way for a single build to try two URLs. So instead, keep both
-// addresses defined below and flip USE_REAL_SERVER when you're ready to
-// switch: build with it OFF while testing on your LAN, then flip it ON (and
-// rebuild) once the real server is live. Each flip needs a rebuild + re-sync:
+// The app opens the DOMAIN only (https), never the server's IP address.
+// Chat calls and voice messages need the microphone, and the WebView only
+// hands that out on a secure origin: https:// with a domain name (the
+// certificate belongs to the domain, not to an IP). A plain http://<ip>
+// address loads the app but calls fail, so it is refused here at build time.
+//
+// To build against a different server, set CAP_SERVER_URL (the cloud builds,
+// .github/workflows/ios.yml and android.yml, do this). It must be
+// https://<domain>; the only other form allowed is http://localhost:<port>
+// for testing on a phone connected by USB (run `adb reverse tcp:3000
+// tcp:3000` first) — localhost counts as secure, so calls work there too.
+// Each change needs a rebuild + re-sync:
 //   npm run build
 //   npx cap sync android
-//
-// ⚠️ Both URLs need a scheme (http:// or https://) and no trailing slash —
-// Capacitor's server.url silently fails to load ("webpage not available")
-// without a valid scheme.
 
-// Local testing on a phone. localhost (not the PC's LAN IP) because the
-// WebView only allows the microphone / camera (chat calls, voice messages) on
-// https:// or localhost — connect the phone by USB and run
-//   adb reverse tcp:3000 tcp:3000
-// so the phone's localhost:3000 reaches the server on this PC. (The old LAN
-// address, http://192.168.66.11:3001, still loads the app over WiFi but
-// calls can't get the microphone there.)
-const LOCAL_SERVER_URL = 'http://192.168.66.11:3000';
+// The live server. The same address the iPhone app and the website use.
+const SERVER_DOMAIN_URL = 'https://hr.credencegroupbd.com';
 
-// The live server. The domain (HTTPS) is the normal address — the iPhone app
-// only loads HTTPS pages, so it always uses this one. The public IP (plain
-// http) is kept as a fallback for the Android APK only.
-const REAL_SERVER_DOMAIN_URL = 'https://hr.credencehousinglimited.com';
-const REAL_SERVER_IP_URL = 'http://203.95.222.58:3000';
+function checkedServerUrl(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`CAP_SERVER_URL "${raw}" is not a valid URL — use https://<domain> (no trailing slash).`);
+  }
+  if (url.protocol === 'http:' && url.hostname === 'localhost') return url;
+  if (url.protocol !== 'https:') {
+    throw new Error(`CAP_SERVER_URL "${raw}" must start with https:// — the app opens the domain only (calls need a secure address).`);
+  }
+  // IPv4 (203.95.222.58) or IPv6 ([::1]) instead of a domain name.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) || url.hostname.startsWith('[')) {
+    throw new Error(`CAP_SERVER_URL "${raw}" is an IP address — use the domain (${SERVER_DOMAIN_URL}) so chat calls can use the microphone.`);
+  }
+  return url;
+}
 
-// Android only: true = build the APK against the IP instead of the domain.
-const USE_IP_INSTEAD_OF_DOMAIN = false;
-const REAL_SERVER_URL = USE_IP_INSTEAD_OF_DOMAIN ? REAL_SERVER_IP_URL : REAL_SERVER_DOMAIN_URL;
-
-// Flip this to true to build against the live server above instead of your
-// PC (LOCAL_SERVER_URL), then rebuild + re-sync as noted above.
-const USE_REAL_SERVER = false;
-
-// CAP_SERVER_URL (set by the cloud builds, .github/workflows/ios.yml and android.yml)
-// overrides both, so a build can point at any server without editing this file.
-const ACTIVE_SERVER_URL = process.env.CAP_SERVER_URL || (USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL);
+const SERVER = checkedServerUrl(process.env.CAP_SERVER_URL || SERVER_DOMAIN_URL);
+const ACTIVE_SERVER_URL = SERVER.origin;
 
 const config = {
   appId: 'com.credencehr.app',
@@ -49,20 +49,15 @@ const config = {
   webDir: 'dist',
   server: {
     url: ACTIVE_SERVER_URL,
-    // Allows plain http:// (not just https://). Only matters if
-    // ACTIVE_SERVER_URL above uses http:// — harmless to leave on otherwise.
-    cleartext: true,
+    // Plain http:// is allowed only for the localhost test address above;
+    // the live (https) build refuses it.
+    cleartext: SERVER.protocol === 'http:',
     androidScheme: 'https',
-    // Without this, navigating to any origin OTHER than ACTIVE_SERVER_URL
-    // above (e.g. GlobalSidebar's "Set Server" switcher doing
-    // window.location.href = <a different admin-added IP/URL>) gets treated
-    // as an "external link" and kicked out to the system browser (Chrome)
-    // instead of just loading in this WebView — that's Capacitor's default
-    // safety behavior for cross-origin navigation. The server catalog is
-    // managed at runtime from the web (Admin Panel -> Servers) so the exact
-    // list of IPs/URLs isn't known at build time; '*' allows navigating to
-    // any origin from inside the WebView rather than only ACTIVE_SERVER_URL.
-    allowNavigation: ['*']
+    // The WebView stays on the server's own domain. A link to any other
+    // origin (an IP address, another site) opens in the phone's browser
+    // instead of inside the app — so the app can't be pointed at a server's
+    // IP from within.
+    allowNavigation: [SERVER.hostname]
   },
   // Employee Tracking (@capacitor-community/background-geolocation) stops
   // getting location updates after ~5 minutes backgrounded on stock Android

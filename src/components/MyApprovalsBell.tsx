@@ -16,10 +16,10 @@ interface MyApprovalsBellProps {
 }
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
-  user_claim: 'Conveyance Bill Claim',
+  bill_claim: 'Bill Claim',
   leave: 'Leave Application',
   attendance_correction: 'Timesheet Edit',
-  attendance: 'Attendance/Movement Claim'
+  attendance: 'Attendance/Check In/Out'
 };
 
 // Approver role is loosened company-wide — any logged-in account (including a

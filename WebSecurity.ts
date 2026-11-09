@@ -15,12 +15,17 @@
 import type { Express } from "express";
 import cors from "cors";
 
-const configured = String(process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((o) => o.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+// Read when first used, not when this file is imported: server.ts loads
+// .env (dotenv.config()) after its imports, so reading it at import time
+// always saw CORS_ORIGINS as empty.
+let configuredCache: string[] | null = null;
+const configuredOrigins = () =>
+  (configuredCache ??= String(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((o) => o.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, ""))
+    .filter(Boolean));
 
-export const corsOpen = configured.length === 0;
+const isCorsOpen = () => configuredOrigins().length === 0;
 
 // An Origin header that is this server's own address (same host and port).
 const sameHost = (origin: string, host: string | undefined) => {
@@ -32,21 +37,21 @@ const sameHost = (origin: string, host: string | undefined) => {
 };
 
 export const originAllowed = (origin: string | undefined, host?: string) =>
-  !origin || corsOpen || configured.includes(origin.replace(/\/+$/, "")) || sameHost(origin, host);
+  !origin || isCorsOpen() || configuredOrigins().includes(origin.replace(/\/+$/, "")) || sameHost(origin, host);
 
 // For Socket.IO, which checks only the Origin: "*" while CORS is open.
-export const socketCorsOrigin = (): string | string[] => (corsOpen ? "*" : configured);
+export const socketCorsOrigin = (): string | string[] => (isCorsOpen() ? "*" : configuredOrigins());
 
 export function installWebSecurity(app: Express) {
   app.disable("x-powered-by");
-  if (corsOpen) {
+  if (isCorsOpen()) {
     console.warn("⚠️ CORS_ORIGINS is not set — any website may call this server's API from a browser. Set it in .env (see WebSecurity.ts).");
   }
   app.use(
     cors((req: any, callback: any) => {
       const origin = req.headers.origin as string | undefined;
       // Not allowed: no CORS headers, so the browser keeps the answer from that page.
-      callback(null, { origin: corsOpen ? "*" : originAllowed(origin, req.headers.host) ? origin || false : false });
+      callback(null, { origin: isCorsOpen() ? "*" : originAllowed(origin, req.headers.host) ? origin || false : false });
     })
   );
   app.use((req: any, res: any, next: any) => {

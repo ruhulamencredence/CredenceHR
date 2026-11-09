@@ -196,6 +196,8 @@ export class MailApiError extends Error {
 // Admin Panel -> Mail Administration: while someone else's mailbox is open
 // (read only), every call carries whose it is (MailRoutes.ts requireMail).
 let viewAsUserId: number | null = null;
+// True while Credence Mail shows someone else's mailbox (read only).
+export const mailViewAsActive = () => viewAsUserId !== null;
 export function setMailViewAs(userId: number | null) {
   viewAsUserId = userId;
 }

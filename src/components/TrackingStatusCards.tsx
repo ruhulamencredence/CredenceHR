@@ -11,11 +11,14 @@
 // 'tracking' module, so without it this renders nothing (and the API refuses).
 
 import { UserAvatar } from './UserAvatar';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BarChart3, CheckCircle2, Navigation, Search, Send, X } from 'lucide-react';
-import { TrackingNoticeReport } from './TrackingNoticeReport';
+import { retryImport } from '../lib/chunkReload';
+// The report (with its Excel / PDF export) is fetched when opened.
+const TrackingNoticeReport = lazy(retryImport(() => import('./TrackingNoticeReport').then((m) => ({ default: m.TrackingNoticeReport }))));
 import { apiUrl } from '../lib/api';
+import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 
 interface TrackingRow {
   employee_pk: number;
@@ -37,6 +40,8 @@ export interface TrackingStatus {
   not_tracked: number;
   // Accounts with the Notices module may send a notice from the Not Tracked list.
   can_send_notice?: boolean;
+  // Location updates per minute over the last 30 minutes, oldest first.
+  updates_per_minute?: number[];
   employees: TrackingRow[];
 }
 
@@ -48,15 +53,24 @@ const DEFAULT_NOTICE_MESSAGE =
 
 // The counts, refreshed every minute: undefined while the first load is on
 // its way, null without the tracking module (the API refuses).
-export function useTrackingStatus(token: string, enabled = true): TrackingStatus | null | undefined {
-  const [data, setData] = useState<TrackingStatus | null | undefined>(enabled ? undefined : null);
+// `cache`: start from this device's last counts (screenCache.ts) — only the
+// numbers are kept on the device, never the list of people; that comes with
+// the fresh load a moment later.
+export function useTrackingStatus(token: string, enabled = true, cache = false): TrackingStatus | null | undefined {
+  const [data, setData] = useState<TrackingStatus | null | undefined>(() =>
+    !enabled ? null : (cache && readScreenCache<TrackingStatus>('tracking-counts')) || undefined
+  );
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     const load = () =>
       fetch(apiUrl('/api/tracking/status'), { headers: { Authorization: `Bearer ${token}` } })
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => alive && setData(d))
+        .then((d) => {
+          if (!alive) return;
+          setData(d);
+          if (cache) writeScreenCache('tracking-counts', d ? { live_minutes: d.live_minutes, tracked: d.tracked, not_tracked: d.not_tracked, employees: [] } : null);
+        })
         .catch(() => {});
     load();
     const t = setInterval(load, REFRESH_MS);
@@ -64,7 +78,7 @@ export function useTrackingStatus(token: string, enabled = true): TrackingStatus
       alive = false;
       clearInterval(t);
     };
-  }, [token, enabled]);
+  }, [token, enabled, cache]);
   return data;
 }
 
@@ -88,7 +102,9 @@ interface Props {
   // 'card': the web Dashboard's quick access card (like My Asset).
   // 'chooser': no tile of its own — the app Dashboard's quick access tile
   // (UserPanel.tsx) opens it via chooserOpen; it shows both numbers.
-  variant?: 'panel' | 'card' | 'chooser';
+  // 'lists': no tile at all — Employee Tracking's own cards open the who-list
+  // (and its Send Notice step) through openRequest / reportRequest.
+  variant?: 'panel' | 'card' | 'chooser' | 'lists';
   className?: string;
   // Counts loaded by the caller (useTrackingStatus) — set `external` and this
   // component skips its own fetch. undefined = still loading.
@@ -96,12 +112,16 @@ interface Props {
   status?: TrackingStatus | null;
   chooserOpen?: boolean;
   onChooserClose?: () => void;
+  // Open a list from outside; `at` changes on every request, `query` pre-fills
+  // the search (e.g. a Department name).
+  openRequest?: { which: 'tracked' | 'not_tracked'; query?: string; at: number } | null;
+  reportRequest?: number;
 }
 
 // Admin Panel -> Employee Tracking (the live map).
 const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose }) => {
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose, openRequest, reportRequest }) => {
   const own = useTrackingStatus(token, !external);
   const data = external ? status : own;
   const chooser = chooserOpen;
@@ -145,6 +165,18 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       setSending(false);
     }
   };
+
+  useEffect(() => {
+    if (!openRequest) return;
+    setPicked(new Set());
+    setComposing(false);
+    setSendResult(null);
+    setQuery(openRequest.query || '');
+    setOpen(openRequest.which);
+  }, [openRequest?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (reportRequest) setReportOpen(true);
+  }, [reportRequest]);
 
   useEffect(() => {
     if (!open) return;
@@ -308,11 +340,11 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       {/* z-[1050]: above the Leaflet map on Employee Tracking (its panes and
           controls go up to 1000), below the Notice Report it opens (1100). */}
       {open && createPortal(
-        <div className="fixed inset-0 z-[1050] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1050] flex items-center justify-center p-4" onClick={() => setOpen(null)}>
           <div
             role="dialog"
             aria-label={open === 'tracked' ? 'Currently Under Tracking' : 'Currently Not Tracked'}
-            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+            className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
@@ -494,7 +526,11 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
         </div>,
         document.body
       )}
-      {reportOpen && <TrackingNoticeReport token={token} onClose={() => setReportOpen(false)} />}
+      {reportOpen && (
+        <Suspense fallback={null}>
+          <TrackingNoticeReport token={token} onClose={() => setReportOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 };

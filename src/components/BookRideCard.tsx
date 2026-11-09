@@ -4,10 +4,11 @@
  */
 
 import { useLiveTick } from '../lib/liveRefresh';
+import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
-import { Lottie } from './LazyLottie';
-import rideAnimation from '../assets/travel-app.json';
+import { Lottie, useLottieJson } from './LazyLottie';
+const loadRideAnimation = () => import('../assets/travel-app.json');
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';
 
@@ -41,7 +42,8 @@ export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
 // This account's own rides still in progress (awaiting approval, awaiting a
 // vehicle, or ongoing), newest first.
 export function useActiveRides(token: string, userId: number): Ride[] | null {
-  const [active, setActive] = useState<Ride[] | null>(null);
+  // Last copy from this device first (screenCache.ts), then the fresh list.
+  const [active, setActive] = useCachedState<Ride[] | null>('rides-active', null);
   // Live refresh: the ride's status updates without a page reload.
   const liveTick = useLiveTick();
   useEffect(() => {
@@ -64,6 +66,7 @@ export function useActiveRides(token: string, userId: number): Ride[] | null {
 // "Where are you going?" shortcut plus this account's own current ride, if
 // any, so its status is one glance away.
 export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpen, className = '' }) => {
+  const rideAnimation = useLottieJson(loadRideAnimation);
   const active = (useActiveRides(token, userId) || []).slice(0, 2);
 
   return (
@@ -71,7 +74,7 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
       {/* Decorative ride animation (a car driving past a skyline) in the
           card's top-right corner. Purely visual — it never takes a tap. */}
       <div className="absolute top-3 right-3 w-44 h-[47px] pointer-events-none" aria-hidden="true">
-        <Lottie src={rideAnimation} autoplay loop className="w-full h-full" />
+        {rideAnimation && <Lottie src={rideAnimation} autoplay loop className="w-full h-full" />}
       </div>
       <div className="relative px-5 pt-5 pb-4 sm:px-6 pr-48 sm:pr-48 border-b border-slate-200 flex items-start justify-between gap-3">
         <div className="relative z-10">

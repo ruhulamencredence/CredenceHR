@@ -5,7 +5,7 @@
 
 // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
 // — kept in its own file, same reasoning as profileRoutes.ts /
-// ConveyanceBillClaimRoutes.ts / PayrollRoutes.ts / AssetManagementRoutes.ts:
+// BillClaimRoutes.ts / PayrollRoutes.ts / AssetManagementRoutes.ts:
 // server.ts is already huge, so new features go in their own module and are
 // registered from inside startServer() via registerEmployeeTransferRoutes(),
 // reusing that request's authenticateToken/requireAdmin/requireModule/queryDB
@@ -47,6 +47,7 @@
 // promoting any now-due row to all_employees right before it's read.
 
 import type { Express } from "express";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 interface EmployeeTransferRouteDeps {
   authenticateToken: any;
@@ -192,6 +193,7 @@ async function applyTransferEffect(
         "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, 1)",
         [row.employee_id, row.to_supervisor_id, row.effective_date]
       );
+        requestApprovalReconcile();
     }
   }
 }

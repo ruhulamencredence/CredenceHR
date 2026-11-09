@@ -11,6 +11,7 @@ import { fingerprintLogin, fingerprintSupported, savedFingerprint } from '../lib
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
 import { PasswordInput } from './PasswordInput';
+import { saveTrustedDevice, trustedDeviceTokens } from '../lib/trustedDevices';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -120,26 +121,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // login works as before with no location prompt at all.
   const isNativeApp = Capacitor.isNativePlatform();
 
-  // Belt-and-braces for the Android keyboard covering a focused field —
-  // making the page scrollable (see the root div's overflow-y-auto below)
-  // is the primary fix, but the browser's own "scroll the focused input
-  // into view when the keyboard opens" behavior isn't reliable on every
-  // WebView/OEM build (confirmed: it silently doesn't happen on at least
-  // one real device). Scrolling it into view here explicitly, from JS,
-  // doesn't depend on that. The delay gives the on-screen keyboard's own
-  // open animation time to finish resizing the visible viewport first —
-  // scrolling immediately on focus would compute the wrong position
-  // against the still-full-height page.
-  const scrollFieldIntoView = (el: HTMLElement) => {
-    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
-  };
+  // A focused field is scrolled above the keyboard by the app-wide
+  // keyboardScrollFix.ts (once — this page used to add a second, competing
+  // smooth scroll of its own).
 
   // overflow-y-auto (above) only lets the page scroll if there's actually
   // something to scroll TO — on this page's WebView, the keyboard opening
   // doesn't reliably shrink the visible layout at all (min-h-dvh's `dvh`
   // unit not recomputing on keyboard open is a known WebView gap on some
   // Android builds), so the container never grew taller than the viewport
-  // and scrollFieldIntoView above had nowhere to actually scroll to. Asking
+  // and the focus scroll had nowhere to actually scroll to. Asking
   // the Capacitor Keyboard plugin directly for the keyboard's real height
   // and reserving that much space at the bottom (padding-bottom, merged
   // into the root div's style below) guarantees real scrollable room to
@@ -154,11 +145,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     (async () => {
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
+        // While typing, Android reports the keyboard again and again as its
+        // suggestion / autofill strip comes and goes (and sometimes a short
+        // "hide" in between). Changing the page's height on each of those
+        // made the form jump under the finger and the keyboard close, so
+        // the space only grows while a field is focused, and is given back
+        // once no field is focused any more.
+        const typing = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
         willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
-          setKeyboardHeight(info.keyboardHeight);
+          setKeyboardHeight((h) => Math.max(h, info.keyboardHeight));
         });
         willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
-          setKeyboardHeight(0);
+          window.setTimeout(() => {
+            if (!typing()) setKeyboardHeight(0);
+          }, 250);
         });
       } catch {
         // Plugin unavailable — the page still scrolls on its own if the
@@ -320,8 +320,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
-            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }) }
+            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}), trusted_devices: trustedDeviceTokens() }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens() }
         ),
       });
 
@@ -330,6 +330,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         throw new Error(data.error || 'Authentication failed');
       }
 
+      // This device is now trusted for the account (src/lib/trustedDevices.ts).
+      saveTrustedDevice(data.user?.id, data.trusted_device);
       // Multi-company: start in the account's default company.
       setActiveCompanyId(data.active_company_id || null);
       onLoginSuccess(data.token, data.user);
@@ -409,7 +411,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             {workspace || ownerMode ? 'Welcome back' : 'Welcome'}
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            {ownerMode ? 'System owner sign-in' : workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
+            {/* The workspace itself is named below ("Not …?") and by its logo. */}
+            {ownerMode ? 'System owner sign-in' : workspace ? 'Sign in to CredenceHR' : "Enter your company's workspace to continue"}
           </p>
           {workspace?.tagline && (
             <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
@@ -449,7 +452,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                     style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
                     onFocus={(e) => {
                       e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                      scrollFieldIntoView(e.currentTarget);
                     }}
                     onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                   />
@@ -479,6 +481,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               <input
                 type="text"
                 required
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="next"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 placeholder="Employee ID, email or Project Name"
@@ -486,7 +494,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
                 onFocus={(e) => {
                   e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                  scrollFieldIntoView(e.currentTarget);
                 }}
                 onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
               />
@@ -500,6 +507,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 <PasswordInput
                   required
                   iconColor="var(--g-text-muted)"
+                  name="password"
+                  autoComplete="current-password"
+                  enterKeyHint="go"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -507,7 +517,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
                   onFocus={(e) => {
                     e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                    scrollFieldIntoView(e.currentTarget);
                   }}
                   onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                 />

@@ -23,7 +23,7 @@ export type TemplateFeature =
 // endpoint (UserManagement.ts) and, like modules, needs module-grant rights.
 export type SelfServiceFeature =
   | 'can_view_movement_claims'
-  | 'can_view_conveyance_claims'
+  | 'can_view_bill_claims'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
   | 'can_view_tasks'
@@ -34,12 +34,16 @@ export type SelfServiceFeature =
   | 'can_use_mail'
   | 'can_view_roster'
   | 'can_take_break'
+  | 'can_save_ride_places'
+  | 'can_update_check_out'
+  | 'can_add_adhoc_approver'
+  | 'can_use_assistant_voice'
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_request_items';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
-  can_view_conveyance_claims: 'conveyance-claim-access',
+  can_view_bill_claims: 'bill-claim-access',
   can_view_timesheet: 'timesheet-access',
   can_view_leave_application: 'leave-application-access',
   can_view_tasks: 'tasks-access',
@@ -50,6 +54,10 @@ const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_use_mail: 'mail-access',
   can_view_roster: 'roster-access',
   can_take_break: 'break-access',
+  can_save_ride_places: 'ride-places-access',
+  can_update_check_out: 'check-out-update-access',
+  can_add_adhoc_approver: 'adhoc-approver-access',
+  can_use_assistant_voice: 'assistant-voice-access',
   can_sign_documents: 'sign-documents-access',
   can_view_payslip: 'payslip-access',
   can_request_items: 'request-items-access'
@@ -62,8 +70,8 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard' },
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date' },
   { key: 'can_job_edit', label: 'Job Edit' },
-  { key: 'can_view_movement_claims', label: 'Movement Claim', selfService: true },
-  { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', selfService: true },
+  { key: 'can_view_movement_claims', label: 'Check In/Out', selfService: true },
+  { key: 'can_view_bill_claims', label: 'Bill Claim', selfService: true },
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_tasks', label: 'My Tasks', selfService: true },
@@ -74,6 +82,10 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_use_mail', label: 'Credence Mail', selfService: true },
   { key: 'can_view_roster', label: 'My Duty Roster', selfService: true },
   { key: 'can_take_break', label: 'Break Time', selfService: true },
+  { key: 'can_save_ride_places', label: 'Book a Ride — saved places', selfService: true },
+  { key: 'can_update_check_out', label: 'Remote Attendance — update Out Time', selfService: true },
+  { key: 'can_add_adhoc_approver', label: 'Approvals — add an ad-hoc approver', selfService: true },
+  { key: 'can_use_assistant_voice', label: 'AI Assistant — voice', selfService: true },
   { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true },
   { key: 'can_view_payslip', label: 'My Payslip', selfService: true },
   { key: 'can_request_items', label: 'SIM & ID Card requests', selfService: true }

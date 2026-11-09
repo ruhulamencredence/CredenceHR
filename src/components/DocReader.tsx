@@ -10,13 +10,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { BookOpenCheck, CheckCircle2, Loader2 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { loadPdfjs } from '../lib/pdfjs';
 import { apiUrl } from '../lib/api';
 import { esignFetch } from '../lib/esign';
 import { MailPopup as Popup } from './mail/MailPopup';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export const DocReader: React.FC<{ token: string; docId: number; title: string; alreadyRead?: boolean; onClose: () => void; onRead: () => void }> = ({ token, docId, title, alreadyRead, onClose, onRead }) => {
   const box = useRef<HTMLDivElement>(null);
@@ -42,6 +39,7 @@ export const DocReader: React.FC<{ token: string; docId: number; title: string; 
           url = URL.createObjectURL(new Blob([bytes], { type }));
           if (!cancelled) setImage(url);
         } else {
+          const pdfjsLib = await loadPdfjs();
           const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
           if (cancelled) return;
           setPages(pdf.numPages);

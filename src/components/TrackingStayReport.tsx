@@ -20,7 +20,7 @@ import { reverseGeocode } from '../lib/reverseGeocode';
 import { formatDate } from '../lib/formatDate';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 
@@ -252,7 +252,7 @@ export const TrackingStayReport: React.FC<{
     );
     const stays = seenDays.flatMap((d) => d.stays.map((s) => ({ Date: d.date, From: s.from, To: s.to, Minutes: s.minutes, Duration: dur(s.minutes), Place: `P${placeNo.get(s.place_id)}`, Location: placeName(s.place_id) })));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stays.length ? stays : [{ Note: 'No stays in this period' }]), 'Stays');
-    XLSX.writeFile(wb, `Stay-Report-${report.user.name.replace(/[^a-zA-Z0-9]+/g, '-')}-${report.settings.from}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Stay-Report-${report.user.name.replace(/[^a-zA-Z0-9]+/g, '-')}-${report.settings.from}.xlsx`);
   };
 
   const card = (label: string, value: string, cls = 'text-slate-900') => (

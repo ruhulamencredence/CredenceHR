@@ -12,6 +12,8 @@ import * as XLSX from 'xlsx';
 import { Eye, FileSpreadsheet, LogIn, MousePointerClick, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
+import { SearchSelect } from './Combobox';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 interface LogRow {
   id: number;
@@ -82,7 +84,7 @@ export const PayrollActivityLog: React.FC<{ token: string }> = ({ token }) => {
     ws['!cols'] = [24, 22, 14, 34, 40, 16, 18].map((wch) => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Activity');
-    XLSX.writeFile(wb, `Payroll-Activity-${from}-to-${to}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Payroll-Activity-${from}-to-${to}.xlsx`);
   };
 
   const input = 'text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg';
@@ -99,12 +101,12 @@ export const PayrollActivityLog: React.FC<{ token: string }> = ({ token }) => {
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-slate-500 mb-1">User</label>
-          <select value={who} onChange={(e) => setWho(e.target.value)} className={input}>
+          <SearchSelect value={who} onChange={(e) => setWho(e.target.value)} className={input}>
             <option value="">Everyone</option>
             {people.map((p) => (
-              <option key={p}>{p}</option>
+              <option key={p} value={p}>{p}</option>
             ))}
-          </select>
+          </SearchSelect>
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-slate-500 mb-1">Type</label>

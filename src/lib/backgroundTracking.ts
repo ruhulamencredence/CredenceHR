@@ -110,6 +110,10 @@ let liveUntil = 0;
 // This APK reports Live Follow natively (see startBackgroundTracking).
 let nativeLive = false;
 export const hasNativeLiveTracking = () => nativeLive;
+// This APK reports everyday tracking natively too (DutyTrackingService.java):
+// it keeps going with the app in the background or swiped away, so the page
+// runs no watcher or timers of its own.
+let nativeDuty = false;
 let lastSentAt = 0;
 let lastSentFixTime = 0;
 let lastFixAt = 0;
@@ -283,8 +287,8 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   // Never ask Android for location before the person has agreed on the
   // disclosure screen (src/lib/locationDisclosure.tsx — a Google Play rule).
   if (getLocationConsent() !== 'accepted') return;
-  if (watcherId && currentToken === token) return; // already running for this account
-  if (watcherId) await stopBackgroundTracking();
+  if ((watcherId || nativeDuty) && currentToken === token) return; // already running for this account
+  if (watcherId || nativeDuty) await stopBackgroundTracking();
 
   currentToken = token;
   mode = 'active';
@@ -292,13 +296,23 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   // Lets the app report live by itself, even in Recent apps (silent push ->
   // LiveTrackingService). Older APKs don't have it; the page then does it.
   if (isAndroidApp()) {
-    LocationAccess.setTrackingSession({ token, baseUrl: window.location.origin })
-      .then(() => {
-        nativeLive = true;
-      })
-      .catch(() => {
-        nativeLive = false;
-      });
+    try {
+      await LocationAccess.setTrackingSession({ token, baseUrl: window.location.origin });
+      nativeLive = true;
+    } catch {
+      nativeLive = false;
+    }
+    // Everyday reporting natively, when this APK has it.
+    if (nativeLive) {
+      try {
+        await LocationAccess.startDutyTracking();
+        nativeDuty = true;
+        void askBatteryExemptionOnce();
+        return;
+      } catch {
+        nativeDuty = false; // an older APK: the page reports, as before
+      }
+    }
   }
   try {
     await armWatcher(ACTIVE_DISTANCE_FILTER_M);
@@ -329,6 +343,27 @@ export async function startBackgroundTracking(token: string): Promise<void> {
 }
 
 // Call on logout, or if an Admin revokes can_use_tracking mid-session.
+// Many phones (Xiaomi, Oppo, Vivo, Samsung…) stop background apps to save
+// battery even with a foreground service; ask once to let CredenceHR run.
+async function askBatteryExemptionOnce(): Promise<void> {
+  const KEY = 'credence_battery_exemption_asked';
+  try {
+    if (localStorage.getItem(KEY)) return;
+  } catch {
+    return;
+  }
+  try {
+    const { unrestricted } = await LocationAccess.getBatteryStatus();
+    if (unrestricted) return;
+    try {
+      localStorage.setItem(KEY, String(Date.now()));
+    } catch {}
+    await LocationAccess.requestBatteryExemption();
+  } catch {
+    // older APK — nothing to ask
+  }
+}
+
 export async function stopBackgroundTracking(): Promise<void> {
   if (idleCheckTimer) {
     clearInterval(idleCheckTimer);
@@ -359,6 +394,7 @@ export async function stopBackgroundTracking(): Promise<void> {
   latestFix = null;
   if (isAndroidApp()) void LocationAccess.clearTrackingSession().catch(() => undefined);
   nativeLive = false;
+  nativeDuty = false;
   currentToken = null;
   requestedToken = null;
   mode = 'active';
@@ -416,6 +452,11 @@ interface LocationAccessPlugin {
   // APKs with native Live Follow (LiveTrackingService.java) only.
   setTrackingSession(o: { token: string; baseUrl: string }): Promise<void>;
   clearTrackingSession(): Promise<void>;
+  // APKs with native everyday tracking (DutyTrackingService.java) only.
+  startDutyTracking(): Promise<void>;
+  stopDutyTracking(): Promise<void>;
+  getBatteryStatus(): Promise<{ unrestricted: boolean }>;
+  requestBatteryExemption(): Promise<void>;
 }
 
 const LocationAccess = registerPlugin<LocationAccessPlugin>('LocationAccess');
@@ -462,5 +503,5 @@ export async function openPhoneLocationSwitch(): Promise<void> {
 }
 
 export function isBackgroundTrackingActive(): boolean {
-  return watcherId !== null;
+  return watcherId !== null || nativeDuty;
 }

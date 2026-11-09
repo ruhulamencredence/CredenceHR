@@ -16,6 +16,7 @@ import {
   Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
+import { usePhoneHeaderTitle } from '../../lib/headerPageTitle';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { connectChatSocket } from '../../lib/chatSocket';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
@@ -598,6 +599,8 @@ export const CredenceMail: React.FC<{
   // Admin Panel -> Mail Administration: someone else's mailbox, read only.
   viewAs?: { userId: number; name: string };
 }> = ({ token, user, onBack, viewAs }) => {
+  // Own mailbox only — the Admin Panel's read-only view keeps its own header.
+  usePhoneHeaderTitle('Credence Mail', !viewAs);
   const isNativeApp = Capacitor.isNativePlatform();
   const ro = !!viewAs;
   // Every call from here on carries whose mailbox it is (set before the first fetch).
@@ -1082,7 +1085,8 @@ export const CredenceMail: React.FC<{
   ) : null;
   const header = (
     <div className="flex items-center justify-between gap-3 mb-3 mt-2 flex-wrap">
-      <div className="flex items-center gap-2 min-w-0">
+      {/* Phone (own mailbox): the title and Back are in the header. */}
+      <div className={`${viewAs ? 'flex' : 'hidden md:flex'} items-center gap-2 min-w-0`}>
         {onBack && (
           <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
             <ArrowLeft className="w-5 h-5 text-slate-500" />
@@ -1127,7 +1131,7 @@ export const CredenceMail: React.FC<{
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
         {/* Inside the Admin Panel, its own path line is already shown. */}
-          {!isNativeApp && !ro && <ModulePath path={modulePath} />}
+          {!isNativeApp && !ro && <div className="hidden md:block"><ModulePath path={modulePath} /></div>}
         {header}
         {roBanner}
         {body}
@@ -1377,7 +1381,7 @@ export const CredenceMail: React.FC<{
     <div className="w-full text-slate-900">
       <div className="w-full px-0 sm:px-6 lg:px-8 pt-1 sm:pt-3 pb-0 md:pb-6">
         <div className="px-3 sm:px-0">
-          {!isNativeApp && !ro && <ModulePath path={modulePath} />}
+          {!isNativeApp && !ro && <div className="hidden md:block"><ModulePath path={modulePath} /></div>}
           <div className="hidden md:block">{header}</div>
           {roBanner}
         </div>

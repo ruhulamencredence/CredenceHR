@@ -26,6 +26,7 @@
 // once. New mail is announced over Socket.IO ("mail:new" to user:<id>), which
 // works across PM2 workers with the Redis adapter.
 
+import { smtpAddress } from "./smtpAddress";
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
@@ -35,6 +36,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { runsBackgroundJobs } from "./jobRunner";
 import { createAlert } from "./Alerts";
+import { currentAppMask } from "./AppAccess";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -484,6 +486,20 @@ const SYNC_ROLES = ["inbox", "sent", "junk"];
 const INITIAL_SYNC = Math.max(20, Number(process.env.MAIL_INITIAL_SYNC) || 200);
 const BATCH_MAX = 300;
 
+// Mail sent AS a person from another part of the app (the AI Assistant's
+// report Email): from that person's own connected mailbox (the default one),
+// through the same path as Compose -> Send, so it lands in their Sent folder.
+// Never falls back to the server's SMTP account. Filled in by
+// registerMailRoutes.
+export interface OwnMailbox { email: string; name: string; internalOnly: boolean }
+export let ownMailboxOf: (user: any) => Promise<OwnMailbox | null> = async () => null;
+export let sendFromOwnMailbox: (
+  user: any,
+  m: { to: string[]; subject: string; html: string; files: { name: string; type: string; dataUrl: string }[] }
+) => Promise<{ from: string; internal: number; external: number }> = async () => {
+  throw Object.assign(new Error("Credence Mail isn't running on this server."), { status: 503 });
+};
+
 export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailDeps) {
   const { authenticateToken, queryDB, isMySQL, requireModuleLayer, hasModuleLayer } = deps;
 
@@ -496,12 +512,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (user.onb) return false;
     if (user.role === "superadmin") return true;
     const id = Number(user.id);
-    const hit = accessCache.get(id);
+    // A mobile-app request with its own narrower access skips the shared cache (AppAccess.ts).
+    const app = !!currentAppMask();
+    const hit = app ? undefined : accessCache.get(id);
     if (hit && Date.now() - hit.at < 30_000) return hit.ok;
     const rows: any[] = (await queryDB("SELECT role, can_use_mail, is_onboarding FROM users WHERE id = ?", [id]).catch(() => [])) || [];
     const u = rows[0];
     const ok = !!u && (u.role === "superadmin" || (!!Number(u.can_use_mail) && !Number(u.is_onboarding)));
-    accessCache.set(id, { ok, at: Date.now() });
+    if (!app) accessCache.set(id, { ok, at: Date.now() });
     return ok;
   }
   // Mail Administration: an account with the "mail_open" layer can open
@@ -639,9 +657,13 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       releaseImap();
     }
   }
-  function smtpTransport(a: any, pass: string, insecure: boolean) {
+  // The SMTP host is looked up by the system resolver first (smtpAddress.ts)
+  // — nodemailer's own lookup timed out on some servers while IMAP worked.
+  async function smtpTransport(a: any, pass: string, insecure: boolean) {
+    const where = await smtpAddress(a.smtp_host);
     return nodemailer.createTransport({
-      host: a.smtp_host,
+      host: where.host,
+      ...(where.servername ? { servername: where.servername } : {}),
       port: Number(a.smtp_port) || 465,
       secure: !!Number(a.smtp_secure),
       auth: { user: a.username, pass },
@@ -655,10 +677,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (isInternalBox(a)) throw bad(`Only colleagues on Credence Mail can get mail from here (${envelope.to.join(", ")} can't). ${INTERNAL_ONLY.replace(/\.$/, "")}`, 409);
     const pass = decryptSecret(a.password_enc);
     try {
-      await smtpTransport(a, pass, !!Number(a.tls_insecure)).sendMail({ envelope, raw });
+      await (await smtpTransport(a, pass, !!Number(a.tls_insecure))).sendMail({ envelope, raw });
     } catch (e: any) {
       if (Number(a.tls_insecure) || !isCertError(e)) throw e;
-      await smtpTransport(a, pass, true).sendMail({ envelope, raw });
+      await (await smtpTransport(a, pass, true)).sendMail({ envelope, raw });
     }
   }
   const imapError = (e: any) =>
@@ -1938,12 +1960,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         throw bad(imapError(e), 400);
       }
       try {
-        const t = smtpTransport(a, password, !!a.tls_insecure);
+        const t = await smtpTransport(a, password, !!a.tls_insecure);
         try {
           await t.verify();
         } catch (e: any) {
           if (a.tls_insecure || !isCertError(e)) throw e;
-          await smtpTransport(a, password, true).verify();
+          await (await smtpTransport(a, password, true)).verify();
           a.tls_insecure = 1;
         }
       } catch (e: any) {
@@ -2600,6 +2622,36 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const files = filesFrom(b.attachments);
     if (keep.length || files.length || previousId) await saveFiles(id, files, keep);
   }
+
+  // For the rest of the app (see ownMailboxOf / sendFromOwnMailbox above).
+  // Only for people Credence Mail is turned on for, from their own mailbox.
+  ownMailboxOf = async (user: any) => {
+    if (!isMySQL() || !(await hasMail(user))) return null;
+    const a = (await accountsOf(Number(user.id)))[0];
+    return a ? { email: a.email, name: a.display_name || a.email, internalOnly: isInternalBox(a) } : null;
+  };
+  sendFromOwnMailbox = async (user, m) => {
+    if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+    if (!(await hasMail(user))) throw bad("Credence Mail isn't turned on for your account — ask the Superadmin (Module Access → Mail).", 403);
+    const userId = Number(user.id);
+    const box = (await accountsOf(userId))[0];
+    if (!box) throw bad("Connect your mailbox first: Self Service → Mail → add your email account. Then send again.", 409);
+    const groupCheck = await expandGroups(box, m.to);
+    const denied = groupCheck.groups.filter((x) => x.denied);
+    if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you.`, 403);
+    const b = { accountId: box.id, to: m.to, cc: [], bcc: [], subject: m.subject, body: m.html, attachments: m.files };
+    const { a, id } = await upsertLocal(userId, b, ["Outbox"]);
+    await attachFor(id, b);
+    try {
+      const d = await deliver(a, await messageOf(userId, id));
+      io.to(`user:${userId}`).emit("mail:changed", { accountId: Number(a.id) });
+      return { from: a.email, ...d };
+    } catch (e: any) {
+      const msg = `Not sent: ${e?.response || e?.message || e}`;
+      await queryDB("UPDATE mail_messages SET labels_json = ?, send_error = ? WHERE id = ?", [JSON.stringify(["Drafts"]), msg.slice(0, 500), id]);
+      throw bad(`${msg}. It was kept in your Mail Drafts.`, 502);
+    }
+  };
 
   // Send now, or later (scheduledAt) — { accountId, to, cc, bcc, subject,
   // body, attachments: [{ name, type, dataUrl }], inReplyTo,

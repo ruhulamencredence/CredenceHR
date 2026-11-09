@@ -550,7 +550,7 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
   // ---- claims (one year) ----
   if (stages.has("claims")) {
     const [claims, bills, items, moves] = await Promise.all([
-      queryDB("SELECT * FROM user_claims").catch(() => []),
+      queryDB("SELECT * FROM bill_claims").catch(() => []),
       queryDB("SELECT * FROM conveyance_bills").catch(() => []),
       queryDB("SELECT * FROM conveyance_bill_items").catch(() => []),
       queryDB("SELECT * FROM claims").catch(() => [])

@@ -29,8 +29,8 @@ interface AlertsBellProps {
   // 'assign' — a ride already approved that still needs a vehicle (or one
   // that expired): open where vehicles are assigned instead of Approvals.
   onOpenVehicleManagement?: (target?: 'status' | 'assign' | 'trips') => void;
-  // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
-  onOpenConveyanceClaim?: () => void;
+  // The claimant's own Bill Claim updates -> Bill Claim.
+  onOpenBillClaim?: () => void;
   // The requester's own Asset Requisition updates -> My Asset (Status for
   // the requisition's approval updates, My Assets for handed-over items).
   onOpenMyAsset?: (target: MyAssetTarget) => void;
@@ -57,7 +57,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenBillClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -70,7 +70,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl('/api/alerts/unread-count'), {
+      const res = await fetch(apiUrl('/api/alerts/unread-count?bell=1'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) return;
@@ -84,7 +84,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/alerts'), {
+      const res = await fetch(apiUrl('/api/alerts?bell=1'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) setAlerts(await res.json());
@@ -154,11 +154,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   };
 
   const clearAll = async () => {
-    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
+    // Only empties this popup — every alert stays on the Alerts page.
+    if (!(await confirmDialog('Clear all alerts from this list? They stay on the Alerts page.'))) return;
     setAlerts([]);
     setUnreadCount(0);
     try {
-      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      await fetch(apiUrl('/api/alerts/bell-clear'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {
       // Best-effort, same as markRead above.
     }
@@ -170,8 +171,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     setAlerts((prev) => prev.filter((a) => a.id !== id));
     if (wasUnread) setUnreadCount((prev) => Math.max(0, prev - 1));
     try {
-      await fetch(apiUrl(`/api/alerts/${id}`), {
-        method: 'DELETE',
+      // Hidden from this popup only; it stays on the Alerts page.
+      await fetch(apiUrl(`/api/alerts/${id}/bell-hide`), {
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
     } catch {
@@ -192,14 +194,14 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? () => onOpenVehicleManagement('assign')
         : rideForDriver && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('trips')
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'bill_claim_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
-        : alert.type === 'vehicle_requisition' && onOpenVehicleManagement
+        : alert.type === 'vehicle_requisition' && alert.related_type !== 'vehicle_driver' && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('status')
-        : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
-        ? onOpenConveyanceClaim
-        : alert.type === 'asset_requisition' && onOpenMyAsset
-        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
+        : alert.type === 'bill_claim' || alert.type === 'conveyance_disbursed'
+        ? onOpenBillClaim
+        : alert.type === 'asset_requisition' && alert.related_type !== 'asset_return' && onOpenMyAsset
+        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : alert.related_type === 'asset_return_incoming' ? 'returns' : 'my-assets')
         : alert.type === 'resignation'
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
@@ -244,6 +246,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'onboarding' })), 0);
           }
+        : alert.type === 'hr_action' && alert.related_type === 'attendance_correction' && !/Awaiting Your Approval/.test(alert.title)
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'timesheet' }))
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
@@ -323,6 +327,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'mobile_bill'
         ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
+        : alert.type === 'device_request' && alert.related_type === 'user_device_decision'
+        ? undefined
+        : alert.type === 'vehicle_requisition' && alert.related_type === 'vehicle_driver'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'vehicle_management' }))
+        : alert.type === 'asset_requisition' && alert.related_type === 'asset_return'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'asset_management' }))
         : alert.type === 'device_request'
         ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))
@@ -336,6 +346,17 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             }
             window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
           }
+        : alert.type === 'zk_machine' || (alert.type === 'site_attendance' && alert.title === 'Attendance machine offline')
+        ? // Admin Panel -> Office Attendance, with the Machines popup open.
+          () => {
+            try {
+              sessionStorage.setItem('open_zk_machines', '1');
+            } catch {
+              // storage unavailable — Office Attendance opens without the popup
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'office_attendance' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:open-zk-machines')), 400);
+          }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'document_sign'
@@ -344,6 +365,15 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'notice_draft'
         ? // Admin Panel -> Notices, where the draft waits to be published.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }))
+        : alert.type === 'interview'
+        ? // Admin Panel -> Recruitment (ATS); opens only for an account with that module.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'recruitment' }))
+        : alert.type === 'profile_photo' && alert.related_type === 'profile_photo_request'
+        ? // Admin Panel -> Users -> Photo approvals (Superadmin; AdminPanel.tsx listens).
+          () => {
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'users' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:photo-requests')), 300);
+          }
         : alert.type === 'password_request'
         ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
           () => {
@@ -427,7 +457,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
                   {loading && alerts.length === 0 ? (
                     <p className="py-8 text-center text-sm text-slate-500">Loading...</p>
                   ) : alerts.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-slate-500">No alerts yet.</p>
+                    <p className="py-8 px-4 text-center text-sm text-slate-500">No new alerts here.<br /><span className="text-xs text-slate-400">Every alert stays on the Alerts page — View all.</span></p>
                   ) : (
                     alerts.map((alert) => (
                       <div
@@ -510,7 +540,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
               </div>
             ) : alerts.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--g-text-muted)' }}>
-                No alerts yet.
+                No new alerts here.
+                <span className="block mt-1 text-xs text-slate-400">Every alert stays on the Alerts page — View all.</span>
               </div>
             ) : (
               alerts.map((alert) => (

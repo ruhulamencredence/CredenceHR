@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, Search } from 'lucide-react';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { inputCls, labelCls, mbApi, monthLabel, num, OperatorBadge } from './MobileBillParts';
 import { LoadingBlock } from './LoadingBlock';
@@ -112,7 +112,7 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
     const ws = XLSX.utils.aoa_to_sheet([[title], filterText.map(([k, v]) => `${k}: ${v}`), [], head, ...body]);
     ws['!cols'] = [6, 20, 15, 13, 24, 12, 22, 11, 11, 10, 26, 20].map((wch) => ({ wch }));
     XLSX.utils.book_append_sheet(wb, ws, 'Limit Changes');
-    XLSX.writeFile(wb, `Mobile-Limit-Changes-${from}-to-${to}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Mobile-Limit-Changes-${from}-to-${to}.xlsx`);
   };
   const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);

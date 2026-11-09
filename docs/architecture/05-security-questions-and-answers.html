@@ -38,7 +38,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>কেউ পাসওয়ার্ড অনুমান করলে?</td>
-<td>৫ বার ভুলে অ্যাকাউন্ট ১৫ মিনিট লক, এক IP থেকে ৩০ বার ভুলে অপেক্ষা। সব চেষ্টা <code>login_attempts</code>-এ। আমাদের টেস্টে ২৫ বার ভুলের পর আটকেছে।</td>
+<td>৫ বার ভুলে অ্যাকাউন্ট ১৫ মিনিট লক, এক IP থেকে ৩০ বার ভুলে অপেক্ষা। আগে সফল login হওয়া (চেনা) ডিভাইস এই লকে আটকায় না, তার নিজের সীমা ১৫ মিনিটে ১০ বার। সব চেষ্টা <code>login_attempts</code>-এ। আমাদের টেস্টে ২৫ বার ভুলের পর আটকেছে।</td>
 <td>✅</td>
 </tr>
 <tr>
@@ -124,8 +124,63 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>⚠️</td>
 </tr>
 <tr>
+<td>Employee Tracking-এ কে কার লোকেশন দেখে?</td>
+<td>Module Access-এ প্রতিটা অ্যাকাউন্টের জন্য বিভাগ আর একক কর্মী বাছা যায়; বাছা থাকলে সার্ভার শুধু তাঁদের লোকেশন, ইতিহাস, Stay Report ও Live Follow দেয়, অন্য কারও id দিলে 403। কিছু বাছা না থাকলে মডিউলের সবাইকে দেখে (আগের মতো); Superadmin সবসময় সবাই।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>একই ফোনে অন্য account-এ ঢুকলে আগের জনের ছবি বা তথ্য দেখায়?</td>
+<td>না। নিজের profile ছবির URL আর browser-এ cache হয় না, আর account বদলালেই আগের ছবি মুছে যায়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কেউ কি নিজের profile ছবি যা খুশি বদলে দিতে পারে?</td>
+<td>না। নতুন ছবি Superadmin-এর অনুমোদনের অপেক্ষায় থাকে, ততক্ষণ পুরনো ছবি দেখায়; Superadmin পুরনো-নতুন পাশাপাশি দেখে Approve বা কারণসহ Reject করেন। অনুমোদনের API শুধু Superadmin-এর (টেস্টে অন্য admin 403)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Payroll-এ MD অ্যাপ ব্যবহার না করলে তাঁর অনুমোদনের প্রমাণ কী?</td>
+<td>HR তাঁর সই/দাগ দেওয়া কাগজের scan/photo attach না করলে মাস এগোয় না; প্রতিটি print-এর version নম্বর পাতায় ছাপা; MD-র প্রতিটি বদল আলাদা correction হিসেবে (কে লিখল, কে apply করল, আগে-পরে net) থাকে আর history-তে সব ধাপ। ফাইল public ফোল্ডারে নয়, শুধু অনুমোদনের পথের layer দিয়ে খোলা যায়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Payroll-এ HR Director, Accounts, Audit কি নিজের বানানো বেতন পাস করতে পারেন?</td>
+<td>না। যে বেতন চালিয়েছে/বদলেছে বা মাস পাঠিয়েছে সে HR Director review দিতে পারে না; যে পাঠিয়েছে বা Accounts-এ পাঠিয়েছে সে pay করতে পারে না; যে বানিয়েছে, পাঠিয়েছে বা pay করেছে সে audit করতে পারে না (Superadmin ছাড়া)। Audit এখন টাকা দেওয়ার পরে, ঐচ্ছিক।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Payroll-এর Top Sheet (সাইট-ভিত্তিক বেতন) কে দেখে?</td>
+<td>যাঁর Payroll module-এ "Approval — Top Sheet (view)" layer আছে (layer সেভ না থাকা Payroll ব্যবহারকারী ডিফল্টে পান; Audit / Accounts-এর "View only" থাকলে আলাদা টিক লাগে), আর Superadmin। API আর পাতার অংশ দুটোই এই layer দেখে; টেস্টে layer ছাড়া 403। এটা শুধু দেখা — approve / pay আগের নিয়মেই।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>HR-এর Custom attendance report বা AI Assistant দিয়ে কি সীমার বাইরের department-এর হাজিরা দেখা যায়?</td>
+<td>না। Attendance Report Builder আলাদা layer <code>custom_report</code>-এর পেছনে (API ও ট্যাব দুটোই), ডাটা আসে Monthly report-এর একই হিসাব থেকে, তাই Department সীমা ও কোম্পানি ফিল্টার একই থাকে। Assistant একই API প্রশ্নকারীর token দিয়ে ডাকে। টেস্টে layer ছাড়া Admin 403 পেয়েছেন, HR-সীমিত Admin Finance চাইলে খালি পেয়েছেন।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>লোকেশন ট্র্যাকিং কি সম্মতি ছাড়া?</td>
 <td>না। আলাদা সুইচ (ডিফল্ট বন্ধ) ও ব্যবহারকারীকে নোটিশ ও সম্মতির পেজ।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কর্মী কি নিজের Out Time পরে বদলে বাড়িয়ে নিতে পারে?</td>
+<td>শুধু একই দিনে, শুধু Module Access-এ "Remote Attendance — update Out Time" টিক দেওয়া থাকলে (শুরুতে বন্ধ; কর্মী নিজে চালু করতে পারেন না, API 403), আর সেই সময়টাতেই project-এর এলাকায় থেকে — পরে বসে আগের সময় লেখা যায় না, সময় server-এর। প্রথম Out Time রাখা থাকে, নতুনটা আবার অনুমোদনে যায় (<code>AttendanceRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Remote check-in-এ কেউ কি অন্য project-এ বা মেয়াদ শেষের পর check-in করতে পারে?</td>
+<td>না। Module Access-এ দেওয়া project-এর তালিকা আর প্রতিটার From / To তারিখ server যাচাই করে — check-in, Correct Attendance ও Data Import-এ; অন্য project বা তারিখের বাইরে হলে 403। তালিকা বদলাতে Users module-এর <code>edit_add</code> layer লাগে, বদল <code>user_access_audit</code>-এ (<code>AttendanceProjects.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>দূরের সাইটের ZKTeco মেশিন internet-এ punch পাঠায় — কেউ ভুয়া punch পাঠাতে পারে?</td>
+<td>ADMS protocol-এ password নেই, তাই শুধু register করা চালু মেশিনের Serial number মানা হয়, আর সাইটের IP দিলে শুধু সেখান থেকে; অচেনা SN-এর কিছু লেখা হয় না, শুধু punch নেওয়া হয়, মেশিনে কোনো command যায় না। SN জেনে IP-সীমা ছাড়া মেশিন নকল করা সম্ভব — তাই fixed IP থাকলে দেওয়ার পরামর্শ (<code>zkMachines.ts</code>, 04 §১০ নং ১৩)।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>এক মেশিনের PIN অন্য মেশিনের কারও হাজিরায় চলে যায় না?</td>
+<td>"Its own numbers" ধরনের মেশিনে প্রতিটা PIN আলাদা করে link হয় (<code>zk_device_pins</code>); link না হলে punch কারও হাজিরায় যায় না। link / unlink শুধু Office Attendance-এর "Link Device PINs" layer-এর (API 403, UI লুকানো)।</td>
 <td>✅</td>
 </tr>
 </tbody>
@@ -146,9 +201,54 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>🏢</td>
 </tr>
 <tr>
+<td>Chat-এর voice / ছবি / video / document কোথায় থাকে, অন্য কেউ খুলতে পারে?</td>
+<td>server-এর একটা folder-এ (<code>.env</code>-এর <code>CHAT_ATTACHMENT_DIR</code>), ডাটাবেসে শুধু path। folder ওয়েবে খোলা নয় — ফাইল যায় শুধু সেই chat-এর সদস্যের কাছে, অন্যরা 403। ফাইলের নাম এলোমেলো, আর path folder-এর বাইরে গেলে server খোলে না। Delete for everyone করলে ফাইলও মুছে যায়। folder-এর অনুমতি, disk এনক্রিপশন আর ব্যাকআপ হোস্টিংয়ের দায়িত্ব (<code>chatFiles.ts</code>)।</td>
+<td>✅ 🏢</td>
+</tr>
+<tr>
+<td>Notice-এর Animation library-তে কেউ ক্ষতিকর animation রাখতে পারে?</td>
+<td>যোগ / মোছা শুধু 🔒 <code>notice_animations</code> layer যাঁর (শুরুতে কারও নেই; API-তেও 403)। শুধু Lottie JSON নেওয়া হয় (৩ MB পর্যন্ত), আর ভেতরের expression — যেখানে JavaScript থাকতে পারে — server-এ বাদ দেওয়া হয়; app-এর light player expression চালায়ও না (<code>NoticeSafety.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Notice-এ দেওয়া ছবি বা PDF কি যে কেউ খুলতে পারে? কে পড়েছে কে দেখে?</td>
+<td>না। ফাইল server-এর folder-এ, ওয়েবে খোলা নয়; খোলে শুধু Notices module-এর লোক আর যাঁদের জন্য notice এখন live। শুধু ছবি ও অফিস-ডকুমেন্ট upload হয় (ছবির ভেতরের byte মিলিয়ে)। কে খুলেছেন / পড়েছেন সেই নাম-ধরা report শুধু <code>notice_read_report</code> layer যাঁর, আর notice email করা শুধু <code>notice_email</code> layer — দুটোই শুরুতে কাউকে দেওয়া থাকে না, API-তেও 403 (<code>NoticeRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>রেস্টে (ডাটাবেস/ডিস্কে) এনক্রিপশন?</td>
 <td>অ্যাপ নিজে পুরো ডাটাবেস এনক্রিপ্ট করে না। নির্দিষ্ট সিক্রেট এনক্রিপ্ট/hash: মেইল পাসওয়ার্ড (AES-256-GCM), সব পাসওয়ার্ড (bcrypt), token/কোড (hash)। ডিস্ক এনক্রিপশন হোস্টিংয়ে।</td>
 <td>⚠️ 🏢</td>
+</tr>
+<tr>
+<td>ফোনে কি অ্যাপের data জমা থাকে? অন্য কেউ ওই ফোনে login করলে দেখবে?</td>
+<td>Dashboard তাড়াতাড়ি খোলার জন্য নিজের কার্ডগুলোর শেষ data ফোনে / ব্রাউজারে থাকে (অন্য কর্মীদের location বা Tracking-এর তালিকা নয়)। অ্যাকাউন্ট ও কোম্পানি আলাদা করে রাখা হয়, logout বা নতুন login-এ মুছে যায়, ৭ দিনের বেশি পুরোনো হলে ব্যবহার হয় না। নতুন data সবসময় server থেকে অনুমতি যাচাই করে আসে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Chat group-এ কে নাম / photo / setting বদলাতে পারে? Starred বা Clear chat কি অন্যরা দেখে?</td>
+<td>Group admin (setting অনুযায়ী member-ও নাম / photo / description); "Only admins can send" চালু থাকলে member-এর message server-ই আটকায়। Star, Mute ও Clear chat শুধু নিজের জন্য, অন্য কারো chat-এ কিছু বদলায় না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Chat group-এর invite link বাইরের কেউ পেলে কী হবে? Disappearing message কি সত্যিই মুছে যায়?</td>
+<td>Link দিয়ে যোগ দিতে CredenceHR-এ login আর Chat-এর অনুমতি লাগে, তাই কোম্পানির বাইরের কেউ পারে না; admin link reset বা বন্ধ করলে পুরোনোটা আর কাজ করে না, আর কে link দিয়ে এসেছে তা group-এ লেখা থাকে। Disappearing message সময় পেরোলেই কারো কাছে দেখায় না, আর কয়েক মিনিটের মধ্যে ডাটাবেস ও ফাইল থেকে মুছে যায় (আগে নেওয়া ব্যাকআপে থাকতে পারে)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Group call-এ বাইরের কেউ ঢুকতে বা শুনতে পারে? Call কি রেকর্ড হয়?</td>
+<td>না। শুধু group-এর member যাঁদের Calls অনুমতি আছে তাঁরাই ঢুকতে পারেন, আর কে আছেন তা call-এ সবার পর্দায় দেখায়। Audio / video ফোন থেকে ফোনে এনক্রিপ্ট হয়ে যায়; server কিছু রেকর্ড বা জমা করে না, শুধু শুরু ও শেষের সময় chat-এ লেখা থাকে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>অফিস / project-এর বাইরে থেকে কেউ হাজিরা দিলে কী হয়?</td>
+<td>দেওয়া যায়, কিন্তু কারণ লিখতে হয় আর সেটা হাজিরা হিসেবে গোনা হয় শুধু supervisor-দের approval chain approve করলে; কোথা থেকে দেওয়া (GPS, দূরত্ব) approver দেখেন। Reject হলে কিছুই গোনা হয় না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>বেতন দেওয়া হয়ে গেলে কেউ সেই মাসের হাজিরা বদলাতে পারে?</td>
+<td>না। বেতন Processed বা Paid হলে সেই মাসের সংশোধনের আবেদন নেওয়া হয় না, আর আগের অপেক্ষায় থাকা আবেদনও approve করা যায় না (শুধু reject)।</td>
+<td>✅</td>
 </tr>
 <tr>
 <td>SQL Injection থেকে সুরক্ষা?</td>
@@ -218,6 +318,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>অনুমোদনের মাঝখানে কেউ নিজের ইচ্ছামতো অন্য কাউকে approver বানাতে পারে?</td>
+<td>শুধু সেই মুহূর্তে যে Layer-এর approver, এবং যাঁর Module Access-এ <strong>Approvals — add an ad-hoc approver</strong> (<code>users.can_add_adhoc_approver</code>, শুরুতে বন্ধ) চালু; Superadmin সবসময়। আবেদনকারী নিজে বা নিজেকে বাছা যায় না, একসাথে একজনই, কারণ লেখা বাধ্যতামূলক; server-এ যাচাই হয় (<code>POST /api/my-approvals/:id/adhoc</code>) এবং পুরো ঘটনা approval trail-এ থাকে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কোনো মডিউলের অনুমতি থাকলেই কি Excel দিয়ে একসাথে অনেক ডাটা ঢোকানো যায়?</td>
+<td>না। HR Data Import আলাদা মডিউল (<code>data_import</code>), আর প্রতিটি ধরন (Employee, Leave, Check In/Out, Conveyance, Remote/Office Attendance) আলাদা টিক — সব শুরুতে বন্ধ। মডিউল + সেই টিক দুটোই না থাকলে সার্ভার 403 দেয় (<code>DataImportRoutes.ts</code>)। Superadmin সবসময় পারেন।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>সব ডাটা-পড়ার লগ আছে?</td>
 <td>না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)।</td>
 <td>⚠️</td>
@@ -268,7 +378,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>ডাটা কি বাইরের কোনো সেবায় যায়?</td>
-<td>শুধু যা <code>.env</code>-এ চালু করা হয়েছে: <strong>Google Gemini</strong> (AI Assistant, চালু থাকলে প্রশ্ন ও ফল Google-এ যায়, বন্ধ রাখা যায়), <strong>Firebase</strong> (পুশ নোটিফিকেশন, শিরোনাম/বার্তা), <strong>SMTP/IMAP</strong> (মেইল সার্ভার), <strong>CARTO</strong> (মানচিত্র টাইল), <strong>360 ERP</strong> (SSO)। কোনোটাই বাধ্যতামূলক নয়।</td>
+<td>শুধু যা <code>.env</code>-এ চালু করা হয়েছে: <strong>Google Gemini</strong> (AI Assistant, চালু থাকলে প্রশ্ন ও ফল Google-এ যায়, বন্ধ রাখা যায়; "AI Assistant — voice" যাঁর চালু তাঁর বলা প্রশ্নের রেকর্ডও লিখে নেওয়ার জন্য যায়, আমাদের কাছে জমা থাকে না), <strong>Firebase</strong> (পুশ নোটিফিকেশন, শিরোনাম/বার্তা), <strong>SMTP/IMAP</strong> (মেইল সার্ভার), <strong>CARTO</strong> (মানচিত্র টাইল), <strong>360 ERP</strong> (SSO)। কোনোটাই বাধ্যতামূলক নয়।</td>
 <td>✅</td>
 </tr>
 <tr>
@@ -282,8 +392,43 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Recruitment থেকে candidate-কে email কে পাঠাতে পারে, ভুল জায়গায় যেতে পারে কি?</td>
+<td>শুধু Recruitment-এর <strong>Email candidates</strong> অনুমতি যাঁর আছে (আলাদা টিক, কাউকে আপনাআপনি দেওয়া হয় না; Superadmin সবসময়) — বোতাম লুকানো আর API-তে 403। ঠিকানা নেওয়া হয় candidate-এর রেকর্ড থেকে, ব্যবহারকারী অন্য ঠিকানা দিতে পারেন না; বিষয়ের লাইনে নতুন লাইন বাদ দেওয়া হয় (header injection নয়), লেখা HTML-escape হয়ে যায়। প্রতিটি email <code>candidate_emails</code>-এ থাকে (<code>RecruitmentRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Asset ফেরত কে গ্রহণ করতে পারে, হাতবদলের ইতিহাস কে দেখে?</td>
+<td>গ্রহণ করতে পারেন শুধু যে store keeper item-টা দিয়েছিলেন, অথবা Asset Management / Superadmin — server-এ যাচাই হয় (অন্যদের 403)। ইতিহাস দেখে Asset Management, item-এর কর্মী (নিজের অংশ) আর যিনি দিয়েছিলেন। প্রতিটা ধাপে কে, কখন, কার হাতে / কার মাধ্যমে — <code>asset_assignments</code>-এ থাকে (<code>AssetManagementRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Superadmin নিজের password বদলালে server restart-এ কি পুরনোটা ফিরে আসে?</td>
+<td>না। <code>.env</code>-এর <code>ADMIN_PASSWORD</code> বসে শুধু প্রথমবার আর যখন <code>.env</code>-এ সেটা বদলানো হয় (শেষ বসানোটার bcrypt hash রাখা থাকে, <code>startupOnce.ts</code>)। app থেকে বদলানো password থাকে; ভুলে গেলে <code>.env</code> বদলে restart করুন।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Approver চলে গেলে বা Supervisor বদলালে অপেক্ষায় থাকা আবেদনের কী হয়?</td>
+<td>এখনকার active Supervisor / Layer-এর active লোকের কাছে নিজে থেকে চলে যায়, তিনি ও কর্মী alert পান। কেউ না থাকলে Superadmin alert পান ও সিদ্ধান্ত দেন। block / inactive account কোনো আবেদন approve করতে পারে না, নতুন আবেদনও তাঁর কাছে যায় না (<code>server.ts</code> reconcilePendingApprovals)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>গাড়ির booking কে বাতিল করতে পারে?</td>
+<td>start-এর আগে শুধু সংশ্লিষ্টরা — rider, (approved হলে) শেষ approver, (গাড়ি দেওয়া হলে) driver ও যিনি দিয়েছেন, আর Vehicle Management; অন্য কেউ চাইলে server 403 দেয়। বাতিল হলে গাড়ি সঙ্গে সঙ্গে ছাড়া পায়; কেউ start না করলে পরিকল্পিত শেষ সময়ের পর ride নিজে বন্ধ হয়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Book a Ride-এ save করা জায়গা (বাড়ির ঠিকানা) কে দেখতে পায়?</td>
+<td>শুধু সেই account নিজে — প্রতিটা অনুরোধ নিজের <code>user_id</code>-এ সীমিত, অন্যের জায়গা মুছতে গেলে 404। আর save করা যায় শুধু Self Service switch <strong>Book a Ride — saved places</strong> চালু থাকলে (শুরুতে বন্ধ, API-তেও 403)। Account মুছলে তার জায়গাও মুছে যায় (<code>ride_saved_places</code>, <code>VehicleManagementRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>লগইন পাতার APK download দিয়ে কি সার্ভারের অন্য ফাইল নামানো যায়?</td>
 <td>না। শুধু <code>downloads/</code> ফোল্ডারের <code>.apk</code> নামের ফাইল যায়, নামে <code>/</code> বা <code>..</code> থাকলে 404। ফাইলটা আসল Android APK না হলে পাঠানোই হয় না (<code>AndroidApkRoute.ts</code>, <code>npm run test:apk</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Android app কি server-এর IP ঠিকানা দিয়ে চলতে পারে?</td>
+<td>না। APK শুধু <code>https://</code> domain খোলে। IP বা সাধারণ <code>http://</code> দিয়ে build করতে গেলে build থেমে যায়, আর চালু app-এ WebView অন্য ঠিকানায় (IP সহ) নিজে যেতে পারে না (<code>capacitor.config.ts</code>)। চ্যাট call-এর microphone-ও এই নিরাপদ ঠিকানা ছাড়া পাওয়া যায় না।</td>
 <td>✅</td>
 </tr>
 <tr>
@@ -374,4 +519,26 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>যা নেই তা স্বীকার করুন এবং তারিখসহ পরিকল্পনা দিন।</strong> ❌ ও ⚠️ সারি ধরে একটি কর্মপরিকল্পনা বানিয়ে রাখুন।</li>
 <li><strong>"হোস্টিং-নির্ভর" (🏢) প্রশ্নে</strong> আপনাদের সার্ভার প্রদানকারীর নথি (ডাটা সেন্টার, ব্যাকআপ, TLS) আলাদা দেখাতে হবে।</li>
 <li><strong>অডিট আসার আগে:</strong> <code>CORS_ORIGINS</code> সেট, পাসওয়ার্ড নীতি নিয়ে লিখিত সিদ্ধান্ত (সহজ পাসওয়ার্ড কেন), ~~অব্যবহৃত GPL লাইব্রেরি বাদ~~ (✅ হয়ে গেছে), ব্যাকআপ পরীক্ষা (একবার পুনরুদ্ধার করে দেখা), penetration test বুক করা। এগুলো সবচেয়ে কম খরচে সবচেয়ে বেশি প্রশ্নের উত্তর বদলে দেয়।</li>
-</ol></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+</ol>
+<p><strong>প্রশ্ন: <code>.env</code>-এ <code>CORS_ORIGINS</code> দেওয়ার পরও সার্ভার "CORS_ORIGINS is not set" দেখাচ্ছিল কেন?</strong>
+উত্তর: <code>.env</code> লোড হওয়ার আগেই <code>WebSecurity.ts</code> মানটা পড়ে ফেলত, তাই তালিকা খালি ধরে নিয়ে CORS সবার জন্য খোলা রাখত। এখন <code>.env</code> সবার আগে লোড হয়, তাই তালিকাটা সত্যিই কাজ করে: তালিকার বাইরের সাইট API-র উত্তর পড়তে পারে না।</p>
+<p><strong>প্রশ্ন: কোনো কর্মী ওয়েবসাইটে যা পারেন, মোবাইল অ্যাপে কি তার চেয়ে কম দেওয়া যায়?</strong>
+উত্তর: হ্যাঁ। Module Access-এ প্রতিটা module আর Self Service switch-এর আলাদা App switch আছে, আর পুরো অ্যাপ বন্ধ করার একটা মূল switch। অ্যাপ কখনো ওয়েবসাইটের চেয়ে বেশি পায় না। এটা শুধু menu লুকানো না: অ্যাপের token দিয়ে বন্ধ module-এর API ডাকলে সার্ভার 403 দেয়, আর অ্যাপ বন্ধ থাকলে login-ই হয় না (<code>AppAccess.ts</code>)। নতুন অ্যাকাউন্টে অ্যাপ ডিফল্টে বন্ধ; প্রতিটা বদল access audit-এ থাকে।</p>
+<p><strong>প্রশ্ন: কল চলাকালে নেট কেটে আবার ফিরলে কেউ কি অন্যের কলে ঢুকে পড়তে পারে?</strong>
+উত্তর: না। কল ধরে রাখার ৩০ সেকেন্ডে ফিরে আসতে <code>call:rejoin</code> লাগে, আর server সেটা শুধু সেই কলের caller বা callee-র নিজের লগইন করা account থেকে নেয় (socket-এর token যাচাই করা user id দিয়ে, <code>CallRoutes.ts</code>)। অন্য কেউ চাইলে "This call has ended." পায়। কলের media আগের মতোই সরাসরি দুই ফোনের মধ্যে encrypted (DTLS-SRTP) থাকে।</p>
+<p><strong>প্রশ্ন: অ্যাপ বন্ধ অবস্থায় কল কাটার (Decline) route-এ sign-in লাগে না কেন, এটা কি ঝুঁকি?</strong>
+উত্তর: ফোনের কল-পর্দা অ্যাপ খোলা ছাড়াই চলে, তাই সেখানে sign-in token থাকে না। তার বদলে প্রতিটা কলের জন্য আলাদা ৪৮-অক্ষরের এলোমেলো চাবি তৈরি হয়, যা শুধু callee-র নিজের ফোনের push-এ যায়। চাবি ছাড়া বা ভুল চাবিতে কিছু হয় না; ঠিক চাবিতেও শুধু সেই বাজতে থাকা কলটা Decline হয় — কোনো ডাটা পড়া বা বদলানো যায় না (<code>CallRoutes.ts</code>)।</p>
+<p><strong>প্রশ্ন: Claim-এর না পাঠানো খসড়া ফোনে থাকে — একই ফোনে অন্য কেউ login করলে কি তা দেখতে পায়?</strong>
+উত্তর: না। খসড়া (<code>src/lib/formDraft.ts</code>) প্রতিটা account-এর আলাদা চাবিতে থাকে, তাই অন্য login সেটা পড়ে না; sign-out করলেই সব খসড়া মুছে যায়, পাঠালে বা ৩ দিন পরেও মুছে যায়। খসড়ায় শুধু নিজের লেখা থাকে (ফাইল নয়), আর পাঠানোর সময় server আগের মতোই সব অনুমতি ও হিসাব যাচাই করে — খসড়া কিছুই অনুমোদন করে না।</p>
+<p><strong>প্রশ্ন: "Conveyance Bill Claim" থেকে "Bill Claim" নাম বদলানোর পর কেউ কি অনুমতি হারায় বা বাড়তি পায়?</strong>
+উত্তর: না। Server চালু হওয়ার সময় (<code>billClaimRename.ts</code>) আগে দেওয়া প্রতিটা অনুমতি একই মানুষের কাছে নতুন নামে সরে যায়: Admin module <code>conveyance</code> → <code>bill_claim</code>, তার layer, Data Import-এর <code>import_conveyance</code> → <code>import_bill_claims</code>, Self Service switch <code>can_view_conveyance_claims</code> → <code>can_view_bill_claims</code>, App access আর Access Template-এর টিক। নতুন কিছু দেওয়া হয় না। পুরনো API (<code>/api/user-claims</code>) আর নেই, নতুন <code>/api/bill-claims</code> আগের মতোই module / layer / switch যাচাই করে।</p>
+<p><strong>প্রশ্ন: কারো Budget (PEPM) switch বন্ধ থাকলে সে কি API দিয়ে Budget বা MPR No-র তালিকা পড়তে পারে?</strong>
+উত্তর: না (৭ নভেম্বর ২০২৬ থেকে)। আগে menu লুকাত কিন্তু <code>/api/budgets</code>, budget item, MPR No, Job-এর তালিকা যেকোনো login করা account পেত — পুরো-অ্যাপ টেস্টে ধরা পড়ে। এখন <code>requireBudgetRead</code> শুধু Superadmin, Budget switch চালু, Job Edit, আর PEPM module (Imports, MPR Nos, Reports, Projects) থাকা Admin-কে দেয়; বাকিরা 403। Admin Dashboard-ও এখন শুধু দেওয়া module-এর tile দেখায় ও তার ডাটাই চায়।</p>
+<p><strong>প্রশ্ন: অফিসের সবাই একই internet (একই IP) থেকে আসেন। কয়েকজনের ভুল password-এ কি পুরো অফিস আটকে যাবে? আর কেউ কি আমার ID-তে ইচ্ছে করে ভুল দিয়ে আমাকে আটকে রাখতে পারে?</strong>
+উত্তর: যাঁরা আগে এই ফোন / browser থেকে সফলভাবে login করেছেন, তাঁরা আটকাবেন না। সফল login-এর পর ডিভাইসটা ওই account-এর জন্য একটা সই করা token পায় (চেনা ডিভাইস, <code>LoginGuard.ts</code>)। পরের login-এ সেটা থাকলে network-এর ৩০-বার আর account-এর ৫-বার লক ওই ডিভাইসে খাটে না; শুধু ডিভাইসের নিজের সীমা (১৫ মিনিটে ১০ বার ভুল)। অচেনা ডিভাইস (নতুন ফোন, অন্য কারো কম্পিউটার) আগের নিয়মেই আটকায়, তাই password অনুমান আগের মতোই কঠিন। Token নকল বা বদলানো যায় না (HMAC), অন্য account-এ কাজ করে না, ১৮০ দিন পরে বা password বদলালে বাতিল হয়।</p>
+<p><strong>প্রশ্ন: কেউ chat-এ disappearing messages চালু করে কথোপকথনের প্রমাণ মুছে ফেলতে পারে কি?</strong>
+উত্তর: শুধু তাঁরাই পারেন যাঁদের Superadmin Module Access-এ "Disappearing messages" switch দিয়েছেন — শুরুতে কারোরই নেই। switch ছাড়া অপশনটা দেখায় না, আর server-এ চাইলেও 403 আসে (<code>ChatRoutes.ts</code>)। বন্ধ করা সবসময় যায়। কোনো switch না দিলে কোম্পানির সব chat-এর রেকর্ড থাকে।</p>
+<p><strong>প্রশ্ন: কল চলার সময় অ্যাপ থেকে বের হলে কি অ্যাপ গোপনে মাইক বা ক্যামেরা চালু রাখে?</strong>
+উত্তর: শুধু চলমান কলের সময়, আর তখন সবসময় একটা "Call in progress" notification দেখা যায় (<code>CallService.java</code>)। Android-ও নিজের মাইক/ক্যামেরা চিহ্ন দেখায়। কল শেষ হলে বা notification-এর Hang up চাপলে service বন্ধ হয়ে যায়। কল ছাড়া এই service কখনো চলে না।</p>
+<p><strong>প্রশ্ন: 360 ERP থেকে CredenceHR-এ password ছাড়া ঢোকা যায় — কেউ কি এটা দিয়ে অন্যের account-এ ঢুকে পড়তে পারে?</strong>
+উত্তর: link বানাতে পারে শুধু সেই application-এর (360 ERP বা Superadmin যাকে যোগ করেছেন) সার্ভার, Superadmin-এর দেওয়া তার নিজের App ID ও Secret দিয়ে, HTTPS-এ, আর চাইলে শুধু তার IP থেকে। মানুষ মেলে email আর Employee ID দুটো দিয়েই। link একবারই চলে আর দুই মিনিটের মধ্যে মেয়াদ শেষ হয়। ঢোকার পর password sign-in-এর মতোই সব যাচাই হয় (block, App access, ফোনের সীমা)। প্রতিটা চেষ্টা log-এ থাকে (Active Users → Partner app sign-in)। secret হারালে বা সন্দেহ হলে সেই application-এর "New secret" চাপলে আগেরটা সাথে সাথে অকেজো হয়; "Switched on" বন্ধ বা "Remove" করলে শুধু সেই application বন্ধ হয়, বাকিগুলো নয়।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

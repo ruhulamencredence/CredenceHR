@@ -8,10 +8,9 @@
 // users.can_export_assistant_reports, so having one is the permission.
 // PDF uses the company's standard report layout (pdfStandard.ts).
 
-import { isNativePlatform, savePdfCrossPlatform } from './saveFile';
+import { isNativePlatform, savePdfCrossPlatform, saveWorkbookCrossPlatform } from './saveFile';
 import { drawStandardHeader, loadPdfCompany, standardTable } from './pdfStandard';
 import { finalizePdfPageNumbers } from './pdfLetterhead';
-import { emailReport } from './reportEmail';
 
 export interface AssistantReport {
   title: string;
@@ -35,7 +34,15 @@ export async function downloadAssistantPdf(token: string, r: AssistantReport, pr
   });
   finalizePdfPageNumbers(doc);
   if (mode === 'email') {
-    await emailReport(doc, { fileName: `${r.file}.pdf`, title: r.title });
+    // Credence Mail's own New message window: from the asker's own mailbox
+    // with their signature, the PDF attached — never the server's account.
+    const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+    const { openMailCompose } = await import('../components/mail/ComposeLauncher');
+    openMailCompose(token, {
+      subject: r.title,
+      body: `<div>Please find the attached report: <b>${esc(r.title)}</b>.</div><div><br></div>`,
+      files: [{ name: `${r.file}.pdf`, type: 'application/pdf', dataUrl: String(doc.output('datauristring')).replace(/^data:application\/pdf;[^,]*,/, 'data:application/pdf;base64,') }]
+    });
     return;
   }
   await savePdfCrossPlatform(doc, `${r.file}.pdf`);
@@ -55,18 +62,5 @@ export async function downloadAssistantExcel(r: AssistantReport, preparedBy: str
   ws['!cols'] = r.columns.map((c, i) => ({ wch: Math.min(45, Math.max(c.length + 2, ...r.rows.slice(0, 300).map((row) => cell(row[i]).length + 2))) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Report');
-  const name = `${r.file}.xlsx`;
-  if (await isNativePlatform()) {
-    try {
-      const { Filesystem, Directory } = await import('@capacitor/filesystem');
-      const { Share } = await import('@capacitor/share');
-      const data = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-      const written = await Filesystem.writeFile({ path: name, data, directory: Directory.Cache });
-      await Share.share({ title: name, url: written.uri, dialogTitle: `Save or share ${name}` });
-      return;
-    } catch (err) {
-      console.error('Native Excel save failed, falling back to browser download:', err);
-    }
-  }
-  XLSX.writeFile(wb, name);
+  await saveWorkbookCrossPlatform(wb, `${r.file}.xlsx`);
 }

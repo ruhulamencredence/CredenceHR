@@ -10,8 +10,8 @@
 //                      added, existing ones updated — only the cells filled
 //                      in the sheet change)
 //   leave              leave_applications (history; no balance is touched)
-//   movement_claims    claims (Movement Claim check in / check out)
-//   bill_claims        user_claims (Conveyance Bill Claim)
+//   movement_claims    claims (Check In/Out check in / check out)
+//   bill_claims        bill_claims (Bill Claim)
 //   remote_attendance  attendance (Remote Attendance check in / check out)
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
 //                      inactive "Imported attendance" device so the ZKTeco
@@ -74,6 +74,9 @@ interface Kind {
   description: string;
   module: string;
   layer?: string;
+  // HR Data Import layer this kind needs (besides its module). Module access
+  // alone never allows importing.
+  importLayer?: string;
   fields: Field[];
 }
 
@@ -86,6 +89,7 @@ export const IMPORT_KINDS: Kind[] = [
     description:
       "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved. Fill Login ID and Password to create the employee's login in the same upload. Payment Type / Bank Name / Account Number add the salary Bank, MFS or Cash account (Employees -> Payment).",
     module: "employees",
+    importLayer: "import_employees",
     fields: [
       EMP,
       { key: "name", label: "Name", type: "text", required: true, aliases: ["employee name", "full name"], example: "Rahim Uddin" },
@@ -149,6 +153,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Leave History",
     description: "Past leave per employee. Approved / Pending leave in the current leave year is taken off the balance; older leave isn't. HR's Leave Summary Report sheet (one block per employee) can be uploaded as it is.",
     module: "leave_applications",
+    importLayer: "import_leave",
     fields: [
       EMP,
       { key: "leave_type", label: "Leave Type", type: "text", required: true, aliases: ["type"], example: "Casual", note: "Casual / Sick / Without Pay, or a Leave Category name" },
@@ -163,10 +168,11 @@ export const IMPORT_KINDS: Kind[] = [
   },
   {
     key: "movement_claims",
-    title: "Movement Claim History",
+    title: "Check In/Out History",
     description:
-      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
+      "Past check in/out records (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
     module: "claims",
+    importLayer: "import_movement_claims",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-08-12" },
@@ -183,9 +189,10 @@ export const IMPORT_KINDS: Kind[] = [
   },
   {
     key: "bill_claims",
-    title: "Conveyance Bill Claim History",
-    description: "Past Conveyance Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
-    module: "conveyance",
+    title: "Bill Claim History",
+    description: "Past Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
+    module: "bill_claim",
+    importLayer: "import_bill_claims",
     fields: [
       EMP,
       { key: "claim_no", label: "Claim No.", type: "text", aliases: ["claim no", "claim number"], example: "087703", note: "Same Claim No. again is skipped" },
@@ -206,6 +213,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Check In / Check Out",
     description: "Remote Attendance (project site) check in and check out times.",
     module: "attendance",
+    importLayer: "import_attendance",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-09-01" },
@@ -240,6 +248,7 @@ export const IMPORT_KINDS: Kind[] = [
     title: "Attendance (Office In / Out)",
     description: "Daily office In and Out times, counted like device punches in every attendance report and payroll.",
     module: "office_attendance",
+    importLayer: "import_office_attendance",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-09-01" },
@@ -343,6 +352,9 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     for (const k of IMPORT_KINDS) {
       if (!mods.includes(k.module)) continue;
       if (k.layer && !(await hasModuleLayer(user, k.module, k.layer).catch(() => false))) continue;
+      // Separate import permission: Module Access -> HR Data Import -> that
+      // kind's tick. Having the data's own module is not enough.
+      if (k.importLayer && !(mods.includes("data_import") && (await hasModuleLayer(user, "data_import", k.importLayer).catch(() => false)))) continue;
       out.push(k);
     }
     return out;
@@ -488,7 +500,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           "designation", "email", "phone", "mobile", "personal_email", "gender", "blood_group", "nid_ssn", "nationality",
           "religion", "marital_status", "job_status", "employment_category", "job_base", "division", "unit", "present_address", "permanent_address"
         ];
-        for (const k of textKeys) if (str(v[k])) set[k] = str(v[k]).slice(0, k.endsWith("_address") ? 2000 : 255);
+        // Column sizes on employees (schemaMigrations.ts) — a longer value would
+        // fail the whole row on Import even though the preview passed.
+        const maxLen: Record<string, number> = { gender: 20, blood_group: 10, nid_ssn: 50, nationality: 100, marital_status: 30, religion: 50 };
+        for (const k of textKeys) if (str(v[k])) set[k] = str(v[k]).slice(0, k.endsWith("_address") ? 2000 : maxLen[k] || 255);
+        if (set.blood_group) {
+          // "B+", "b +ve", "AB(-)", "O positive" -> B+ / AB- / O+; anything else ("Not Defined") is left empty
+          const m = String(set.blood_group).toUpperCase().replace(/\s+/g, "").match(/^(AB|A|B|O)\(?(\+|-|\+VE|-VE|POSITIVE|NEGATIVE|POS|NEG)\)?$/);
+          if (m) set.blood_group = m[1] + (/^(\+|\+VE|POS)/.test(m[2]) ? "+" : "-");
+          else { notes.push(`Blood Group "${str(v.blood_group)}" isn't a blood group — left empty`); delete set.blood_group; }
+        }
         for (const [k, label] of [["joining_date", "Joining Date"], ["date_of_birth", "Date of Birth"]] as const) {
           const d = dateOf(v, k, label, false);
           if (d) set[k] = d;
@@ -756,7 +777,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       }
     },
 
-    // ---- Movement claims -----------------------------------------------
+    // ---- Check in/out -----------------------------------------------
     movement_claims: {
       prepare: async () => ({ existing: ((await queryDB("SELECT user_id, check_in_at FROM claims").catch(() => [])) || []) as any[] }),
       row: async (v, ctx, prep) => {
@@ -810,7 +831,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     // ---- Conveyance bill claims ----------------------------------------
     bill_claims: {
       prepare: async () => {
-        const existing: any[] = (await queryDB("SELECT user_id, claim_date, category, amount, admin_remarks FROM user_claims").catch(() => [])) || [];
+        const existing: any[] = (await queryDB("SELECT user_id, claim_date, category, amount, admin_remarks FROM bill_claims").catch(() => [])) || [];
         const cats: any[] = (await queryDB("SELECT id, name FROM bill_claim_categories").catch(() => [])) || [];
         // Bills earlier imports made for disbursed claims, one per employee per month.
         const bills: any[] = (await queryDB("SELECT id, user_id, remarks FROM conveyance_bills WHERE remarks LIKE 'Imported from Excel%'").catch(() => [])) || [];
@@ -851,7 +872,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const billKey = `${userId}|Imported from Excel — disbursed claims ${claimDate.slice(0, 7)}`;
         if (!ctx.dryRun) {
           const res = await queryDB(
-            `INSERT INTO user_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at, first_submitted_at)
+            `INSERT INTO bill_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at, first_submitted_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               userId, claimDate, from, to, category, amount, approved, str(v.description) || null, status,
@@ -861,7 +882,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           );
           const cat = prep.cats.get(norm(category));
           await queryDB(
-            "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO bill_claim_items (bill_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
             [res.insertId, cat ? Number(cat.id) : null, cat ? String(cat.name) : category, billDate, amount, str(v.description).slice(0, 500) || null]
           );
           if (disbursed) {
@@ -875,8 +896,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
               prep.bills.set(billKey, billId);
             }
             await queryDB(
-              `INSERT INTO conveyance_bill_items (bill_id, source, user_claim_id, entry_date, particulars, amount, remarks)
-               VALUES (?, 'user_claim', ?, ?, ?, ?, ?)`,
+              `INSERT INTO conveyance_bill_items (bill_id, source, bill_claim_id, entry_date, particulars, amount, remarks)
+               VALUES (?, 'bill_claim', ?, ?, ?, ?, ?)`,
               [billId, res.insertId, billDate, (str(v.description) || `${category} claim`).slice(0, 255), approved, claimNo ? `Claim No. ${claimNo}` : null]
             );
           }
@@ -891,12 +912,21 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     remote_attendance: {
       prepare: async () => {
         const projects: any[] = (await queryDB("SELECT id, project_name FROM projects").catch(() => [])) || [];
-        const users: any[] = (await queryDB("SELECT id, attendance_project_id FROM users").catch(() => [])) || [];
+        // Each account's check-in Projects with their From/To dates
+        // (user_attendance_projects, AttendanceProjects.ts).
+        const listed: any[] =
+          (await queryDB("SELECT user_id, project_id, DATE_FORMAT(valid_from, '%Y-%m-%d') AS f, DATE_FORMAT(valid_to, '%Y-%m-%d') AS t FROM user_attendance_projects").catch(() => [])) || [];
+        const userProjects = new Map<number, { id: number; f: string | null; t: string | null }[]>();
+        for (const r of listed) {
+          const k = Number(r.user_id);
+          if (!userProjects.has(k)) userProjects.set(k, []);
+          userProjects.get(k)!.push({ id: Number(r.project_id), f: r.f || null, t: r.t || null });
+        }
         const existing: any[] = (await queryDB("SELECT id, user_id, project_id, attendance_date, check_in_at, check_out_at FROM attendance").catch(() => [])) || [];
         return {
           projects: new Map(projects.map((p) => [norm(String(p.project_name)), p])),
           projectById: new Map(projects.map((p) => [Number(p.id), p])),
-          userProject: new Map(users.map((u) => [Number(u.id), u.attendance_project_id ? Number(u.attendance_project_id) : null])),
+          userProjects,
           existing
         };
       },
@@ -909,8 +939,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         let project: any = null;
         if (str(v.project)) project = prep.projects.get(norm(str(v.project))) || fail(`Project "${str(v.project)}" isn't in Projects.`);
         else {
-          const pid = prep.userProject.get(userId);
-          project = (pid && prep.projectById.get(pid)) || fail("Project is empty and this employee has no assigned Attendance Project.");
+          // Blank Project: the employee's only check-in Project on that date.
+          const onDay = (prep.userProjects.get(userId) || []).filter((r: any) => (!r.f || r.f <= date) && (!r.t || r.t >= date));
+          if (onDay.length > 1) fail("Project is empty and this employee has more than one check-in Project that day — fill in the Project.");
+          project = (onDay[0] && prep.projectById.get(onDay[0].id)) || fail("Project is empty and this employee has no check-in Project that day.");
         }
         const who = `${emp.name} (${str(v.employee_id)})`;
         const same = prep.existing.find((a: any) => Number(a.user_id) === userId && Number(a.project_id) === Number(project.id) && String(a.attendance_date).slice(0, 10) === date);

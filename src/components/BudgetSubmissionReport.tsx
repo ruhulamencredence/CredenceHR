@@ -17,6 +17,7 @@ import { formatDate } from '../lib/formatDate';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 type Status = 'not_submitted' | 'job_submitted' | 'final_submitted';
 
 interface Submitter {
@@ -132,7 +133,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Submission Status');
-    XLSX.writeFile(wb, `Submission_Status_${budgetName.replace(/[^\w-]+/g, '_') || budgetId}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Submission_Status_${budgetName.replace(/[^\w-]+/g, '_') || budgetId}.xlsx`);
   };
 
   const toggle = (key: string) =>

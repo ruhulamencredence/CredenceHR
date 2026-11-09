@@ -19,6 +19,7 @@ import type { Express } from "express";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
 import { employeeIdConflict, syncEmployeeLoginId } from "./EmployeeLoginId";
+import { requestApprovalReconcile } from "./approvalReconcile";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -130,6 +131,37 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           ? { rows: shaped, total: matched.length, page: pageNo, limit: pageLimit, counts: { all: allSorted.length, active: activeCount, inactive: allSorted.length - activeCount } }
           : shaped
       );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/employees/by-user/:userId — the Employee record linked to one
+  // login account (Admin Panel -> Users -> "Employee" on a row). Same fields
+  // the Employees list shows, so it needs the same "employees" module.
+  app.get("/api/employees/by-user/:userId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) return res.status(400).json({ error: "Bad account id." });
+      const rows: any[] = await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [userId]);
+      const e = rows[0];
+      if (!e) return res.json({ linked: false });
+      const out: Record<string, any> = {
+        id: e.id,
+        employee_id: e.employee_id || null,
+        name: e.name,
+        designation: e.designation || null,
+        department: e.department || null,
+        branch: e.branch || null,
+        email: e.email || null,
+        phone: e.phone || null,
+        is_active: !!Number(e.is_active),
+        user_id: e.user_id || null
+      };
+      for (const field of EMPLOYEE_EXT_FIELDS) {
+        out[field] = (EMPLOYEE_BOOL_FIELDS as readonly string[]).includes(field) ? !!Number(e[field]) : e[field] ?? null;
+      }
+      res.json({ linked: true, employee: out });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -415,6 +447,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           id
         ]
       );
+      // Set inactive here: requests waiting on them move on (approvalReconcile.ts).
+      requestApprovalReconcile();
       if (zkPin.set && (existing[0].zk_device_pin ?? null) !== zkPin.pin) {
         await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, id]);
       }
@@ -503,6 +537,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, ?)",
         [id, supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0]
       );
+        requestApprovalReconcile();
       res.status(201).json({ id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -525,6 +560,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         "UPDATE employee_supervisors SET supervisor_id = ?, effective_date = ?, is_direct = ? WHERE id = ?",
         [supId, effective_date && String(effective_date).trim() ? String(effective_date).trim() : null, is_direct ? 1 : 0, rowId]
       );
+        requestApprovalReconcile();
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -538,6 +574,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const existing = await queryDB("SELECT id FROM employee_supervisors WHERE id = ? AND employee_id = ?", [rowId, id]);
       if (existing.length === 0) return res.status(404).json({ error: "Supervisor record not found" });
       await queryDB("DELETE FROM employee_supervisors WHERE id = ?", [rowId]);
+      requestApprovalReconcile();
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -12,14 +12,14 @@ on:
       domain:
         description: "Domain to check"
         required: false
-        default: "hr.credencehousinglimited.com"
+        default: "hr.credencegroupbd.com"
   push:
     branches: [main, claude/nice-fermi-0tale9]
     paths:
       - ".github/workflows/server-check.yml"
 
 env:
-  DOMAIN: ${{ github.event.inputs.domain || 'hr.credencehousinglimited.com' }}
+  DOMAIN: ${{ github.event.inputs.domain || 'hr.credencegroupbd.com' }}
   IP_URL: "http://203.95.222.58:3000"
 
 jobs:

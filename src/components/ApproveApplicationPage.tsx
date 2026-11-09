@@ -15,7 +15,7 @@ import { LoadingBlock } from './LoadingBlock';
 // shape PendingApprovalsCard.tsx (the Dashboard card version of this) uses.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -36,15 +36,15 @@ interface ApproveApplicationPageProps {
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
-  t === 'user_claim'
-    ? 'Conveyance Bill Claim'
+  t === 'bill_claim'
+    ? 'Bill Claim'
     : t === 'attendance_correction'
     ? 'Timesheet Correction'
     : t === 'leave_application'
     ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
-    : 'Movement Claim';
+    : 'Check In/Out';
 
 // Self Service -> "Approve Application" — a dedicated, always-reachable page
 // for exactly the same personal approval queue PendingApprovalsCard.tsx shows

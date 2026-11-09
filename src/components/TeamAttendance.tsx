@@ -15,6 +15,7 @@
 // Attendance to correct / approve a sheet.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clearSiteSupervisorCache } from '../lib/siteSupervisor';
 import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft,
@@ -214,32 +215,8 @@ const getPosition = () =>
     );
   });
 
-// Is this account a Site Attendance supervisor? (sidebar item / home tile)
-let supervisorCache: { token: string; at: number; value: { teams: number; notSubmitted: number } } | null = null;
-export function useSiteSupervisor(token: string) {
-  const [value, setValue] = useState(() => (supervisorCache && supervisorCache.token === token ? supervisorCache.value : { teams: 0, notSubmitted: 0 }));
-  useEffect(() => {
-    if (!token) return;
-    if (supervisorCache && supervisorCache.token === token && Date.now() - supervisorCache.at < 60000) {
-      setValue(supervisorCache.value);
-      return;
-    }
-    let alive = true;
-    fetch(apiUrl('/api/site-attendance/my-teams'), { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d || !alive) return;
-        const v = { teams: d.teams.length, notSubmitted: d.teams.filter((t: SiteTeam) => t.members.length && !t.today?.sheet).length };
-        supervisorCache = { token, at: Date.now(), value: v };
-        setValue(v);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [token]);
-  return value;
-}
+// The supervisor check lives in lib/siteSupervisor.ts (light, for the sidebar).
+export { useSiteSupervisor } from '../lib/siteSupervisor';
 
 // ============================ Sheet editor ============================
 
@@ -724,7 +701,7 @@ export const TeamAttendance: React.FC<{ token: string; onBack?: () => void }> = 
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-3xl mx-auto">
         {!isNativeApp && <ModulePath path={['Self Service', 'Team Attendance']} />}
-        <div className="flex items-center gap-2 mb-3 mt-2">
+        <div className="flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />
@@ -802,7 +779,7 @@ export const TeamAttendance: React.FC<{ token: string; onBack?: () => void }> = 
                 date={date}
                 onDateChange={setDate}
                 onSaved={() => {
-                  supervisorCache = null;
+                  clearSiteSupervisorCache();
                   loadTeams();
                 }}
               />

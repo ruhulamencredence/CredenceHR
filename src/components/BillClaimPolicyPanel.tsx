@@ -420,7 +420,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
         <div className="min-w-0">
           <h2 className="text-lg font-bold text-slate-900">Bill Claim Policy</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Rules every Conveyance Bill Claim is checked against when it's filed, and the bill categories employees choose from.
+            Rules every Bill Claim is checked against when it's filed, and the bill categories employees choose from.
             {!canEdit && ' Only the Superadmin can change them.'}
           </p>
         </div>

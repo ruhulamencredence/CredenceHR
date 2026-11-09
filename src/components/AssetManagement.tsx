@@ -31,9 +31,12 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { CardButton, SelfCard, type CardTone } from './SelfCard';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
+import { ReturnAssetModal, ReturnsToReceive, AssetTimelineModal, HistoryButton, useReturnsToReceive } from './AssetHandover';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 import { LoadingBlock } from './LoadingBlock';
@@ -61,7 +64,15 @@ interface AssignedAsset {
   quantity?: number | string | null;
   unit?: string | null;
   handover_note?: string | null;
+  given_by_name?: string | null;
+  handed_to_kind?: string | null;
+  handed_to_name?: string | null;
+  return_via_kind?: string | null;
+  return_via_name?: string | null;
 }
+
+const returnWaitText = (a: AssignedAsset) =>
+  `Return sent${a.return_via_kind === 'employee' || a.return_via_kind === 'other' ? ` through ${a.return_via_name}` : ''} — waiting for ${a.given_by_name || 'the store'} to receive it.`;
 
 // "5 reams" — only shown for items handed over with a quantity.
 const qtyLabel = (a: AssignedAsset) => (a.quantity != null && a.quantity !== '' ? `${Number(a.quantity)} ${a.unit || 'pcs'}` : null);
@@ -128,6 +139,16 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
 // Pill status badge — same shape/size as Leave Application's StatusBadge
 // (rounded-full, 10px bold text, tinted bg + border + icon), just extended
 // to cover a Requisition's extra in-between states.
+// Phone card tint per requisition state.
+const REQ_TONE: Record<Requisition['status'], CardTone> = {
+  pending: 'amber',
+  manager_approved: 'amber',
+  approved: 'blue',
+  rejected: 'rose',
+  dispatched: 'blue',
+  fulfilled: 'green'
+};
+
 const RequisitionStatusBadge: React.FC<{ status: Requisition['status'] }> = ({ status }) => {
   const theme: Record<Requisition['status'], string> = {
     pending: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -153,7 +174,7 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-type AssetTab = 'my-assets' | 'status' | 'fulfill';
+type AssetTab = 'my-assets' | 'status' | 'fulfill' | 'returns';
 
 // Web list columns (same table-style rows as Book a Ride's Ride Status).
 const ASSET_LIST_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_260px]';
@@ -164,6 +185,7 @@ interface AssetManagementProps {
 }
 
 export function AssetManagement({ onBack }: AssetManagementProps) {
+  usePhoneHeaderTitle('My Asset');
   // Web gets Book a Ride's page design; the Android APK keeps the card
   // design so it reads as one native screen.
   const isNativeApp = Capacitor.isNativePlatform();
@@ -175,7 +197,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   // One-shot request from the Dashboard's My Asset quick access: a tab, or
   // 'new' to open the New Requisition popup straight away.
   const [quickAccess] = useState(() => takeQuickAccessTab('myAsset'));
-  const [tab, setTab] = useState<AssetTab>(quickAccess === 'status' ? 'status' : 'my-assets');
+  const [tab, setTab] = useState<AssetTab>(quickAccess === 'status' ? 'status' : quickAccess === 'returns' ? 'returns' : 'my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -191,6 +213,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   const [fulfillingFor, setFulfillingFor] = useState<Requisition | null>(null);
   // Requisition whose History is open (AssetRequisitionHistoryModal).
   const [historyFor, setHistoryFor] = useState<number | null>(null);
+  // Return popup, an item's hand-to-hand history, and the items coming back
+  // to this account (it handed them over, or it runs Asset Management).
+  const [returning, setReturning] = useState<AssignedAsset | null>(null);
+  const [timelineFor, setTimelineFor] = useState<number | null>(null);
+  const returnsToReceive = useReturnsToReceive(localStorage.getItem('mpr_token') || '');
   // Issues reported on items THIS account handed over — only returned when
   // the server's FULFILLER_CAN_RESOLVE_CLAIMS switch is on (currently off,
   // so this section stays hidden).
@@ -304,6 +331,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     if (tab === 'status') void loadRequisitions(true);
     if (tab === 'fulfill') void loadMyClaims();
     void loadAwaitingFulfillment(true);
+    void returnsToReceive.reload();
   });
 
   // Runs once on mount, regardless of which tab is active, purely so the
@@ -320,20 +348,6 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not acknowledge.');
-      loadMyAssets();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function requestReturn(assignmentId: number) {
-    try {
-      const res = await fetch(apiUrl(`/api/assets/assignments/${assignmentId}/request-return`), {
-        method: 'POST',
-        headers: authHeaders()
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not submit return request.');
       loadMyAssets();
     } catch (err: any) {
       setError(err.message);
@@ -412,7 +426,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   const TABS: { key: AssetTab; label: string; count?: number }[] = [
     { key: 'my-assets', label: 'My Assets' },
     { key: 'status', label: 'Status' },
-    { key: 'fulfill', label: 'Approved by Me', count: awaitingFulfillment.length }
+    { key: 'fulfill', label: 'Approved by Me', count: awaitingFulfillment.length },
+    // Only for an account something is coming back to.
+    ...(returnsToReceive.rows.length > 0 || tab === 'returns'
+      ? [{ key: 'returns' as AssetTab, label: 'Returns to receive', count: returnsToReceive.rows.length }]
+      : [])
   ];
 
   return (
@@ -422,9 +440,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     // design below.
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className={isNativeApp ? 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8' : 'w-full px-4 lg:px-8 pt-3 pb-28 md:pb-8'}>
-        {!isNativeApp && <ModulePath path={['Self Service', 'My Asset']} />}
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Asset']} /></div>}
         {!isNativeApp && (
-          <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="hidden md:flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -455,13 +474,13 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
             keep the original plain white panel untouched. */}
         <div
           className={
-            phoneUI
-              ? 'bg-gradient-to-br from-violet-100/60 via-white/60 to-white/40 border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.7)] overflow-hidden'
-              : 'w-full'
+            // Phone: no panel around the list — the Directory-style cards
+            // (SelfCard) sit straight on the page.
+            'w-full'
           }
         >
           {isNativeApp && (
-          <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
+          <div className="hidden md:flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
                 <Package className="w-5 h-5 text-blue-600" />
@@ -508,7 +527,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
               Application's Review/Approved/Rejected tabs; mobile gets the
               same translucent bg-white/50 + blur glass treatment as the
               outer card, desktop keeps the solid slate-100 track. */
-          <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-white/60 border border-white/70 p-1.5 text-xs font-semibold overflow-x-auto">
+          <div className="flex items-center gap-1.5 rounded-full bg-white/80 border border-white/90 p-1.5 text-xs font-semibold overflow-x-auto shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)]">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
@@ -538,12 +557,12 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
           )}
 
           {error && (
-            <div className={`${phoneUI ? 'mx-4 mt-4' : 'mb-3'} rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5`}>
+            <div className={`${phoneUI ? 'mt-3' : 'mb-3'} rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5`}>
               {error}
             </div>
           )}
 
-          <div className={phoneUI ? 'p-4' : ''}>
+          <div className={phoneUI ? 'pt-3' : ''}>
             {tab === 'my-assets' && wideWeb && (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className={`grid ${ASSET_LIST_COLS} gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
@@ -598,7 +617,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                               {ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}: {a.pending_claim.description}
                             </div>
                           )}
-                          {a.return_requested_at && <div className="text-xs text-amber-700">Return requested — awaiting IT/Admin.</div>}
+                          {a.return_requested_at && <div className="text-xs text-amber-700">{returnWaitText(a)}</div>}
                         </div>
                         <div className="flex flex-wrap justify-end gap-1.5">
                           {!a.pending_claim && !a.acknowledged_at && (
@@ -622,12 +641,13 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           )}
                           {!a.pending_claim && !a.return_requested_at && (
                             <button
-                              onClick={() => requestReturn(a.assignment_id)}
+                              onClick={() => setReturning(a)}
                               className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
                             >
                               Return / Replace
                             </button>
                           )}
+                          <HistoryButton onClick={() => setTimelineFor(a.asset_id)} />
                         </div>
                       </div>
                       {renderReportForm(a)}
@@ -645,59 +665,47 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                   <p className="text-xs font-semibold text-slate-500">You don't have any assets assigned right now.</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {myAssets.map((a) => (
-                    <div key={a.assignment_id} className="border border-slate-200 rounded-xl p-3.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-xs font-bold text-slate-900">{a.name}</div>
-                          <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">
-                            Tag: {a.asset_tag} • Category: {a.category}
-                            {a.serial_number ? ` • S/N: ${a.serial_number}` : ''}
-                          </p>
-                          {qtyLabel(a) && <p className="text-[11px] font-semibold text-slate-700 mt-0.5">Qty: {qtyLabel(a)}</p>}
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Handed over: {a.assigned_date} • Condition: {a.condition_on_assign}
-                          </p>
-                          {a.handover_note && <p className="text-[11px] text-slate-500 mt-0.5">Note: {a.handover_note}</p>}
-                          {a.return_requested_at && (
-                            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
-                              <Clock className="w-3 h-3" /> Return requested — awaiting IT/Admin.
-                            </div>
-                          )}
+                    // Directory-style card: amber while it waits on you (or an
+                    // issue / return is open), green once acknowledged.
+                    <SelfCard
+                      key={a.assignment_id}
+                      tone={a.pending_claim || !a.acknowledged_at || a.return_requested_at ? 'amber' : 'green'}
+                      lead={<Package className="w-[18px] h-[18px]" />}
+                      dot={!a.acknowledged_at && !a.pending_claim ? 'amber' : undefined}
+                      title={a.name}
+                      sub={`${a.category}${qtyLabel(a) ? ` · Qty ${qtyLabel(a)}` : ''} · since ${a.assigned_date}`}
+                      chips={[
+                        { label: a.asset_tag, mono: true },
+                        a.pending_claim
+                          ? { label: 'Issue Reported', tone: 'amber' as const }
+                          : !a.acknowledged_at
+                          ? { label: 'Awaiting your Ack', tone: 'amber' as const }
+                          : { label: a.return_requested_at ? 'Return requested' : 'Acknowledged', tone: a.return_requested_at ? ('amber' as const) : ('green' as const) }
+                      ]}
+                      actions={<HistoryButton small onClick={() => setTimelineFor(a.asset_id)} />}
+                    >
+                      {(a.serial_number || a.handover_note || a.condition_on_assign) && (
+                        <p className="text-[11px] text-slate-600">
+                          {[a.serial_number ? `S/N ${a.serial_number}` : '', a.condition_on_assign ? `Condition: ${a.condition_on_assign}` : '', a.handover_note ? `Note: ${a.handover_note}` : ''].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                      {a.return_requested_at && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-amber-700">
+                          <Clock className="w-3 h-3 shrink-0" /> {returnWaitText(a)}
                         </div>
-                        <div className="flex flex-col gap-2 items-end shrink-0">
-                          {a.pending_claim ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                              <AlertTriangle className="w-2.5 h-2.5" /> Issue Reported
-                            </span>
-                          ) : !a.acknowledged_at ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                              <Clock className="w-2.5 h-2.5" /> Awaiting your Ack
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-2.5 h-2.5" /> Acknowledged
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
+                      )}
                       {a.pending_claim && (
-                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 text-[11px] text-amber-700">
+                        <div className="text-[11px] text-amber-700">
                           <span className="font-semibold">{ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}:</span> {a.pending_claim.description}
                         </div>
                       )}
-
-                      {!a.pending_claim && (
-                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                      {!a.pending_claim && (!a.acknowledged_at || !a.return_requested_at) && (
+                        <div className="flex flex-wrap items-center gap-2">
                           {!a.acknowledged_at && (
                             <>
-                              <button
-                                onClick={() => acknowledge(a.assignment_id)}
-                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg text-white transition-colors"
-                                style={{ background: 'var(--g-accent)' }}
-                              >
+                              <button onClick={() => acknowledge(a.assignment_id)} className="px-3 py-1.5 text-[11px] font-semibold rounded-full text-white" style={{ background: 'var(--g-accent)' }}>
                                 Accept &amp; Acknowledge
                               </button>
                               <button
@@ -705,25 +713,21 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                                   setReportingFor(reportingFor === a.assignment_id ? null : a.assignment_id);
                                   setIssueForm({ issue_type: 'mismatch', description: '' });
                                 }}
-                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors"
+                                className="px-3 py-1.5 text-[11px] font-semibold rounded-full bg-white/70 text-amber-700"
                               >
                                 Report Issue
                               </button>
                             </>
                           )}
                           {!a.return_requested_at && (
-                            <button
-                              onClick={() => requestReturn(a.assignment_id)}
-                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                            >
+                            <button onClick={() => setReturning(a)} className="px-3 py-1.5 text-[11px] font-semibold rounded-full bg-white/70 text-slate-700">
                               Request Return / Replace
                             </button>
                           )}
                         </div>
                       )}
-
                       {renderReportForm(a)}
-                    </div>
+                    </SelfCard>
                   ))}
                 </div>
               )
@@ -788,49 +792,63 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                   <p className="text-xs font-semibold text-slate-500">No requisitions yet.</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {requisitions.map((r) => (
-                    <div key={r.id} className="border border-slate-200 rounded-xl p-3.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-bold text-slate-900">{r.asset_category}</div>
-                        <RequisitionStatusBadge status={r.status} />
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-1">Requested: {r.created_at} • Urgency: <span className="capitalize">{r.urgency}</span></p>
+                    // Directory-style card tinted by the requisition's state.
+                    <SelfCard
+                      key={r.id}
+                      tone={REQ_TONE[r.status]}
+                      lead={<Package className="w-[18px] h-[18px]" />}
+                      dot={r.status === 'pending' ? 'amber' : undefined}
+                      title={r.asset_category}
+                      sub={`Requested ${r.created_at} · ${r.urgency} urgency`}
+                      chips={[{ label: STATUS_LABEL[r.status], tone: REQ_TONE[r.status] }]}
+                      actions={
+                        <CardButton label="View history" onClick={() => setHistoryFor(r.id)}>
+                          <Clock className="w-3.5 h-3.5" />
+                        </CardButton>
+                      }
+                    >
                       {r.status === 'pending' && r.pending_with && (
-                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
+                        <div className="flex items-center gap-1.5 text-[11px] text-amber-700">
                           <Clock className="w-3 h-3" /> Waiting on: <span className="font-semibold">{r.pending_with}</span>
                         </div>
                       )}
-                      <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-1">
-                        {(r.items || []).map((it, idx) => (
-                          <div key={idx} className="text-xs text-slate-600 flex items-baseline justify-between gap-2">
-                            <span>
-                              <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
-                              <SupervisorEditMark it={it} />
-                            </span>
-                            <span className="text-[11px] text-slate-500 shrink-0">
-                              {Number(it.quantity)} {it.unit}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <button type="button" onClick={() => setHistoryFor(r.id)} className="mt-2 text-[11px] font-semibold text-blue-600 hover:underline">
-                        View history
-                      </button>
+                      {(r.items || []).length > 0 && (
+                        <div className="rounded-2xl bg-white/55 border border-white/60 px-3 py-2 space-y-1">
+                          {(r.items || []).map((it, idx) => (
+                            <div key={idx} className="text-xs text-slate-600 flex items-baseline justify-between gap-2">
+                              <span>
+                                <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
+                                <SupervisorEditMark it={it} />
+                              </span>
+                              <span className="text-[11px] text-slate-500 shrink-0">
+                                {Number(it.quantity)} {it.unit}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {r.status === 'rejected' && r.rejection_reason && (
-                        <div className="mt-2 text-[11px] text-rose-600">
+                        <div className="text-[11px] text-rose-600">
                           <span className="font-semibold">Reason:</span> {r.rejection_reason}
                         </div>
                       )}
-                      {r.asset_name && (
-                        <div className="mt-2 text-[11px] text-slate-500">
-                          Assigned item: {r.asset_name} ({r.asset_tag})
-                        </div>
-                      )}
-                    </div>
+                      {r.asset_name && <div className="text-[11px] text-slate-600">Assigned item: {r.asset_name} ({r.asset_tag})</div>}
+                    </SelfCard>
                   ))}
                 </div>
               )
+            )}
+
+            {tab === 'returns' && (
+              <ReturnsToReceive
+                token={localStorage.getItem('mpr_token') || ''}
+                rows={returnsToReceive.rows}
+                all={returnsToReceive.all}
+                onChanged={() => void returnsToReceive.reload()}
+                onHistory={(id) => setTimelineFor(id)}
+              />
             )}
 
             {tab === 'fulfill' && (
@@ -934,6 +952,24 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
 
       {historyFor !== null && (
         <AssetRequisitionHistoryModal token={localStorage.getItem('mpr_token') || ''} requisitionId={historyFor} onClose={() => setHistoryFor(null)} />
+      )}
+
+      {returning && (
+        <ReturnAssetModal
+          token={localStorage.getItem('mpr_token') || ''}
+          assignmentId={returning.assignment_id}
+          itemLabel={`${returning.name} (${returning.asset_tag})`}
+          givenBy={returning.given_by_name}
+          onClose={() => setReturning(null)}
+          onDone={() => {
+            setReturning(null);
+            loadMyAssets();
+          }}
+        />
+      )}
+
+      {timelineFor !== null && (
+        <AssetTimelineModal token={localStorage.getItem('mpr_token') || ''} assetId={timelineFor} onClose={() => setTimelineFor(null)} />
       )}
 
       {fulfillingFor && (

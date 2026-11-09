@@ -22,7 +22,6 @@ import { createRoot, Root } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Clock, LogOut, MapPin, ShieldCheck, Users } from 'lucide-react';
 import { Lottie } from '../components/LazyLottie';
-import trackingAnimation from '../assets/gps-navigation.json';
 import { PrivacyPolicy } from '../components/PrivacyPolicy';
 
 const CONSENT_KEY = 'credence_bg_location_consent';
@@ -63,6 +62,15 @@ function DisclosureCard({ onDone }: { onDone: (ok: boolean) => void }) {
   const [showPolicy, setShowPolicy] = useState(false);
   const agreeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => agreeRef.current?.focus(), []);
+  // The animation (≈275 KB) is fetched only when this card actually shows.
+  const [trackingAnimation, setTrackingAnimation] = useState<any>(null);
+  useEffect(() => {
+    let alive = true;
+    import('../assets/gps-navigation.json').then((m) => alive && setTrackingAnimation(m.default)).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   if (showPolicy) return <PrivacyPolicy onClose={() => setShowPolicy(false)} />;
   return (
     // No tap-outside-to-close: leaving the screen is not an answer (Google
@@ -79,7 +87,7 @@ function DisclosureCard({ onDone }: { onDone: (ok: boolean) => void }) {
           <div className="overflow-y-auto">
             <div className="p-3 pb-0">
               <div className="liquid-glass-inset h-28 rounded-[24px] overflow-hidden pointer-events-none flex items-center justify-center px-4">
-                <Lottie src={trackingAnimation as any} autoplay loop className="h-full aspect-[351/174] max-w-full" />
+                {trackingAnimation && <Lottie src={trackingAnimation} autoplay loop className="h-full aspect-[351/174] max-w-full" />}
               </div>
             </div>
             <div className="px-6 pt-5">

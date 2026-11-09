@@ -3,20 +3,20 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'data_import' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
 // report inside is gated by its own module — see ReportsInsightsRoutes.ts).
 export const REPORTS_INSIGHTS_MODULES: AdminModuleKey[] = [
-  'attendance_reports', 'attendance', 'office_attendance', 'claims', 'conveyance',
+  'attendance_reports', 'attendance', 'office_attendance', 'claims', 'bill_claim',
   'disbursement', 'leave_applications', 'asset_management', 'vehicle_management'
 ];
 
-// Admin Panel -> Data Import: shows for anyone holding at least one of the
-// modules its imports write into (each import is gated by its own module —
-// see DataImportRoutes.ts).
-export const DATA_IMPORT_MODULES: AdminModuleKey[] = ['employees', 'leave_applications', 'claims', 'conveyance', 'attendance', 'office_attendance'];
+// Modules HR Data Import can write into. Holding one of them is not enough
+// to import: the page needs the 'data_import' module and each kind its own
+// data_import layer tick (see DataImportRoutes.ts).
+export const DATA_IMPORT_MODULES: AdminModuleKey[] = ['employees', 'leave_applications', 'claims', 'bill_claim', 'attendance', 'office_attendance'];
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Every role==='admin'|'superadmin' account already gets this as their own
@@ -44,8 +44,8 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'leave_applications', label: 'Monthly Leave Application' },
   { key: 'office_attendance', label: 'Office Attendance' },
   { key: 'tracking', label: 'Employee Tracking' },
-  { key: 'claims', label: 'Movement Claims' },
-  { key: 'conveyance', label: 'Conveyance Bill Claim' },
+  { key: 'claims', label: 'Check In/Out' },
+  { key: 'bill_claim', label: 'Bill Claim' },
   { key: 'disbursement', label: 'Conveyance Disbursement' },
   { key: 'approvals', label: 'Approvals' },
   { key: 'notices', label: 'Notices' },
@@ -68,6 +68,8 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'recruitment', label: 'Recruitment (ATS)' },
   { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
   { key: 'hr_analytics', label: 'HR Analytics' },
+  { key: 'management_dashboard', label: 'Management Dashboard' },
+  { key: 'data_import', label: 'HR Data Import' },
   { key: 'document_vault', label: 'Document Vault' },
   { key: 'hr_operations', label: 'HR Operations' },
   // Tasks (TaskManagement.tsx): give tasks to anyone, employees' requests to
@@ -95,7 +97,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -109,7 +111,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'conveyance', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'document_vault', 'employees'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['notices', 'departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'bill_claim', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'document_vault', 'employees', 'recruitment', 'data_import', 'vehicle_management'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -140,10 +142,18 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     // Sees every Payroll page and report, changes nothing — give it to Audit
     // and Accounts with their Audit Approve / Accounts Pay layer.
     { key: 'payroll_view', label: 'View only (Audit / Accounts)' },
+    // Payroll -> Approval -> Salary sheet: the month's salaries on screen.
+    { key: 'approval_sheet', label: 'Approval — Salary sheet (view)' },
+    // Payroll -> Approval -> Month comparison (this month vs last, and why).
+    { key: 'month_compare', label: 'Approval — Month comparison (view)' },
+    // Payroll -> Approval -> Top Sheet: the month's salary by Branch / site.
+    { key: 'top_sheet', label: 'Approval — Top Sheet (view)' },
     { key: 'salary_month', label: 'Salary Month Setting' },
     { key: 'salary_hold', label: 'Salary Hold / Release' },
-    // Payroll -> Approval: Audit approves / returns a month, Accounts pays it.
-    { key: 'audit_approve', label: 'Audit Approve' },
+    // Payroll -> Approval: the HR Director checks the sheet; Accounts pays it;
+    // Audit checks a paid month afterwards (optional, never blocks pay).
+    { key: 'hrd_review', label: 'HR Director review' },
+    { key: 'audit_approve', label: 'Audit (after payment)' },
     { key: 'accounts_pay', label: 'Accounts Pay' },
     // Payroll -> Activity Log: who opened Payroll and what they did.
     { key: 'access_log', label: 'Activity Log' },
@@ -156,14 +166,21 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'limit_history', label: 'Limit Change History' }
   ],
   // Office Attendance -> Unlinked PINs (edits Employees: explicit only).
+  // Notices: who has read it (report, send again) and email — only when ticked.
+  notices: [
+    { key: 'read', label: 'Write & publish notices' },
+    { key: 'notice_read_report', label: 'Who has read it (report & send again)' },
+    { key: 'notice_email', label: 'Send notices by email' },
+    { key: 'notice_animations', label: 'Animation library (add / remove)' }
+  ],
   office_attendance: [
     { key: 'read', label: 'Office Attendance' },
     { key: 'link_pins', label: 'Link Device PINs' }
   ],
   // Conveyance -> Claim on Behalf: file a claim for another employee (it goes
   // through that employee's approval chain). Explicit only.
-  conveyance: [
-    { key: 'read', label: 'Conveyance Bill Claim' },
+  bill_claim: [
+    { key: 'read', label: 'Bill Claim' },
     { key: 'on_behalf', label: 'Claim on Behalf' }
   ],
   // HR Operations -> Onboarding -> New Joiners (self-service onboarding).
@@ -197,7 +214,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // Attendance Reports -> who came late on a day, by name. Explicit only.
   attendance_reports: [
     { key: 'read', label: 'Attendance Reports' },
-    { key: 'late_list', label: 'Late list (who came late)' }
+    { key: 'late_list', label: 'Late list (who came late)' },
+    { key: 'dept_summary', label: 'Department Summary (present / absent / leave / delay by department)' },
+    { key: 'custom_report', label: 'Custom Report (Attendance Report Builder)' }
   ],
   // Mail Administration -> open someone's mailbox (read only) and see a
   // mailbox's saved password. Both explicit only, both logged.
@@ -233,12 +252,35 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'sign_request', label: 'Request signatures from others' },
     { key: 'esign_settings', label: 'E-Signature settings (OTP, read to the end)' }
   ],
+  // Recruitment (ATS): emailing a candidate (interview set / moved /
+  // cancelled, offer, regret) is its own explicit tick.
+  recruitment: [
+    { key: 'read', label: 'Recruitment (postings, candidates, interviews)' },
+    { key: 'email_candidates', label: 'Email candidates' }
+  ],
+  // Vehicle Management -> Inventory -> Drivers: adding / changing /
+  // removing a driver is its own explicit tick.
+  vehicle_management: [
+    { key: 'read', label: 'Vehicle Management' },
+    { key: 'manage_drivers', label: 'Manage drivers' }
+  ],
+  // HR Data Import: one tick per kind of data. Having Employees / Leave /
+  // Attendance… does not let anyone import into it — only these ticks do.
+  // All explicit-only. (Salary import is Payroll -> Salary Bulk Upload.)
+  data_import: [
+    { key: 'import_employees', label: 'Import Employee Details' },
+    { key: 'import_leave', label: 'Import Leave' },
+    { key: 'import_movement_claims', label: 'Import Check In/Out' },
+    { key: 'import_bill_claims', label: 'Import Bill Claims' },
+    { key: 'import_attendance', label: 'Import Remote Attendance' },
+    { key: 'import_office_attendance', label: 'Import Office Attendance' }
+  ],
   // Users -> Block / Unblock a login (only for accounts it is ticked for).
   users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }, { key: 'password_requests', label: 'Password requests (Forgot password)' }]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -541,7 +583,7 @@ export interface ApprovalChainStep {
 // which layer it's waiting on right now while status is 'pending'.
 // Approval Templates (Admin Panel -> Approvals -> Templates,
 // ApprovalTemplateManager.tsx; GET /api/approval-templates).
-export type ApprovalRequestType = 'conveyance' | 'leave' | 'timesheet' | 'asset' | 'vehicle' | 'mobile' | 'loan';
+export type ApprovalRequestType = 'bill_claim' | 'leave' | 'timesheet' | 'asset' | 'vehicle' | 'mobile' | 'loan';
 export interface ApprovalTemplateStep {
   id?: number;
   step_order: number;
@@ -565,7 +607,7 @@ export interface ApprovalRequest {
   // 1 while it waits for an approver (no Supervisor and no Approval Template
   // for the employee); it moves to one as soon as one is set.
   awaiting_approver?: number | null;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
+  source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
   event_type: 'check_in' | 'check_out' | 'submit';
   source_id: number;
   requested_by: number;
@@ -574,7 +616,7 @@ export interface ApprovalRequest {
   current_step: number;
   total_steps: number;
   actions: ApprovalAction[];
-  // Conveyance Bill Claims only (see ClaimReviewBits.tsx): the claim version
+  // Bill Claims only (see ClaimReviewBits.tsx): the claim version
   // to send back with a decision, what the employee changed since the last
   // Return/Reject, and whether Return / "Allow re-claim" are offered.
   claim_version?: number;
@@ -586,21 +628,21 @@ export interface ApprovalRequest {
   updated_at?: string;
   // Only present on rows from GET /api/approvals (joined server-side) — a short
   // human-readable label for what was checked in/out of (Project name for
-  // Attendance, Purpose for a Movement Claim, Description/Category for a
-  // Conveyance Bill Claim, "Date — Project" for an Attendance Correction), and
+  // Attendance, Purpose for a Check In/Out, Description/Category for a
+  // Bill Claim, "Date — Project" for an Attendance Correction), and
   // who's up next while still pending.
   source_label?: string;
   // GET /api/approvals: who can act on the current Layer now.
   current_approver_ids?: number[];
-  // Only present when source_type is 'user_claim' — the Conveyance Bill Claim's
+  // Only present when source_type is 'bill_claim' — the Bill Claim's
   // Amount/Category, so the Approvals queue can show them without a second call.
   source_amount?: number | null;
   source_category?: string | null;
-  // Only present when source_type is 'user_claim' AND the request has already
+  // Only present when source_type is 'bill_claim' AND the request has already
   // been approved — the Approved Amount the approver recorded at decision time
   // (may be less than source_amount, a partial approval). NULL while still
   // pending, rejected, or for anything approved before this feature existed.
-  // Pending user_claim on its template's Conveyance Disburser Layer —
+  // Pending bill_claim on its template's Conveyance Disburser Layer —
   // Approve there also pays it out (own Bill + voucher no).
   conveyance_disburser_step?: boolean;
   source_approved_amount?: number | null;
@@ -613,16 +655,16 @@ export interface ApprovalAction {
   step_order: number;
   approver_id: number;
   approver_name: string;
-  // 'returned' / 'resubmitted': Conveyance Bill Claims sent back for
+  // 'returned' / 'resubmitted': Bill Claims sent back for
   // correction, and the employee's resubmission.
   action: 'approved' | 'rejected' | 'returned' | 'resubmitted';
   remarks: string | null;
   acted_at: string;
-  // Only present on a 'user_claim' Approve — the Approved Amount this Layer
+  // Only present on a 'bill_claim' Approve — the Approved Amount this Layer
   // decided (whatever they submitted, or the running/original amount
   // carried forward if they left it untouched). amount_edited is true only
   // when this differs from whatever was on record just before this action,
-  // so the Admin's Conveyance Bill Claim history can tell "approved as-is"
+  // so the Admin's Bill Claim history can tell "approved as-is"
   // apart from "partially approved here" and count real edits across the
   // whole chain. See performApprovalAction server-side.
   approved_amount?: number | null;
@@ -747,19 +789,19 @@ export interface User {
   // switched on by the Superadmin (PUT /api/users/:id/leave-management-access).
   can_manage_leave?: boolean;
   // Superadmin-only grants: can this Admin or User account see/use the Movement
-  // Claim (GPS Check In/Out) and Conveyance Bill Claim sections on ITS OWN User
+  // Claim (GPS Check In/Out) and Bill Claim sections on ITS OWN User
   // Panel at all? Always true for role === 'superadmin'. OFF by default for
   // 'admin'/'user', switched on by the Superadmin (PUT
-  // /api/users/:id/movement-claim-access and .../conveyance-claim-access) — the
+  // /api/users/:id/movement-claim-access and .../bill-claim-access) — the
   // same gate every other module already has, applied here too.
   can_view_movement_claims?: boolean;
-  can_view_conveyance_claims?: boolean;
+  can_view_bill_claims?: boolean;
   // Superadmin-only grant: can this Admin or User account see/use the core
   // Budget/Jobs/Job Entry Details workflow ("Select a Budget", "Jobs", "Job
   // Entry Details" — the mobile tile menu, BottomNav tabs, and the
   // Navbar/GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items) on ITS
   // OWN User Panel at all? Always true for role === 'superadmin'. Unlike
-  // can_view_movement_claims/can_view_conveyance_claims above, this is ON by
+  // can_view_movement_claims/can_view_bill_claims above, this is ON by
   // default for 'admin'/'user' too, so nothing changes until the Superadmin
   // explicitly switches it off (PUT /api/users/:id/budget-module-access).
   can_view_budget_module?: boolean;
@@ -776,12 +818,14 @@ export interface User {
   // for role === 'superadmin'. OFF by default for 'admin'/'user', switched on
   // by the Superadmin (PUT /api/users/:id/timesheet-access,
   // .../leave-application-access, .../my-leave-access) — same on/off pattern
-  // as can_view_movement_claims/can_view_conveyance_claims above. Self
+  // as can_view_movement_claims/can_view_bill_claims above. Self
   // Service -> Employee Directory deliberately has NO such flag — every
   // account keeps seeing it regardless (see GlobalSidebar.tsx).
   can_view_timesheet?: boolean;
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
+  // Chat: may turn ON disappearing messages (off by default).
+  can_use_disappearing?: boolean;
   // Chat (ChatPanel.tsx) — Module Access switch, on unless turned off.
   can_use_chat?: boolean;
   can_use_mail?: boolean;
@@ -797,6 +841,15 @@ export interface User {
   can_view_roster?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.
   can_take_break?: boolean;
+  // Book a Ride -> save places (Home / Work…) with a note for the driver — off by default.
+  can_save_ride_places?: boolean;
+  // Remote Attendance -> give the Out Time again the same day — off by default.
+  can_update_check_out?: boolean;
+  // Approve Application -> "Add approver": ask one more person to approve a
+  // request waiting on them first (ApprovalRoutes.ts) — off by default.
+  can_add_adhoc_approver?: boolean;
+  // AI Assistant -> speak a question / hear the answer (off by default).
+  can_use_assistant_voice?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
   can_sign_documents?: boolean;
   can_view_payslip?: boolean;
@@ -817,8 +870,10 @@ export interface User {
   can_view_tasks?: boolean;
   // Self Service -> My Mobile SIM (MyMobileSim.tsx) — off until turned on in Module Access.
   can_view_mobile_bill?: boolean;
-  // Self Service -> My Letters & Service Record -> Service Book (own Employee 360).
+  // Profile -> My Service Book (own Employee 360).
   can_view_service_book?: boolean;
+  // Whether this login has its own Employee record (GET /api/auth/me).
+  has_employee?: boolean;
   // Self Service -> My Loan / Advance (LoanRequestRoutes.ts).
   can_view_loan_request?: boolean;
   // Self Service -> My Targets (MyTargets.tsx, TargetRoutes.ts). Off by default.
@@ -1528,6 +1583,11 @@ export interface AttendanceRecord {
   check_out_lng?: number | null;
   check_out_distance_m?: number | null;
   check_out_remarks?: string | null;
+  // Out Time given again the same day (users.can_update_check_out): the
+  // first one, how often it was replaced, and whether this account may now.
+  check_out_first_at?: string | null;
+  check_out_update_count?: number;
+  can_update_check_out?: boolean;
   created_at?: string;
   // Only present on rows returned to a User's own history / an Admin's system-wide
   // list (joined server-side) — never trusted as something the client can set.
@@ -1577,38 +1637,38 @@ export interface AttendanceCorrection {
   reviewed_at?: string | null;
   created_at?: string;
   // Only present on rows from GET /api/attendance/corrections/mine (joined
-  // server-side) — mirrors ClaimRecord/UserClaim's `approval` field, null
+  // server-side) — mirrors ClaimRecord/BillClaim's `approval` field, null
   // meaning no chain was configured yet when this request was submitted (in
   // which case it was auto-processed immediately instead).
   approval?: AttendanceCorrectionApproval | null;
 }
-// (source: 'user_claim' once it reaches a ConveyanceBillItem) that requires
+// (source: 'bill_claim' once it reaches a ConveyanceBillItem) that requires
 // Admin approval before it's attached to an official Conveyance Bill. Unlike a
-// Movement Claim (ClaimRecord — a live GPS check-in/out) this is filled in by
+// Check In/Out (ClaimRecord — a live GPS check-in/out) this is filled in by
 // hand after the fact, optionally spanning several days (a multi-day tour) and
-// optionally carrying a receipt/attachment. See POST /api/user-claims.
+// optionally carrying a receipt/attachment. See POST /api/bill-claims.
 // Category names come from Bill Claim Policy (bill_claim_categories), so any
 // name is possible; these five are the starting set.
-export type UserClaimCategory = string;
-export type UserClaimStatus = 'pending' | 'approved' | 'rejected';
+export type BillClaimCategoryName = string;
+export type BillClaimStatus = 'pending' | 'approved' | 'rejected';
 
-export const USER_CLAIM_CATEGORIES: UserClaimCategory[] = ['Transport', 'Fuel', 'Toll', 'Parking', 'Others'];
+export const BILL_CLAIM_CATEGORIES: BillClaimCategoryName[] = ['Transport', 'Fuel', 'Toll', 'Parking', 'Others'];
 
-// One referenced Movement Claim (check-in/out) attached to a UserClaim, each
-// carrying its own Amount — see user_claim_references / GET /api/claims/available.
+// One referenced Check In/Out (check-in/out) attached to a BillClaim, each
+// carrying its own Amount — see bill_claim_references / GET /api/claims/available.
 // purpose/check_in_at/check_out_at/distance_km are joined in from the `claims`
 // row for display, so the User/Admin can see exactly which check-in/out an
 // amount belongs to without a second lookup.
-export interface UserClaimReference {
+export interface BillClaimReference {
   claim_id: number;
   amount: number;
   purpose: string;
   check_in_at: string;
   check_out_at?: string | null;
   distance_km?: number | null;
-  // Where the referenced Movement Claim's Check In/Out actually happened — lets
+  // Where the referenced Check In/Out's Check In/Out actually happened — lets
   // an Admin open the same read-only ClaimLocationMap while reviewing a
-  // Conveyance Bill Claim, without a second permission-gated lookup.
+  // Bill Claim, without a second permission-gated lookup.
   check_in_lat?: number | null;
   check_in_lng?: number | null;
   check_out_lat?: number | null;
@@ -1617,9 +1677,9 @@ export interface UserClaimReference {
   check_out_approval?: ApprovalStatusSummary | null;
 }
 
-// One bill inside a Conveyance Bill Claim. category_name is kept as it was
+// One bill inside a Bill Claim. category_name is kept as it was
 // when filed, so renaming/deleting the category later doesn't change it.
-export interface UserClaimItem {
+export interface BillClaimItem {
   id?: number;
   category_id: number | null;
   category_name: string;
@@ -1651,7 +1711,7 @@ export interface BillClaimPolicyDef {
   unit?: string;
 }
 export type BillClaimPolicyValues = Record<string, number | boolean>;
-// GET /api/bill-claim-policy/mine — what the New Conveyance Claim form needs.
+// GET /api/bill-claim-policy/mine — what the New Bill Claim form needs.
 export interface MyBillClaimPolicy {
   today: string;
   min_date: string;
@@ -1663,34 +1723,34 @@ export interface MyBillClaimPolicy {
   today_claim_id?: number | null;
 }
 
-export interface UserClaim {
+export interface BillClaim {
   id: number;
   user_id: number;
   claim_date: string; // YYYY-MM-DD
   from_date: string; // YYYY-MM-DD — start of the covered date range (defaults to claim_date)
   to_date: string; // YYYY-MM-DD — end of the covered date range, >= from_date
   // One category name, or "Fuel, Toll" when the claim's bills span several.
-  category: UserClaimCategory;
+  category: BillClaimCategoryName;
   // The total Claim Amount: the bills (items) plus any referenced
   // check-in/outs (claim_refs).
   amount: number;
   // The claim's bills — one per category/date/amount (empty on claims filed
   // before bill lines existed).
-  items?: UserClaimItem[];
-  // Zero or more completed Movement Claims (check-in/out) this claim references,
-  // each with its own amount — see POST /api/user-claims (claim_refs in the
+  items?: BillClaimItem[];
+  // Zero or more completed Check In/Out (check-in/out) this claim references,
+  // each with its own amount — see POST /api/bill-claims (claim_refs in the
   // request body) and GET /api/claims/available (the picker source). A given
-  // check-in/out can only ever be referenced by ONE UserClaim.
-  claim_refs?: UserClaimReference[];
+  // check-in/out can only ever be referenced by ONE BillClaim.
+  claim_refs?: BillClaimReference[];
   description?: string | null;
   // The attachment itself (LONGBLOB) is never sent on list/mine/admin-list rows —
   // only has_file (whether one exists) is. Fetch the actual bytes from
-  // GET /api/user-claims/:id/file, which the owner or an Admin with the
-  // "conveyance" module can call.
+  // GET /api/bill-claims/:id/file, which the owner or an Admin with the
+  // "bill_claim" module can call.
   file_name?: string | null;
   file_mimetype?: string | null;
   has_file?: boolean;
-  status: UserClaimStatus;
+  status: BillClaimStatus;
   // Set by the Admin on Approve/Reject — shown to the User on a Rejected claim,
   // optional on Approved.
   admin_remarks?: string | null;
@@ -1699,7 +1759,7 @@ export interface UserClaim {
   // Set when an Admin filed this claim for the employee (Conveyance -> Claim on Behalf).
   filed_by?: number | null;
   filed_by_name?: string | null;
-  // Editing (ConveyanceClaimHistory.ts / Bill Claim Policy -> Editing & review):
+  // Editing (BillClaimHistory.ts / Bill Claim Policy -> Editing & review):
   // the employee may edit while `editable`; `edit_mode` says why (still before
   // the lock Layer, returned for correction, or rejected with re-claim
   // allowed); `lock_reason` says why not. `version` goes back with the edit.
@@ -1713,27 +1773,27 @@ export interface UserClaim {
   lock_reason?: string | null;
   reviewed_at?: string | null;
   // Set once an Approved claim has actually been attached as a line item onto a
-  // Conveyance Bill (see POST /api/user-claims/:id/decision) — null until then.
+  // Conveyance Bill (see POST /api/bill-claims/:id/decision) — null until then.
   bill_item_id?: number | null;
   bill_id?: number | null;
   created_at?: string;
   updated_at?: string;
-  // Only present on rows from the Admin's GET /api/user-claims list.
+  // Only present on rows from the Admin's GET /api/bill-claims list.
   user_name?: string | null;
   // Present once this claim was routed through the Approval Workflow (a
   // Template/Supervisor applied at submit time) — null when either no
   // Approval Request exists yet (auto-processed immediately, nothing
   // configured) or the claim predates this feature. Includes which Layer/
   // approver it's currently sitting with (while still 'pending') and its
-  // approve/reject trail so far. See attachUserClaimApproval server-side.
-  approval?: UserClaimApproval | null;
+  // approve/reject trail so far. See attachBillClaimApproval server-side.
+  approval?: BillClaimApproval | null;
 }
 
 // Same idea as AttendanceCorrectionApproval — adds who a Conveyance Bill
 // Claim's Approval Request is currently sitting with (null once it's no
 // longer 'pending') and the full approve/reject trail, so the User can see
 // exactly which Layer their claim is waiting on.
-export interface UserClaimApproval extends ApprovalStatusSummary {
+export interface BillClaimApproval extends ApprovalStatusSummary {
   current_approver_name?: string | null;
   actions?: ApprovalAction[];
 }
@@ -1758,7 +1818,7 @@ export interface Notice {
   content_html: string;
   lottie_json?: string | null;
   lottie_url?: string | null;
-  target_type: 'all' | 'specific';
+  target_type: 'all' | 'specific' | 'groups';
   // 'tracking' = sent from Employee Tracking -> Currently Not Tracked;
   // 'budget_import' = drafted from a PEPM Budget import (BudgetNoticeDraft.ts).
   source?: string | null;
@@ -1774,6 +1834,49 @@ export interface Notice {
   audience_count?: number;
   seen_count?: number;
   seen_by?: string[];
+  ack_count?: number;
+  // Notice v2 (NoticeRoutes.ts): audience groups, priority, schedule, files.
+  audience?: NoticeAudience;
+  status?: 'live' | 'scheduled' | 'expired' | 'paused' | 'draft';
+  priority?: NoticePriority;
+  publish_at?: string | null;
+  expire_at?: string | null;
+  pinned?: boolean;
+  require_ack?: boolean;
+  send_push?: boolean;
+  send_email?: boolean;
+  remind_unread?: boolean;
+  // People who join after it went out also get it (default: no).
+  new_joiners?: boolean;
+  cover?: NoticeFile | null;
+  files?: NoticeFile[];
+}
+
+export type NoticePriority = 'normal' | 'important' | 'urgent';
+export interface NoticeAudience {
+  departments: number[];
+  branches: number[];
+  include: number[];
+  exclude: number[];
+}
+export interface NoticeFile {
+  id: number;
+  kind: 'image' | 'file';
+  role?: 'inline' | 'cover' | 'attachment';
+  name: string;
+  mimetype: string;
+  size: number;
+  url: string;
+}
+export interface NoticeAudiencePerson {
+  id: number;
+  name: string;
+  role: string;
+  employee_code: string | null;
+  designation: string | null;
+  department: string | null;
+  department_id: number | null;
+  branch_id: number | null;
 }
 
 // Personal Alerts (bell icon, web + mobile) — a small per-account inbox.
@@ -1785,10 +1888,10 @@ export type AlertType =
   // A Leave Application waiting on this account (Reliever or an approval
   // Layer) — opens Approve Application.
   | 'leave_approval'
-  | 'conveyance_claim'
-  // A Conveyance Bill Claim waiting on this account's approval — opens
-  // Approve Application ('conveyance_claim' is the claimant's own updates).
-  | 'conveyance_approval'
+  | 'bill_claim'
+  // A Bill Claim waiting on this account's approval — opens
+  // Approve Application ('bill_claim' is the claimant's own updates).
+  | 'bill_claim_approval'
   | 'conveyance_disbursed'
   | 'asset_requisition'
   // An Asset Requisition waiting on this account (approve, or fulfill on an
@@ -1813,6 +1916,9 @@ export type AlertType =
   // Site Attendance (supervisor muster roll): a reminder / review outcome
   // for the supervisor — opens Self Service -> Team Attendance.
   | 'site_attendance'
+  // Office Attendance: a ZKTeco machine went quiet — opens Admin Panel ->
+  // Office Attendance -> Machines.
+  | 'zk_machine'
   // Superadmin: a new phone is waiting for approval (Admin Panel -> Device Access).
   | 'device_request'
   // Tasks (TaskRoutes.ts): a task given / started / done / overdue, or a new
@@ -1846,9 +1952,12 @@ export type AlertType =
   | 'mpr_dispatch'
   // Someone asked HR for a new password (login page) — opens Users -> Password requests.
   | 'password_request'
+  | 'profile_photo'
   // A notice drafted from a Budget import, waiting to be checked and published — opens Notices.
   | 'notice_draft'
-  | 'requisition';
+  | 'requisition'
+  // An interview this account takes was set, moved or cancelled (RecruitmentRoutes.ts).
+  | 'interview';
 
 export interface Alert {
   id: number;
@@ -1875,9 +1984,18 @@ export interface ActiveNotice {
   // shows it as the location set-up card).
   source?: string | null;
   created_at?: string;
+  priority?: NoticePriority;
+  require_ack?: boolean;
+  pinned?: boolean;
+  cover?: NoticeFile | null;
+  attachments?: NoticeFile[];
+  opened_at?: string | null;
+  acknowledged_at?: string | null;
+  // Who posted it.
+  from_name?: string | null;
 }
 
-// "Movement Claim" — a User checks in with a Purpose (where/why they're heading
+// "Check In/Out" — a User checks in with a Purpose (where/why they're heading
 // out for office work), then later checks out once they reach/finish there. Unlike
 // Remote Attendance this isn't tied to a fixed Project geofence — it's a free-form
 // point A -> point B travel record used for TA/DA-style reimbursement claims. Only
@@ -1910,20 +2028,20 @@ export interface ClaimRecord {
   user_name?: string | null;
 }
 
-// One line item inside a Conveyance Bill (Admin Panel -> Conveyance Bill Claim,
+// One line item inside a Conveyance Bill (Admin Panel -> Bill Claim,
 // Superadmin + explicitly-granted Admins only) — either pulled in from that
-// Bill's User's own completed Movement Claim (source: 'movement_claim', claim_id
+// Bill's User's own completed Check In/Out (source: 'movement_claim', claim_id
 // set) or entered fully by hand (source: 'manual', claim_id null). Every field
 // here is this item's OWN copy, taken from the Claim at the moment it was added
 // (if any) — it stays intact even if that Claim is later edited/removed.
 export interface ConveyanceBillItem {
   id: number;
   bill_id: number;
-  source: 'movement_claim' | 'manual' | 'user_claim';
+  source: 'movement_claim' | 'manual' | 'bill_claim';
   claim_id?: number | null;
-  // Set when source === 'user_claim' — which User-submitted claim this item was
-  // approved in from (see UserClaim above). Mutually exclusive with claim_id.
-  user_claim_id?: number | null;
+  // Set when source === 'bill_claim' — which User-submitted claim this item was
+  // approved in from (see BillClaim above). Mutually exclusive with claim_id.
+  bill_claim_id?: number | null;
   entry_date: string;
   particulars: string;
   from_location?: string | null;
@@ -1976,29 +2094,29 @@ export interface ConveyanceBill {
   department?: string | null;
 }
 
-// Fired by the Navbar's web-only "Claims" header menu (Movement Claims /
-// Conveyance Bill Claim) — App.tsx bumps `ts` on every click (even repeat
+// Fired by the Navbar's web-only "Claims" header menu (Check In/Out /
+// Bill Claim) — App.tsx bumps `ts` on every click (even repeat
 // clicks on the same target) so AdminPanel/UserPanel's effect always re-fires,
 // then hands this down to whichever of the two panels is currently mounted.
 export interface ClaimsNavRequest {
-  target: 'movementClaims' | 'conveyanceBill';
+  target: 'movementClaims' | 'billClaim';
   ts: number;
 }
 
 // Fired by the Navbar's web-only "Budget", "Manage" and "Workforce" header
 // menus — same bump-`ts`-on-every-click pattern as ClaimsNavRequest above.
 // Consumed by AdminPanel only: every one of these targets is an Admin-only
-// tab with no User Panel equivalent, unlike Movement Claims/Conveyance Bill
+// tab with no User Panel equivalent, unlike Check In/Out/Conveyance Bill
 // Claim above which exist in both panels.
 export interface AdminNavRequest {
   // 'bill_claim_policy' is NOT an AdminModuleKey/module_permissions entry —
-  // the "Bill Claim Policy" page rides along with the 'conveyance' tab.
+  // the "Bill Claim Policy" page rides along with the 'bill_claim' tab.
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
   // Every Admin Panel module (claims / conveyance go through ClaimsNavRequest)
   // plus the pages that aren't modules.
-  target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'dashboard' | 'reports_insights' | 'data_import' | 'bill_claim_policy' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'servers';
+  target: Exclude<AdminModuleKey, 'claims' | 'bill_claim'> | 'dashboard' | 'reports_insights' | 'data_import' | 'bill_claim_policy' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'servers';
   ts: number;
 }
 
@@ -2006,7 +2124,7 @@ export interface AdminNavRequest {
 // Details / Job Edits) — same bump-`ts`-on-every-click pattern as
 // ClaimsNavRequest above. Consumed by UserPanel only: every one of these
 // targets is a User Panel section with no Admin Panel equivalent, unlike
-// Movement Claims/Conveyance Bill Claim which exist in both panels.
+// Check In/Out/Bill Claim which exist in both panels.
 export interface JobsNavRequest {
   target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit';
   ts: number;
@@ -2061,7 +2179,7 @@ export interface ChatRoom {
   my_role: 'admin' | 'member';
   last_message_id: number | null;
   last_message_content: string | null;
-  last_message_type: 'text' | 'image' | 'file' | 'audio' | null;
+  last_message_type: 'text' | 'image' | 'file' | 'audio' | 'system' | null;
   last_message_sender_id: number | null;
   last_message_at: string | null;
   unread_count: number;
@@ -2071,6 +2189,16 @@ export interface ChatRoom {
   // This account's background for the conversation (chat/ChatExtras.tsx
   // CHAT_WALLPAPERS); null = the default.
   wallpaper?: string | null;
+  // Group info: photo version (changes when the photo does), description,
+  // "only admins edit info" / "only admins send messages".
+  avatar_version?: number;
+  description?: string | null;
+  info_admins_only?: number | boolean;
+  send_admins_only?: number | boolean;
+  // This account muted the chat until then (null = not muted).
+  muted_until?: string | null;
+  // Disappearing messages for new messages (seconds; 0 = off).
+  disappear_seconds?: number;
 }
 
 export interface ChatRoomMember {
@@ -2095,11 +2223,14 @@ export interface ChatMessage {
   room_id: number;
   sender_id: number;
   sender_name: string;
-  message_type: 'text' | 'image' | 'file' | 'audio';
+  // 'system': a centred note ("Rahim added Karim") — no menu, no unread.
+  message_type: 'text' | 'image' | 'file' | 'audio' | 'system';
   content: string | null;
   attachment_filename: string | null;
   attachment_mimetype: string | null;
   has_attachment: boolean;
+  // Disappearing messages: when this one goes.
+  expires_at?: string | null;
   reply_to_id: number | null;
   reply_to_content: string | null;
   reply_to_sender_name: string | null;
@@ -2112,6 +2243,8 @@ export interface ChatMessage {
   is_forwarded?: number | boolean;
   // One per account that reacted (ChatRoutes.ts loadMessages).
   reactions?: ChatReaction[];
+  // This account starred it (its own bookmark).
+  starred?: boolean;
 }
 export interface ChatReaction {
   emoji: string;

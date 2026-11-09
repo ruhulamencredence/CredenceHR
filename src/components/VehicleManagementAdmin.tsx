@@ -33,6 +33,11 @@ import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 
 import { SearchSelect } from './Combobox';
+import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { VehicleDriversPanel } from './VehicleDriversPanel';
+import { confirmDialog } from '../lib/confirmDialog';
+import { DurationPicker } from './DurationPicker';
+import { formatDuration } from '../lib/rideDuration';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -107,14 +112,24 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
   const [viewingMapFor, setViewingMapFor] = useState<number | null>(null);
   const [viewingDetailsFor, setViewingDetailsFor] = useState<number | null>(null);
+  // Drivers for a ride: Inventory -> Drivers once it is in use (driverPicker.ts).
+  const [driverOptions, setDriverOptions] = useState<DriverOption[]>([]);
+  const loadDriverOptions = () =>
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((rows) => setDriverOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
       .then((r) => r.json())
       .then((rows) => setPeople(Array.isArray(rows) ? rows : []))
       .catch(() => {});
+    void loadDriverOptions();
   }, []);
 
   const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
+  // Inventory: Vehicles | Drivers (VehicleDriversPanel.tsx).
+  const [inventoryView, setInventoryView] = useState<'vehicles' | 'drivers'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -273,6 +288,25 @@ useLiveRefresh(() => loadRequisitions());
     }
   }
 
+  // Calls off a ride that hasn't started: approved and still waiting for a
+  // vehicle, or given a vehicle but never started (the vehicle is freed).
+  async function cancelRide(r: Requisition) {
+    const msg =
+      r.status === 'assigned'
+        ? `Cancel ride #${r.id}? The vehicle is freed for another booking, and the rider and driver are told.`
+        : `Cancel ride request #${r.id}? It is approved but has no vehicle yet — the rider is told.`;
+    if (!(await confirmDialog(msg, { tone: 'danger' }))) return;
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${r.id}/cancel`), { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not cancel this ride.');
+      loadRequisitions();
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   async function decideExtension(id: number, decision: 'approved' | 'rejected') {
     try {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/extension-decision`), {
@@ -353,7 +387,8 @@ useLiveRefresh(() => loadRequisitions());
               <div className="min-w-[220px] flex-1">
                 <div className="font-semibold text-gray-800 text-sm">Ride deadline</div>
                 A request still waiting on approval or a vehicle expires {rideRules.grace_minutes} min after its start time; approvers and
-                Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it.
+                Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it. A ride given a vehicle but never started is
+                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed.
               </div>
               {rideRules.can_change && (
                 <>
@@ -397,7 +432,7 @@ useLiveRefresh(() => loadRequisitions());
                 <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status === 'assigned' ? 'assigned — not started' : r.status}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+                {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
@@ -414,12 +449,20 @@ useLiveRefresh(() => loadRequisitions());
                   {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
                   {r.started_at && <div>Started: {new Date(r.started_at).toLocaleString()}{r.started_by_name ? ` by ${r.started_by_name}` : ''}</div>}
                   {r.status === 'assigned' && (
-                    <button
-                      onClick={() => startRide(r.id)}
-                      className="mt-1.5 px-2.5 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                    >
-                      Start Ride
-                    </button>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      <button
+                        onClick={() => startRide(r.id)}
+                        className="px-2.5 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                      >
+                        Start Ride
+                      </button>
+                      <button
+                        onClick={() => cancelRide(r)}
+                        className="px-2.5 py-1 text-xs font-medium rounded border border-rose-300 text-rose-700 bg-white hover:bg-rose-50"
+                      >
+                        Cancel Ride
+                      </button>
+                    </div>
                   )}
                   {r.status === 'ongoing' && (
                     <button
@@ -538,9 +581,9 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {people.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name}
+                        {sortDrivers(driverOptions, assignForm.vehicle_id).map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {driverOptionLabel(d, assignForm.vehicle_id)}
                           </option>
                         ))}
                       </SearchSelect>
@@ -563,6 +606,14 @@ useLiveRefresh(() => loadRequisitions());
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
                       Assign Vehicle &amp; Driver
+                    </button>
+                  )}
+                  {assigningFor !== r.id && (
+                    <button
+                      onClick={() => cancelRide(r)}
+                      className="ml-2 px-3 py-1.5 text-xs font-medium rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                    >
+                      Cancel Ride
                     </button>
                   )}
                 </div>
@@ -667,16 +718,12 @@ useLiveRefresh(() => loadRequisitions());
                   className="w-full border rounded px-3 py-2 text-sm"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
-                <input
-                  required
-                  type="number"
-                  min={0.5}
-                  step="0.5"
+              <div className="col-span-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration</label>
+                <DurationPicker
                   value={emergencyForm.estimated_duration_hours}
-                  onChange={(e) => setEmergencyForm({ ...emergencyForm, estimated_duration_hours: Number(e.target.value) })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  onChange={(h) => setEmergencyForm({ ...emergencyForm, estimated_duration_hours: h })}
+                  className="border rounded px-3 py-2 text-sm"
                 />
               </div>
             </div>
@@ -693,6 +740,23 @@ useLiveRefresh(() => loadRequisitions());
       )}
 
       {tab === 'inventory' && (
+        <div className="inline-flex rounded-xl bg-slate-100 p-1 mb-4" role="tablist">
+          {(['vehicles', 'drivers'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={inventoryView === k}
+              onClick={() => setInventoryView(k)}
+              className={`px-4 py-1.5 text-sm font-semibold rounded-lg ${inventoryView === k ? 'bg-blue-600 text-white' : 'text-slate-600'}`}
+            >
+              {k === 'vehicles' ? `Vehicles (${vehicles.length})` : 'Drivers'}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === 'inventory' && inventoryView === 'drivers' && <VehicleDriversPanel vehicles={vehicles} onChanged={() => void loadDriverOptions()} />}
+      {tab === 'inventory' && inventoryView === 'vehicles' && (
         <div className="space-y-6">
           <form onSubmit={addVehicle} className="grid grid-cols-4 gap-3 items-end max-w-3xl">
             <div>

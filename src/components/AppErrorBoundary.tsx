@@ -9,10 +9,11 @@
 // / Reload (the house liquid-glass style).
 
 import React from 'react';
-import { isChunkLoadError, reloadForNewVersion } from '../lib/chunkReload';
+import { isChunkLoadError, reloadForNewVersion, serverReachable, waitUntilReachable } from '../lib/chunkReload';
 
 interface State {
   error: Error | null;
+  offline?: boolean;
 }
 
 export class AppErrorBoundary extends React.Component<{ children: React.ReactNode; resetKey?: unknown }, State> {
@@ -23,8 +24,19 @@ export class AppErrorBoundary extends React.Component<{ children: React.ReactNod
   }
 
   componentDidCatch(error: Error) {
-    if (isChunkLoadError(error)) reloadForNewVersion();
     console.error('Page error:', error);
+    if (!isChunkLoadError(error)) return;
+    // No internet is not a new version: wait for the network, then just try
+    // the page again — no app reload.
+    void serverReachable().then(async (ok) => {
+      if (ok) {
+        reloadForNewVersion();
+        return;
+      }
+      this.setState({ offline: true });
+      await waitUntilReachable();
+      this.setState({ error: null, offline: false });
+    });
   }
 
   componentDidUpdate(prev: { resetKey?: unknown }) {
@@ -35,6 +47,16 @@ export class AppErrorBoundary extends React.Component<{ children: React.ReactNod
   render() {
     if (!this.state.error) return this.props.children;
     const chunk = isChunkLoadError(this.state.error);
+    if (chunk && this.state.offline) {
+      return (
+        <div className="w-full min-h-[50vh] flex items-center justify-center px-4 py-10">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] max-w-sm w-full p-6 text-center">
+            <div className="text-base font-bold text-slate-900">No internet</div>
+            <p className="text-sm text-slate-600 mt-1.5">This page opens by itself as soon as the connection is back.</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="w-full min-h-[50vh] flex items-center justify-center px-4 py-10">
         <div className="liquid-glass liquid-glass-in rounded-[32px] max-w-sm w-full p-6 text-center">

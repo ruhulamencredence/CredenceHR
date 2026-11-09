@@ -12,6 +12,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CreditCard, Smartphone, X } from 'lucide-react';
 import { ModulePath } from './ModulePath';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard, toneOfStatus } from './SelfCard';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { LoadingBlock } from './LoadingBlock';
 import { MailPopup as Popup, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -67,6 +70,7 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
   const [error, setError] = useState('');
   const [form, setForm] = useState<{ kind: 'sim' | 'id_card'; reason: string; note: string; operator: string; name_on_card: string; blood_group: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const isPhone = useIsPhone();
 
   const load = useCallback(async () => {
     try {
@@ -162,8 +166,36 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
       {rows.length === 0 ? (
         <p className="text-xs text-slate-500">No requests yet.</p>
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
-          {rows.map((q) => (
+        <div className={isPhone ? 'space-y-2.5' : 'rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100'}>
+          {rows.map((q) =>
+            isPhone ? (
+              // Phone: the shared Directory-style card, tinted by the state.
+              <SelfCard
+                key={q.id}
+                tone={toneOfStatus(q.status)}
+                lead={q.kind === 'sim' ? <Smartphone className="w-[18px] h-[18px]" /> : <CreditCard className="w-[18px] h-[18px]" />}
+                dot={q.status === 'requested' ? 'amber' : undefined}
+                title={`${KIND_LABEL[q.kind]} · ${REASON_LABEL[q.reason] || q.reason}`}
+                sub={['Asked ' + shortDate(q.created_at), q.operator, q.name_on_card ? `"${q.name_on_card}"` : '', q.blood_group].filter(Boolean).join(' · ')}
+                chips={[{ label: statusLabel(q.status), tone: toneOfStatus(q.status) }]}
+                actions={
+                  q.status === 'requested' ? (
+                    <CardButton label="Cancel request" tone="rose" onClick={() => void cancel(q)}>
+                      <X className="w-3.5 h-3.5" />
+                    </CardButton>
+                  ) : undefined
+                }
+              >
+                {q.note && <p className="text-xs text-slate-700">{q.note}</p>}
+                {q.status === 'issued' && (
+                  <p className="text-xs text-emerald-700">
+                    {q.kind === 'sim' ? `SIM ${q.sim_number || ''}` : `Card ${q.card_number || ''}`} — issued {shortDate(q.decided_at)}
+                    {q.decision_note ? ` · ${q.decision_note}` : ''}
+                  </p>
+                )}
+                {q.status === 'rejected' && q.decision_note && <p className="text-xs text-rose-700">HR: {q.decision_note}</p>}
+              </SelfCard>
+            ) : (
             <div key={q.id} className="px-4 py-3 flex items-start gap-3">
               <span className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 mt-0.5">
                 {q.kind === 'sim' ? <Smartphone className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
@@ -196,7 +228,8 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
                 </button>
               )}
             </div>
-          ))}
+            )
+          )}
         </div>
       )}
 
@@ -280,12 +313,14 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
 
 /** Self Service -> SIM & ID Card (users.can_request_items). */
 export const MyRequisitions: React.FC<{ token: string; userName?: string; onBack?: () => void }> = ({ token, userName, onBack }) => {
+  usePhoneHeaderTitle('SIM & ID Card');
   const isNativeApp = Capacitor.isNativePlatform();
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl">
-        {!isNativeApp && <ModulePath path={['Self Service', 'SIM & ID Card']} />}
-        <div className="flex items-center gap-2 mb-4 mt-2">
+        {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'SIM & ID Card']} /></div>}
+        <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
               <ArrowLeft className="w-5 h-5 text-slate-500" />

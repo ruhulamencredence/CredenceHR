@@ -4,6 +4,7 @@
  */
 
 import { useLiveTick } from '../lib/liveRefresh';
+import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
 import { Package, Plus, ChevronRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -24,7 +25,8 @@ export interface MyAssetSummary {
 // Counts behind the My Asset quick access card/tile: assets held, ones still
 // waiting for this account's acknowledgement, and requisitions not yet closed.
 export function useMyAssetSummary(token: string): MyAssetSummary | null {
-  const [summary, setSummary] = useState<MyAssetSummary | null>(null);
+  // Last copy from this device first (screenCache.ts), then the fresh counts.
+  const [summary, setSummary] = useCachedState<MyAssetSummary | null>('asset-summary', null);
   // Live refresh: counts update without a page reload.
   const liveTick = useLiveTick();
   useEffect(() => {

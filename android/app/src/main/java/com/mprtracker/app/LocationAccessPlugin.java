@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.content.ContextCompat;
 import androidx.core.location.LocationManagerCompat;
@@ -122,8 +123,54 @@ public class LocationAccessPlugin extends Plugin {
     // Logout / tracking turned off: forget the sign-in and stop any live reporting.
     @PluginMethod
     public void clearTrackingSession(PluginCall call) {
+        DutyTrackingService.stop(getContext());
         getContext().getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().clear().apply();
         LiveTrackingService.stop(getContext());
+        call.resolve();
+    }
+
+    // Everyday Employee Tracking, reported natively (DutyTrackingService) so
+    // it keeps going with the app in the background or swiped away. Needs
+    // setTrackingSession first.
+    @PluginMethod
+    public void startDutyTracking(PluginCall call) {
+        DutyTrackingService.start(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopDutyTracking(PluginCall call) {
+        DutyTrackingService.stop(getContext());
+        call.resolve();
+    }
+
+    // Battery saving: many phones stop background apps anyway unless
+    // CredenceHR is let off battery optimisation.
+    @PluginMethod
+    public void getBatteryStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        boolean ignoring = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            ignoring = pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+        }
+        ret.put("unrestricted", ignoring);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestBatteryExemption(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+            } catch (Exception e) {
+                Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+            }
+        }
         call.resolve();
     }
 

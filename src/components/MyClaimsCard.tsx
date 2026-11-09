@@ -5,7 +5,8 @@
 
 import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, LogIn, LogOut, Inbox } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, Inbox, MapPin, Map as MapIcon } from 'lucide-react';
+import { CardButton, SelfCard } from './SelfCard';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -19,7 +20,7 @@ interface MyClaimsCardProps {
   // same "Back to Menu" pattern the Jobs / Entries cards already use. Omit (or
   // pass undefined) on desktop where the card is just always visible.
   onBack?: () => void;
-  // Bump this (e.g. ++) to force a re-fetch — used by the Movement Claim page's
+  // Bump this (e.g. ++) to force a re-fetch — used by the Check In/Out page's
   // "Add Check In/Out" sheet so a fresh Check In/Out shows up here right after
   // the sheet reports success, without needing a full page reload.
   refreshKey?: number;
@@ -31,7 +32,7 @@ interface MyClaimsCardProps {
   // disables a new Check In while one is open), so this doesn't need to tell
   // the parent which claim, just that the sheet should open.
   onCheckOut?: () => void;
-  // Web (desktop) Movement Claim page: shown under the Check In/Out form as a
+  // Web (desktop) Check In/Out page: shown under the Check In/Out form as a
   // normal card with its own title, instead of the full-screen mobile page.
   desktop?: boolean;
 }
@@ -39,7 +40,7 @@ interface MyClaimsCardProps {
 type ClaimFilter = 'all' | 'open' | 'completed';
 
 // User Dashboard -> "My Claims" — a dedicated card of its own (same visual treatment
-// as the Jobs summary card next to it), listing every Movement Claim this user has
+// as the Jobs summary card next to it), listing every Check In/Out this user has
 // made. Tapping a claim's row opens ClaimLocationMap to show exactly where the Check
 // In/Check Out happened, same as from the compact history list in MyClaimsModal; a
 // still-open claim also gets its own "Check Out" button so the User can complete it
@@ -125,10 +126,14 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       className={
         desktop
           ? 'mt-4 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col'
-          : 'bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]'
+          : // Phone: the cards sit straight on the page under the blended
+            // header (Navbar.tsx), no panel around them; room at the bottom
+            // for the floating "Add Check In/Out" button.
+            'flex flex-col pb-24 min-h-[calc(100dvh-14rem)]'
       }
     >
-      {onBack && (
+      {/* Desktop only — on a phone the blended header has its own round Back. */}
+      {onBack && desktop && (
         <button
           type="button"
           onClick={onBack}
@@ -142,9 +147,15 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           page's own "My Claims" title in the logo's place (see
           headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
           a redundant duplicate. The count badge stays (it's live data). */}
-      <div className={`flex items-center gap-3 px-5 py-4 border-b shrink-0 ${desktop ? 'border-slate-100' : 'border-white/40'}`}>
-        {desktop && <h3 className="text-sm font-bold text-slate-900">My Movement Claims</h3>}
-        <div className="flex-1 flex items-center gap-1 rounded-full bg-white/60 p-1 text-xs font-semibold max-w-sm ml-auto">
+      <div className={desktop ? 'flex items-center gap-3 px-5 py-4 border-b shrink-0 border-slate-100' : 'shrink-0 px-1 pt-2 pb-1'}>
+        {desktop && <h3 className="text-sm font-bold text-slate-900">My Check In/Out</h3>}
+        <div
+          className={
+            desktop
+              ? 'flex-1 flex items-center gap-1 rounded-full bg-white/60 p-1 text-xs font-semibold max-w-sm ml-auto'
+              : 'grid grid-cols-3 gap-1 rounded-full bg-white/75 border border-white/90 p-[5px] text-[13px] font-semibold shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]'
+          }
+        >
           {(
             [
               ['all', 'All', claims.length],
@@ -156,12 +167,22 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               key={key}
               type="button"
               onClick={() => setFilter(key)}
-              className={`flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-full transition-colors ${
-                filter === key ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
+              aria-pressed={filter === key}
+              className={
+                desktop
+                  ? `flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-full transition-colors ${
+                      filter === key ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`
+                  : `min-h-[40px] inline-flex items-center justify-center gap-1.5 rounded-full transition-colors ${filter === key ? 'text-white' : 'text-zinc-600'}`
+              }
+              style={!desktop && filter === key ? { background: 'var(--g-accent, #7f00ff)', boxShadow: '0 6px 14px -6px rgba(var(--g-accent-rgb,127,0,255),.6)' } : undefined}
             >
               {label}
-              <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] inline-flex items-center justify-center ${filter === key ? 'bg-white/25' : 'bg-slate-200'}`}>
+              <span
+                className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] inline-flex items-center justify-center ${
+                  filter === key ? 'bg-white/25' : desktop ? 'bg-slate-200' : 'bg-slate-900/[.06] font-bold'
+                }`}
+              >
                 {n}
               </span>
             </button>
@@ -173,18 +194,24 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       {loading ? (
         <LoadingBlock />
       ) : shown.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400">
+        <div
+          className={
+            desktop
+              ? 'flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400'
+              : 'mx-1 mt-3 rounded-[24px] bg-white/80 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400'
+          }
+        >
           <Inbox className="w-5 h-5 text-slate-300" />
           <p className="text-sm">
             {claims.length === 0
-              ? 'No claims yet — check in from the Movement Claim card when you head out.'
+              ? 'No check in/out yet — check in from the Check In/Out card when you head out.'
               : filter === 'open'
-                ? 'No open claim.'
-                : 'No completed claims yet.'}
+                ? 'Nothing checked in right now.'
+                : 'No completed check in/out yet.'}
           </p>
         </div>
       ) : (
-        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 overflow-y-auto p-3 space-y-2.5'}>
+        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 px-1 pt-3 space-y-2.5'}>
           {shown.map((c) => {
             // undefined = lookup not resolved yet, null = it resolved to nothing
             // (falls back to plain coordinates below), string = the place name.
@@ -198,6 +225,56 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               checkOutAddr !== undefined
                 ? checkOutAddr ?? `${Number(c.check_out_lat).toFixed(5)}, ${Number(c.check_out_lng).toFixed(5)}`
                 : 'Locating…';
+            // Phone: the shared Directory-style card (SelfCard) — amber while
+            // open, green once checked out; the route and Check Out under it.
+            if (!desktop) {
+              const time = new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+              return (
+                <SelfCard
+                  key={c.id}
+                  tone={c.status === 'open' ? 'amber' : 'green'}
+                  lead={<MapPin className="w-[18px] h-[18px]" />}
+                  dot={c.status === 'open' ? 'amber' : undefined}
+                  title={c.purpose}
+                  sub={`${formatDate(c.check_in_at)} · ${time}`}
+                  chips={[
+                    ...(c.distance_km != null ? [{ label: `${Number(c.distance_km).toFixed(1)} km`, mono: true }] : []),
+                    { label: c.status === 'open' ? 'Open' : 'Completed', tone: c.status === 'open' ? ('amber' as const) : ('green' as const) }
+                  ]}
+                  actions={
+                    <CardButton label="Movement on the map" onClick={() => setViewingLocation(c)}>
+                      <MapIcon className="w-3.5 h-3.5" />
+                    </CardButton>
+                  }
+                >
+                  <div className="rounded-2xl bg-white/55 border border-white/60 px-3 py-2 flex items-start gap-2.5">
+                    <div className="flex flex-col items-center pt-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                      {c.check_out_at && (
+                        <>
+                          <span className="w-px flex-1 min-h-[8px] border-l border-dashed border-slate-300" />
+                          <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0" />
+                        </>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1 text-[11px] text-slate-600">
+                      <p className="truncate">{checkInLabel}</p>
+                      <p className="truncate">{c.check_out_at ? checkOutLabel : <span className="text-slate-400">Not checked out yet.</span>}</p>
+                    </div>
+                  </div>
+                  {c.status === 'open' && onCheckOut && (
+                    <button
+                      type="button"
+                      onClick={onCheckOut}
+                      className="w-full min-h-[40px] flex items-center justify-center gap-1.5 text-[13px] font-bold text-white rounded-full active:scale-[0.99] transition-transform"
+                      style={{ background: 'var(--g-accent, #7f00ff)' }}
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Check Out
+                    </button>
+                  )}
+                </SelfCard>
+              );
+            }
             return (
             // Was a single <button> covering the whole row (tap -> location map).
             // Now a plain <div> instead, since an open claim needs its own nested
@@ -207,17 +284,31 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
             // makes it visually obvious these are separate, individual claims.
             <div
               key={c.id}
-              className="rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]"
+              className={
+                desktop
+                  ? 'rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]'
+                  : 'rounded-[24px] bg-white px-4 py-3.5 space-y-3 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.28),0_2px_6px_-2px_rgba(15,23,42,.06)]'
+              }
             >
-              {/* Purpose + Check In date/time on one line, e.g. "Kakoli, 19-Sep-2026
-                  4:24 PM" — the status badge sits at the end of the same row. */}
+              {/* Purpose + Check In date/time, e.g. "Kakoli, 19-Sep-2026
+                  4:24 PM" (on a phone: the purpose, the date and time under
+                  it) — the status badge sits at the end of the same row. */}
               <div className="flex items-start justify-between gap-3">
-                <span className="text-sm font-medium text-slate-900 truncate">
-                  {c.purpose}, {formatDate(c.check_in_at)}{' '}
-                  {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                </span>
+                {desktop ? (
+                  <span className="text-sm font-medium text-slate-900 truncate">
+                    {c.purpose}, {formatDate(c.check_in_at)}{' '}
+                    {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                ) : (
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-slate-900 truncate">{c.purpose}</span>
+                    <span className="block text-[11.5px] font-medium text-zinc-500 mt-0.5">
+                      {formatDate(c.check_in_at)} · {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </span>
+                )}
                 <span
-                  className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  className={`shrink-0 font-semibold rounded-full border ${desktop ? 'text-[10px] px-2 py-0.5' : 'text-[11px] font-bold px-2.5 py-1 border-transparent'} ${
                     c.status === 'open'
                       ? 'bg-amber-50 text-amber-700 border-amber-200'
                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -236,7 +327,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                 // the Check Out point, each a clickable place-name link, same
                 // visual language as the pickup/drop-off list on a ride-hailing
                 // app's trip history.
-                <div className="flex items-start gap-2.5 pt-0.5">
+                <div className={`flex items-start gap-2.5 ${desktop ? 'pt-0.5' : 'rounded-2xl bg-slate-50/80 px-3 py-2.5'}`}>
                   <div className="flex flex-col items-center pt-1">
                     <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
                     <span className="w-px flex-1 min-h-[8px] border-l border-dashed border-slate-300" />
@@ -260,7 +351,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                   </div>
                 </div>
               ) : (
-                <div className="flex items-start gap-2.5 pt-0.5">
+                <div className={`flex items-start gap-2.5 ${desktop ? 'pt-0.5' : 'rounded-2xl bg-slate-50/80 px-3 py-2.5'}`}>
                   <LogIn className="w-3 h-3 text-emerald-700 shrink-0 mt-1" />
                   <div className="flex-1 min-w-0 space-y-1">
                     <button
@@ -276,14 +367,19 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               )}
 
               {/* Only the still-open claim gets this — lets the User complete it
-                  right here instead of going back to the Movement Claim page's
+                  right here instead of going back to the Check In/Out page's
                   floating button. Opens the same "Add Check In/Out" sheet/form
                   the parent already uses (see onCheckOut on the props above). */}
               {c.status === 'open' && onCheckOut && (
                 <button
                   type="button"
                   onClick={onCheckOut}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg py-2 transition-colors"
+                  className={
+                    desktop
+                      ? 'w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg py-2 transition-colors'
+                      : 'w-full min-h-[42px] flex items-center justify-center gap-1.5 text-[13px] font-bold text-white rounded-full active:scale-[0.99] transition-transform'
+                  }
+                  style={desktop ? undefined : { background: 'var(--g-accent, #7f00ff)' }}
                 >
                   <LogOut className="w-3.5 h-3.5" /> Check Out
                 </button>

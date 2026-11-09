@@ -14,6 +14,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { fetchPhoto } from './UserAvatar';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { registerHeaderSearch, unregisterHeaderSearch, setHeaderSearchBarHidden } from '../lib/headerSearch';
 
 interface EmployeeDirectoryProps {
@@ -149,6 +150,7 @@ const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
 );
 
 export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack, isActive }) => {
+  usePhoneHeaderTitle('Employee Directory', !!isActive);
   const isNativeApp = Capacitor.isNativePlatform();
 
   const [employees, setEmployees] = useState<EmployeeDirectoryEntry[]>([]);
@@ -274,22 +276,45 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   }, [employees]);
   const multiCompany = companies.length > 1;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  // Everyone matching the search box and the other filters, before the
+  // department is picked — the department list and its counts follow it.
+  const searchQ = search.trim().toLowerCase();
+  const matching = useMemo(() => {
     return employees.filter((e) => {
       if (companyFilter && e.company_code !== companyFilter) return false;
-      if (q && !e.name.toLowerCase().includes(q) && !(e.employee_id || '').toLowerCase().includes(q)) return false;
-      if (departmentFilter && String(e.department_id || '') !== departmentFilter) return false;
+      if (searchQ && !e.name.toLowerCase().includes(searchQ) && !(e.employee_id || '').toLowerCase().includes(searchQ)) return false;
       if (designationFilter && e.designation !== designationFilter) return false;
       return true;
     });
-  }, [employees, search, departmentFilter, designationFilter, companyFilter]);
+  }, [employees, searchQ, designationFilter, companyFilter]);
+  const filtered = useMemo(
+    () => (departmentFilter ? matching.filter((e) => String(e.department_id || '') === departmentFilter) : matching),
+    [matching, departmentFilter]
+  );
 
+  // People per department among those matching the search (all of them when
+  // nothing is typed): typing "ruhul" leaves only the departments that have
+  // a Ruhul, each with how many.
+  const deptCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of matching) {
+      const k = String(e.department_id || '');
+      if (k) m.set(k, (m.get(k) || 0) + 1);
+    }
+    return m;
+  }, [matching]);
+  const narrowed = !!searchQ || !!designationFilter || !!companyFilter;
+  // While searching, only departments that have someone matching (and the
+  // one already picked, so it can still be cleared).
+  const shownDepartments = useMemo(
+    () => (narrowed ? departments.filter((d) => (deptCounts.get(String(d.id)) || 0) > 0 || String(d.id) === departmentFilter) : departments),
+    [departments, deptCounts, narrowed, departmentFilter]
+  );
   const filteredDepartments = useMemo(() => {
     const q = deptSearchQuery.trim().toLowerCase();
-    if (!q) return departments;
-    return departments.filter((d) => d.name.toLowerCase().includes(q));
-  }, [departments, deptSearchQuery]);
+    if (!q) return shownDepartments;
+    return shownDepartments.filter((d) => d.name.toLowerCase().includes(q));
+  }, [shownDepartments, deptSearchQuery]);
 
   const selectedDepartmentName = departmentFilter
     ? departments.find((d) => String(d.id) === departmentFilter)?.name || 'All Departments'
@@ -339,17 +364,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'Employee Directory']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Employee Directory']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
@@ -391,15 +410,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
           )}
 
           {/* Search & Control Bar */}
-          <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
+          {/* Phone: a white pill search box and a row of department chips,
+              in the same white-card look as the employee cards below. */}
+          <div className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
             <div className="relative flex-1" ref={searchBarRef}>
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-4 sm:left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or Employee ID…"
-                className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                className="w-full pl-10 sm:pl-9 pr-9 py-3 sm:py-2.5 bg-white sm:bg-slate-50 border-0 sm:border sm:border-slate-200 rounded-full sm:rounded-xl text-sm text-slate-900 shadow-[0_8px_24px_-10px_rgba(15,23,42,0.25)] sm:shadow-none focus:ring-2 focus:ring-[color:var(--g-accent)] sm:focus:ring-blue-600 focus:outline-none"
               />
               {search && (
                 <button
@@ -419,7 +440,28 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 to narrow a long roster down to one team while on mobile. A
                 searchable dropdown (instead of a plain <select>) so a long
                 department list doesn't force a blind scroll. */}
-            <div className="relative w-full lg:w-56" ref={deptDropdownRef}>
+            {/* Phone: departments as a sideways-scrolling row of chips, with
+                how many people each has. */}
+            <div className="sm:hidden -mx-1 px-1 flex gap-2 overflow-x-auto gsidebar-no-scrollbar pb-1" role="tablist" aria-label="Department">
+              {[{ id: '', name: 'All', count: matching.length }, ...shownDepartments.map((d) => ({ id: String(d.id), name: d.name, count: deptCounts.get(String(d.id)) || 0 }))].map((d) => {
+                const on = departmentFilter === d.id;
+                return (
+                  <button
+                    key={d.id || 'all'}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setDepartmentFilter(d.id)}
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${on ? 'text-white' : 'bg-white text-slate-600 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.3)]'}`}
+                    style={on ? { background: 'var(--g-accent)' } : undefined}
+                  >
+                    {d.name}
+                    <span className={`px-1.5 rounded-full text-[10px] ${on ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{d.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block relative w-full lg:w-56" ref={deptDropdownRef}>
               <button
                 type="button"
                 onClick={() => setDeptDropdownOpen((o) => !o)}
@@ -448,9 +490,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                         setDeptDropdownOpen(false);
                         setDeptSearchQuery('');
                       }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${!departmentFilter ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                      className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-50 ${!departmentFilter ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                     >
-                      All Departments
+                      <span>All Departments</span>
+                      <span className="shrink-0 px-1.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">{matching.length}</span>
                     </button>
                     {filteredDepartments.map((d) => (
                       <button
@@ -461,13 +504,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           setDeptDropdownOpen(false);
                           setDeptSearchQuery('');
                         }}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 truncate ${departmentFilter === String(d.id) ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                        className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-50 ${departmentFilter === String(d.id) ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                       >
-                        {d.name}
+                        <span className="truncate">{d.name}</span>
+                        <span className="shrink-0 px-1.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">{deptCounts.get(String(d.id)) || 0}</span>
                       </button>
                     ))}
                     {filteredDepartments.length === 0 && (
-                      <p className="px-3 py-2.5 text-xs text-slate-400">No matching department.</p>
+                      <p className="px-3 py-2.5 text-xs text-slate-400">{narrowed && !deptSearchQuery.trim() ? 'No department has anyone matching the search.' : 'No matching department.'}</p>
                     )}
                   </div>
                 </div>
@@ -604,8 +648,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-semibold text-slate-900 text-sm truncate">{emp.name}</p>
-                          <p className="text-xs text-slate-600 sm:text-slate-500 truncate">{emp.designation || '—'}</p>
+                          {/* Full name, wrapping onto a second line when long. */}
+                          <p className="font-semibold text-slate-900 text-sm leading-snug break-words">{emp.name}</p>
+                          <p className="text-xs text-slate-600 sm:text-slate-500 leading-snug break-words">{emp.designation || '—'}</p>
                         </div>
                       </div>
                       <ChevronRight className="w-4 h-4 text-slate-500 sm:text-slate-300 shrink-0 sm:hidden" />
@@ -846,17 +891,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
 
             {/* Overlapping card */}
             <div className="relative -mt-6 rounded-t-[32px] bg-white/50 backdrop-blur-2xl border-t border-white/60 px-5 pt-5 pb-6 space-y-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-slate-900 truncate">{selectedEmployee.name}</h2>
-                  <p className="text-sm text-slate-500 mt-0.5 truncate">
-                    {selectedEmployee.designation || '—'}
-                    {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
-                    {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
-                  </p>
-                </div>
+              {/* The full name and designation, however long — they wrap
+                  rather than being cut off; the ID sits under them. */}
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-slate-900 leading-snug break-words">{selectedEmployee.name}</h2>
+                <p className="text-sm text-slate-500 mt-0.5 leading-snug break-words">
+                  {selectedEmployee.designation || '—'}
+                  {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
+                  {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
+                </p>
                 {selectedEmployee.employee_id && (
-                  <span className="shrink-0 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
+                  <span className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
                     ID: {selectedEmployee.employee_id}
                   </span>
                 )}
@@ -866,7 +911,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               <div className="grid grid-cols-3 divide-x divide-white/50 bg-white/40 backdrop-blur rounded-2xl border border-white/60 overflow-hidden">
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Department</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.department || '—'}</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.department || '—'}</p>
                 </div>
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Status</p>
@@ -876,25 +921,25 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 </div>
                 <div className="px-2 py-3 text-center min-w-0">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Reports To</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.supervisor_name || '—'}</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.supervisor_name || '—'}</p>
                 </div>
               </div>
 
               <div className="space-y-2.5">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact Information</p>
                 {selectedEmployee.email && (
-                  <a href={`mailto:${selectedEmployee.email}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <Mail className="w-4 h-4 text-slate-400" /> {selectedEmployee.email}
+                  <a href={`mailto:${selectedEmployee.email}`} className="flex items-start gap-2 text-sm text-slate-700 hover:text-blue-600 min-w-0">
+                    <Mail className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-all">{selectedEmployee.email}</span>
                   </a>
                 )}
                 {selectedEmployee.mobile && (
                   <a href={`tel:${selectedEmployee.mobile}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <Phone className="w-4 h-4 text-slate-400" /> {selectedEmployee.mobile}
+                    <Phone className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.mobile}
                   </a>
                 )}
                 {selectedEmployee.phone && selectedEmployee.phone !== selectedEmployee.mobile && (
                   <a href={`tel:${selectedEmployee.phone}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <PhoneCall className="w-4 h-4 text-slate-400" /> {selectedEmployee.phone}
+                    <PhoneCall className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.phone}
                   </a>
                 )}
                 {selectedEmployee.telephone && (
@@ -903,8 +948,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                   </p>
                 )}
                 {officeLocationOf(selectedEmployee) && (
-                  <p className="flex items-center gap-2 text-sm text-slate-700">
-                    <MapPin className="w-4 h-4 text-slate-400" /> {officeLocationOf(selectedEmployee)}
+                  <p className="flex items-start gap-2 text-sm text-slate-700">
+                    <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-words">{officeLocationOf(selectedEmployee)}</span>
                   </p>
                 )}
                 {!selectedEmployee.email && !selectedEmployee.mobile && !selectedEmployee.phone && !selectedEmployee.telephone && (

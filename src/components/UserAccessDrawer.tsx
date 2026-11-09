@@ -23,6 +23,7 @@ import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { AttendanceProjectsEditor } from './AttendanceProjectsEditor';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
   | 'can_job_edit'
@@ -53,12 +54,13 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_login_location: 'See last login location',
   can_access_user_panel: 'User Panel access',
   can_manage_leave: 'Leave balance edit',
-  can_view_movement_claims: 'Movement Claim',
-  can_view_conveyance_claims: 'Conveyance Claim',
+  can_view_movement_claims: 'Check In/Out',
+  can_view_bill_claims: 'Bill Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
   can_use_chat: 'Chat',
   can_use_calls: 'Audio / Video Calls',
+  can_use_disappearing: 'Disappearing messages',
   can_use_mail: 'Credence Mail',
   can_view_mail_directory: 'Mail: Email Directory',
   can_use_mail_groups: 'Mail: My groups',
@@ -68,6 +70,10 @@ const FEATURE_NAME: Record<string, string> = {
   can_use_fingerprint: 'Fingerprint login',
   can_view_roster: 'My Duty Roster',
   can_take_break: 'Break Time',
+  can_save_ride_places: 'Book a Ride — saved places',
+  can_update_check_out: 'Remote Attendance — update Out Time',
+  can_add_adhoc_approver: 'Approvals — add an ad-hoc approver',
+  can_use_assistant_voice: 'AI Assistant — voice',
   can_sign_documents: 'Documents to Sign',
   can_view_payslip: 'My Payslip',
   can_request_items: 'SIM & ID Card requests',
@@ -310,6 +316,10 @@ export function UserAccessDrawer({
   const isTargetSuper = u.role === 'superadmin';
   // Same rule the old table used: a delegated Admin only ever edits role='user'.
   const canEdit = !isTargetSuper && (u.role !== 'admin' || isSuperAdmin);
+  // A Superadmin's own sign-in (Login ID, password) can be changed by a
+  // Superadmin — the server allows only that (UserManagement.ts). Role,
+  // switches, Block and Delete stay off for a Superadmin account.
+  const canEditLogin = canEdit || (isTargetSuper && isSuperAdmin);
   const canManageModules = canGrantModuleAccess && !isTargetSuper && (u.role === 'user' || (u.role === 'admin' && isSuperAdmin));
   const modules = u.module_permissions || [];
   const moduleLabels = modules.map((k) => ADMIN_MODULES.find((m) => m.key === k)?.label || k);
@@ -356,6 +366,7 @@ export function UserAccessDrawer({
     { label: 'Timesheet', on: !!u.can_view_timesheet },
     { label: 'Chat', on: u.can_use_chat !== false },
     { label: 'Audio / Video Calls', on: !!u.can_use_calls },
+    { label: 'Disappearing messages', on: !!u.can_use_disappearing },
     { label: 'Credence Mail', on: !!u.can_use_mail },
     { label: 'Mail: Email Directory', on: !!u.can_view_mail_directory },
     { label: 'Mail: My groups', on: !!u.can_use_mail_groups },
@@ -365,6 +376,10 @@ export function UserAccessDrawer({
     { label: 'Fingerprint login', on: !!u.can_use_fingerprint },
     { label: 'My Duty Roster', on: !!u.can_view_roster },
     { label: 'Break Time', on: !!u.can_take_break },
+    { label: 'Book a Ride — saved places', on: !!u.can_save_ride_places },
+    { label: 'Remote Attendance — update Out Time', on: !!u.can_update_check_out },
+    { label: 'Approvals — add an ad-hoc approver', on: !!u.can_add_adhoc_approver },
+    { label: 'AI Assistant — voice', on: !!u.can_use_assistant_voice },
     { label: 'Documents to Sign', on: !!u.can_sign_documents },
     { label: 'My Payslip', on: !!u.can_view_payslip },
     { label: 'SIM & ID Card requests', on: !!u.can_request_items },
@@ -375,8 +390,8 @@ export function UserAccessDrawer({
     { label: 'My Service Book', on: !!u.can_view_service_book },
     { label: 'Loan / Advance Request', on: !!u.can_view_loan_request },
     { label: 'My Targets', on: !!u.can_view_targets },
-    { label: 'Movement Claim', on: !!u.can_view_movement_claims },
-    { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
+    { label: 'Check In/Out', on: !!u.can_view_movement_claims },
+    { label: 'Bill Claim', on: !!u.can_view_bill_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
 
@@ -472,7 +487,16 @@ export function UserAccessDrawer({
                   </select>
                 </div>
               )}
-              {canEdit ? (
+              {isTargetSuper && (
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Role</div>
+                    <p className="text-xs text-slate-500">Every module and permission. A Superadmin can’t be changed to another role, blocked or deleted.</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${ROLE_BADGE.superadmin}`}>Superadmin</span>
+                </div>
+              )}
+              {canEditLogin ? (
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <button type="button" onClick={onChangeLoginId} className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
                     <Mail className="w-3.5 h-3.5" /> Change Login ID
@@ -659,22 +683,9 @@ export function UserAccessDrawer({
                     onToggle={() => toggle('can_use_attendance', !!u.can_use_attendance)}
                   >
                     {u.can_use_attendance && (
-                      <label className="block">
-                        <span className="text-[11px] text-slate-500">Allowed project for check-in</span>
-                        <SearchSelect
-                          value={u.attendance_project_id ?? ''}
-                          disabled={busy === 'attendance_project'}
-                          onChange={(e) => run('attendance_project', () => onAttendanceProject(e.target.value ? Number(e.target.value) : null))}
-                          className="mt-0.5 w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          <option value="">Any project (no restriction)</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.project_name}
-                            </option>
-                          ))}
-                        </SearchSelect>
-                      </label>
+                      // One or many check-in Projects, each with optional
+                      // From / To dates (AttendanceProjectsEditor.tsx).
+                      <AttendanceProjectsEditor token={token} userId={u.id} projects={projects} />
                     )}
                   </FeatureRow>
                   <FeatureRow

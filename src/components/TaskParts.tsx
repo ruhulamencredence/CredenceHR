@@ -10,7 +10,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, CalendarDays, CheckCircle2, Clock, MessageSquare, Play, Repeat, Search, Send, UserPlus, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardCheck, Clock, MessageSquare, Play, Repeat, Search, Send, UserPlus, X, XCircle } from 'lucide-react';
+import { CardChip, SelfCard } from './SelfCard';
+import { useIsPhone } from '../lib/useScrolling';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -106,7 +108,31 @@ export const StatusBadge: React.FC<{ task: Task }> = ({ task }) => (
   </span>
 );
 
-export const TaskCard: React.FC<{ task: Task; onOpen: () => void; showAssignees?: boolean; showCreator?: boolean }> = ({ task, onOpen, showAssignees = true, showCreator = true }) => (
+export const TaskCard: React.FC<{ task: Task; onOpen: () => void; showAssignees?: boolean; showCreator?: boolean }> = (props) => {
+  // Phone: the shared Directory-style card, tinted by the task's state.
+  if (useIsPhone()) return <TaskPhoneCard {...props} />;
+  return <TaskDeskCard {...props} />;
+};
+
+const TaskPhoneCard: React.FC<{ task: Task; onOpen: () => void; showAssignees?: boolean; showCreator?: boolean }> = ({ task, onOpen, showAssignees = true, showCreator = true }) => {
+  const tone = task.overdue ? 'rose' : task.status === 'done' ? 'green' : task.status === 'cancelled' ? 'slate' : task.status === 'in_progress' ? 'amber' : 'blue';
+  const chips: CardChip[] = [];
+  if (task.overdue) chips.push({ label: 'Overdue', tone: 'rose' });
+  chips.push({ label: STATUS_LABEL[task.status], tone: task.status === 'done' ? 'green' : task.status === 'in_progress' ? 'amber' : task.status === 'cancelled' ? 'slate' : 'blue' });
+  chips.push({ label: cap(task.priority), tone: task.priority === 'urgent' ? 'rose' : task.priority === 'high' ? 'amber' : undefined });
+  if (task.recurrence_id) chips.push({ label: 'Repeats', icon: <Repeat className="w-2.5 h-2.5" /> });
+  if (task.comment_count > 0) chips.push({ label: String(task.comment_count), icon: <MessageSquare className="w-2.5 h-2.5" /> });
+  const who = [SOURCE_LABEL[task.source], showCreator && task.created_by_name ? task.created_by_name : '', task.due_date ? `due ${fmtDate(task.due_date)}` : ''].filter(Boolean).join(' · ');
+  return (
+    <SelfCard tone={tone} lead={<ClipboardCheck className="w-[18px] h-[18px]" />} dot={task.overdue ? 'rose' : undefined} title={task.title} sub={who} chips={chips} onClick={onOpen}>
+      {showAssignees && (
+        <p className="text-[11px] text-slate-600 truncate">{task.assignees.length ? `For ${task.assignees.map((a) => a.name).join(', ')}` : 'Not assigned yet'}</p>
+      )}
+    </SelfCard>
+  );
+};
+
+const TaskDeskCard: React.FC<{ task: Task; onOpen: () => void; showAssignees?: boolean; showCreator?: boolean }> = ({ task, onOpen, showAssignees = true, showCreator = true }) => (
   <button
     type="button"
     onClick={onOpen}

@@ -2,13 +2,16 @@ package com.mprtracker.app;
 
 import android.Manifest;
 import android.content.ActivityNotFoundException;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Rational;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebResourceError;
@@ -42,13 +45,79 @@ public class MainActivity extends BridgeActivity {
     // is an install-time permission, so only the real runtime ones (camera,
     // microphone) are asked for here, and the page gets whatever was granted.
     private PermissionRequest pendingMediaRequest;
+
+    // Whether the app is on screen — an incoming call then rings in the page
+    // (CallLayer.tsx) rather than as the phone's call screen (IncomingCall).
+    private static volatile boolean onScreen = false;
+    static boolean isOnScreen() {
+        return onScreen;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        onScreen = true;
+    }
+
+    @Override
+    public void onPause() {
+        onScreen = false;
+        super.onPause();
+    }
+
+    // Leaving the app (Home / Recents) during a video call: keep the call in
+    // the phone's picture-in-picture window, like WhatsApp. The page then
+    // shows only the video (CallLayer.tsx, "pictureInPicture").
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (!CallAudioPlugin.videoCallOn() || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            enterPictureInPictureMode(new PictureInPictureParams.Builder().setAspectRatio(new Rational(9, 16)).build());
+        } catch (Exception ignored) {
+            // Picture-in-picture turned off for the app, or not supported:
+            // the call goes on in the background (CallService).
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPip, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(inPip, newConfig);
+        CallAudioPlugin.pictureInPictureChanged(inPip);
+    }
+
+    // Opened from the incoming-call notification (Accept / tap): hand the
+    // call to the page (CallAudioPlugin.takePendingCall / "callAction"),
+    // stop the ringing, and show over the lock screen.
+    private void handleCallIntent(Intent intent) {
+        if (intent == null) return;
+        String callId = intent.getStringExtra(IncomingCall.EXTRA_CALL_ID);
+        if (callId == null) return;
+        String action = intent.getStringExtra(IncomingCall.EXTRA_CALL_ACTION);
+        IncomingCall.cancel(this, callId);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+        CallAudioPlugin.setPendingCall(callId, action == null ? "open" : action);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleCallIntent(intent);
+    }
     private ActivityResultLauncher<String[]> mediaPermissionLauncher;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // App's own plugins have to be registered before the bridge starts.
         registerPlugin(LocationAccessPlugin.class);
+        registerPlugin(CallAudioPlugin.class);
         super.onCreate(savedInstanceState);
+        handleCallIntent(getIntent());
 
         // Set up edge-to-edge natively, synchronously, right here -- rather
         // than solely relying on App.tsx's StatusBar.setOverlaysWebView({

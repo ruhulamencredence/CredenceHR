@@ -18,6 +18,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
+import { ReturnsToReceive, AssetTimelineModal, HistoryButton, useReturnsToReceive } from './AssetHandover';
 import { apiUrl } from '../lib/api';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
@@ -87,7 +88,10 @@ function authHeaders(): HeadersInit {
 }
 
 export function AssetManagementAdmin() {
-  const [tab, setTab] = useState<'inventory' | 'approvals' | 'claims'>('approvals');
+  const [tab, setTab] = useState<'inventory' | 'approvals' | 'claims' | 'returns'>('approvals');
+  // Items employees are sending back, and one item's hand-to-hand history.
+  const returnsToReceive = useReturnsToReceive(localStorage.getItem('mpr_token') || '');
+  const [timelineFor, setTimelineFor] = useState<number | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [claims, setClaims] = useState<AssignmentClaim[]>([]);
@@ -221,6 +225,7 @@ useLiveRefresh(() => {
         {([
           ['approvals', 'Requisition Approvals'],
           ['claims', `Issue Reports${claims.filter((c) => c.status === 'pending').length > 0 ? ` (${claims.filter((c) => c.status === 'pending').length})` : ''}`],
+          ['returns', `Returns to receive${returnsToReceive.rows.length > 0 ? ` (${returnsToReceive.rows.length})` : ''}`],
           ...(inventorySetting.show_inventory ? [['inventory', 'Inventory'] as const] : [])
         ] as const).map(([key, label]) => (
           <button
@@ -242,6 +247,19 @@ useLiveRefresh(() => {
       </div>
 
       {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
+
+      {tab === 'returns' && (
+        <ReturnsToReceive
+          token={localStorage.getItem('mpr_token') || ''}
+          rows={returnsToReceive.rows}
+          all={returnsToReceive.all}
+          onChanged={() => {
+            void returnsToReceive.reload();
+            loadAssets();
+          }}
+          onHistory={(id) => setTimelineFor(id)}
+        />
+      )}
 
       {tab === 'approvals' && (
         <div className="space-y-3">
@@ -431,6 +449,7 @@ useLiveRefresh(() => {
                 <th>Category</th>
                 <th>Serial No.</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -441,11 +460,17 @@ useLiveRefresh(() => {
                   <td>{a.category}</td>
                   <td>{a.serial_number || '—'}</td>
                   <td>{a.status}</td>
+                  <td className="text-right">
+                    <HistoryButton small onClick={() => setTimelineFor(a.id)} />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {timelineFor !== null && (
+        <AssetTimelineModal token={localStorage.getItem('mpr_token') || ''} assetId={timelineFor} onClose={() => setTimelineFor(null)} />
       )}
       {historyFor !== null && (
         <AssetRequisitionHistoryModal token={localStorage.getItem('mpr_token') || ''} requisitionId={historyFor} onClose={() => setHistoryFor(null)} />

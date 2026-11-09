@@ -164,8 +164,8 @@ export function registerXxxRoutes(app, deps) {               // Controller + Rou
 | Duty Roster | `RosterRoutes.ts` | `DutyRoster.tsx`, `MyRoster.tsx` |
 | বেতন (Payroll) | `PayrollRoutes.ts`, `PayrollItemsRoutes.ts`, `PayrollApprovalRoutes.ts` | `RunPayrollWizard.tsx`, `SalaryStructureSetupPanel.tsx` |
 | পেস্লিপ | `PayslipRoutes.ts` | `MyPayslips.tsx` |
-| Movement Claim | `MovementClaimRoutes.ts` | `ClaimsPanel.tsx`, `NewConveyanceClaimModal.tsx` |
-| Conveyance Bill Claim | `ConveyanceBillClaimRoutes.ts`, `BillClaimPolicy.ts` | `ConveyanceBillPanel.tsx`, `DisbursementPanel.tsx` |
+| Movement Claim | `MovementClaimRoutes.ts` | `ClaimsPanel.tsx`, `NewBillClaimModal.tsx` |
+| Conveyance Bill Claim | `BillClaimRoutes.ts`, `BillClaimPolicy.ts` | `ConveyanceBillPanel.tsx`, `DisbursementPanel.tsx` |
 | কর্মী তালিকা | `EmployeeRoutes.ts`, `EmployeeDirectoryRoutes.ts` | `EmployeesPanel.tsx`, `EmployeeDirectory.tsx` |
 | HR Operations (চিঠি, বদলি, ইত্যাদি) | `HROperationsRoutes.ts`, `HrOps*Routes.ts` | `HrOps*.tsx` |
 | Notice | `NoticeRoutes.ts` | `NoticeManager.tsx`, `NoticePopup.tsx` |

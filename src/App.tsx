@@ -10,7 +10,6 @@ import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
-import { ProfilePage } from './components/ProfilePage';
 // UserPanel/AdminPanel are the two heaviest branches of the app (PDF export,
 // Leaflet maps, Excel import/export, etc. all live under one of these two) —
 // lazy-loading them means the Login screen only has to download/parse the
@@ -18,8 +17,45 @@ import { ProfilePage } from './components/ProfilePage';
 // eagerly-loaded bundle every visitor's phone has to fetch before they can
 // even see the login form. See the Suspense fallback below for what shows
 // during the brief gap while a panel's own chunk downloads after login.
-const UserPanel = lazy(retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel }))));
+// Opened from the avatar / the Assistant button — not part of the first download.
+const ProfilePage = lazy(retryImport(() => import('./components/ProfilePage').then(m => ({ default: m.ProfilePage }))));
+const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant }))));
+// The Dashboard's code starts downloading the moment the app starts (or the
+// moment someone signs in) — not only once React gets round to drawing it —
+// so the Dashboard opens without its placeholder on a signed-in phone.
+const loadUserPanel = retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
+let userPanelLoad: ReturnType<typeof loadUserPanel> | null = null;
+// The Dashboard component itself once its code has run — drawn directly
+// (no Suspense placeholder for a frame) when it is ready before the app's
+// first render.
+let LoadedUserPanel: Awaited<ReturnType<typeof loadUserPanel>>['default'] | null = null;
+const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().then((m) => {
+  LoadedUserPanel = m.default;
+  return m;
+}).catch((err) => {
+  userPanelLoad = null; // let the next try download it again
+  throw err;
+}));
+const UserPanel = lazy(preloadUserPanel);
+// A signed-in open waits for the Dashboard's code (main.tsx) — at most
+// `maxMs` — while index.html's own "Loading…" screen is up, so the phone
+// goes from that straight to the Dashboard (with its saved data), not
+// through the skeleton placeholder for a split second.
+export function dashboardCodeReady(maxMs: number): Promise<void> {
+  if (!userPanelLoad) return Promise.resolve();
+  return Promise.race([userPanelLoad.then(() => undefined), new Promise<void>((r) => setTimeout(r, maxMs))]).catch(() => undefined);
+}
+try {
+  if (localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
+} catch {
+  // storage unavailable — it loads when first drawn instead
+}
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
+// Welcome slides, once per account (WelcomeSlides.tsx) — its own small chunk.
+const WelcomeSlides = lazy(retryImport(() => import('./components/WelcomeSlides')));
+// Tutorials: the list and one guided tour (src/lib/tutorials.ts) — loaded when used.
+const TutorialsSheet = lazy(retryImport(() => import('./components/TutorialsSheet')));
+const GuidedTour = lazy(retryImport(() => import('./components/GuidedTour')));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
@@ -65,19 +101,23 @@ import { preloadPdfCompany } from './lib/pdfStandard';
 import { setReportEmailAccess } from './lib/reportEmail';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
+import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
-import { AiAssistant } from './components/AiAssistant';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
+import { GroupCallLayer } from './components/GroupCallLayer';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
 import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
+import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
+import { clearScreenCache } from './lib/screenCache';
+import { clearAllDrafts } from './lib/formDraft';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
@@ -92,8 +132,11 @@ import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSi
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
+import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
 export default function App() {
+  // Fixed for this mount: switching component type later would remount the Dashboard.
+  const [DashboardPanel] = useState(() => LoadedUserPanel || UserPanel);
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('mpr_user');
@@ -101,6 +144,8 @@ export default function App() {
   });
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   useBackButtonClose(isApkModalOpen, () => setIsApkModalOpen(false));
+  // Book a Ride keeps its own title row only on a desktop browser.
+  const bookRideWide = useWideWeb();
 
   // Navbar's web-only "Claims" header menu — see ClaimsNavRequest in types.ts.
   const [claimsNavRequest, setClaimsNavRequest] = useState<ClaimsNavRequest | null>(null);
@@ -348,6 +393,9 @@ export default function App() {
 
         const subscription = await CapacitorApp.addListener('backButton', () => {
           if (closeTopmostOrReturnFalse()) return;
+          // No popup / drill-down of its own is open: a full page steps back
+          // towards the dashboard before the app offers to exit.
+          if (pageBackRef.current()) return;
 
           if (awaitingExitConfirmRef.current) {
             CapacitorApp.exitApp();
@@ -409,7 +457,97 @@ export default function App() {
     })();
   }, []);
 
+  // Signed in: keep the login screen's animation on the device (downloaded
+  // once, in the background), so the login screen after a sign-out shows it
+  // straight away — website, phone browser, "Add to Home screen" and the app.
+  useEffect(() => {
+    if (!token) return;
+    const t = setTimeout(() => {
+      void import('./lib/authHeroAsset').then((m) => m.keepAuthHeroOnDevice()).catch(() => undefined);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [token]);
+
+  // First sign-in of an account: the welcome slides, once (WelcomeSlidesRoutes.ts
+  // decides — a Superadmin can switch them off or show them again to everyone).
+  const [showWelcome, setShowWelcome] = useState(false);
+  useEffect(() => {
+    setShowWelcome(false);
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(apiUrl('/api/welcome-slides/status'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && d?.show && setShowWelcome(true))
+        .catch(() => undefined);
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const finishWelcome = (showAround?: boolean) => {
+    setShowWelcome(false);
+    if (token) void fetch(apiUrl('/api/welcome-slides/seen'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+    if (showAround) startTour('dashboard');
+  };
+
+  // Tutorials (src/lib/tutorials.ts): switched on for this account, which
+  // ones it finished (WelcomeSlidesRoutes.ts). The list (Menu / More ->
+  // Tutorials) and the tours themselves only while switched on.
+  const tutorials = useTutorialsState().enabled;
+  useEffect(() => {
+    setTutorialsState({ enabled: false, done: [] });
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    fetch(apiUrl('/api/tutorials'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && d && setTutorialsState({ enabled: !!d.enabled, done: Array.isArray(d.done) ? d.done : [] }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const [tutorialsOpen, setTutorialsOpen] = useState(false);
+  const [activeTour, setActiveTour] = useState<Tour | null>(null);
+  useEffect(() => {
+    const onOpen = () => getTutorialsState().enabled && setTutorialsOpen(true);
+    const onStart = (e: Event) => {
+      const tour = toursFor(user).find((t) => t.id === (e as CustomEvent).detail);
+      if (!tour || !getTutorialsState().enabled) return;
+      window.dispatchEvent(new Event(TOUR_GO_EVENT));
+      setTutorialsOpen(false);
+      setActiveTour(tour);
+    };
+    window.addEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+    window.addEventListener(START_TOUR_EVENT, onStart);
+    return () => {
+      window.removeEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+      window.removeEventListener(START_TOUR_EVENT, onStart);
+    };
+  }, [user]);
+  useEffect(() => {
+    if (!tutorials) {
+      setTutorialsOpen(false);
+      setActiveTour(null);
+    }
+  }, [tutorials]);
+  const closeTour = (finished: boolean) => {
+    const t = activeTour;
+    setActiveTour(null);
+    if (!finished || !t || !token) return;
+    setTutorialsState({ done: Array.from(new Set([...getTutorialsState().done, t.id])) });
+    void fetch(apiUrl('/api/tutorials/done'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: t.id })
+    }).catch(() => undefined);
+  };
+
   const handleLoginSuccess = (newToken: string, newUser: User) => {
+    // Nothing saved from an earlier sign-in on this device is shown.
+    clearScreenCache();
+    void preloadUserPanel().catch(() => {});
     localStorage.setItem('mpr_token', newToken);
     localStorage.setItem('mpr_user', JSON.stringify(newUser));
     // A new joiner's temporary login opens only My Onboarding (main.tsx).
@@ -470,6 +608,10 @@ export default function App() {
     void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
+    // The Dashboard's saved copy of this account's data (screenCache.ts),
+    // and any unsent form drafts (formDraft.ts).
+    clearScreenCache();
+    clearAllDrafts();
     refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);
@@ -506,7 +648,9 @@ export default function App() {
             ? 'This sign-in was ended. Sign in again.'
             : why === 'password'
               ? 'The password of this account was changed. Sign in again with the new password.'
-              : 'Your session has expired. Sign in again.'
+              : why === 'app_off'
+                ? 'The mobile app was turned off for your account. Use the website, or ask HR to turn it on.'
+                : 'Your session has expired. Sign in again.'
       );
       handleLogout();
     };
@@ -727,6 +871,53 @@ export default function App() {
   // always sees Admin Panel" case, since Superadmin now starts on the User
   // Panel dashboard like everyone else and switches in the same way.
   const isAdminView = hasAdminPanel && viewMode === 'admin';
+
+  // The phone's Back on a full page (see the backButton listener above):
+  // Chat / Alerts / Profile / a Self Service page close back to where they
+  // were opened from; an Admin Panel page goes to the Admin dashboard, and
+  // that to the User dashboard. Returns false on the User dashboard, where
+  // the app then offers to exit. A page's own popups, and Book a Ride
+  // (VehicleManagement keeps its own steps), are handled first by the
+  // back-button stack.
+  const adminTabRef = useRef(adminActiveTab);
+  adminTabRef.current = adminActiveTab;
+  const pageBackRef = useRef<() => boolean>(() => false);
+  pageBackRef.current = () => {
+    if (showChat) {
+      setShowChat(false);
+      return true;
+    }
+    if (showAlertsPage) {
+      setShowAlertsPage(false);
+      return true;
+    }
+    if (showProfilePage) {
+      setShowProfilePage(false);
+      return true;
+    }
+    if (selfServiceView) {
+      setSelfServiceView(null);
+      return true;
+    }
+    if (isAdminView) {
+      if (adminTabRef.current !== 'dashboard') {
+        setAdminNavRequest({ target: 'dashboard', ts: Date.now() });
+        // An account without the Admin dashboard stays on its page — then
+        // Back goes to the User dashboard instead.
+        setTimeout(() => {
+          if (adminTabRef.current !== 'dashboard') {
+            setViewMode('user');
+            setDashboardNavRequest({ ts: Date.now() });
+          }
+        }, 150);
+      } else {
+        setViewMode('user');
+        setDashboardNavRequest({ ts: Date.now() });
+      }
+      return true;
+    }
+    return false;
+  };
   // An /admin/... address with no Admin Panel showing (no access, or the User
   // Panel is open) has nothing to point at — back to /.
   useEffect(() => {
@@ -872,6 +1063,10 @@ export default function App() {
     if (!user) return;
     const canAdmin = user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0;
     if (!canAdmin) return;
+    // Not in the phone app: there Home is what opens, and fetching and
+    // reading the whole Admin Panel right after made the phone slow for a
+    // few seconds. It downloads when the Admin Panel is opened instead.
+    if (Capacitor.isNativePlatform()) return;
     const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1500));
     const id = idle(() => {
       import('./components/AdminPanel').catch(() => {});
@@ -922,7 +1117,7 @@ export default function App() {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'timesheet' || target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -931,6 +1126,19 @@ export default function App() {
     window.addEventListener('credence:open-self-service', onOpen);
     return () => window.removeEventListener('credence:open-self-service', onOpen);
   }, [user]);
+  // A tutorial starting: back to the user Dashboard (UserPanel.tsx then
+  // opens the tour's own section — TOUR_SECTION_EVENT).
+  useEffect(() => {
+    const onGo = () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('user');
+    };
+    window.addEventListener(TOUR_GO_EVENT, onGo);
+    return () => window.removeEventListener(TOUR_GO_EVENT, onGo);
+  }, []);
   // A task alert (TaskRoutes.ts): one about work given to this account opens
   // My Tasks; anything else (a request to HR, a task they gave) opens Task
   // Management for HR. The page then opens the task itself.
@@ -1104,7 +1312,7 @@ export default function App() {
       case 'jobEdit': return 'jobEdit';
       case 'claim':
       case 'claims': return 'userMovementClaims';
-      case 'conveyanceClaim': return 'userConveyanceClaims';
+      case 'billClaim': return 'userBillClaims';
       case 'leave': return 'leaveApplication';
       case 'timesheet': return 'timesheet';
       case 'employeeDirectory': return 'employeeDirectory';
@@ -1113,13 +1321,13 @@ export default function App() {
   };
 
   // mobileActiveSection isn't actually mobile-only for these values — per
-  // UserPanel.tsx's showingClaimsPage, Movement Claim/My Claims/Conveyance
+  // UserPanel.tsx's showingClaimsPage, Check In/Out/My Claims/Conveyance
   // Bill Claim/Leave/Timesheet/Employee Directory/Notice Board show as their
   // OWN page on desktop too, driven by this same state. desktopActiveSection
   // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on
   // desktop these need to be checked first, before falling back to it.
   const CLAIMS_TYPE_SECTIONS = new Set([
-    'claim', 'claims', 'conveyanceClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
+    'claim', 'claims', 'billClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
   ]);
 
   // Which GlobalSidebar item currently matches what's actually on screen —
@@ -1187,7 +1395,7 @@ export default function App() {
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
-    onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => {
+    onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -1195,15 +1403,15 @@ export default function App() {
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
-    onGoToAdminClaims: (target: 'claims' | 'conveyance') => {
+    onGoToAdminClaims: (target: 'claims' | 'bill_claim') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
       setViewMode('admin');
-      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
+      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'billClaim', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'bill_claim'> | 'bill_claim_policy' | 'reports_insights' | 'data_import' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -1222,7 +1430,7 @@ export default function App() {
         // bottom nav already open, so there's exactly one Leave Application
         // interface regardless of entry point (see leaveNavRequest above and
         // LeaveNavRequest in types.ts). Switches into the User Panel first,
-        // same as onGoToJobsTab/onGoToUserClaims above.
+        // same as onGoToJobsTab/onGoToBillClaims above.
         setSelfServiceView(null);
         setViewMode('user');
         setLeaveNavRequest({ ts: Date.now() });
@@ -1346,12 +1554,12 @@ export default function App() {
           setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
-        onGoToConveyanceBillClaim={() => {
+        onGoToBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
-          setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
+          setClaimsNavRequest({ target: 'billClaim', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
           // Every "Jobs" menu target lives only in the User Panel — the mirror
@@ -1408,6 +1616,11 @@ export default function App() {
         onOpenChat={openChat}
         isChatOpen={showChat}
         onOpenAlerts={sidebarNavProps.onOpenAlerts}
+        // The blended phone header's round Back: the same step as the
+        // phone's own Back button (a page's open popup first, then the page).
+        onPageBack={() => {
+          if (!closeTopmostOrReturnFalse()) pageBackRef.current();
+        }}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
@@ -1440,7 +1653,8 @@ export default function App() {
             never a blank page: the User Dashboard its own layout
             (UserDashboardSkeleton), HR Operations its page skeleton, any
             other Admin Panel tab AdminPageSkeleton, Chat / Alerts a list
-            skeleton, every other page the generic loader. An error on a
+            skeleton, a Self Service page its own shape (SelfPageSkeleton),
+            every other page the generic loader. An error on a
             page (or its code failing to download after a deploy) shows a
             card instead of a white screen (AppErrorBoundary). */}
         <AppErrorBoundary resetKey={`${isAdminView}|${selfServiceView}|${showChat}|${showAlertsPage}|${showProfilePage}|${adminActiveTab}`}>
@@ -1454,6 +1668,9 @@ export default function App() {
               <AdminPageSkeleton />
             ) : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
+            ) : !showProfilePage && selfServiceView ? (
+              // A Self Service page: its own shape and phone-header name.
+              <SelfPageSkeleton view={selfServiceView} />
             ) : (
               <AppLoader />
             )
@@ -1488,9 +1705,9 @@ export default function App() {
               requestQuickAccessTab('bookRide', target || 'status');
               sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
             }}
-            onOpenConveyanceClaim={() => {
+            onOpenBillClaim={() => {
               setShowAlertsPage(false);
-              sidebarNavProps.onGoToUserClaims('conveyanceBill');
+              sidebarNavProps.onGoToBillClaims('billClaim');
             }}
             onOpenMyAsset={(target) => {
               setShowAlertsPage(false);
@@ -1516,6 +1733,7 @@ export default function App() {
             }}
           />
         ) : showProfilePage ? (
+          <Suspense fallback={<ListPageSkeleton />}>
           <ProfilePage
             user={user}
             token={token || ''}
@@ -1538,6 +1756,7 @@ export default function App() {
               });
             }}
           />
+          </Suspense>
         ) : selfServiceView === 'leaveManagement' ? (
           <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'approveApplications' ? (
@@ -1582,18 +1801,20 @@ export default function App() {
         ) : selfServiceView === 'myTargets' ? (
           <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
-          <MyLetters token={token} onBack={() => setSelfServiceView(null)} canServiceBook={!!user && (user.role === 'superadmin' || !!user.can_view_service_book)} />
+          <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'teamAttendance' ? (
           <TeamAttendance token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.
-          <div className="w-full min-h-[calc(100vh-4rem)] [background:var(--g-surface-muted)] max-md:[background:transparent]">
+          <div className="w-full min-h-[calc(100vh-4rem)]">
             {/* Web: full content width (map beside the booking panel, Ride Status
                 in two columns) instead of a narrow phone-width column. */}
             <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
-              {!Capacitor.isNativePlatform() && <ModulePath path={['Self Service', 'Book a Ride']} />}
-              <div className="flex items-center gap-2 mb-3">
+              {!Capacitor.isNativePlatform() && bookRideWide && <ModulePath path={['Self Service', 'Book a Ride']} />}
+              {/* Phone: the title is in the header (VehicleManagement sets it)
+                  and the phone's Back leaves — no row of its own here. */}
+              <div className={`items-center gap-2 mb-3 ${bookRideWide ? 'flex' : 'hidden'}`}>
                 <button
                   type="button"
                   onClick={() => setSelfServiceView(null)}
@@ -1607,7 +1828,7 @@ export default function App() {
                   <Car className="w-5 h-5 text-blue-600 shrink-0" /> Book a Ride
                 </h1>
               </div>
-              <VehicleManagement user={user} />
+              <VehicleManagement user={user} onBack={() => setSelfServiceView(null)} />
             </div>
           </div>
         ) : isAdminView ? (
@@ -1620,7 +1841,7 @@ export default function App() {
           />
         ) : (
           <>
-            <UserPanel
+            <DashboardPanel
               token={token}
               user={user}
               claimsNavRequest={claimsNavRequest}
@@ -1678,6 +1899,7 @@ export default function App() {
 
       {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
           off in Module Access; its buttons open the page an answer is about. */}
+      <Suspense fallback={null}>
       <AiAssistant
         token={token || ''}
         user={user}
@@ -1686,10 +1908,21 @@ export default function App() {
           const [kind, target] = nav.split(':');
           if (nav === 'home') return sidebarNavProps.onGoToDashboard();
           if (nav === 'profile') return sidebarNavProps.onOpenProfile();
+          // Profile -> My Service Book (ProfilePage.tsx).
+          if (nav === 'profile:service_book') {
+            try {
+              sessionStorage.setItem('profile_open', 'service_book');
+            } catch {
+              // storage unavailable — the event below still opens it
+            }
+            sidebarNavProps.onOpenProfile();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:profile-open', { detail: 'service_book' })), 0);
+            return;
+          }
           if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
-          if (kind === 'claims') return sidebarNavProps.onGoToUserClaims(target as 'movementClaims' | 'conveyanceBill');
+          if (kind === 'claims') return sidebarNavProps.onGoToBillClaims(target as 'movementClaims' | 'billClaim');
           if (kind === 'admin') {
-            if (target === 'claims' || target === 'conveyance') return sidebarNavProps.onGoToAdminClaims(target);
+            if (target === 'claims' || target === 'bill_claim') return sidebarNavProps.onGoToAdminClaims(target);
             return sidebarNavProps.onGoToAdminModule(target as Parameters<typeof sidebarNavProps.onGoToAdminModule>[0]);
           }
           if (kind === 'hrops') {
@@ -1703,13 +1936,33 @@ export default function App() {
           }
         }}
       />
+      </Suspense>
 
       {/* Chat audio/video calls — rings on any page; only for accounts with
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />
+
+      {/* An account's first sign-in: the welcome slides (WelcomeSlides.tsx). */}
+      {showWelcome && token && user && (
+        <Suspense fallback={null}>
+          <WelcomeSlides onDone={finishWelcome} canTour={tutorials} />
+        </Suspense>
+      )}
+      {/* Tutorials: the list, and the guided tour running (GuidedTour.tsx). */}
+      {tutorialsOpen && token && user && (
+        <Suspense fallback={null}>
+          <TutorialsSheet user={user} onClose={() => setTutorialsOpen(false)} />
+        </Suspense>
+      )}
+      {activeTour && token && user && (
+        <Suspense fallback={null}>
+          <GuidedTour key={activeTour.id} tour={activeTour} onClose={closeTour} />
+        </Suspense>
+      )}
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}

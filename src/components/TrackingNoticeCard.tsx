@@ -17,9 +17,9 @@ import { Capacitor } from '@capacitor/core';
 import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { App } from '@capacitor/app';
 import { BatteryCharging, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
-import { Lottie } from './LazyLottie';
+import { Lottie, useLottieJson } from './LazyLottie';
 import { ActiveNotice } from '../types';
-import trackingAnimation from '../assets/gps-navigation.json';
+const loadTrackingAnimation = () => import('../assets/gps-navigation.json');
 import {
   getLocationAccess,
   LocationAccessStatus,
@@ -72,6 +72,7 @@ interface Props {
 }
 
 export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, onDone }) => {
+  const trackingAnimation = useLottieJson(loadTrackingAnimation);
   const isAndroidApp = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
   const [showSteps, setShowSteps] = useState(!isAndroidApp);
   const [settingsFailed, setSettingsFailed] = useState(false);
@@ -196,7 +197,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
           <div className="p-3 pb-0">
             {/* GPS navigation animation (src/assets/gps-navigation.json, ~2:1) — kept short so the message shows without scrolling. */}
             <div className="liquid-glass-inset h-32 sm:h-36 rounded-[24px] overflow-hidden pointer-events-none flex items-center justify-center px-4">
-              <Lottie src={trackingAnimation as any} autoplay loop className="h-full aspect-[351/174] max-w-full" />
+              {trackingAnimation && <Lottie src={trackingAnimation} autoplay loop className="h-full aspect-[351/174] max-w-full" />}
             </div>
           </div>
 

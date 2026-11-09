@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { Paperclip } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { serviceLength, type ServiceEvent } from './HrOpsServiceBook';
@@ -740,7 +740,7 @@ function dossierTables(d: DossierData, picked: Set<string>): { title: string; he
   }
   if (want('claims') && d.claims) {
     out.push({
-      title: `Conveyance Claims ${d.year}`,
+      title: `Bill Claims ${d.year}`,
       head: ['Date', 'Category', 'Claimed', 'Approved', 'Status', 'Description'],
       rows: d.claims.claims.map((c: any) => [fmtDate(c.claim_date), c.category, n(c.amount), n(c.approved_amount ?? (c.status === 'approved' ? c.amount : null)), c.status, c.description || ''])
     });
@@ -847,7 +847,7 @@ export function saveDossierExcel(d: DossierData, picked: Set<string>) {
     used.add(name);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([t.head, ...t.rows]), name);
   }
-  XLSX.writeFile(wb, `Employee_Dossier_${d.overview.employee.name.replace(/\s+/g, '_')}.xlsx`);
+  void saveWorkbookCrossPlatform(wb, `Employee_Dossier_${d.overview.employee.name.replace(/\s+/g, '_')}.xlsx`);
 }
 
 export const DossierModal: React.FC<{ token: string; overview: P360Overview; onClose: () => void }> = ({ token, overview, onClose }) => {

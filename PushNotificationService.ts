@@ -124,19 +124,28 @@ export async function sendPushToUserIds(
   }
 }
 
+// A member who muted this chat (Chat -> group / contact info -> Mute
+// notifications, chat_room_settings) gets no push for it until the mute ends.
+const NOT_MUTED =
+  "NOT EXISTS (SELECT 1 FROM chat_room_settings st WHERE st.user_id = m.user_id AND st.room_id = m.room_id AND st.muted_until > NOW())";
+
 export async function sendPushToRoomMembers(
   queryDB: (sql: string, params?: any[]) => Promise<any>,
   roomId: number,
   excludeUserId: number,
   title: string,
   body: string,
-  data: Record<string, string>
+  data: Record<string, string>,
+  // @mentioned members: told even when they muted the chat (like WhatsApp).
+  alwaysUserIds: number[] = []
 ): Promise<void> {
+  const always = alwaysUserIds.filter((n) => Number.isFinite(n));
+  const notMuted = always.length ? `(${NOT_MUTED} OR m.user_id IN (${always.map(() => "?").join(",")}))` : NOT_MUTED;
   // Browsers too (desktop notifications) — with or without Firebase.
   // Only members who still have Chat (users.can_use_chat).
   void queryDB(
-    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)",
-    [roomId]
+    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0) AND " + notMuted,
+    [roomId, ...always]
   )
     .then((members: any[]) =>
       sendWebPushToUserIds(
@@ -156,8 +165,8 @@ export async function sendPushToRoomMembers(
       `SELECT t.token FROM chat_push_tokens t
        JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
        JOIN users u ON u.id = t.user_id
-       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)`,
-      [roomId, excludeUserId]
+       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0) AND ${notMuted}`,
+      [roomId, excludeUserId, ...always]
     );
     if (rows.length === 0) return;
     const result = await getMessaging(app).sendEachForMulticast({

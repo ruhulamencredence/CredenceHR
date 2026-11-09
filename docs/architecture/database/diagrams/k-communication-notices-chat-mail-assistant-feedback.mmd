@@ -74,6 +74,11 @@ erDiagram
     int user_id PK,FK
     int last_read_message_id
   }
+  chat_room_settings {
+    int user_id PK,FK
+    int room_id PK,FK
+    datetime muted_until
+  }
   chat_rooms {
     int id PK
     int parent_room_id FK
@@ -81,7 +86,11 @@ erDiagram
     varchar title
     varchar avatar_mimetype
     longblob avatar_data
-    int group_id
+    varchar description
+  }
+  chat_starred_messages {
+    int user_id PK,FK
+    int message_id PK,FK
   }
   chat_wallpapers {
     int user_id PK,FK
@@ -229,11 +238,33 @@ erDiagram
     varchar sender PK
     datetime sent_at
   }
+  notice_animations {
+    int id PK
+    varchar name
+    mediumtext lottie_json
+    int size_bytes
+  }
   notice_dismissals {
     int id PK
     int notice_id FK
     int user_id FK
     timestamp dismissed_at
+  }
+  notice_files {
+    int id PK
+    int notice_id FK
+    enum kind
+    enum role
+    varchar original_name
+    varchar mimetype
+    int size_bytes
+  }
+  notice_reads {
+    int id PK
+    int notice_id FK
+    int user_id FK
+    timestamp opened_at
+    timestamp acknowledged_at
   }
   notice_targets {
     int id PK
@@ -257,6 +288,15 @@ erDiagram
     text recipients_json
     text failed_json
   }
+  ride_saved_places {
+    int id PK
+    int user_id FK
+    varchar kind
+    varchar name
+    varchar address
+    decimal lat
+    decimal lng
+  }
   all_employees {
     int id PK
   }
@@ -279,7 +319,11 @@ erDiagram
   users ||--o{ chat_room_members : "user_id"
   chat_rooms ||--o{ chat_room_reads : "room_id"
   users ||--o{ chat_room_reads : "user_id"
+  chat_rooms ||--o{ chat_room_settings : "room_id"
+  users ||--o{ chat_room_settings : "user_id"
   chat_rooms ||--o{ chat_rooms : "parent_room_id"
+  chat_messages ||--o{ chat_starred_messages : "message_id"
+  users ||--o{ chat_starred_messages : "user_id"
   users ||--o{ chat_wallpapers : "user_id"
   chat_rooms ||..o{ chat_wallpapers : "room_id"
   users ||--o{ feedback_prompts : "user_id"
@@ -296,5 +340,9 @@ erDiagram
   users ||..o{ mail_templates : "user_id"
   notices ||--o{ notice_dismissals : "notice_id"
   users ||--o{ notice_dismissals : "user_id"
+  notices ||--o{ notice_files : "notice_id"
+  notices ||--o{ notice_reads : "notice_id"
+  users ||--o{ notice_reads : "user_id"
   notices ||--o{ notice_targets : "notice_id"
   users ||--o{ notice_targets : "user_id"
+  users ||--o{ ride_saved_places : "user_id"

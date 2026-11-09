@@ -15,7 +15,7 @@
 // access audit log apply to every account individually.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle, Smartphone } from 'lucide-react';
 import {
   ADMIN_MODULES,
   AdminModuleKey,
@@ -40,7 +40,7 @@ const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
   { key: 'pepm', label: 'PEPM', hint: 'Budgets, MPR entries, reports and material dispatch.' },
   { key: 'hr', label: 'HR', hint: 'Dashboard, approvals, notices, departments, tasks and targets.' },
   { key: 'attendance', label: 'Attendance & Leave', hint: 'Attendance, roster, leave applications and leave balances.' },
-  { key: 'claims', label: 'Claims & Bills', hint: 'Movement and conveyance claims, disbursement and mobile bills.' },
+  { key: 'claims', label: 'Claims & Bills', hint: 'Check In/Out and bill claims, disbursement and mobile bills.' },
   { key: 'employees', label: 'Employees & Assets', hint: 'Employee records, tracking, assets and vehicles.' },
   { key: 'hrops', label: 'HR Operations', hint: 'Onboarding, exit, performance, recruitment and documents.' },
   { key: 'payroll', label: 'Payroll', hint: 'Salary, payslips and loans.' },
@@ -59,7 +59,7 @@ type FlagKey =
   | 'can_job_edit'
   | 'can_manage_leave'
   | 'can_view_movement_claims'
-  | 'can_view_conveyance_claims'
+  | 'can_view_bill_claims'
   | 'can_view_budget_module'
   | 'can_view_timesheet'
   | 'can_view_leave_application'
@@ -73,6 +73,7 @@ type FlagKey =
   | 'can_export_assistant_reports'
   | 'can_handle_assistant_support'
   | 'can_use_calls'
+  | 'can_use_disappearing'
   | 'can_use_chat'
   | 'can_use_mail'
   | 'can_view_mail_directory'
@@ -83,6 +84,10 @@ type FlagKey =
   | 'can_use_fingerprint'
   | 'can_view_roster'
   | 'can_take_break'
+  | 'can_save_ride_places'
+  | 'can_update_check_out'
+  | 'can_add_adhoc_approver'
+  | 'can_use_assistant_voice'
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_request_items'
@@ -106,9 +111,11 @@ const FLAGS: FlagDef[] = [
   { key: 'can_access_user_panel', label: 'User Panel access', desc: 'This Admin also gets the User Panel (attendance, claims, job entry).', section: 'general', endpoint: 'user-panel-access', adminOnly: true },
   { key: 'can_use_chat', label: 'Chat', desc: 'Messages with other accounts (one-to-one, groups). On by default.', section: 'general', endpoint: 'chat-access', defaultOn: true },
   { key: 'can_use_calls', label: 'Audio / Video Calls', desc: 'Call, and be called by, other accounts from a one-to-one Chat (needs Chat).', section: 'general', endpoint: 'calls-access' },
+  { key: 'can_use_disappearing', label: 'Disappearing messages', desc: 'May turn on disappearing messages in a chat (group: as its admin). Such messages and their files are deleted for good — no record is kept.', section: 'general', endpoint: 'disappearing-access', parent: 'can_use_chat' },
   { key: 'can_email_reports', label: 'Email reports', desc: 'An Email button next to PDF on the reports they can open.', section: 'general', endpoint: 'report-email-access' },
   { key: 'can_use_ai_assistant', label: 'AI Assistant', desc: 'The floating Assistant. On by default.', section: 'general', endpoint: 'ai-assistant-access', defaultOn: true },
   { key: 'can_export_assistant_reports', label: 'Assistant: PDF / Excel download', desc: 'Download the Assistant’s list answers (only figures they can see).', section: 'general', endpoint: 'assistant-report-access' },
+  { key: 'can_use_assistant_voice', label: 'AI Assistant — voice', desc: 'Speak a question with the mic and hear the answer read out. The recording is sent to Google (Gemini) to be written down, then dropped.', section: 'general', endpoint: 'assistant-voice-access', parent: 'can_use_ai_assistant' },
   { key: 'can_handle_assistant_support', label: 'Assistant live support', desc: 'Answer people who ask the Assistant for a human.', section: 'general', endpoint: 'assistant-support-access' },
 
   { key: 'can_view_budget_module', label: 'Budget / Jobs / Job Entry Details', desc: 'Enter MPRs for their projects. On by default.', section: 'pepm', endpoint: 'budget-module-access', defaultOn: true },
@@ -126,12 +133,15 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_leave_application', label: 'Leave Application', desc: 'Apply for leave and see their own balance.', section: 'attendance', endpoint: 'leave-application-access' },
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
   { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
+  { key: 'can_update_check_out', label: 'Remote Attendance — update Out Time', desc: 'Give the Out Time again later the same day (e.g. after tapping it too early); the new time goes for approval again.', section: 'attendance', endpoint: 'check-out-update-access' },
   { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
+  { key: 'can_save_ride_places', label: 'Book a Ride — saved places', desc: 'Save pickup / drop places (Home, Work…) with a note for the driver, and pick them first next time.', section: 'general', endpoint: 'ride-places-access' },
+  { key: 'can_add_adhoc_approver', label: 'Approvals — add an ad-hoc approver', desc: 'On a request waiting on them, ask one more person to approve first; it comes back to them after that person approves.', section: 'general', endpoint: 'adhoc-approver-access' },
   { key: 'can_give_feedback', label: 'Give feedback', desc: 'Rate the app and send problems or ideas (and the 7-day "How do you like the app?").', section: 'general', endpoint: 'feedback-access' },
   { key: 'can_use_fingerprint', label: 'Fingerprint login', desc: 'Sign in with fingerprint / face on their own phone (app) or computer (passkey), turned on from Profile. Turning this off removes the saved fingerprints.', section: 'general', endpoint: 'fingerprint-access' },
 
-  { key: 'can_view_movement_claims', label: 'Movement Claim', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
-  { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
+  { key: 'can_view_movement_claims', label: 'Check In/Out', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
+  { key: 'can_view_bill_claims', label: 'Bill Claim', desc: 'Submit bill claims.', section: 'claims', endpoint: 'bill-claim-access' },
   { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
@@ -157,9 +167,9 @@ const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
   admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
-  claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
+  claims: 'claims', bill_claim: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
-  hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', document_vault: 'hrops',
+  hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', management_dashboard: 'hr', data_import: 'hr', document_vault: 'hrops',
   payroll: 'payroll',
   mail_admin: 'mail',
   users: 'mis', projects: 'mis', branches: 'mis', user_feedback: 'mis'
@@ -168,6 +178,7 @@ const sectionOfModule = (k: AdminModuleKey): SectionKey => MODULE_SECTION[k] || 
 
 const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   admin_dashboard: 'Quick View, attendance and leave at a glance.',
+  data_import: 'Import from Excel. Tick each kind; having the module itself does not allow importing.',
   reports: 'MPR Entries Report, Budget Submission Status, Dispatch Material.',
   mprs: 'MPR numbers of each project.',
   imports: 'Bulk upload from Excel.',
@@ -179,7 +190,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   duty_roster: 'Shifts and who works when.',
   break_time: 'Who is on a break, daily totals, over-limit.',
   user_feedback: 'Ratings, problems and ideas people send about the app.',
-  conveyance: 'Review conveyance bills.',
+  bill_claim: 'Review bill claims and conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',
   mobile_bill: 'Company SIMs, limits and operator bills.',
   vehicle_maintainer: 'Direct Book a ride without approval.',
@@ -188,11 +199,11 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
 };
 
 const LAYER_MODULES = PERMISSION_LAYER_MODULES as readonly string[];
-type DeptKind = 'attendance_reports' | 'leave_applications' | 'conveyance' | 'duty_roster';
+type DeptKind = 'attendance_reports' | 'leave_applications' | 'bill_claim' | 'duty_roster';
 const DEPT_KINDS: { module: DeptKind; endpoint: string; title: string; hint: string; preTick: boolean }[] = [
   { module: 'attendance_reports', endpoint: 'attendance-report-departments', title: 'Departments on the Monthly Attendance Report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'leave_applications', endpoint: 'leave-application-departments', title: 'Departments on the Monthly Leave Application report', hint: 'Nothing ticked = every Department.', preTick: true },
-  { module: 'conveyance', endpoint: 'conveyance-claim-departments', title: 'Departments on Conveyance Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
+  { module: 'bill_claim', endpoint: 'bill-claim-departments', title: 'Departments on Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'duty_roster', endpoint: 'roster-departments', title: 'Departments whose roster they set', hint: 'Nothing ticked = every Department and the shifts too (full setup, e.g. HR). Ticked = only those, shifts read only.', preTick: false }
 ];
 
@@ -205,6 +216,29 @@ interface DeptState {
   saved: Record<DeptKind, string[]>;
   draft: Record<DeptKind, Set<string>>;
 }
+// Employee Tracking -> whom they may see (TrackingScope.ts): Departments plus
+// single Employees; both empty = everyone.
+interface TrackEmployee {
+  id: number;
+  employee_id: string;
+  name: string;
+  designation: string;
+  department: string;
+}
+interface TrackScope {
+  saved: { departments: string[]; employee_ids: number[] };
+  draft: { departments: Set<string>; employees: Set<number> };
+  options: TrackEmployee[];
+}
+const fetchTrackScope = (token: string, userId: number) =>
+  fetch(apiUrl(`/api/users/${userId}/tracking-scope`), { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((d: any) => ({
+      departments: Array.isArray(d?.departments) ? (d.departments as string[]) : [],
+      employee_ids: Array.isArray(d?.employee_ids) ? (d.employee_ids as number[]).map(Number) : [],
+      employees: Array.isArray(d?.employees) ? (d.employees as TrackEmployee[]) : []
+    }));
 
 const flagOf = (u: User, k: FlagKey): boolean => {
   const v = (u as any)[k];
@@ -234,6 +268,36 @@ const cloneAccess = (a: Access): Access => ({
   layers: Object.fromEntries(Object.entries(a.layers).map(([k, v]) => [k, new Set(v)])),
   flags: { ...a.flags }
 });
+// Mobile App (APK) access (AppAccess.ts on the server): the app switched on
+// at all, and — once given its own ticks (custom) — which modules / switches
+// it has. Not custom = the app has exactly what the website has. An App
+// tick never gives more than the Web tick.
+interface AppAcc {
+  can: boolean;
+  custom: boolean;
+  items: Set<string>;
+}
+const cloneApp = (p: AppAcc): AppAcc => ({ can: p.can, custom: p.custom, items: new Set(p.items) });
+const webItems = (a: Access) => {
+  const out = new Set<string>(a.modules);
+  for (const f of FLAGS) if (a.flags[f.key]) out.add(f.key);
+  return out;
+};
+// What the app ends up with, written so two states can be compared.
+const appKey = (p: AppAcc, a: Access) => {
+  const web = webItems(a);
+  return `${p.can ? 1 : 0}|${p.custom ? [...p.items].filter((k) => web.has(k)).sort().join(',') : '='}`;
+};
+const fetchAppAccess = (token: string, ids: number[]): Promise<Record<number, AppAcc>> =>
+  fetch(apiUrl(`/api/app-access?ids=${ids.join(',')}`), { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => (r.ok ? r.json() : { items: [] }))
+    .catch(() => ({ items: [] }))
+    .then((d: any) =>
+      Object.fromEntries(
+        (Array.isArray(d?.items) ? d.items : []).map((x: any) => [Number(x.id), { can: !!x.can_use_app, custom: !!x.custom, items: new Set<string>((x.app || []).map(String)) }])
+      )
+    );
+
 const sameSet = (a: Set<string> | string[], b: Set<string> | string[]) => {
   const A = new Set(a);
   const B = new Set(b);
@@ -247,7 +311,7 @@ interface Change {
 
 // Everything that differs between an account's saved access and its draft,
 // as the requests that save it.
-function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined): Change[] {
+function changesFor(token: string, u: User, base: Access, draft: Access, dept: DeptState | undefined, track?: TrackScope, appBase?: AppAcc, appDraft?: AppAcc): Change[] {
   const put = async (path: string, body: unknown) => {
     const res = await fetch(apiUrl(`/api/users/${u.id}/${path}`), {
       method: 'PUT',
@@ -273,6 +337,9 @@ function changesFor(token: string, u: User, base: Access, draft: Access, dept: D
       out.push({ label: `${d.module} departments`, run: () => put(d.endpoint, { departments: [...dept.draft[d.module]] }) });
     }
   }
+  if (track && draft.modules.has('tracking') && (!sameSet(track.saved.departments, track.draft.departments) || !sameSet(track.saved.employee_ids.map(String), [...track.draft.employees].map(String)))) {
+    out.push({ label: 'Employee Tracking — who they can see', run: () => put('tracking-scope', { departments: [...track.draft.departments], employee_ids: [...track.draft.employees] }) });
+  }
   for (const f of FLAGS) {
     if (f.adminOnly && u.role !== 'admin') continue;
     const v = draft.flags[f.key];
@@ -282,6 +349,14 @@ function changesFor(token: string, u: User, base: Access, draft: Access, dept: D
   }
   if (draft.flags.can_manage_leave && (!base.flags.can_manage_leave || !sameSet(base.layers.leave_manage, draft.layers.leave_manage))) {
     out.push({ label: 'Leave Manage layers', run: () => put('module-permission-layers', { module: 'leave_manage', layers: [...draft.layers.leave_manage] }) });
+  }
+  // Saved last, after the website's own access it is narrowed to.
+  if (appBase && appDraft && appKey(appBase, base) !== appKey(appDraft, draft)) {
+    const web = webItems(draft);
+    out.push({
+      label: 'Mobile App',
+      run: () => put('app-access', { can_use_app: appDraft.can, ...(appDraft.custom ? { app: [...appDraft.items].filter((k) => web.has(k)) } : {}) })
+    });
   }
   return out;
 }
@@ -293,19 +368,21 @@ interface Agg {
   state: Tri;
 }
 
-const Toggle: React.FC<{ state: Tri; onClick: () => void; label: string }> = ({ state, onClick, label }) => (
+// tone: web = the website (sky), app = the mobile app (violet).
+const TONE = {
+  web: { on: 'bg-sky-500', mixed: 'bg-[repeating-linear-gradient(135deg,#0ea5e9_0_5px,#cbd5e1_5px_10px)]' },
+  app: { on: 'bg-violet-600', mixed: 'bg-[repeating-linear-gradient(135deg,#7c3aed_0_5px,#cbd5e1_5px_10px)]' }
+};
+const Toggle: React.FC<{ state: Tri; onClick: () => void; label: string; tone?: keyof typeof TONE; disabled?: boolean; hint?: string }> = ({ state, onClick, label, tone = 'web', disabled, hint }) => (
   <button
     type="button"
     onClick={onClick}
+    disabled={disabled}
     aria-label={label}
     aria-pressed={state === 'on'}
-    title={state === 'mixed' ? 'Different for the selected accounts — click to turn on for all' : state === 'on' ? 'On — click to turn off' : 'Off — click to turn on'}
-    className={`relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors shrink-0 ${
-      state === 'on'
-        ? 'bg-emerald-500'
-        : state === 'mixed'
-          ? 'bg-[repeating-linear-gradient(135deg,#10b981_0_5px,#cbd5e1_5px_10px)]'
-          : 'bg-slate-300'
+    title={hint || (state === 'mixed' ? 'Different for the selected accounts — click to turn on for all' : state === 'on' ? 'On — click to turn off' : 'Off — click to turn on')}
+    className={`relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors shrink-0 disabled:opacity-35 disabled:cursor-not-allowed ${
+      state === 'on' ? TONE[tone].on : state === 'mixed' ? TONE[tone].mixed : 'bg-slate-300'
     }`}
   >
     <span
@@ -336,12 +413,14 @@ interface ModuleAccessPageProps {
   initialIds: number[];
   departments: Department[];
   viewer: AccessViewer;
+  // The page Back returns to (Users, or Employees when opened from there).
+  backTo?: 'Users' | 'Employees';
   onClose: () => void;
   // After a save: reload the accounts and say how it went.
   onSaved: (text: string, ok: boolean) => void;
 }
 
-export function ModuleAccessPage({ token, users, initialIds, departments, viewer, onClose, onSaved }: ModuleAccessPageProps) {
+export function ModuleAccessPage({ token, users, initialIds, departments, viewer, backTo = 'Users', onClose, onSaved }: ModuleAccessPageProps) {
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const editable = useMemo(() => users.filter((u) => canEditUserModules(u, viewer)), [users, viewer]);
 
@@ -354,6 +433,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   // Department scopes: fetched for an account while it's edited on its own.
   const [depts, setDepts] = useState<Record<number, DeptState>>({});
   const [loadingDepts, setLoadingDepts] = useState(false);
+  const [tracks, setTracks] = useState<Record<number, TrackScope>>({});
 
   const [section, setSection] = useState<SectionKey>('general');
   const [query, setQuery] = useState('');
@@ -363,6 +443,24 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
 
   const selected = ids.map((id) => userById.get(id)).filter(Boolean) as User[];
   const single = selected.length === 1 ? selected[0] : null;
+
+  // Mobile App access of each account, saved and draft (fetched when added).
+  const [appBase, setAppBase] = useState<Record<number, AppAcc>>({});
+  const [appDrafts, setAppDrafts] = useState<Record<number, AppAcc>>({});
+  useEffect(() => {
+    const missing = ids.filter((id) => !appBase[id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    fetchAppAccess(token, missing).then((got) => {
+      if (cancelled) return;
+      setAppBase((b) => ({ ...b, ...got }));
+      setAppDrafts((d) => ({ ...d, ...Object.fromEntries(Object.entries(got).map(([id, p]) => [id, cloneApp(p)])) }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids.join(',')]);
 
   const addUsers = (list: User[]) => {
     const fresh = list.filter((u) => !base[u.id]);
@@ -374,7 +472,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     setIds((cur) => [...cur, ...list.map((u) => u.id).filter((id) => !cur.includes(id))]);
   };
 
-  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id]) : []);
+  const changesOf = (u: User) => (base[u.id] && drafts[u.id] ? changesFor(token, u, base[u.id], drafts[u.id], depts[u.id], tracks[u.id], appBase[u.id], appDrafts[u.id]) : []);
   const pending = selected.map((u) => ({ u, changes: changesOf(u) }));
   const changeCount = pending.reduce((s, p) => s + p.changes.length, 0);
   const changedAccounts = pending.filter((p) => p.changes.length > 0).length;
@@ -383,7 +481,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const u = userById.get(id);
     if (u && changesOf(u).length > 0 && !(await confirmDialog(`Drop the unsaved changes for ${u.name}?`, { tone: 'danger' }))) return;
     setIds((cur) => cur.filter((x) => x !== id));
-    for (const set of [setBase, setDrafts, setDepts] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
+    for (const set of [setBase, setDrafts, setDepts, setTracks, setAppBase, setAppDrafts] as React.Dispatch<React.SetStateAction<Record<number, any>>>[]) {
       set((m) => {
         const next = { ...m };
         delete next[id];
@@ -428,6 +526,34 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [single?.id]);
+
+  // Employee Tracking scope of the one account being edited, fetched fresh.
+  useEffect(() => {
+    if (!single || tracks[single.id]) return;
+    const u = single;
+    let cancelled = false;
+    fetchTrackScope(token, u.id).then((d) => {
+      if (cancelled) return;
+      setTracks((m) => ({
+        ...m,
+        [u.id]: { saved: { departments: d.departments, employee_ids: d.employee_ids }, draft: { departments: new Set(d.departments), employees: new Set(d.employee_ids) }, options: d.employees }
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [single?.id]);
+  const editTrack = (fn: (t: TrackScope['draft']) => void) => {
+    if (!single) return;
+    setTracks((m) => {
+      const cur = m[single.id];
+      if (!cur) return m;
+      const draft = { departments: new Set(cur.draft.departments), employees: new Set(cur.draft.employees) };
+      fn(draft);
+      return { ...m, [single.id]: { ...cur, draft } };
+    });
+  };
 
   // --- reading the selected accounts' drafts ---
   const aggregate = (get: (a: Access) => boolean, eligible: (u: User, a: Access) => boolean = () => true): Agg => {
@@ -481,6 +607,60 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     });
   const flip = (agg: Agg) => agg.state !== 'on';
 
+  // --- the Mobile App column ---
+  // On in the app = on for the website, the app switched on, and ticked for
+  // the app (or the app has no ticks of its own and follows the website).
+  const appHas = (p: AppAcc, key: string, webOn: boolean) => webOn && p.can && (!p.custom || p.items.has(key));
+  const appAgg = (key: string, webGet: (a: Access) => boolean, eligible: (u: User, a: Access) => boolean = () => true): Agg => {
+    let on = 0;
+    let n = 0;
+    for (const u of selected) {
+      const a = drafts[u.id];
+      const p = appDrafts[u.id];
+      if (!a || !p || !eligible(u, a)) continue;
+      n++;
+      if (appHas(p, key, webGet(a))) on++;
+    }
+    return { on, n, state: n === 0 ? 'none' : on === 0 ? 'off' : on === n ? 'on' : 'mixed' };
+  };
+  const appCanAgg = (): Agg => {
+    const list = selected.filter((u) => appDrafts[u.id]);
+    const on = list.filter((u) => appDrafts[u.id].can).length;
+    return { on, n: list.length, state: list.length === 0 ? 'none' : on === 0 ? 'off' : on === list.length ? 'on' : 'mixed' };
+  };
+  const anyAppOn = selected.some((u) => appDrafts[u.id]?.can);
+  const editApp = (fn: (p: AppAcc, a: Access, u: User) => void) =>
+    setAppDrafts((d) => {
+      const next = { ...d };
+      for (const u of selected) {
+        if (!next[u.id] || !drafts[u.id]) continue;
+        const p = cloneApp(next[u.id]);
+        fn(p, drafts[u.id], u);
+        next[u.id] = p;
+      }
+      return next;
+    });
+  // An App tick of its own: the app stops following the website from here.
+  const setAppItem = (key: string, on: boolean, webGet: (a: Access) => boolean) =>
+    editApp((p, a) => {
+      if (!webGet(a) || !p.can) return;
+      if (!p.custom) {
+        p.custom = true;
+        p.items = webItems(a);
+      }
+      if (on) p.items.add(key);
+      else p.items.delete(key);
+    });
+  const setAppCan = (on: boolean) => editApp((p) => (p.can = on));
+  const copyWebToApp = () => {
+    editApp((p) => {
+      p.can = true;
+      p.custom = false;
+      p.items = new Set();
+    });
+    setNotice('The app now gets the same access as the website — check it, then Save.');
+  };
+
   const setDept = (kind: DeptKind, keys: string[], on: boolean) => {
     if (!single) return;
     setDepts((m) => {
@@ -506,6 +686,8 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
       }
       return next;
     });
+    const srcApp = (await fetchAppAccess(token, [src.id]))[src.id];
+    if (srcApp) setAppDrafts((d) => ({ ...d, ...Object.fromEntries(selected.map((u) => [u.id, cloneApp(srcApp)])) }));
     if (single) {
       const target = single;
       const lists = await Promise.all(
@@ -522,6 +704,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         const draft = { ...cur.draft };
         DEPT_KINDS.forEach((d, i) => (draft[d.module] = new Set(lists[i])));
         return { ...m, [target.id]: { ...cur, draft } };
+      });
+      const t = await fetchTrackScope(token, src.id);
+      setTracks((m) => {
+        const cur = m[target.id];
+        if (!cur) return m;
+        return { ...m, [target.id]: { ...cur, draft: { departments: new Set(t.departments), employees: new Set(t.employee_ids) } } };
       });
     }
     setNotice(`Copied access from ${src.name} — check it, then Save.`);
@@ -584,32 +772,69 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
   const sectionOnCount = (s: SectionKey) =>
     FLAGS.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => flagAgg(f).on > 0).length +
     ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s && moduleAgg(m.key).on > 0).length;
+  const sectionAppCount = (s: SectionKey) =>
+    FLAGS.filter((f) => f.section === s && (!f.adminOnly || anyAdmin)).filter((f) => appAgg(f.key, (a) => a.flags[f.key], flagEligible(f)).on > 0).length +
+    ADMIN_MODULES.filter((m) => sectionOfModule(m.key) === s && appAgg(m.key, (a) => a.modules.has(m.key)).on > 0).length;
   const visibleSections = SECTIONS.filter((s) => s.key !== 'other' || ADMIN_MODULES.some((m) => sectionOfModule(m.key) === 'other'));
 
   const summary = [
-    ...FLAGS.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
-    ...ADMIN_MODULES.map((m) => ({ label: m.label, agg: moduleAgg(m.key), layers: LAYER_MODULES.includes(m.key) ? (m.key as string) : null }))
+    ...FLAGS.filter((f) => !f.adminOnly || anyAdmin).map((f) => ({ label: f.label, agg: flagAgg(f), app: appAgg(f.key, (a) => a.flags[f.key], flagEligible(f)), layers: f.key === 'can_manage_leave' ? 'leave_manage' : null })),
+    ...ADMIN_MODULES.map((m) => ({ label: m.label, agg: moduleAgg(m.key), app: appAgg(m.key, (a) => a.modules.has(m.key)), layers: LAYER_MODULES.includes(m.key) ? (m.key as string) : null }))
   ].filter((x) => x.agg.on > 0);
 
   const pill = (active: boolean) =>
     `text-[11.5px] font-semibold rounded-full px-2.5 py-1 border transition-colors ${active ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-violet-300'}`;
 
-  const renderFlag = (f: FlagDef) => {
-    const agg = flagAgg(f);
+  // The App switch of one row, next to its Web switch.
+  const appCell = (key: string, label: string, webAgg: Agg, webGet: (a: Access) => boolean, eligible?: (u: User, a: Access) => boolean) => {
+    const agg = appAgg(key, webGet, eligible);
+    const off = agg.n === 0 || webAgg.on === 0 || !anyAppOn;
     return (
-      <div
-        key={f.key}
-        className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 ${f.parent ? 'ml-6' : ''} ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{f.label}</div>
-          <div className="text-xs text-slate-500">{f.desc}</div>
-        </div>
-        <MixedNote agg={agg} />
-        <Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />
-      </div>
+      <span className="w-12 sm:w-14 flex justify-center shrink-0">
+        <Toggle
+          tone="app"
+          state={off ? 'off' : agg.state}
+          disabled={off}
+          hint={agg.n === 0 ? 'Loading…' : !anyAppOn ? 'Mobile App access is off' : webAgg.on === 0 ? 'Turn it on for the website first' : undefined}
+          label={`${label} in the app`}
+          onClick={() => setAppItem(key, flip(agg), webGet)}
+        />
+      </span>
     );
   };
+  const webCell = (node: React.ReactNode) => <span className="w-12 sm:w-14 flex justify-center shrink-0">{node}</span>;
+  // On for the website but not in the app: say so under the row.
+  const websiteOnly = (key: string, webAgg: Agg, webGet: (a: Access) => boolean, ml = 'ml-4') => {
+    if (!anyAppOn || webAgg.on === 0) return null;
+    const agg = appAgg(key, webGet);
+    if (agg.n === 0 || agg.on > 0) return null;
+    return <p className={`${ml} -mt-1 mb-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5`}>Website only — not in the mobile app for {selected.length > 1 ? 'these accounts' : 'this account'}.</p>;
+  };
+
+  const renderFlag = (f: FlagDef) => {
+    const agg = flagAgg(f);
+    const webGet = (a: Access) => a.flags[f.key];
+    return (
+      <React.Fragment key={f.key}>
+        <div className={`flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 ${f.parent ? 'ml-6' : ''} ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-slate-900">{f.label}</div>
+            <div className="text-xs text-slate-500">{f.desc}</div>
+          </div>
+          <MixedNote agg={agg} />
+          {webCell(<Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />)}
+          {appCell(f.key, f.label, agg, webGet, flagEligible(f))}
+        </div>
+        {websiteOnly(f.key, agg, webGet, f.parent ? 'ml-10' : 'ml-4')}
+      </React.Fragment>
+    );
+  };
+  const columnHeads = (
+    <div className="flex justify-end pr-1.5 -mb-1" aria-hidden="true">
+      <span className="w-12 sm:w-14 text-center text-[10px] font-extrabold tracking-[0.08em] text-sky-600">WEB</span>
+      <span className="w-12 sm:w-14 text-center text-[10px] font-extrabold tracking-[0.08em] text-violet-600">APP</span>
+    </div>
+  );
 
   const renderLayers = (m: string, options: { key: string; label: string }[]) => (
     <div className="flex flex-wrap gap-1.5 -mt-1 mb-3 ml-9">
@@ -655,25 +880,92 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     );
   };
 
+  const renderTrackingScope = () => {
+    if (!single) {
+      return <p className="ml-9 -mt-1 mb-3 text-[11px] text-slate-500">Who they can track is set one account at a time — open just one account to change it.</p>;
+    }
+    const ts = tracks[single.id];
+    const empById = new Map((ts?.options || []).map((e) => [e.id, e]));
+    const picked = ts ? [...ts.draft.employees].map((id) => empById.get(id) || { id, employee_id: '', name: `Employee #${id}`, designation: '', department: '' }) : [];
+    const everyone = !!ts && ts.draft.departments.size === 0 && ts.draft.employees.size === 0;
+    return (
+      <div className="ml-9 -mt-1 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+        <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-0.5">
+          <UsersIcon className="w-3.5 h-3.5 text-amber-600" /> Who they can see on Employee Tracking
+        </p>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Nothing chosen = every employee. Chosen = only the people in the ticked Departments plus the employees added below — on the map, status cards, history, Stay Report and Live Follow.
+        </p>
+        {!ts ? (
+          <p className="text-[11px] text-slate-400">Loading…</p>
+        ) : (
+          <>
+            <p className="text-[11px] font-semibold text-amber-900 mb-2">{everyone ? 'Now: everyone' : `Now: ${ts.draft.departments.size} department${ts.draft.departments.size === 1 ? '' : 's'} + ${ts.draft.employees.size} employee${ts.draft.employees.size === 1 ? '' : 's'}`}</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Departments</p>
+            {departments.length === 0 ? (
+              <p className="text-[11px] text-slate-400 mb-2">No Departments set up yet (Admin Panel → Departments).</p>
+            ) : (
+              <ModuleAccessChecklist
+                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+                selected={ts.draft.departments}
+                onToggle={(k) => editTrack((d) => (d.departments.has(k) ? d.departments.delete(k) : d.departments.add(k)))}
+                onSetMany={(keys, checked) => editTrack((d) => keys.forEach((k) => (checked ? d.departments.add(k) : d.departments.delete(k))))}
+                tone="amber"
+                searchPlaceholder="Search departments…"
+              />
+            )}
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-3 mb-1">Single employees</p>
+            <SearchSelect
+              value=""
+              onChange={(e) => e.target.value && editTrack((d) => d.employees.add(Number(e.target.value)))}
+              className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="">— Add an employee —</option>
+              {ts.options
+                .filter((e) => !ts.draft.employees.has(e.id))
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {[e.name, e.employee_id, e.designation, e.department].filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+            </SearchSelect>
+            {picked.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {picked.map((e) => (
+                  <span key={e.id} className="inline-flex items-center gap-1 text-[11.5px] font-semibold bg-white border border-amber-300 text-amber-900 rounded-full pl-2.5 pr-1 py-0.5">
+                    {e.name}
+                    {e.employee_id ? ` · ${e.employee_id}` : ''}
+                    <button type="button" onClick={() => editTrack((d) => d.employees.delete(e.id))} className="p-0.5 rounded-full hover:bg-amber-100" aria-label={`Remove ${e.name}`}>
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderModule = (m: { key: AdminModuleKey; label: string }) => {
     const agg = moduleAgg(m.key);
     const showGroupView = m.key === 'admin_dashboard' && (agg.on > 0 || anyAdmin);
     return (
       <React.Fragment key={m.key}>
-        <button
-          type="button"
-          onClick={() => setModule(m.key, flip(agg))}
-          className={`w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-        >
-          <Box state={agg.state} />
+        <div className={`w-full flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-slate-900">{m.label}</div>
             {MODULE_DESC[m.key] && <div className="text-xs text-slate-500">{MODULE_DESC[m.key]}</div>}
           </div>
           <MixedNote agg={agg} />
-        </button>
+          {webCell(<Toggle state={agg.state} label={m.label} onClick={() => setModule(m.key, flip(agg))} />)}
+          {appCell(m.key, m.label, agg, (a) => a.modules.has(m.key))}
+        </div>
+        {websiteOnly(m.key, agg, (a) => a.modules.has(m.key))}
         {agg.on > 0 && LAYER_MODULES.includes(m.key) && renderLayers(m.key, layersFor(m.key))}
         {agg.on > 0 && DEPT_KINDS.some((d) => d.module === m.key) && renderDepts(m.key as DeptKind)}
+        {agg.on > 0 && m.key === 'tracking' && renderTrackingScope()}
         {showGroupView && <div className="ml-6">{renderFlag(FLAG.can_view_group_dashboard)}</div>}
       </React.Fragment>
     );
@@ -684,18 +976,16 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     const agg = flagAgg(f);
     return (
       <React.Fragment key="leave_manage">
-        <button
-          type="button"
-          onClick={() => setFlag(f, flip(agg))}
-          className={`w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-        >
-          <Box state={agg.state} />
+        <div className={`w-full flex items-center gap-2 sm:gap-3 pl-3.5 pr-1.5 py-3 rounded-2xl border mb-2 transition-colors ${agg.on > 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-slate-900">{f.label}</div>
             <div className="text-xs text-slate-500">{f.desc}</div>
           </div>
           <MixedNote agg={agg} />
-        </button>
+          {webCell(<Toggle state={agg.state} label={f.label} onClick={() => setFlag(f, flip(agg))} />)}
+          {appCell(f.key, f.label, agg, (a) => a.flags[f.key])}
+        </div>
+        {websiteOnly(f.key, agg, (a) => a.flags[f.key])}
         {agg.on > 0 && renderLayers('leave_manage', LEAVE_MANAGE_LAYERS)}
       </React.Fragment>
     );
@@ -714,12 +1004,13 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         ) : (
           <>
             <h3 className="text-base font-extrabold text-slate-900">{meta.label}</h3>
-            <p className="text-xs text-slate-500 mb-3">{meta.hint} Tick a module to open it for them, then pick what they may do in it.</p>
+            <p className="text-xs text-slate-500 mb-3">{meta.hint} Turn a module on for the website (Web) and, separately, for the mobile app (App); then pick what they may do in it — the same on both.</p>
           </>
         )}
+        {columnHeads}
         {flags.length > 0 && (
           <>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-3 mb-2">On their own pages</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mt-1 mb-2">On their own pages</p>
             {flags.map(renderFlag)}
           </>
         )}
@@ -742,11 +1033,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             <button
               type="button"
               onClick={back}
-              className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label="Back to Users"
-              title="Back to Users"
+              className={`h-9 shrink-0 rounded-full flex items-center justify-center gap-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 ${backTo === 'Users' ? 'w-9' : 'px-3 border border-slate-200 text-sm font-semibold'}`}
+              aria-label={`Back to ${backTo}`}
+              title={`Back to ${backTo}`}
             >
               <ArrowLeft className="w-5 h-5" />
+              {backTo !== 'Users' && <span>{backTo}</span>}
             </button>
             <div className="min-w-0 flex-1">
               <h2 className="text-base md:text-lg font-bold text-slate-900">Module Access</h2>
@@ -808,6 +1100,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
               </SearchSelect>
             </div>
           </div>
+          <AppAccessCard
+            agg={appCanAgg()}
+            following={selected.length > 0 && selected.every((u) => appDrafts[u.id] && !appDrafts[u.id].custom)}
+            onToggle={(on) => setAppCan(on)}
+            onCopy={copyWebToApp}
+          />
           {selected.length > 1 && (
             <div className="px-4 md:px-5 py-2 bg-amber-50 border-t border-amber-200 text-xs text-amber-900 flex items-start gap-2">
               <UsersIcon className="w-4 h-4 shrink-0 mt-px" />
@@ -838,6 +1136,8 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                 {x.label}
                 {layerLabels.length > 0 && <span className="font-normal text-violet-700"> · {layerLabels.join(', ')}</span>}
                 {x.agg.state === 'mixed' && <span className="font-normal text-amber-700"> ({x.agg.on} of {x.agg.n})</span>}
+                <span className="ml-1.5 text-[9.5px] font-extrabold bg-sky-100 text-sky-700 rounded-md px-1 py-px align-middle">WEB</span>
+                {x.app.on > 0 && <span className="ml-1 text-[9.5px] font-extrabold bg-violet-100 text-violet-700 rounded-md px-1 py-px align-middle">APP</span>}
               </span>
             );
           })}
@@ -859,7 +1159,12 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                     }`}
                   >
                     {s.label}
-                    <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${n > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{n}</span>
+                    <span
+                      title={`${n} on the website · ${sectionAppCount(s.key)} in the app`}
+                      className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${n > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
+                    >
+                      {n > 0 ? `${n} · ${sectionAppCount(s.key)}` : n}
+                    </span>
                   </button>
                 );
               })}
@@ -896,6 +1201,41 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             {saving ? `Saving ${saving.done} of ${saving.total}…` : selected.length > 1 ? `Save for ${changedAccounts || selected.length} account${(changedAccounts || selected.length) === 1 ? '' : 's'}` : 'Save Access'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The Mobile App (APK) switch for the whole account, and "Copy Web → App".
+function AppAccessCard({ agg, following, onToggle, onCopy }: { agg: Agg; following: boolean; onToggle: (on: boolean) => void; onCopy: () => void }) {
+  const loading = agg.n === 0;
+  return (
+    <div className="mx-4 md:mx-5 mb-3 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50 p-3 sm:p-3.5 flex flex-wrap items-center gap-3">
+      <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-700 text-white flex items-center justify-center shrink-0">
+        <Smartphone className="w-5 h-5" />
+      </span>
+      <div className="flex-1 min-w-[180px]">
+        <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          Mobile App (APK) access
+          {agg.state === 'mixed' && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{agg.on} of {agg.n}</span>}
+        </div>
+        <div className="text-xs text-slate-600">
+          {loading
+            ? 'Loading…'
+            : agg.on === 0
+              ? 'Off — this account can’t sign in to the phone app. The website is not affected.'
+              : following
+                ? 'On — the app has the same access as the website. Turn an App switch off below to take something out of the app only.'
+                : 'On — the app has only the App switches turned on below (never more than the website).'}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 ml-auto">
+        {!loading && agg.on > 0 && !following && (
+          <button type="button" onClick={onCopy} className="text-xs font-semibold text-violet-700 bg-white border border-violet-300 hover:bg-violet-50 rounded-full px-3 py-1.5 whitespace-nowrap">
+            Copy Web → App
+          </button>
+        )}
+        <Toggle tone="app" state={loading ? 'off' : agg.state} disabled={loading} label="Mobile App access" onClick={() => onToggle(agg.state !== 'on')} />
       </div>
     </div>
   );

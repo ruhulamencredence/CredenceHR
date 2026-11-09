@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { HolidayEntry } from '../types';
@@ -155,8 +156,13 @@ function buildGrid(year: number, month: number): GridCell[] {
 // list), the Superadmin everyone's — scoped by /api/calendar-attendance.
 export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ token, size = 'compact' }) => {
   const large = size === 'large';
-  const [entries, setEntries] = useState<HolidayEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from this device's last copy (screenCache.ts), then refreshed.
+  const [entries, setEntriesState] = useState<HolidayEntry[]>(() => readScreenCache<HolidayEntry[]>('holidays') || []);
+  const setEntries = (rows: HolidayEntry[]) => {
+    writeScreenCache('holidays', rows);
+    setEntriesState(rows);
+  };
+  const [loading, setLoading] = useState(() => readScreenCache('holidays') === undefined);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -181,7 +187,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
   const englishTitle = bn ? `${BENGALI_GREGORIAN_MONTHS[calMonth]} ${toBengaliDigits(calYear)}` : `${MONTH_LABELS[calMonth]} ${calYear}`;
 
   const fetchHolidays = useCallback(async () => {
-    setLoading(true);
+    if (readScreenCache('holidays') === undefined) setLoading(true);
     try {
       // This widget mounts twice on every Dashboard load (compact mobile +
       // large desktop copies, see UserPanel.tsx) — dedupedFetchJson means
@@ -220,8 +226,18 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
   const gridTo = gridCells[gridCells.length - 1].dateStr;
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `cal-att:${gridFrom}:${gridTo}`;
+    const apply = (r: any) => {
+      setPeople(Array.isArray(r?.people) ? r.people : []);
+      setMe(typeof r?.me === 'number' ? r.me : null);
+      setMarksByDate(r?.days || {});
+    };
+    const saved = readScreenCache(cacheKey);
+    if (saved !== undefined) apply(saved);
     dedupedFetchJson(apiUrl(`/api/calendar-attendance?from=${gridFrom}&to=${gridTo}`), token).then((r: any) => {
-      if (cancelled) return;
+      // null = offline / not reachable: keep what's on screen.
+      if (cancelled || (!r && saved !== undefined)) return;
+      if (r) writeScreenCache(cacheKey, r);
       setPeople(Array.isArray(r?.people) ? r.people : []);
       setMe(typeof r?.me === 'number' ? r.me : null);
       setMarksByDate(r?.days || {});

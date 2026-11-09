@@ -22,6 +22,7 @@
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import { sendSilentPushToUserIds } from "./PushNotificationService";
+import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 
 interface Deps {
   authenticateToken: any;
@@ -131,8 +132,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
       try {
         const userId = Number(req.params.userId);
         if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ error: "Invalid employee." });
-        // Scoped read (same as the live board): only someone this account can
-        // already see on Employee Tracking can be followed.
+        // Only someone this account can already see on Employee Tracking
+        // (company and TrackingScope.ts) can be followed.
+        if (!inTrackingScope(await getTrackingScope(queryDB, req.user), userId)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
         const latest = await queryDB(
           "SELECT lat, lng, accuracy_m, battery_pct, recorded_at FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1",
           [userId]
@@ -177,6 +179,67 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
+    }
+  );
+
+  // "Live all" on the Employee Tracking map: the same as /watch for several
+  // people at once (the ones on the map, at most WATCH_MANY_MAX), renewed by
+  // the page every RENEW like Live Follow. Each person must be in this
+  // account's tracking scope; the others are skipped. No trails — the map
+  // already shows everyone's latest position; pings then arrive over the
+  // socket ("tracking:location").
+  const WATCH_MANY_MAX = 100;
+  const idsFrom = (body: any): number[] =>
+    Array.from(new Set((Array.isArray(body?.user_ids) ? body.user_ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))).slice(
+      0,
+      WATCH_MANY_MAX
+    ) as number[];
+  app.post(
+    "/api/tracking/live/watch-many",
+    authenticateToken,
+    requireAdmin,
+    requireModule("tracking"),
+    requireModuleLayer("tracking", "live"),
+    async (req: any, res: any) => {
+      try {
+        const scope = await getTrackingScope(queryDB, req.user);
+        const ids = idsFrom(req.body).filter((id) => inTrackingScope(scope, id));
+        const me = Number(req.user.id);
+        const watching: { user_id: number; live_until: number | null }[] = [];
+        for (const userId of ids) {
+          let m = watchers.get(userId);
+          const wasLive = !!(m && activeWatchers(userId).length);
+          if (!m) watchers.set(userId, (m = new Map()));
+          m.set(me, Date.now() + WATCH_TTL_MS);
+          const until = await liveUntil(userId);
+          if (!wasLive) {
+            tellPhone(userId, until);
+            wakes.delete(userId);
+            wakePhone(userId, until);
+          } else if ((lastHeard.get(userId) || 0) < (wakes.get(userId)?.at || 0)) {
+            wakePhone(userId, until);
+          }
+          watching.push({ user_id: userId, live_until: until });
+        }
+        res.json({ watching, max: WATCH_MANY_MAX });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+  app.post(
+    "/api/tracking/live/unwatch-many",
+    authenticateToken,
+    requireAdmin,
+    requireModule("tracking"),
+    requireModuleLayer("tracking", "live"),
+    async (req: any, res: any) => {
+      const me = Number(req.user.id);
+      for (const userId of idsFrom(req.body)) {
+        watchers.get(userId)?.delete(me);
+        if ((await liveUntil(userId)) == null) tellPhone(userId, null);
+      }
+      res.json({ success: true });
     }
   );
 

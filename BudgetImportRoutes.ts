@@ -9,7 +9,7 @@
 import { activeGroupId } from "./companyContext";
 import { DeliveryConditionType } from "./deliveryDateConditions";
 import { addDaysToDateStr } from "./deliveryDateConditions";
-import { resolveMinLeadDays } from "./deliveryDateConditions";
+import { resolveMinLeadDays, materialRules } from "./deliveryDateConditions";
 import { memoryDb } from "./memoryDbFallback";
 import type { Express } from "express";
 import { draftBudgetNotice } from "./BudgetNoticeDraft";
@@ -24,6 +24,8 @@ export interface RegisterBudgetImportRoutesDeps {
   queryDB: any;
   requireAdmin: any;
   requireBudgetModuleAccess: any;
+  // GET of Budgets / items / MPR Nos / Jobs (server.ts requireBudgetRead).
+  requireBudgetRead: any;
   requireModule: any;
   scopedExecute: any;
   toDateOnlyString: any;
@@ -32,9 +34,9 @@ export interface RegisterBudgetImportRoutesDeps {
 }
 
 export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImportRoutesDeps) {
-  const { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert } = deps;
+  const { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireBudgetRead, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert } = deps;
   // 3. MPR Numbers CRUD
-  app.get("/api/mpr-numbers", authenticateToken, async (req, res) => {
+  app.get("/api/mpr-numbers", authenticateToken, requireBudgetRead, async (req, res) => {
     try {
       const mprs = await queryDB("SELECT * FROM mpr_numbers ORDER BY mpr_no ASC");
       res.json(mprs);
@@ -87,10 +89,11 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
   // 3b. Budgets — created by the Admin, then an Excel sheet of line items is imported
   // into them. Importing auto-adds every MRF No to the Approved MPR list and every
   // Project Name to the Approved Project list, if they don't already exist.
-  // Listing is open to any authenticated user (not admin-only): Users must browse the
+  // Listing is open to every PEPM account (requireBudgetRead — Budget switch, Job Edit
+  // or a PEPM Admin module), not admin-only: Users must browse the
   // Budgets the Admin has created & imported before they're allowed to start a new MPR
   // Entry — clicking a Budget is now the entry point into the Entry form.
-  app.get("/api/budgets", authenticateToken, async (req, res) => {
+  app.get("/api/budgets", authenticateToken, requireBudgetRead, async (req, res) => {
     try {
       // Explicit columns (not SELECT *) so the potentially large file_data blob is
       // never sent down for the list view — only whether a file exists (has_file).
@@ -189,10 +192,10 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
     }
   });
 
-  // Open to any authenticated user (not admin-only): once a User picks a Budget from
+  // Open to every PEPM account (requireBudgetRead), not admin-only: once a User picks a Budget from
   // the list, the Entry Form calls this to know exactly which Project(s) and MPR/MRF
   // Nos were imported into that Budget, so only those can be picked for a new entry.
-  app.get("/api/budgets/:id/items", authenticateToken, async (req: any, res) => {
+  app.get("/api/budgets/:id/items", authenticateToken, requireBudgetRead, async (req: any, res) => {
     try {
       // requisitioned_by_me: how much of THIS item's Qty the CALLING user has already
       // put into their own active entries — lets the User Entry Form show/cap the
@@ -213,10 +216,10 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
   });
 
   // Look up the imported "Description of Materials" for a given MRF/MPR No, so the User
-  // Entry Form can auto-fill Item Name the moment an MPR No is selected. Open to any
-  // authenticated user (not admin-only) since this is used from the User Entry Form.
+  // Entry Form can auto-fill Item Name the moment an MPR No is selected. Open to every
+  // PEPM account (requireBudgetRead) since this is used from the User Entry Form.
   // If the same MRF No was imported more than once, the most recently imported row wins.
-  app.get("/api/budget-items/lookup", authenticateToken, async (req, res) => {
+  app.get("/api/budget-items/lookup", authenticateToken, requireBudgetRead, async (req, res) => {
     try {
       const mprNo = String(req.query.mpr_no || "").trim();
       if (!mprNo) return res.json({ description: null });
@@ -1238,7 +1241,7 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
   // Delivery Date picker on the New Job Entry / Add MPR / Job Edit forms
   // grey out blocked dates for THIS account before it even attempts a
   // submit, using the exact same resolver the server enforces with.
-  app.get("/api/delivery-date-conditions/effective", authenticateToken, async (req: any, res) => {
+  app.get("/api/delivery-date-conditions/effective", authenticateToken, requireBudgetRead, async (req: any, res) => {
     try {
       const conditionType = req.query.type as DeliveryConditionType;
       if (conditionType !== "entry" && conditionType !== "job_edit") {
@@ -1251,9 +1254,14 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         budgetId,
         userRole: req.user.role
       });
+      // Material conditions that apply to this account for this type — the
+      // picker takes the stricter of these and the rule above per material.
+      const materials = Array.from((await materialRules(queryDB, conditionType, req.user.role)).values());
       res.json({
         min_lead_days: minLeadDays,
-        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null
+        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null,
+        today: todayInDhaka(),
+        materials
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1261,7 +1269,7 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
   });
 
   // 4. Jobs & Duration
-  app.get("/api/jobs", authenticateToken, async (req, res) => {
+  app.get("/api/jobs", authenticateToken, requireBudgetRead, async (req, res) => {
     try {
       const jobs = await queryDB("SELECT * FROM jobs ORDER BY job_no ASC");
       res.json(jobs);
@@ -1270,7 +1278,7 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
     }
   });
 
-  app.get("/api/jobs/check/:jobNo", authenticateToken, async (req, res) => {
+  app.get("/api/jobs/check/:jobNo", authenticateToken, requireBudgetRead, async (req, res) => {
     try {
       const { jobNo } = req.params;
       const jobs = await queryDB("SELECT * FROM jobs WHERE job_no = ?", [jobNo.trim()]);

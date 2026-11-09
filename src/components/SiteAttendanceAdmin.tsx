@@ -26,6 +26,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 interface TeamMember {
   employee_id: number;
   name: string;
@@ -326,7 +327,7 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet), 'Muster register');
-    XLSX.writeFile(wb, `site-attendance-${month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `site-attendance-${month}.xlsx`);
   };
   return (
     <div className="space-y-3">

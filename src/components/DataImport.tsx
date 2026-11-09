@@ -4,7 +4,7 @@
  */
 
 // Admin Panel -> HR Data Import (DataImportRoutes.ts): bring Employee Details,
-// Leave history, Movement / Conveyance Bill Claim history, Check In / Check
+// Leave history, Movement / Bill Claim history, Check In / Check
 // Out and office Attendance in from an Excel or CSV sheet.
 //
 // 1. Pick what to import and download its template (headers on the Data
@@ -39,6 +39,7 @@ import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { useHrApi } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
 type FieldType = 'text' | 'date' | 'time' | 'number' | 'yesno';
 interface Field {
@@ -149,7 +150,7 @@ function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
   return out;
 }
 
-// Movement Claim History can also come as the "Multiple Check In/Out Details
+// Check In/Out History can also come as the "Multiple Check In/Out Details
 // Report": a few title lines, then "SL | Employee Code | Employee Name | Type |
 // Check In/Out Time | Visited Company | Address | Remarks", one line per Check
 // In or Check Out ("01-10-2026 08:44 AM"). Each person's lines are put in time
@@ -245,7 +246,7 @@ function checkInOutSheetRows(grid: any[][]): Record<string, any>[] | null {
   return out.sort((a, b) => a.__row - b.__row);
 }
 
-// Conveyance Bill Claim History can also come as the "Claim Report": title
+// Bill Claim History can also come as the "Claim Report": title
 // lines, then "Serial | Employee | Designation | Department | Claim No. |
 // Created Date | Categories | Description | Claim Date | Status | ... | Claim
 // Amount | Approved Amount | Sanctioned / Disbursed Amount | ...", one line per
@@ -406,7 +407,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     ]);
     info['!cols'] = [{ wch: 22 }, { wch: 10 }, { wch: 36 }, { wch: 22 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, info, 'Instructions');
-    XLSX.writeFile(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
   // Reads one sheet into import rows + the column mapping (throws a readable error).
@@ -610,7 +611,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     );
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, 'Result');
-    XLSX.writeFile(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
   if (!kinds)
@@ -642,7 +643,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             the system are skipped, so a sheet can be uploaded again safely.
           </p>
           {kinds.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">You don't have access to any import. {error}</p>
+            <p className="mt-4 text-sm text-slate-500">No import is ticked for you yet — ask your Superadmin to tick it in Module Access → HR Data Import. {error}</p>
           ) : (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
               {kinds.map((k) => {

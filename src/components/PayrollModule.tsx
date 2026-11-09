@@ -28,7 +28,7 @@ import { PayrollAdjustmentsPanel } from './PayrollAdjustmentsPanel';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { PayrollListPanel } from './PayrollListPanel';
@@ -41,6 +41,7 @@ import { PayrollApprovalPanel } from './PayrollApprovalPanel';
 import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 
 import { STD_STYLES, STD_HEAD, STD_FOOT } from '../lib/pdfStandard';
 interface PayrollModuleProps {
@@ -473,7 +474,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Payroll');
-      XLSX.writeFile(wb, `Payroll_Report_${monthYear}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Payroll_Report_${monthYear}.xlsx`);
     } finally {
       setExporting(null);
     }
@@ -591,7 +592,9 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   });
   const [monthYear, setMonthYear] = useState(currentMonthYear());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(false);
+  // true from the start: fetchSummary runs on open and always ends it — no
+  // empty dashboard drawn for a frame before its loading placeholder.
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [forbidden, setForbidden] = useState(false);
 
@@ -678,19 +681,10 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const outstandingCount = (summary?.unpaid.count || 0) + (summary?.processed.count || 0);
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} onBack={onBack} />
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-4">
@@ -849,7 +843,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <p className="text-xs text-slate-400 mt-1">Ask an Admin to grant Payroll access from Admin Panel → Users → Module Access.</p>
           </div>
         ) : loading && !summary ? (
-          <LoadingBlock />
+          <SelfBodySkeleton shape="payroll" />
         ) : loadError ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <p className="text-sm text-rose-600">{loadError}</p>

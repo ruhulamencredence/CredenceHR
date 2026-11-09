@@ -24,16 +24,17 @@ import { SearchSelect } from './Combobox';
 // Employee 360 records (HrOps360Routes.ts) right after the Employee itself.
 type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' | 'payment' | 'history';
 
-const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
-  { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
-  { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
-  { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
-  { key: 'career', label: 'Experience & Education', icon: <GraduationCap className="w-3.5 h-3.5" /> },
-  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
-  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
+// `short` is the phone label (the tabs sit in a grid there, no sideways scroll).
+const FORM_TABS: { key: EmployeeFormTab; label: string; short: string; icon: React.ReactNode }[] = [
+  { key: 'info', label: 'Employee Info', short: 'Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
+  { key: 'status', label: 'Status', short: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
+  { key: 'contact', label: 'Contact', short: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
+  { key: 'career', label: 'Experience & Education', short: 'Career', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+  { key: 'supervisor', label: 'Supervisor', short: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
+  { key: 'payment', label: 'Payment', short: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
   // Read-only audit trail: Department/Designation changes (employee_transfers)
   // merged with every other field changed by an Edit save (employee_change_log).
-  { key: 'history', label: 'History', icon: <History className="w-3.5 h-3.5" /> }
+  { key: 'history', label: 'History', short: 'History', icon: <History className="w-3.5 h-3.5" /> }
 ];
 
 interface EmployeesPanelProps {
@@ -310,18 +311,35 @@ const EmployeesTableSkeleton: React.FC = () => {
   );
 };
 
+// Where the list was (search, filters, page, scroll) when a row's key button
+// opened Module Access; read back once when Back returns here.
+const RETURN_VIEW_KEY = 'credence_employees_return_view';
+interface EmployeesReturnView { search: string; status: 'all' | 'active' | 'inactive'; dept: string; page: number; pageSize: number; scrollY: number }
+function takeReturnView(): EmployeesReturnView | null {
+  try {
+    const raw = sessionStorage.getItem(RETURN_VIEW_KEY);
+    sessionStorage.removeItem(RETURN_VIEW_KEY);
+    return raw ? (JSON.parse(raw) as EmployeesReturnView) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onOpenModuleAccess }) => {
+  const returnView = useRef<EmployeesReturnView | null | undefined>(undefined);
+  if (returnView.current === undefined) returnView.current = takeReturnView();
+  const rv = returnView.current;
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(rv?.search ?? '');
   // The directory shows one page at a time — drawing every employee at once
   // made the tab (and typing in the edit form above it) slow.
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(rv?.status ?? 'all');
   // Department filter: '' = all, '__none__' = no department, else the department's name.
-  const [deptFilter, setDeptFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [deptFilter, setDeptFilter] = useState(rv?.dept ?? '');
+  const [page, setPage] = useState(rv?.page ?? 1);
+  const [pageSize, setPageSize] = useState(rv?.pageSize ?? 50);
   // The server pages and searches the directory; `employees` is just the page on screen.
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ all: 0, active: 0, inactive: 0 });
@@ -1191,12 +1209,28 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   };
 
   // The search waits for a pause in typing; any change of search / status / size goes back to page 1.
-  const [appliedSearch, setAppliedSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState((rv?.search ?? '').trim());
   useEffect(() => {
     const t = setTimeout(() => setAppliedSearch(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [appliedSearch, statusFilter, deptFilter, pageSize]);
+  // Not on the first run when coming back from Module Access — keep its page.
+  const keepPage = useRef(!!rv);
+  useEffect(() => {
+    if (keepPage.current) {
+      keepPage.current = false;
+      return;
+    }
+    setPage(1);
+  }, [appliedSearch, statusFilter, deptFilter, pageSize]);
+  // Back at the same place in the list once it has loaded.
+  const restoreScroll = useRef(rv?.scrollY ?? 0);
+  useEffect(() => {
+    if (!restoreScroll.current || loading) return;
+    const y = restoreScroll.current;
+    restoreScroll.current = 0;
+    requestAnimationFrame(() => window.scrollTo({ top: y }));
+  }, [loading]);
   useEffect(() => {
     listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter };
     fetchEmployees();
@@ -1369,7 +1403,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           {onOpenModuleAccess && (
                             <button
                               type="button"
-                              onClick={() => onOpenModuleAccess(emp.user_id!)}
+                              onClick={() => {
+                                try {
+                                  sessionStorage.setItem(RETURN_VIEW_KEY, JSON.stringify({ search, status: statusFilter, dept: deptFilter, page, pageSize, scrollY: window.scrollY }));
+                                } catch {
+                                  // storage unavailable — Back opens the list from the top
+                                }
+                                onOpenModuleAccess(emp.user_id!);
+                              }}
                               className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               title="Open this account's Module Access"
                               aria-label="Open Module Access"
@@ -1489,7 +1530,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                 to this app's own look (not the reference screenshots' purple
                 sidebar). Supervisor is disabled until the employee has been
                 saved once (it needs a real employee id to attach rows to). */}
-            <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 overflow-x-auto sticky top-[65px] bg-white z-10">
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 px-3 sm:px-5 pt-2 border-b border-slate-200 sticky top-[65px] bg-white z-10">
               {FORM_TABS.map((t) => {
                 const disabled = (t.key === 'supervisor' || t.key === 'payment' || t.key === 'history') && !editingId;
                 const active = formTab === t.key;
@@ -1500,7 +1541,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     disabled={disabled}
                     onClick={() => setFormTab(t.key)}
                     title={disabled ? `Save the employee first to manage ${t.label}` : undefined}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
+                    className={`flex flex-col items-center justify-start gap-0.5 px-1 py-1.5 text-[11px] leading-tight text-center font-semibold rounded-t-lg border-b-2 transition-colors ${
                       active
                         ? 'border-blue-600 text-blue-700'
                         : disabled
@@ -1508,7 +1549,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    {t.icon} {t.label}
+                    {t.icon}
+                    <span className="sm:hidden">{t.short}</span>
+                    <span className="hidden sm:inline">{t.label}</span>
                   </button>
                 );
               })}

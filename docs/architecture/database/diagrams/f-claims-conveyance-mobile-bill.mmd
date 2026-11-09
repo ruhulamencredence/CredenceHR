@@ -8,6 +8,29 @@ erDiagram
     int sort_order
     decimal max_per_bill
   }
+  bill_claim_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
+  bill_claim_history {
+    int id PK
+    int bill_claim_id FK
+    varchar action
+    int actor_id
+    varchar actor_name
+    text reason
+    int version
+  }
+  bill_claim_items {
+    int id PK
+    int bill_claim_id FK
+    int category_id FK
+    varchar category_name
+    date bill_date
+    decimal amount
+    varchar description
+  }
   bill_claim_policy_history {
     bigint id PK
     int company_ref
@@ -22,6 +45,21 @@ erDiagram
     int company_id
     varchar policy_key
     varchar policy_value
+  }
+  bill_claim_references {
+    int id PK
+    int bill_claim_id FK
+    int claim_id FK
+    decimal amount
+  }
+  bill_claims {
+    int id PK
+    int user_id FK
+    date claim_date
+    date from_date
+    date to_date
+    varchar category
+    decimal amount
   }
   claim_approval_signatures {
     int id PK
@@ -44,7 +82,7 @@ erDiagram
     int id PK
     int bill_id FK
     int claim_id FK
-    int user_claim_id FK
+    int bill_claim_id FK
     enum source
     date entry_date
     varchar particulars
@@ -57,11 +95,6 @@ erDiagram
     text remarks
     tinyint is_disbursed
     varchar voucher_no
-  }
-  conveyance_claim_department_access {
-    int id PK
-    int user_id FK
-    varchar department
   }
   mobile_bills {
     int id PK
@@ -106,39 +139,6 @@ erDiagram
     varchar sim_type
     varchar package_name
   }
-  user_claim_history {
-    int id PK
-    int user_claim_id FK
-    varchar action
-    int actor_id
-    varchar actor_name
-    text reason
-    int version
-  }
-  user_claim_items {
-    int id PK
-    int user_claim_id FK
-    int category_id FK
-    varchar category_name
-    date bill_date
-    decimal amount
-    varchar description
-  }
-  user_claim_references {
-    int id PK
-    int user_claim_id FK
-    int claim_id FK
-    decimal amount
-  }
-  user_claims {
-    int id PK
-    int user_id FK
-    date claim_date
-    date from_date
-    date to_date
-    varchar category
-    decimal amount
-  }
   all_employees {
     int id PK
   }
@@ -151,24 +151,24 @@ erDiagram
   users {
     int id PK
   }
+  users ||--o{ bill_claim_department_access : "user_id"
+  bill_claims ||--o{ bill_claim_history : "bill_claim_id"
+  bill_claims ||--o{ bill_claim_items : "bill_claim_id"
+  leave_categories ||..o{ bill_claim_items : "category_id"
+  bill_claims ||--o{ bill_claim_references : "bill_claim_id"
+  claims ||--o{ bill_claim_references : "claim_id"
+  users ||--o{ bill_claims : "user_id"
   approval_requests ||..o{ claim_approval_signatures : "approval_request_id"
   users ||--o{ claims : "user_id"
+  bill_claims ||--o{ conveyance_bill_items : "bill_claim_id"
   conveyance_bills ||--o{ conveyance_bill_items : "bill_id"
   claims ||--o{ conveyance_bill_items : "claim_id"
-  user_claims ||--o{ conveyance_bill_items : "user_claim_id"
   users ||--o{ conveyance_bills : "disbursed_by"
   users ||--o{ conveyance_bills : "disbursed_by"
   users ||--o{ conveyance_bills : "user_id"
-  users ||--o{ conveyance_claim_department_access : "user_id"
   mobile_sims ||--o{ mobile_bills : "sim_id"
   all_employees ||..o{ mobile_bills : "employee_id"
   mobile_sims ||--o{ mobile_limit_requests : "sim_id"
   users ||--o{ mobile_limit_requests : "user_id"
   mobile_sims ||--o{ mobile_sim_events : "sim_id"
   all_employees ||..o{ mobile_sims : "employee_id"
-  user_claims ||--o{ user_claim_history : "user_claim_id"
-  user_claims ||--o{ user_claim_items : "user_claim_id"
-  leave_categories ||..o{ user_claim_items : "category_id"
-  claims ||--o{ user_claim_references : "claim_id"
-  user_claims ||--o{ user_claim_references : "user_claim_id"
-  users ||--o{ user_claims : "user_id"

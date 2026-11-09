@@ -24,6 +24,10 @@ android/app/release/
 # file belongs in public/ either, or every build ships it.
 public/**/*.apk
 public/**/*.aab
+# …and nowhere else either: APKs come from the Android build workflow's
+# Artifacts and live on the server, never in git.
+*.apk
+*.aab
 
 # Docs sync's biggest outputs: built every run, kept as the run's artifact
 # (CredenceHR-documentation) and by `npm run docs:sync` locally, not in git —
@@ -32,3 +36,6 @@ docs/architecture/CredenceHR-Documentation.html
 docs/architecture/CredenceHR-Full-Workflow.html
 docs/architecture/database/diagrams/full-application-er.png
 docs/architecture/database/diagrams/full-application-er.pdf
+
+# Chat attachments saved on this machine (chatFiles.ts) — never in git.
+/uploads/

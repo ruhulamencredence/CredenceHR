@@ -171,7 +171,7 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
       FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
     )`
   );
-  // Conveyance Bill Claim: the approver's signature as it was when they approved
+  // Bill Claim: the approver's signature as it was when they approved
   // (Bill Claim Policy -> "Put each approver's signature on the Bill and Voucher").
   await run(
     "claim_approval_signatures",
@@ -916,9 +916,15 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       const id = Number(req.params.id);
       const doc = await loadDoc(id);
       if (doc.sign_status !== "pending") throw bad("Only a document that is out for signing can be cancelled.");
+      const waiting: any[] = (await queryDB("SELECT signer_user_id FROM document_signers WHERE document_id = ? AND status = 'pending'", [id])) || [];
       await queryDB("UPDATE employee_documents SET sign_status = 'cancelled' WHERE id = ?", [id]);
       await queryDB("UPDATE document_signers SET status = 'cancelled' WHERE document_id = ? AND status IN ('pending', 'waiting')", [id]);
       await logDocEvent(queryDB, id, "cancelled", { userId: Number(req.user.id), req });
+      // Whoever it was waiting on no longer needs to sign it.
+      for (const w of waiting) {
+        if (Number(w.signer_user_id) === Number(req.user.id)) continue;
+        await notify(Number(w.signer_user_id), "Signature no longer needed", `${doc.doc_type} was cancelled by ${req.user.name || "HR"} — you don't need to sign it.`, id).catch(() => {});
+      }
       res.json(await docView(await loadDoc(id)));
     } catch (err) {
       fail(res, err);
@@ -1081,7 +1087,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (buf.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw bad("The signature must be a PNG image.");
     return buf;
   };
-  // Conveyance Bill Claim approvers' own signature (Approve Application ->
+  // Bill Claim approvers' own signature (Approve Application ->
   // "My signature"): the same saved signature as Documents to Sign, but open to
   // any approver — and only while the Bill Claim Policy has "Put each
   // approver's signature on the Bill and Voucher" on.

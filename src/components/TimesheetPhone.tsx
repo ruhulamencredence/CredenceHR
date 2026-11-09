@@ -10,8 +10,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock, X, XCircle } from 'lucide-react';
+import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, X, XCircle } from 'lucide-react';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { CardChip, CardTone, SelfCard } from './SelfCard';
 
 export type TimesheetMode = 'month' | 'day' | 'range';
 export type DayStatus = 'ontime' | 'delay' | 'extreme' | 'absent' | 'leave' | 'weekend' | 'holiday';
@@ -88,23 +89,78 @@ export function periodLabel(p: TimesheetPeriod): string {
 
 const MODE_LABEL: Record<TimesheetMode, string> = { month: 'Month', day: 'Day', range: 'Date range' };
 
-export const PeriodButton: React.FC<{ period: TimesheetPeriod; onClick: () => void }> = ({ period, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    aria-label="Change what the timesheet shows"
-    className="liquid-glass w-full min-h-[52px] flex items-center gap-2.5 px-3.5 rounded-[20px] text-left text-slate-900"
-  >
-    <span className="liquid-glass-inset w-[34px] h-[34px] rounded-xl flex items-center justify-center shrink-0">
-      <CalendarDays className="w-[18px] h-[18px] text-[color:var(--g-accent,#7f00ff)]" />
-    </span>
-    <span className="flex-1 min-w-0">
-      <span className="block text-[11px] text-slate-500">{MODE_LABEL[period.mode]}</span>
-      <span className="block text-[15px] font-bold truncate">{periodLabel(period)}</span>
-    </span>
-    <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
-  </button>
-);
+// The period as one white pill: ‹ previous · the period (tap to change
+// Month / Day / Range) · next ›. The arrows step a month or a day; a date
+// range has none. Nothing after today.
+export const PeriodPill: React.FC<{
+  period: TimesheetPeriod;
+  today: string;
+  minYear: number;
+  onOpen: () => void;
+  onChange: (p: TimesheetPeriod) => void;
+}> = ({ period: p, today, minYear, onOpen, onChange }) => {
+  const t = parts(today);
+  let prev: TimesheetPeriod | null = null;
+  let next: TimesheetPeriod | null = null;
+  let sub = MODE_LABEL[p.mode];
+  if (p.mode === 'month') {
+    const pm = p.month === 1 ? { year: p.year - 1, month: 12 } : { year: p.year, month: p.month - 1 };
+    const nm = p.month === 12 ? { year: p.year + 1, month: 1 } : { year: p.year, month: p.month + 1 };
+    if (pm.year >= minYear) prev = { ...p, ...pm };
+    if (nm.year < t.y || (nm.year === t.y && nm.month <= t.m)) next = { ...p, ...nm };
+    const last = p.year === t.y && p.month === t.m ? t.d : daysIn(p.year, p.month);
+    sub = `1 – ${last} ${MONTH_SHORT[p.month - 1]}`;
+  } else if (p.mode === 'day') {
+    const pd = shiftDays(p.day, -1);
+    const nd = shiftDays(p.day, 1);
+    if (Number(pd.slice(0, 4)) >= minYear) prev = { ...p, day: pd };
+    if (nd <= today) next = { ...p, day: nd };
+    sub = p.day === today ? 'Today' : 'Day';
+  }
+  const arrow = 'w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-30';
+  const arrowStyle = { background: 'color-mix(in srgb, var(--g-accent, #7f00ff) 8%, white)', color: 'var(--g-accent, #7f00ff)' };
+  return (
+    <div className="w-full min-h-[54px] flex items-center gap-1 px-1.5 rounded-full bg-white shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.35),0_2px_6px_-2px_rgba(15,23,42,.06)]">
+      {p.mode !== 'range' && (
+        <button type="button" className={arrow} style={arrowStyle} disabled={!prev} onClick={() => prev && onChange(prev)} aria-label={p.mode === 'month' ? 'Previous month' : 'Previous day'}>
+          <ChevronLeft className="w-[18px] h-[18px]" strokeWidth={2.4} />
+        </button>
+      )}
+      <button type="button" onClick={onOpen} aria-label="Change what the timesheet shows" className="flex-1 min-w-0 py-1.5 px-2 text-center">
+        <span className="flex items-center justify-center gap-1 text-[15px] font-bold text-slate-900">
+          <span className="truncate">{periodLabel(p)}</span>
+          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+        </span>
+        <span className="block text-[11px] font-medium text-slate-500 truncate">{sub}</span>
+      </button>
+      {p.mode !== 'range' && (
+        <button type="button" className={arrow} style={arrowStyle} disabled={!next} onClick={() => next && onChange(next)} aria-label={p.mode === 'month' ? 'Next month' : 'Next day'}>
+          <ChevronRight className="w-[18px] h-[18px]" strokeWidth={2.4} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+// Today's check-in, as a soft green confirmation pill above the summary.
+export const TodayCheckInPill: React.FC<{ at: string; status: DayStatus; where: string }> = ({ at, status, where }) => {
+  const late = status === 'delay' || status === 'extreme';
+  const tone = late ? { bg: '#fffbeb', border: '#fde68a', dot: '#f59e0b', fg: '#92400e' } : { bg: '#ecfdf3', border: '#bbf7d0', dot: '#22c55e', fg: '#166534' };
+  return (
+    <div className="flex items-center gap-2.5 rounded-full pl-2 pr-4 py-2 border" style={{ background: tone.bg, borderColor: tone.border }}>
+      <span className="w-[30px] h-[30px] rounded-full flex items-center justify-center shrink-0 text-white" style={{ background: tone.dot }}>
+        {late ? <Clock className="w-4 h-4" strokeWidth={2.6} /> : <Check className="w-4 h-4" strokeWidth={3} />}
+      </span>
+      <span className="min-w-0 leading-tight" style={{ color: tone.fg }}>
+        <span className="block text-[13px] font-semibold truncate">Checked in today at {at}</span>
+        <span className="block text-[11px] font-medium opacity-90 truncate">
+          {status === 'extreme' ? 'Extreme delay' : status === 'delay' ? 'Delay' : 'On time'}
+          {where ? ` · ${where}` : ''}
+        </span>
+      </span>
+    </div>
+  );
+};
 
 const pillOn = 'liquid-glass-button';
 const pillOff = 'liquid-glass-inset text-slate-900';
@@ -443,45 +499,58 @@ export const AttendanceGauge: React.FC<{
   );
 };
 
-// One day of the list on a phone: date tile tinted by status, In – Out,
-// project, status chip. Tapping it opens the correction / status modal.
+// One day of the list on a phone: date tile tinted by status, In → Out,
+// hours and project, status chip. Tapping it opens the correction / status
+// modal. Weekends and holidays sit quieter (no shadow, see-through).
+// One day in the phone list — the shared Directory-style card (SelfCard),
+// tinted by the day's state.
+const DAY_TONE: Record<DayStatus, CardTone> = {
+  ontime: 'green',
+  delay: 'amber',
+  extreme: 'amber',
+  absent: 'rose',
+  leave: 'violet',
+  weekend: 'slate',
+  holiday: 'slate'
+};
 export const PhoneDayCard: React.FC<{
   dateStr: string;
   status: DayStatus;
+  inAt?: string;
+  outAt?: string;
   times: string;
   where: string;
   statusLabel?: string;
   correction?: 'pending' | 'rejected';
   onClick: () => void;
-}> = ({ dateStr, status, times, where, statusLabel, correction, onClick }) => {
+}> = ({ dateStr, status, inAt, outAt, times, where, statusLabel, correction, onClick }) => {
   const s = STATUS_STYLE[status];
+  const tone = DAY_TONE[status];
+  const quiet = status === 'weekend' || status === 'holiday';
+  const chips: CardChip[] = [];
+  chips.push({ label: statusLabel || (status === 'ontime' ? 'On time' : s.label), tone: quiet ? undefined : tone });
+  if (correction) chips.push({ label: correction === 'pending' ? 'Correction pending' : 'Correction rejected', tone: correction === 'pending' ? 'amber' : 'rose' });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full text-left rounded-[22px] p-3 flex items-center gap-3 bg-white/80 border border-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_8px_20px_-14px_rgba(15,23,42,.35)] active:scale-[0.99] transition-transform"
-    >
-      <div className="w-12 h-[52px] rounded-2xl flex flex-col items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,.8)]" style={{ background: s.soft, color: s.fg }}>
-        <span className="text-lg font-extrabold leading-none">{Number(dateStr.slice(8, 10))}</span>
-        <span className="text-[10px] font-bold mt-[3px]">{weekdayShort(dateStr)}</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-slate-900 truncate">{times}</div>
-        <div className="text-xs text-zinc-500 mt-0.5 truncate">{where}</div>
-        {correction && (
-          <span
-            className={`mt-1 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              correction === 'pending' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
-            }`}
-          >
-            {correction === 'pending' ? <Clock className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
-            {correction === 'pending' ? 'Correction pending' : 'Correction rejected'}
+    <SelfCard
+      tone={tone}
+      quiet={quiet}
+      lead={<span className="text-[15px]">{Number(dateStr.slice(8, 10))}</span>}
+      dot={quiet ? undefined : tone}
+      title={
+        inAt ? (
+          <span className="inline-flex items-center gap-1.5">
+            {inAt} <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" strokeWidth={2.4} /> {outAt}
           </span>
-        )}
-      </div>
-      <div className="text-[11px] font-bold px-2.5 py-[5px] rounded-full whitespace-nowrap" style={{ background: s.soft, color: s.fg }}>
-        {statusLabel || s.label}
-      </div>
-    </button>
+        ) : times && times !== '—' ? (
+          times
+        ) : (
+          // No check-in: the row says why (No check-in, Leave, the holiday…).
+          where || '—'
+        )
+      }
+      sub={`${weekdayShort(dateStr)}, ${Number(dateStr.slice(8, 10))} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}${inAt && where && where !== '—' ? ` · ${where}` : ''}`}
+      chips={chips}
+      onClick={onClick}
+    />
   );
 };

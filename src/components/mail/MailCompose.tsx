@@ -38,6 +38,8 @@ export interface ComposeInit {
   // Forward: the original's attachments are fetched and sent again.
   forwardFrom?: { messageId: string; attachments: MailAttachment[] };
   scheduledAt?: string | null;
+  // Files to start with (e.g. a report PDF from the AI Assistant).
+  files?: OutgoingFile[];
 }
 
 // Must stay under the server's JSON limit (server.ts: 25 MB, base64 adds a third).
@@ -466,7 +468,9 @@ export const MailCompose: React.FC<{
   }, [token, accountId, to, cc, bcc]);
   const [subject, setSubject] = useState(init.subject || '');
   const [sigId, setSigId] = useState<string>(init.draftId ? '' : defaultSig?.id || '');
-  const [files, setFiles] = useState<(OutgoingFile & { size: number })[]>([]);
+  const [files, setFiles] = useState<(OutgoingFile & { size: number })[]>(() =>
+    (init.files || []).map((f) => ({ ...f, size: Math.round(((f.dataUrl.split(',')[1] || '').length * 3) / 4) }))
+  );
   const [kept, setKept] = useState<MailAttachment[]>(init.draftAttachments || []);
   const [draftId, setDraftId] = useState<string | undefined>(init.draftId);
   const [busy, setBusy] = useState<'' | 'send' | 'schedule' | 'draft' | 'files'>('');

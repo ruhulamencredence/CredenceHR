@@ -4,6 +4,8 @@
  */
 
 import { ensureAccountBlockSchema } from "./AccountBlock";
+import { widenEnum } from "./enumWiden";
+import { getStartupMarker, setStartupMarker } from "./startupOnce";
 import { ensureOnboardingSchema } from "./OnboardingSelfServiceRoutes";
 import { ensureHrReminderSchema } from "./HrRemindersRoutes";
 import { ensureActiveUsersSchema } from "./ActiveUsersRoutes";
@@ -14,6 +16,7 @@ import { ensureBillClaimPolicySchema } from "./BillClaimPolicy";
 import { ensureChatSchema } from "./ChatRoutes";
 import { ensureCompanySchema } from "./CompanyRoutes";
 import { ensureDeviceSchema } from "./DeviceRoutes";
+import { ensureAppAccessSchema } from "./AppAccess";
 import { ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
 import { ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
@@ -23,6 +26,7 @@ import { ensureEmployee360Schema } from "./HrOps360Routes";
 import { ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { ensureLoanRequestSchema } from "./LoanRequestRoutes";
+import { ensureProfilePhotoRequestSchema } from "./profileRoutes";
 import { ensureMobileBillSchema } from "./MobileBillRoutes";
 import { ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
 import { ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
@@ -96,6 +100,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensurePayrollSchema(dbPool);
   await ensurePayrollApprovalSchema(dbPool);
   await ensureLoanRequestSchema(dbPool);
+  // Profile photo approval (profileRoutes.ts) — after user_profile_details.
+  await ensureProfilePhotoRequestSchema(dbPool);
   // Payroll -> Allowance & Adjustment (PayrollItemsRoutes.ts) — after
   // ensurePayrollSchema, since its tables point at payrolls.
   await ensurePayrollItemsSchema(dbPool);
@@ -149,6 +155,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
 
   // Mobile app device access (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
+  // Mobile App access, separate from the website (AppAccess.ts).
+  await ensureAppAccessSchema(queryDB).catch((e: any) => console.warn("⚠️ Mobile app access tables: " + e.message));
   await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
   await ensureSessionSecuritySchema(queryDB).catch((e: any) => console.warn("⚠️ Session security: " + e.message));
 
@@ -634,14 +642,14 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   }
   try {
     // Superadmin-only grants: whether this Admin or User account can see/use the
-    // Movement Claim (GPS Check In/Out) and Conveyance Bill Claim sections on their
+    // Check In/Out (GPS Check In/Out) and Bill Claim sections on their
     // own User Panel at all — same on/off pattern as can_manage_leave above, gated
     // for BOTH 'admin' and 'user' roles. OFF by default; a Superadmin always has
     // both implicitly.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0`);
-    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0`);
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_bill_claims TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
-    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_movement_claims/can_view_conveyance_claims columns: " + err.message);
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_movement_claims/can_view_bill_claims columns: " + err.message);
   }
   try {
     // Gate for the mobile app's background Employee Tracking ping loop — OFF by
@@ -660,7 +668,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     // and "Job Entry Details" (the mobile tile menu's three main tiles, the
     // Navbar/GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items, and the
     // BottomNav's Budget/Jobs/Entries tabs). One combined switch for all three,
-    // same on/off pattern as can_view_movement_claims/can_view_conveyance_claims
+    // same on/off pattern as can_view_movement_claims/can_view_bill_claims
     // above, applying to BOTH 'admin' and 'user' roles. ON by default (unlike
     // those two) so every existing account keeps today's behavior until a
     // Superadmin explicitly turns it off; a Superadmin always has it implicitly.
@@ -681,7 +689,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     // Superadmin-only grants: whether this Admin or User account can see/use
     // the Self Service -> Timesheet / Leave Application / My Leave sections at
     // all — same on/off pattern as can_view_movement_claims/can_view_
-    // conveyance_claims above, applying to BOTH 'admin' and 'user' roles. OFF
+    // bill_claims above, applying to BOTH 'admin' and 'user' roles. OFF
     // by default; a Superadmin always has all three implicitly. Employee
     // Directory deliberately keeps NO such gate — every account can browse it
     // regardless of role or module access (see GlobalSidebar.tsx).
@@ -696,6 +704,14 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // New Joiner Onboarding: temporary-login columns + its two tables.
   await ensureOnboardingSchema(dbPool);
   await ensureHrReminderSchema(dbPool);
+  try {
+    // Chat -> Disappearing messages (ChatRoutes.ts): turning them ON in a
+    // chat needs this switch — OFF until given in Module Access, because the
+    // messages and files are then deleted for good (no record is kept).
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_disappearing TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_disappearing column: " + err.message);
+  }
   try {
     // Chat audio/video calls (CallRoutes.ts) — a Self Service switch, OFF
     // until a Superadmin turns it on per account in Module Access.
@@ -754,7 +770,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_loan_request column: " + err.message);
   }
   try {
-    // Self Service -> My Letters & Service Record -> "Service Book" (the
+    // Profile -> "My Service Book" (the
     // employee's own read-only Employee 360, HrOps360Routes.ts) — OFF until
     // turned on per account in Module Access.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_service_book TINYINT(1) NOT NULL DEFAULT 0`);
@@ -1071,21 +1087,21 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_application_department_access table exists: " + err.message);
   }
-  // Department-wise scoping for the 'conveyance' module only — identical
+  // Department-wise scoping for the 'bill_claim' module only — identical
   // design to attendance_report_department_access/leave_application_
   // department_access above, just for the Admin Panel's "Conveyance Bill
-  // Claim" tab (Admin Panel -> Users -> Module Access -> "Conveyance Claim
-  // Departments", shown once 'conveyance' itself is checked). A row here
-  // means the account may ONLY see Conveyance Bill Claims submitted by users
+  // Claim" tab (Admin Panel -> Users -> Module Access -> "Bill Claim
+  // Departments", shown once 'bill_claim' itself is checked). A row here
+  // means the account may ONLY see Bill Claims submitted by users
   // whose linked Employee Directory row has that one Department —
-  // GET /api/user-claims in ConveyanceBillClaimRoutes.ts filters on it via
-  // getConveyanceClaimDeptScope() below. No rows at all for a user means
+  // GET /api/bill-claims in BillClaimRoutes.ts filters on it via
+  // getBillClaimDeptScope() below. No rows at all for a user means
   // unrestricted (every Department's claims visible), exactly like granting
   // the module alone. Same rename-sync convention as the other two tables —
   // see PUT /api/departments/:id in DepartmentsAndBranches.ts.
   try {
     await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS conveyance_claim_department_access (
+      CREATE TABLE IF NOT EXISTS bill_claim_department_access (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
         department VARCHAR(150) NOT NULL,
@@ -1095,7 +1111,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       )
     `);
   } catch (err: any) {
-    console.warn("⚠️ Could not ensure conveyance_claim_department_access table exists: " + err.message);
+    console.warn("⚠️ Could not ensure bill_claim_department_access table exists: " + err.message);
   }
   // "Remote Attendance" — one row per (user, project, calendar day). check_in_* is
   // filled when the User taps Check In (server-validated to be inside the Project's
@@ -1470,10 +1486,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add branches.project_id column: " + err.message);
     }
   }
-  // "Movement Claims" — a free-form (not tied to a fixed Project geofence) point A
+  // "Check In/Out" — a free-form (not tied to a fixed Project geofence) point A
   // -> point B travel record: a User checks in with a Purpose (why/where they're
   // heading out for office work) then later checks out once they get there/finish.
-  // Used for TA/DA-style reimbursement review in the Admin Panel -> Movement Claims
+  // Used for TA/DA-style reimbursement review in the Admin Panel -> Check In/Out
   // tab. Only one row per User may have status = 'open' at a time (enforced in
   // POST /api/claims/check-in) — distance_km is computed server-side on check-out.
   try {
@@ -1499,13 +1515,13 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure claims table exists: " + err.message);
   }
-  // "Conveyance Bill Claim" — Admin Panel tab restricted to the Superadmin and any
-  // Admin the Superadmin explicitly grants the "conveyance" module to (see
+  // "Bill Claim" — Admin Panel tab restricted to the Superadmin and any
+  // Admin the Superadmin explicitly grants the "bill_claim" module to (see
   // ADMIN_MODULE_KEYS). One BILL groups several conveyance/travel line ITEMS for a
   // single User into one claim document. Each item is either pulled in from that
-  // User's own completed "Movement Claim" (the `claims` table above — its
+  // User's own completed "Check In/Out" (the `claims` table above — its
   // distance_km carries straight over so an Amount can be computed at a Rate/KM)
-  // or entered fully by hand for a trip that was never logged as a Movement Claim
+  // or entered fully by hand for a trip that was never logged as a Check In/Out
   // check-in/out at all (e.g. a one-off fare, or a trip from before this feature
   // existed). Item fields are copied from the source Claim at insert time rather
   // than just referencing it, so a bill's line items stay intact and printable
@@ -1540,7 +1556,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         id INT AUTO_INCREMENT PRIMARY KEY,
         bill_id INT NOT NULL,
         source ENUM('movement_claim','manual') NOT NULL DEFAULT 'manual',
-        -- Which Movement Claim this item came from, if any. UNIQUE so the same
+        -- Which Check In/Out this item came from, if any. UNIQUE so the same
         -- Claim can never end up billed twice across any Bill.
         claim_id INT NULL UNIQUE,
         entry_date DATE NOT NULL,
@@ -1580,16 +1596,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   try {
     await dbPool.query(`ALTER TABLE conveyance_bills ADD FOREIGN KEY (disbursed_by) REFERENCES users(id) ON DELETE SET NULL`);
   } catch (err: any) {}
-  // "Conveyance Bill Claim" (User Panel) — a User-submitted expense claim filled
+  // "Bill Claim" (User Panel) — a User-submitted expense claim filled
   // in by hand (unlike the live GPS check-in/out `claims` table above), optionally
   // spanning several days (a multi-day tour) and optionally carrying a receipt/
   // attachment (same FileReader/Base64 -> LONGBLOB pattern as budgets.file_data —
-  // no multipart/multer). Starts 'pending'; an Admin with the "conveyance" module
+  // no multipart/multer). Starts 'pending'; an Admin with the "bill_claim" module
   // then Approves (which attaches it onto an official Conveyance Bill as a
-  // conveyance_bill_items row, source = 'user_claim') or Rejects it with remarks.
+  // conveyance_bill_items row, source = 'bill_claim') or Rejects it with remarks.
   try {
     await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_claims (
+      CREATE TABLE IF NOT EXISTS bill_claims (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
         claim_date DATE NOT NULL,
@@ -1611,23 +1627,23 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
       )
     `);
-    // Lets an Approved user_claim be attached onto a Conveyance Bill as its own
-    // line item (source = 'user_claim'), alongside the existing 'movement_claim'/
+    // Lets an Approved bill_claim be attached onto a Conveyance Bill as its own
+    // line item (source = 'bill_claim'), alongside the existing 'movement_claim'/
     // 'manual' sources — UNIQUE so the same claim can never be billed twice.
     await dbPool.query(`
       ALTER TABLE conveyance_bill_items
-        MODIFY COLUMN source ENUM('movement_claim','manual','user_claim') NOT NULL DEFAULT 'manual'
+        MODIFY COLUMN source ENUM('movement_claim','manual','bill_claim') NOT NULL DEFAULT 'manual'
     `);
-    const [ucCol]: any = await dbPool.query(`SHOW COLUMNS FROM conveyance_bill_items LIKE 'user_claim_id'`);
+    const [ucCol]: any = await dbPool.query(`SHOW COLUMNS FROM conveyance_bill_items LIKE 'bill_claim_id'`);
     if (!ucCol || ucCol.length === 0) {
       await dbPool.query(`
         ALTER TABLE conveyance_bill_items
-          ADD COLUMN user_claim_id INT NULL UNIQUE AFTER claim_id,
-          ADD FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE SET NULL
+          ADD COLUMN bill_claim_id INT NULL UNIQUE AFTER claim_id,
+          ADD FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE SET NULL
       `);
     }
   } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_claims table / conveyance_bill_items.user_claim_id exists: " + err.message);
+    console.warn("⚠️ Could not ensure bill_claims table / conveyance_bill_items.bill_claim_id exists: " + err.message);
   }
   // Approved Amount — set by the approver at Approvals-tab decision time (Admin
   // Panel -> Approvals). Lets the approver partially approve a Conveyance Bill
@@ -1636,23 +1652,23 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // NULL until a decision is made (still 'pending') and for anything decided
   // before this feature existed.
   try {
-    await dbPool.query(`ALTER TABLE user_claims ADD COLUMN approved_amount DECIMAL(12, 2) NULL`);
+    await dbPool.query(`ALTER TABLE bill_claims ADD COLUMN approved_amount DECIMAL(12, 2) NULL`);
   } catch (err: any) {
     if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add user_claims.approved_amount column: " + err.message);
+      console.warn("⚠️ Could not add bill_claims.approved_amount column: " + err.message);
     }
   }
   // Who filed the claim when it isn't the claimant themself — an Admin with
-  // Conveyance -> "Claim on Behalf" (POST /api/user-claims/on-behalf/:userId).
+  // Conveyance -> "Claim on Behalf" (POST /api/bill-claims/on-behalf/:userId).
   // NULL for a claim the employee filed on their own.
   try {
-    await dbPool.query(`ALTER TABLE user_claims ADD COLUMN filed_by INT NULL`);
+    await dbPool.query(`ALTER TABLE bill_claims ADD COLUMN filed_by INT NULL`);
   } catch (err: any) {
     if (err.code !== "ER_DUP_FIELDNAME") {
-      console.warn("⚠️ Could not add user_claims.filed_by column: " + err.message);
+      console.warn("⚠️ Could not add bill_claims.filed_by column: " + err.message);
     }
   }
-  // Editing a claim before it is locked (ConveyanceBillClaimRoutes.ts):
+  // Editing a claim before it is locked (BillClaimRoutes.ts):
   //   first_submitted_at  the date window ("bills for the last N days") is
   //                       counted from here, so a returned claim fixed days
   //                       later still accepts its own dates
@@ -1671,10 +1687,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     ["reclaim_allowed", "TINYINT(1) NOT NULL DEFAULT 0"]
   ] as const) {
     try {
-      await dbPool.query(`ALTER TABLE user_claims ADD COLUMN ${col} ${ddl}`);
-      if (col === "first_submitted_at") await dbPool.query(`UPDATE user_claims SET first_submitted_at = created_at WHERE first_submitted_at IS NULL`);
+      await dbPool.query(`ALTER TABLE bill_claims ADD COLUMN ${col} ${ddl}`);
+      if (col === "first_submitted_at") await dbPool.query(`UPDATE bill_claims SET first_submitted_at = created_at WHERE first_submitted_at IS NULL`);
     } catch (err: any) {
-      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add user_claims.${col} column: ` + err.message);
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add bill_claims.${col} column: ` + err.message);
     }
   }
   // Every submit / edit / return / reject / resubmit of a Conveyance Bill
@@ -1682,9 +1698,9 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // approvers' "changed since you last saw it" is worked out from.
   try {
     await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_claim_history (
+      CREATE TABLE IF NOT EXISTS bill_claim_history (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        user_claim_id INT NOT NULL,
+        bill_claim_id INT NOT NULL,
         action VARCHAR(20) NOT NULL,
         actor_id INT NULL,
         actor_name VARCHAR(255) NULL,
@@ -1692,31 +1708,31 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         version INT NOT NULL DEFAULT 1,
         snapshot_json MEDIUMTEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_uch_claim (user_claim_id),
-        FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE
+        INDEX idx_uch_claim (bill_claim_id),
+        FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE
       )
     `);
   } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_claim_history table: " + err.message);
+    console.warn("⚠️ Could not ensure bill_claim_history table: " + err.message);
   }
-  // Lets a Conveyance Bill Claim reference one or more of the User's own completed
-  // Movement Claims (check-in/out), each with its own Amount — see the long
+  // Lets a Bill Claim reference one or more of the User's own completed
+  // Check In/Out (check-in/out), each with its own Amount — see the long
   // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
-  // out can only ever be referenced by ONE Conveyance Bill Claim.
+  // out can only ever be referenced by ONE Bill Claim.
   try {
     await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS user_claim_references (
+      CREATE TABLE IF NOT EXISTS bill_claim_references (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        user_claim_id INT NOT NULL,
+        bill_claim_id INT NOT NULL,
         claim_id INT NOT NULL UNIQUE,
         amount DECIMAL(12, 2) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE,
+        FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE,
         FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE
       )
     `);
   } catch (err: any) {
-    console.warn("⚠️ Could not ensure user_claim_references table exists: " + err.message);
+    console.warn("⚠️ Could not ensure bill_claim_references table exists: " + err.message);
   }
   // Approval Workflow — a single global, ORDERED chain of Admin/Superadmin
   // approvers (Admin Panel -> Approvals, Superadmin-only to edit). See the long
@@ -1735,7 +1751,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS approval_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        source_type ENUM('attendance','claim','user_claim','attendance_correction') NOT NULL,
+        source_type ENUM('attendance','claim','bill_claim','attendance_correction') NOT NULL,
         event_type ENUM('check_in','check_out','submit') NOT NULL,
         source_id INT NOT NULL,
         requested_by INT NOT NULL,
@@ -1748,16 +1764,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
-    // Widen the ENUMs for existing databases created before Conveyance Bill Claims /
+    // Widen the ENUMs for existing databases created before Bill Claims /
     // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') NOT NULL,
+        MODIFY COLUMN source_type ENUM('attendance','claim','bill_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
-    // 'returned': a Conveyance Bill Claim sent back to the employee to fix
+    // 'returned': a Bill Claim sent back to the employee to fix
     // (it leaves every queue until they resubmit; the chain then restarts at
-    // Layer 1). Only user_claim requests use it.
+    // Layer 1). Only bill_claim requests use it.
     await dbPool.query(`ALTER TABLE approval_requests MODIFY COLUMN status ENUM('pending','approved','rejected','returned') NOT NULL DEFAULT 'pending'`);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
     // open, by every account) starts with `WHERE status = 'pending'`, which
@@ -1767,7 +1783,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     // The Monthly Attendance Report (and the Admin Dashboard that reads it)
     // reads one month by date; claims and leave are read from a date on.
     await dbPool.query(`CREATE INDEX idx_attendance_date ON attendance (attendance_date)`).catch(() => {});
-    await dbPool.query(`CREATE INDEX idx_user_claims_claim_date ON user_claims (claim_date)`).catch(() => {});
+    await dbPool.query(`CREATE INDEX idx_bill_claims_claim_date ON bill_claims (claim_date)`).catch(() => {});
     await dbPool.query(`CREATE INDEX idx_leave_applications_end_date ON leave_applications (end_date)`).catch(() => {});
   } catch (err: any) {
     console.warn("⚠️ Could not ensure approval_chain_steps/approval_requests tables exist: " + err.message);
@@ -1775,7 +1791,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // ============================================================================
   // Approval Workflow TEMPLATES (Dynamic Approval Engine — Part 1 of 5).
   // Superadmin can pre-build any number of named templates, each an ORDERED list
-  // of Layers/Steps, one per request_type (Conveyance Bill Claim / Leave
+  // of Layers/Steps, one per request_type (Bill Claim / Leave
   // Application / Timesheet=Attendance Correction). See the long design comment
   // above approval_chain_steps for the OLD single-global-chain engine this is
   // replacing — that table/engine is left untouched here; Part 5 migrates it
@@ -1786,7 +1802,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       CREATE TABLE IF NOT EXISTS approval_templates (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(150) NOT NULL,
-        request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+        request_type ENUM('bill_claim','leave','timesheet') NOT NULL,
         -- Company-wide fallback for this request_type — used whenever a
         -- submitting Employee has no row in employee_template_assignments
         -- for this request_type. "At most one default per request_type" is
@@ -1843,7 +1859,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       CREATE TABLE IF NOT EXISTS employee_template_assignments (
         id INT AUTO_INCREMENT PRIMARY KEY,
         employee_user_id INT NOT NULL,
-        request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+        request_type ENUM('bill_claim','leave','timesheet') NOT NULL,
         template_id INT NOT NULL,
         assigned_by INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1890,6 +1906,30 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     if (err.code !== "ER_DUP_FIELDNAME" && err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
       console.warn("⚠️ Could not add approval_requests.supervisor_step_user_id column: " + err.message);
     }
+  }
+  // Ad-hoc approver: the current Layer's approver asks one more person to
+  // approve first (POST /api/my-approvals/:id/adhoc). While adhoc_approver_id
+  // is set the request waits on that person only; their Approve hands it back
+  // to the same Layer (getCurrentStepApprovers / performApprovalAction).
+  for (const col of ["adhoc_approver_id INT NULL", "adhoc_added_by INT NULL", "adhoc_note VARCHAR(500) NULL"]) {
+    try {
+      await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN ${col}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add approval_requests." + col.split(" ")[0] + ": " + err.message);
+    }
+  }
+  // Who may add one (Module Access switch, off by default; Superadmin always).
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_add_adhoc_approver TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_add_adhoc_approver: " + err.message);
+  }
+  // AI Assistant — voice (speak a question, hear the answer). Off by default;
+  // the speech goes to Google (Gemini) to be written down (AiAssistantRoutes.ts).
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_use_assistant_voice TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_use_assistant_voice: " + err.message);
   }
   // Approver Type override (Template editor's "Layer 1" card) — when a
   // Template is built with its first Layer explicitly set to something other
@@ -1951,54 +1991,34 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add approval_template_steps.label column: " + err.message);
     }
   }
-  // Widen request_type to add 'asset' (Asset Requisition, routed through this
-  // same Dynamic Approval Engine — see createTemplateApprovalRequest) onto
-  // the original ENUM('conveyance','leave','timesheet'). MODIFY COLUMN is
-  // safe to re-run every startup (no-op once already widened), unlike ADD
-  // COLUMN's ER_DUP_FIELDNAME pattern above.
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'asset': " + err.message);
+  // request_type: conveyance, leave, timesheet, asset (Asset Requisition),
+  // vehicle (Vehicle Requisition), mobile (Mobile Bill limit raise —
+  // MobileBillRoutes.ts), loan (loan / salary advance — LoanRequestRoutes.ts).
+  // widenEnum only ever adds values: the old chain of narrower MODIFYs blanked
+  // 'vehicle' / 'mobile' / 'loan' on every restart under a non-strict
+  // sql_mode (see enumWiden.ts).
+  const REQUEST_TYPES = ["bill_claim", "leave", "timesheet", "asset", "vehicle", "mobile", "loan"];
+  for (const table of ["approval_templates", "employee_template_assignments"]) {
+    try {
+      await widenEnum(dbPool, table, "request_type", REQUEST_TYPES, "NOT NULL");
+    } catch (err: any) {
+      console.warn(`⚠️ Could not widen ${table}.request_type: ` + err.message);
+    }
   }
-  // Widen request_type to add 'vehicle' (Vehicle Requisition, routed through
-  // this same Dynamic Approval Engine — see the Vehicle Requisition
-  // Flowchart's single "HR/Admin Review" layer, LAYER_NAMES in
-  // ApprovalTemplateManager.tsx).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'vehicle': " + err.message);
-  }
-  // 'mobile' — Mobile Bill limit raise requests (MobileBillRoutes.ts).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'mobile': " + err.message);
-  }
-  // 'loan' — Self Service loan / salary advance requests (LoanRequestRoutes.ts).
-  try {
-    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
-    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen request_type ENUM to include 'loan': " + err.message);
-  }
+  await repairBlankTemplateRequestTypes(dbPool);
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
   // Submitting one NEVER touches the `attendance` table directly — it only
   // records the REQUEST here, 'pending' until an Admin reviews it. Routed
   // through the exact same global Approval Workflow chain as Attendance Check
-  // In/Out and Conveyance Bill Claims (see createApprovalRequest/
+  // In/Out and Bill Claims (see createApprovalRequest/
   // POST /api/approvals/:id/act) — no separate review page needed, it already
   // shows up in the existing Admin Panel -> Approvals queue. Only on the LAST
   // step's Approve does finalizeAttendanceCorrection actually write the
   // requested times into `attendance` (creating that day's row if it didn't
   // exist yet); a Reject leaves `attendance` untouched. Optional remarks (why
   // the edit is needed) and an optional Image/PDF attachment, same
-  // FileReader/Base64 -> LONGBLOB pattern as user_claims.file_data.
+  // FileReader/Base64 -> LONGBLOB pattern as bill_claims.file_data.
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS attendance_corrections (
@@ -2430,11 +2450,17 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // created — a fresh install auto-approving until someone builds a Template
   // is the correct, intended behavior in that case.
   // ============================================================================
+  // Runs ONCE (startupOnce.ts): before, every restart re-created a
+  // "Migrated Global Chain" template for any of these types an admin had
+  // removed all templates from. An install that already has any template
+  // ran it long ago — it is only marked done.
   try {
-    const chain = await getApprovalChain();
+    const alreadyDone = !!(await getStartupMarker(dbPool, "approval_chain_to_templates"));
+    const [anyTemplate]: any = alreadyDone ? [[{ n: 1 }]] : await dbPool.query("SELECT COUNT(*) AS n FROM approval_templates");
+    const chain = Number(anyTemplate?.[0]?.n || 0) > 0 ? [] : await getApprovalChain();
     if (chain.length > 0) {
-      const requestTypes: { key: "conveyance" | "leave" | "timesheet"; label: string }[] = [
-        { key: "conveyance", label: "Conveyance Bill Claim" },
+      const requestTypes: { key: "bill_claim" | "leave" | "timesheet"; label: string }[] = [
+        { key: "bill_claim", label: "Bill Claim" },
         { key: "leave", label: "Leave Application" },
         { key: "timesheet", label: "Timesheet" }
       ];
@@ -2453,6 +2479,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         console.log(`\u2705 Migrated the old global Approval Chain into a default Template for '${rt.key}' (Admin Panel -> Approvals -> Templates).`);
       }
     }
+    if (!alreadyDone) await setStartupMarker(dbPool, "approval_chain_to_templates");
   } catch (err: any) {
     console.warn("⚠️ Could not migrate the old global Approval Chain into default Templates: " + err.message);
   }
@@ -2461,4 +2488,63 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // what gives departments and Module Access layers their company_id. On an
   // existing one every step is already done and is skipped.
   await ensureCompanySchema(dbPool);
+}
+
+// Templates / assignments whose request_type was blanked by the old ENUM
+// chain (see enumWiden.ts). The type is worked out from what the template
+// was actually used for — approval requests made on it, its other
+// assignments, a Vehicle Maintainer layer — and, failing that, its name.
+// Anything still unknown is left as is and logged.
+async function repairBlankTemplateRequestTypes(dbPool: any): Promise<void> {
+  try {
+    const [blank]: any = await dbPool.query("SELECT id, name FROM approval_templates WHERE request_type = ''");
+    const SOURCE_TO_TYPE: Record<string, string> = {
+      bill_claim: "bill_claim",
+      leave_application: "leave",
+      attendance_correction: "timesheet",
+      asset_requisition: "asset",
+      vehicle_requisition: "vehicle",
+      mobile_limit_request: "mobile",
+      advance_request: "loan"
+    };
+    for (const t of blank || []) {
+      let type: string | null = null;
+      try {
+        const [used]: any = await dbPool.query("SELECT source_type FROM approval_requests WHERE template_id = ? LIMIT 1", [t.id]);
+        type = SOURCE_TO_TYPE[used?.[0]?.source_type] || null;
+      } catch {
+        /* older DB without template_id — try the next clue */
+      }
+      if (!type) {
+        const [asg]: any = await dbPool.query("SELECT request_type FROM employee_template_assignments WHERE template_id = ? AND request_type <> '' LIMIT 1", [t.id]);
+        type = asg?.[0]?.request_type || null;
+      }
+      if (!type) {
+        const [vm]: any = await dbPool.query("SELECT id FROM approval_template_steps WHERE template_id = ? AND approver_type = 'vehicle_maintainer' LIMIT 1", [t.id]);
+        if (vm?.length) type = "vehicle";
+      }
+      if (!type) {
+        const n = String(t.name || "").toLowerCase();
+        type = /vehicle|ride|car|গাড়ি|গাড়ি/.test(n) ? "vehicle" : /mobile|sim|phone|মোবাইল/.test(n) ? "mobile" : /loan|advance|ঋণ|অগ্রিম/.test(n) ? "loan" : null;
+      }
+      if (type) {
+        await dbPool.query("UPDATE approval_templates SET request_type = ? WHERE id = ?", [type, t.id]);
+        console.log(`✔ Approval template #${t.id} "${t.name}": Request Type restored to '${type}'.`);
+      } else {
+        console.warn(`⚠️ Approval template #${t.id} "${t.name}" has no Request Type and none could be worked out — set it again in Approval Chain -> Templates.`);
+      }
+    }
+    // Assignments: take the type from their template; drop a blank row when
+    // the employee already has a proper one for that type.
+    const [blankAsg]: any = await dbPool.query(
+      "SELECT eta.id, eta.employee_user_id, t.request_type FROM employee_template_assignments eta JOIN approval_templates t ON t.id = eta.template_id WHERE eta.request_type = '' AND t.request_type <> ''"
+    );
+    for (const a of blankAsg || []) {
+      const [dup]: any = await dbPool.query("SELECT id FROM employee_template_assignments WHERE employee_user_id = ? AND request_type = ?", [a.employee_user_id, a.request_type]);
+      if (dup?.length) await dbPool.query("DELETE FROM employee_template_assignments WHERE id = ?", [a.id]);
+      else await dbPool.query("UPDATE employee_template_assignments SET request_type = ? WHERE id = ?", [a.request_type, a.id]);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not repair blank approval template Request Types: " + err.message);
+  }
 }

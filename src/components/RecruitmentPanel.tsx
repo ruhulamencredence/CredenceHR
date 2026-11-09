@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck } from 'lucide-react';
+import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck, CalendarClock, Mail } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { StartJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 import { LoadingBlock } from './LoadingBlock';
+import { InterviewModal, CandidateEmailModal, type RecruitmentAccess } from './RecruitmentInterview';
 
 interface RecruitmentPanelProps {
   token: string;
@@ -30,6 +31,12 @@ interface Candidate {
   // The scheduled interview, if any (candidate_interviews).
   interview_id?: number | null;
   interview_at?: string | null;
+  interview_mode?: 'in_person' | 'online' | 'phone' | null;
+  interview_venue?: string | null;
+  interview_link?: string | null;
+  // false = the interview changed after the last email to the candidate (or
+  // none was sent).
+  interview_informed?: boolean | null;
 }
 
 // A candidate's New Joiner Onboarding (HR Operations), from
@@ -114,6 +121,18 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
         if (a && (a.onboarding_create || a.onboarding_review || a.onboarding_approve)) loadOnboarding();
       })
       .catch(() => setOnbAccess(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Emailing candidates is its own explicit permission (layer "email_candidates").
+  const [access, setAccess] = useState<RecruitmentAccess | null>(null);
+  const [interviewFor, setInterviewFor] = useState<{ postingId: number; c: Candidate } | null>(null);
+  const [emailFor, setEmailFor] = useState<{ postingId: number; c: Candidate; kind: 'offered' | 'rejected' | 'custom' } | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/recruitment/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setAccess)
+      .catch(() => setAccess(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -241,28 +260,16 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update candidate');
+      const merged = { ...((candidatesByPosting[postingId] || []).find((c) => c.id === candidateId) || {}), ...data } as Candidate;
       setCandidatesByPosting((prev) => ({
         ...prev,
         [postingId]: (prev[postingId] || []).map((c) => (c.id === candidateId ? { ...c, ...data } : c))
       }));
+      // Next step right away: set the interview, or tell the candidate.
+      if (status === 'interview_scheduled' && !merged.interview_id) setInterviewFor({ postingId, c: merged });
+      else if ((status === 'offered' || status === 'rejected') && access?.email_candidates && merged.email) setEmailFor({ postingId, c: merged, kind: status });
     } catch (err: any) {
       setError(err.message || 'Failed to update candidate');
-    }
-  };
-
-  // Interview date & time for a candidate whose status is "interview
-  // scheduled" — the Admin Dashboard counts today's and this week's.
-  const setInterviewAt = async (postingId: number, c: Candidate, value: string) => {
-    const scheduled_at = value ? `${value.replace('T', ' ')}:00` : null;
-    try {
-      const res = c.interview_id
-        ? await fetch(apiUrl(`/api/candidate-interviews/${c.interview_id}`), { method: 'PUT', headers: authHeaders, body: JSON.stringify({ scheduled_at }) })
-        : await fetch(apiUrl('/api/candidate-interviews'), { method: 'POST', headers: authHeaders, body: JSON.stringify({ candidate_id: c.id, scheduled_at }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to save the interview time');
-      await fetchCandidates(postingId);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save the interview time');
     }
   };
 
@@ -393,20 +400,22 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                               {c.email || '—'} · {c.phone || '—'} · {c.source || '—'}
                             </p>
                             {c.status === 'interview_scheduled' && (
-                              <label className="mt-1 flex items-center gap-1.5 text-[11px] text-indigo-700">
-                                Interview:
-                                <input
-                                  type="datetime-local"
-                                  defaultValue={c.interview_at ? String(c.interview_at).replace(' ', 'T').slice(0, 16) : ''}
-                                  key={c.interview_at || 'none'}
-                                  onBlur={(e) => {
-                                    const cur = c.interview_at ? String(c.interview_at).replace(' ', 'T').slice(0, 16) : '';
-                                    if (e.target.value !== cur) setInterviewAt(p.id, c, e.target.value);
-                                  }}
-                                  className="px-1.5 py-0.5 text-[11px] border border-indigo-200 rounded-md"
-                                  aria-label={`Interview date and time for ${c.name}`}
-                                />
-                              </label>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setInterviewFor({ postingId: p.id, c })}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold hover:bg-indigo-100"
+                                >
+                                  <CalendarClock className="w-3 h-3" />
+                                  {c.interview_at
+                                    ? `${new Date(String(c.interview_at).replace(' ', 'T')).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}${c.interview_mode === 'online' ? ' · Online' : c.interview_mode === 'phone' ? ' · Phone' : c.interview_venue ? ` · ${c.interview_venue}` : ''}`
+                                    : 'Set interview time'}
+                                </button>
+                                {c.interview_id && c.email && c.interview_informed === false && (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-semibold">Candidate not emailed yet</span>
+                                )}
+                                {c.interview_id && c.interview_informed && <span className="inline-flex px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold">Candidate emailed</span>}
+                              </div>
                             )}
                             {c.status === 'hired' && canSeeOnboarding && (() => {
                               const o = onbByCandidate[c.id];
@@ -431,6 +440,22 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                               );
                             })()}
                           </div>
+                          <div className="flex items-center gap-1.5">
+                          {(c.status === 'applied' || c.status === 'shortlisted') && (
+                            <button type="button" onClick={() => setInterviewFor({ postingId: p.id, c })} className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1">
+                              <CalendarClock className="w-3 h-3" /> Interview
+                            </button>
+                          )}
+                          {access?.email_candidates && c.email && (
+                            <button
+                              type="button"
+                              onClick={() => (c.status === 'interview_scheduled' && c.interview_id ? setInterviewFor({ postingId: p.id, c }) : setEmailFor({ postingId: p.id, c, kind: c.status === 'offered' || c.status === 'rejected' ? c.status : 'custom' }))}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"
+                              aria-label={`Email ${c.name}`}
+                            >
+                              <Mail className="w-3 h-3" /> Email
+                            </button>
+                          )}
                           <select
                             value={c.status}
                             onChange={(e) => updateCandidateStatus(p.id, c.id, e.target.value)}
@@ -442,6 +467,7 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                               </option>
                             ))}
                           </select>
+                          </div>
                         </div>
                       ))}
                       {candidates.length === 0 && <p className="text-xs text-slate-400 py-2">No candidates yet.</p>}
@@ -453,6 +479,18 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
           })}
           {postings.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No job postings yet.</p>}
         </div>
+      )}
+      {interviewFor && (
+        <InterviewModal
+          token={token}
+          candidate={interviewFor.c}
+          access={access}
+          onClose={() => setInterviewFor(null)}
+          onChanged={() => fetchCandidates(interviewFor.postingId)}
+        />
+      )}
+      {emailFor && (
+        <CandidateEmailModal token={token} candidate={emailFor.c} kind={emailFor.kind} interviewId={null} onClose={() => setEmailFor(null)} />
       )}
       {startingFor !== null && <StartJoinerOnboarding token={token} candidateId={startingFor} onClose={() => setStartingFor(null)} onCreated={loadOnboarding} />}
     </div>

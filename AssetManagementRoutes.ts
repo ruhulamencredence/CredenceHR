@@ -6,7 +6,7 @@
 // Asset Management (Employee Profile -> "My Assets" / "New Requisition" /
 // "Requisition Status", plus Admin Panel -> Asset Management) — split into
 // its own file from day one, same reasoning as profileRoutes.ts /
-// ConveyanceBillClaimRoutes.ts / PayrollRoutes.ts: server.ts is already huge,
+// BillClaimRoutes.ts / PayrollRoutes.ts: server.ts is already huge,
 // so new features go in their own module and are registered from inside
 // startServer() via registerAssetManagementRoutes(), reusing that request's
 // authenticateToken/requireAdmin/requireModule/queryDB rather than a second
@@ -71,8 +71,8 @@ interface AssetManagementRouteDeps {
   // through request_type 'asset' the same way Conveyance/Leave/Timesheet
   // already do. See the design note above registerAssetManagementRoutes.
   createTemplateApprovalRequest: (
-    requestType: "conveyance" | "leave" | "timesheet" | "asset",
-    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
+    requestType: "bill_claim" | "leave" | "timesheet" | "asset",
+    sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
     sourceId: number,
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
@@ -262,7 +262,28 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
   for (const [col, def] of [
     ["quantity", "DECIMAL(10,2) NULL"],
     ["unit", "VARCHAR(50) NULL"],
-    ["handover_note", "TEXT NULL"]
+    ["handover_note", "TEXT NULL"],
+    // Who physically got it, when (the employee, someone on their behalf —
+    // an Employee — or an outsider by name and mobile).
+    ["handed_to_kind", "VARCHAR(10) NULL"],
+    ["handed_to_employee_id", "INT NULL"],
+    ["handed_to_name", "VARCHAR(150) NULL"],
+    ["handed_to_mobile", "VARCHAR(30) NULL"],
+    ["handed_over_at", "DATETIME NULL"],
+    // My Assets -> Return: why, the condition as the employee sees it, and how
+    // it reaches the store (themself, or through someone).
+    ["return_reason", "VARCHAR(30) NULL"],
+    ["return_condition_said", "VARCHAR(10) NULL"],
+    ["return_via_kind", "VARCHAR(10) NULL"],
+    ["return_via_employee_id", "INT NULL"],
+    ["return_via_name", "VARCHAR(150) NULL"],
+    ["return_via_mobile", "VARCHAR(30) NULL"],
+    ["return_note", "VARCHAR(500) NULL"],
+    // The store keeper (or Asset Management) taking it back.
+    ["received_by", "INT NULL"],
+    ["received_from_name", "VARCHAR(150) NULL"],
+    ["received_at", "DATETIME NULL"],
+    ["receive_note", "VARCHAR(500) NULL"]
   ]) {
     try {
       await dbPool.query(`ALTER TABLE asset_assignments ADD COLUMN ${col} ${def}`);
@@ -546,9 +567,11 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       const rows = await queryDB(
         `SELECT asg.id AS assignment_id, asg.assigned_date, asg.condition_on_assign,
                 asg.acknowledged_at, asg.return_requested_at, asg.quantity, asg.unit, asg.handover_note, asg.requisition_id,
-                a.id AS asset_id, a.asset_tag, a.name, a.category, a.serial_number
+                asg.handed_to_kind, asg.handed_to_name, asg.return_via_kind, asg.return_via_name, asg.return_condition_said,
+                a.id AS asset_id, a.asset_tag, a.name, a.category, a.serial_number, g.name AS given_by_name
            FROM asset_assignments asg
            JOIN assets a ON a.id = asg.asset_id
+           LEFT JOIN users g ON g.id = asg.assigned_by
           WHERE asg.employee_user_id = ? AND asg.returned_date IS NULL
           ORDER BY asg.assigned_date DESC`,
         [req.user.id]
@@ -688,6 +711,191 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     }
   });
 
+  // ---------- Handover / return: who, through whom ----------
+  // A person on the handover or return form: the employee themself, another
+  // Employee (picked), or an outsider typed in by name and mobile.
+  async function readPerson(raw: any, label: string): Promise<{ kind: "self" | "employee" | "other"; employeeId: number | null; name: string | null; mobile: string | null }> {
+    const kind = raw?.kind === "employee" ? "employee" : raw?.kind === "other" ? "other" : "self";
+    if (kind === "self") return { kind, employeeId: null, name: null, mobile: null };
+    if (kind === "employee") {
+      const id = Number(raw?.employee_id);
+      const e: any[] = id ? (await queryDB("SELECT id, name, mobile, phone FROM all_employees WHERE id = ?", [id])) || [] : [];
+      if (!e.length) throw Object.assign(new Error(`${label}: pick the employee.`), { statusCode: 400 });
+      return { kind, employeeId: Number(e[0].id), name: String(e[0].name || "").slice(0, 150), mobile: String(e[0].mobile || e[0].phone || "").slice(0, 30) || null };
+    }
+    const name = String(raw?.name ?? "").trim().slice(0, 150);
+    const mobile = String(raw?.mobile ?? "").trim().slice(0, 30);
+    if (!name) throw Object.assign(new Error(`${label}: type the person's name.`), { statusCode: 400 });
+    if (!mobile) throw Object.assign(new Error(`${label}: type the person's mobile number.`), { statusCode: 400 });
+    return { kind, employeeId: null, name, mobile };
+  }
+  const readWhen = (v: any) => {
+    const t = String(v ?? "").trim();
+    if (!t) return new Date();
+    const d = new Date(t);
+    if (Number.isNaN(d.getTime())) throw Object.assign(new Error("The handover time is not a valid date."), { statusCode: 400 });
+    if (d.getTime() > Date.now() + 5 * 60e3) throw Object.assign(new Error("The handover time can't be in the future."), { statusCode: 400 });
+    return d;
+  };
+  // May this account take back this assignment's item: whoever handed it
+  // over (the store keeper), or Asset Management. A store keeper whose
+  // account is blocked can't — Asset Management takes over.
+  async function mayReceive(user: any, a: any): Promise<boolean> {
+    if (await canManage(user.id, user.role)) return true;
+    if (!a.assigned_by || Number(a.assigned_by) !== Number(user.id)) return false;
+    const u: any[] = (await queryDB("SELECT is_blocked FROM users WHERE id = ?", [user.id])) || [];
+    return !!u.length && !Number(u[0].is_blocked);
+  }
+  // Records an item coming back: the assignment closes, the asset goes back
+  // to stock (good), maintenance (damaged) or is disposed (lost), the
+  // requisition log notes it and the employee is told.
+  async function recordReturn(a: any, actor: any, condition: "good" | "damaged" | "lost", receivedFrom: string | null, note: string | null) {
+    // Brought back in person: it came from the employee.
+    if (!receivedFrom) {
+      const e: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [a.employee_user_id])) || [];
+      receivedFrom = e[0]?.name ? String(e[0].name).slice(0, 150) : null;
+    }
+    await queryDB(
+      "UPDATE asset_assignments SET returned_date = CURDATE(), condition_on_return = ?, received_by = ?, received_from_name = ?, received_at = NOW(), receive_note = ? WHERE id = ?",
+      [condition, actor.id, receivedFrom, note, a.id]
+    );
+    const nextAssetStatus = condition === "good" ? "available" : condition === "damaged" ? "maintenance" : "disposed";
+    await queryDB("UPDATE assets SET status = ? WHERE id = ?", [nextAssetStatus, a.asset_id]);
+    const asset = (await queryDB("SELECT * FROM assets WHERE id = ?", [a.asset_id]))[0];
+    const what = asset ? `${asset.name} (${asset.asset_tag})` : "an item";
+    if (a.requisition_id) {
+      await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [a.requisition_id]);
+      await logEvent(Number(a.requisition_id), actor, "returned", `${actor.name || "IT/Admin"} received ${what} back${receivedFrom ? ` from ${receivedFrom}` : ""} — condition: ${condition}.`);
+    }
+    if (Number(a.employee_user_id) !== Number(actor.id)) {
+      await createAlert(queryDB, {
+        userId: Number(a.employee_user_id),
+        type: "asset_requisition" as AlertType,
+        title: "Return received",
+        message: `${actor.name || "The store"} received ${what} back${receivedFrom ? ` from ${receivedFrom}` : ""} — condition: ${condition}. It is no longer in your name.`,
+        relatedType: "asset_handover",
+        relatedId: Number(a.requisition_id) || Number(a.id)
+      }).catch(() => {});
+    }
+  }
+  // The hand-to-hand story of one asset, newest first, built from its
+  // assignments (handed over -> acknowledged -> return sent -> received).
+  async function assetHistory(assetId: number, onlyUserId?: number) {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT asg.*, e.name AS employee_name, g.name AS giver_name, r.name AS receiver_name
+           FROM asset_assignments asg
+           LEFT JOIN users e ON e.id = asg.employee_user_id
+           LEFT JOIN users g ON g.id = asg.assigned_by
+           LEFT JOIN users r ON r.id = asg.received_by
+          WHERE asg.asset_id = ?${onlyUserId ? " AND asg.employee_user_id = ?" : ""}`,
+        onlyUserId ? [assetId, onlyUserId] : [assetId]
+      )) || [];
+    const ev: { at: string; kind: string; title: string; detail: string }[] = [];
+    const iso = (v: any) => (v ? new Date(v).toISOString() : "");
+    for (const a of rows) {
+      const owner = a.employee_name || "the employee";
+      const to = a.handed_to_kind === "employee" || a.handed_to_kind === "other" ? `to ${a.handed_to_name}${a.handed_to_mobile ? ` (${a.handed_to_mobile})` : ""} on behalf of ${owner}` : `to ${owner}`;
+      ev.push({
+        at: iso(a.handed_over_at || a.assigned_date),
+        kind: "handed_over",
+        title: `Handed over by ${a.giver_name || "the store"}`,
+        detail: [to, a.condition_on_assign ? `condition ${a.condition_on_assign}` : "", a.handover_note ? `"${a.handover_note}"` : ""].filter(Boolean).join(" · ")
+      });
+      if (a.acknowledged_at) ev.push({ at: iso(a.acknowledged_at), kind: "acknowledged", title: `Acknowledged by ${owner}`, detail: "" });
+      if (a.return_requested_at) {
+        const via = a.return_via_kind === "employee" || a.return_via_kind === "other" ? `through ${a.return_via_name}${a.return_via_mobile ? ` (${a.return_via_mobile})` : ""}` : a.return_via_kind === "self" ? "bringing it themself" : "";
+        ev.push({
+          at: iso(a.return_requested_at),
+          kind: "return_sent",
+          title: `Return sent by ${owner}`,
+          detail: [via, a.return_reason ? `reason: ${String(a.return_reason).replace(/_/g, " ")}` : "", a.return_condition_said ? `said: ${a.return_condition_said}` : "", a.return_note ? `"${a.return_note}"` : ""].filter(Boolean).join(" · ")
+        });
+      }
+      if (a.returned_date) {
+        ev.push({
+          at: iso(a.received_at || a.returned_date),
+          kind: "received",
+          title: `Received back${a.receiver_name ? ` by ${a.receiver_name}` : ""}`,
+          detail: [a.received_from_name ? `from ${a.received_from_name}` : "", a.condition_on_return ? `condition checked: ${a.condition_on_return}` : "", a.receive_note ? `"${a.receive_note}"` : ""].filter(Boolean).join(" · ")
+        });
+      }
+    }
+    return ev.sort((x, y) => (x.at < y.at ? 1 : -1));
+  }
+
+  // People for the handover / return pickers: active Employees (Name · ID ·
+  // Designation · Department), the same details the Employee Directory
+  // already shows every signed-in account.
+  app.get("/api/assets/people", authenticateToken, async (_req: any, res) => {
+    try {
+      const rows: any[] =
+        (await queryDB("SELECT id, name, employee_id, designation, department FROM all_employees WHERE is_active = 1 ORDER BY name ASC")) || [];
+      res.json(rows.map((e) => ({ id: Number(e.id), name: e.name, employee_code: e.employee_id || "", designation: e.designation || "", department: e.department || "" })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Items on their way back to this account: the ones it handed over, and —
+  // for Asset Management — every pending return.
+  app.get("/api/assets/returns-to-receive", authenticateToken, async (req: any, res) => {
+    try {
+      const all = await canManage(req.user.id, req.user.role);
+      const rows: any[] =
+        (await queryDB(
+          `SELECT asg.id AS assignment_id, asg.asset_id, asg.assigned_by, asg.return_requested_at, asg.return_reason, asg.return_condition_said,
+                  asg.return_via_kind, asg.return_via_name, asg.return_via_mobile, asg.return_note, asg.quantity, asg.unit,
+                  a.asset_tag, a.name AS asset_name, u.name AS employee_name, g.name AS given_by_name
+             FROM asset_assignments asg
+             JOIN assets a ON a.id = asg.asset_id
+             LEFT JOIN users u ON u.id = asg.employee_user_id
+             LEFT JOIN users g ON g.id = asg.assigned_by
+            WHERE asg.return_requested_at IS NOT NULL AND asg.returned_date IS NULL${all ? "" : " AND asg.assigned_by = ?"}
+            ORDER BY asg.return_requested_at ASC`,
+          all ? [] : [req.user.id]
+        )) || [];
+      res.json({ rows, all });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The store keeper (or Asset Management) takes the item back.
+  app.post("/api/assets/assignments/:id/receive", authenticateToken, async (req: any, res) => {
+    try {
+      const a = (await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [req.params.id]))[0];
+      if (!a) return res.status(404).json({ error: "Assignment not found." });
+      if (!(await mayReceive(req.user, a))) return res.status(403).json({ error: "Only the person who handed it over, or Asset Management, can take it back." });
+      if (a.returned_date) return res.status(400).json({ error: "Already received back." });
+      const condition = req.body?.condition;
+      if (!["good", "damaged", "lost"].includes(condition)) return res.status(400).json({ error: "Pick the condition: good, damaged or lost." });
+      const from = String(req.body?.received_from ?? "").trim().slice(0, 150) || a.return_via_name || null;
+      const note = String(req.body?.note ?? "").trim().slice(0, 500) || null;
+      await recordReturn(a, req.user, condition, from, note);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err?.statusCode || 500).json({ error: err.message });
+    }
+  });
+
+  // History of one asset: Asset Management sees all of it; the employee who
+  // holds / held it sees their own part; the store keeper who gave it too.
+  app.get("/api/assets/:id/timeline", authenticateToken, async (req: any, res) => {
+    try {
+      const assetId = Number(req.params.id);
+      const asset = (await queryDB("SELECT id, asset_tag, name, status FROM assets WHERE id = ?", [assetId]))[0];
+      if (!asset) return res.status(404).json({ error: "Asset not found." });
+      if (await canManage(req.user.id, req.user.role)) return res.json({ asset, events: await assetHistory(assetId) });
+      const mine: any[] = (await queryDB("SELECT id FROM asset_assignments WHERE asset_id = ? AND (employee_user_id = ? OR assigned_by = ?)", [assetId, req.user.id, req.user.id])) || [];
+      if (!mine.length) return res.status(403).json({ error: "Not authorized." });
+      const gave: any[] = (await queryDB("SELECT id FROM asset_assignments WHERE asset_id = ? AND assigned_by = ?", [assetId, req.user.id])) || [];
+      res.json({ asset, events: await assetHistory(assetId, gave.length ? undefined : Number(req.user.id)) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/assets/assignments/:id/request-return — Asset Return &
   // Clearance: the Employee flags they want to return an asset (e.g. on
   // resignation, or simply no longer needing it). This only records intent —
@@ -702,7 +910,57 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         return res.status(403).json({ error: "Not authorized." });
       }
       if (assignment.returned_date) return res.status(400).json({ error: "This asset was already returned." });
-      await queryDB("UPDATE asset_assignments SET return_requested_at = NOW() WHERE id = ?", [assignment.id]);
+      if (assignment.return_requested_at) return res.status(400).json({ error: "A return is already on its way to the store." });
+      const reasons = ["not_needed", "replace_faulty", "leaving", "other"];
+      const reason = reasons.includes(req.body?.reason) ? req.body.reason : "other";
+      const said = ["good", "damaged", "lost"].includes(req.body?.condition) ? req.body.condition : null;
+      let via;
+      try {
+        via = await readPerson(req.body?.via, "How it reaches the store");
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+      const note = String(req.body?.note ?? "").trim().slice(0, 500) || null;
+      await queryDB(
+        `UPDATE asset_assignments SET return_requested_at = NOW(), return_reason = ?, return_condition_said = ?, return_via_kind = ?,
+                return_via_employee_id = ?, return_via_name = ?, return_via_mobile = ?, return_note = ? WHERE id = ?`,
+        [reason, said, via.kind, via.employeeId, via.name, via.mobile, note, assignment.id]
+      );
+      // The store keeper who handed it over hears it first-hand.
+      if (assignment.assigned_by && Number(assignment.assigned_by) !== Number(req.user.id)) {
+        const it = (await queryDB("SELECT name, asset_tag FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+        await createAlert(queryDB, {
+          userId: Number(assignment.assigned_by),
+          type: "asset_requisition" as AlertType,
+          title: "Asset coming back to you",
+          message: `${req.user.name || "An employee"} is returning ${it ? `${it.name} (${it.asset_tag})` : "an item"} you handed over${via.kind === "self" ? "" : ` — through ${via.name}${via.mobile ? ` (${via.mobile})` : ""}`}${said ? `, condition: ${said}` : ""}. Receive it in My Asset -> Returns to receive.`,
+          relatedType: "asset_return_incoming",
+          relatedId: Number(assignment.id)
+        }).catch(() => {});
+      }
+      // Whoever runs Asset Management takes it back — tell them.
+      try {
+        const asset = (await queryDB("SELECT name, asset_tag FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+        const keepers: any[] =
+          (await queryDB(
+            `SELECT DISTINCT u.id FROM users u
+              WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
+                 OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'asset_management'))`
+          )) || [];
+        for (const k of keepers) {
+          if (Number(k.id) === Number(req.user.id) || Number(k.id) === Number(assignment.assigned_by)) continue;
+          await createAlert(queryDB, {
+            userId: Number(k.id),
+            type: "asset_requisition" as AlertType,
+            title: "Asset return requested",
+            message: `${req.user.name || "An employee"} wants to return ${asset ? `${asset.name} (${asset.asset_tag})` : "an asset"}. Receive it in My Asset -> Returns to receive.`,
+            relatedType: "asset_return_incoming",
+            relatedId: Number(assignment.id)
+          }).catch(() => {});
+        }
+      } catch {
+        // Not telling HR never blocks the request itself.
+      }
       if (assignment.requisition_id) {
         const retAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
         await logEvent(
@@ -720,7 +978,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
 
   // POST /api/assets/requisitions — New Requisition tab: submit a request
   // for a new/replacement asset. Attachment is optional, same base64 ->
-  // LONGBLOB pattern already used for Conveyance Bill Claim attachments and
+  // LONGBLOB pattern already used for Bill Claim attachments and
   // the Profile photo upload (profileRoutes.ts) — no multipart/multer
   // anywhere else in this app, so this doesn't introduce a second upload
   // mechanism. Routing (who has to approve it) is entirely the Dynamic
@@ -803,7 +1061,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         }
       } else {
         // Notify whoever the request is actually sitting with first — same
-        // idea as Conveyance Bill Claim's own submit route.
+        // idea as Bill Claim's own submit route.
         try {
           const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
           const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
@@ -1254,7 +1512,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // auto one like AR-12-1) assigned to the employee, so it shows in their
   // My Asset list where they Accept & Acknowledge or report an issue.
   // Moves the requisition to 'dispatched' and alerts the employee + HR.
-  async function handOverItems(requisition: any, items: ReturnType<typeof cleanHandoverItems>, condition: string, actor: any) {
+  async function handOverItems(
+    requisition: any,
+    items: ReturnType<typeof cleanHandoverItems>,
+    condition: string,
+    actor: any,
+    handover: { person: Awaited<ReturnType<typeof readPerson>>; at: Date } = { person: { kind: "self", employeeId: null, name: null, mobile: null }, at: new Date() }
+  ) {
     for (const it of items) {
       if (it.asset_tag) {
         const dup = await queryDB("SELECT id FROM assets WHERE asset_tag = ?", [it.asset_tag]);
@@ -1287,12 +1551,10 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
          VALUES (?, ?, ?, CURDATE(), ?, ?)`,
         [assetId, requisition.employee_user_id, requisition.id, condition, actor.id]
       );
-      await queryDB("UPDATE asset_assignments SET quantity = ?, unit = ?, handover_note = ? WHERE id = ?", [
-        it.quantity,
-        it.unit,
-        it.note,
-        asg.insertId
-      ]);
+      await queryDB(
+        "UPDATE asset_assignments SET quantity = ?, unit = ?, handover_note = ?, handed_to_kind = ?, handed_to_employee_id = ?, handed_to_name = ?, handed_to_mobile = ?, handed_over_at = ? WHERE id = ?",
+        [it.quantity, it.unit, it.note, handover.person.kind, handover.person.employeeId, handover.person.name, handover.person.mobile, handover.at, asg.insertId]
+      );
     }
     await queryDB("UPDATE asset_requisitions SET status = 'dispatched', assigned_asset_id = ? WHERE id = ?", [firstAssetId, requisition.id]);
 
@@ -1301,7 +1563,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       userId: requisition.employee_user_id,
       type: "asset_requisition" as AlertType,
       title: "Asset Handed Over",
-      message: `${actor.name || "The fulfiller"} handed over your requisition: ${summary}. Please check it in My Asset — Accept & Acknowledge, or report an issue if something is wrong.`,
+      message: `${actor.name || "The fulfiller"} handed over your requisition: ${summary}${handover.person.kind === "self" ? "" : ` — given to ${handover.person.name} on your behalf`}. Please check it in My Asset — Accept & Acknowledge, or report an issue if something is wrong.`,
       // 'asset_handover' so a click opens My Asset on My Assets (where the
       // Accept button is) rather than the Status tab.
       relatedType: "asset_handover",
@@ -1311,7 +1573,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       actor.id,
       requisition.employee_user_id
     ]);
-    await logEvent(Number(requisition.id), actor, "handed_over", `${actor.name || "The fulfiller"} handed over: ${summary}.`, {
+    await logEvent(Number(requisition.id), actor, "handed_over", `${actor.name || "The fulfiller"} handed over: ${summary}${handover.person.kind === "self" ? "" : ` (to ${handover.person.name}${handover.person.mobile ? `, ${handover.person.mobile}` : ""}, on the employee's behalf)`}.`, {
       details: { items },
       notify: false
     });
@@ -1350,8 +1612,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       const overRequest = await checkAgainstRequested(requisition, req.body.items, items);
       if (overRequest) return res.status(400).json({ error: overRequest });
       const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
+      let handover;
       try {
-        await handOverItems(requisition, items, condition, req.user);
+        handover = { person: await readPerson(req.body?.handed_to, "Handed over to"), at: readWhen(req.body?.handed_over_at) };
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+      try {
+        await handOverItems(requisition, items, condition, req.user, handover);
       } catch (e: any) {
         if (String(e.message).startsWith("Asset Tag")) return res.status(400).json({ error: e.message });
         throw e;
@@ -1399,6 +1667,12 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       if (overRequest) return res.status(400).json({ error: overRequest });
       const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
+      let handover;
+      try {
+        handover = { person: await readPerson(req.body?.handed_to, "Handed over to"), at: readWhen(req.body?.handed_over_at) };
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
 
       for (const it of items) {
         if (it.asset_tag && (await queryDB("SELECT id FROM assets WHERE asset_tag = ?", [it.asset_tag])).length > 0) {
@@ -1416,7 +1690,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         [req.user.id, id]
       );
       try {
-        await handOverItems({ ...requisition, status: "approved" }, items, condition, req.user);
+        await handOverItems({ ...requisition, status: "approved" }, items, condition, req.user, handover);
       } catch (e: any) {
         await queryDB("UPDATE asset_requisitions SET status = 'pending', admin_decided_by = ?, admin_decided_at = NULL WHERE id = ?", [null, id]);
         if (String(e.message).startsWith("Asset Tag")) return res.status(400).json({ error: e.message });
@@ -1682,24 +1956,9 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         if (!assignment) return res.status(404).json({ error: "Assignment not found." });
         if (assignment.returned_date) return res.status(400).json({ error: "Already returned." });
 
-        await queryDB(
-          "UPDATE asset_assignments SET returned_date = CURDATE(), condition_on_return = ? WHERE id = ?",
-          [condition_on_return, assignment.id]
-        );
-
-        const nextAssetStatus = condition_on_return === "good" ? "available" : condition_on_return === "damaged" ? "maintenance" : "disposed";
-        await queryDB("UPDATE assets SET status = ? WHERE id = ?", [nextAssetStatus, assignment.asset_id]);
-
-        if (assignment.requisition_id) {
-          await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [assignment.requisition_id]);
-          const retAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
-          await logEvent(
-            Number(assignment.requisition_id),
-            req.user,
-            "returned",
-            `${req.user.name || "IT/Admin"} recorded the return of ${retAsset ? `${retAsset.name} (${retAsset.asset_tag})` : "an item"} — condition: ${condition_on_return}.`
-          );
-        }
+        const from = String(req.body?.received_from ?? "").trim().slice(0, 150) || assignment.return_via_name || null;
+        const note = String(req.body?.note ?? "").trim().slice(0, 500) || null;
+        await recordReturn(assignment, req.user, condition_on_return, from, note);
 
         res.json({ success: true });
       } catch (err: any) {

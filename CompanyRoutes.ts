@@ -925,6 +925,10 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   });
 
   // Who may enter which company, and what Module Access they hold in each.
+  // One page of accounts at a time (?offset=&limit=, ?q= searches name /
+  // email / username on the server) — a group with hundreds of accounts used
+  // to send every account, every company row and every permission row in one
+  // answer and draw them all at once.
   app.get("/api/system/company-access", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
       const groupId = await myGroup(req);
@@ -933,38 +937,67 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       // An account with no rows yet (hasn't signed in since multi-company)
       // works in the mother company — show it that way.
       const motherId = Number((groupCompanies.find((c) => Number(c.is_mother) === 1) || groupCompanies[0])?.id || DEFAULT_COMPANY_ID);
-      const [users, access, perms] = await Promise.all([
-        // Every account of the group, whichever company is selected — a
-        // sister company's people must be listable to give them the mother
-        // company too (filtered to the group just below).
-        queryDB("/*unscoped*/ SELECT * FROM users").catch(() => []),
-        queryDB("SELECT * FROM user_company_access").catch(() => []),
-        queryDB("SELECT * FROM admin_module_permissions").catch(() => [])
-      ]);
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+      const q = String(req.query.q || "").trim().slice(0, 100);
+      const where = ["COALESCE(group_id, ?) = ?"];
+      const args: any[] = [DEFAULT_GROUP_ID, groupId];
+      if (q) {
+        const like = `%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`;
+        where.push("(name LIKE ? OR email LIKE ? OR username LIKE ?)");
+        args.push(like, like, like);
+      }
+      // Every account of the group, whichever company is selected — a
+      // sister company's people must be listable to give them the mother
+      // company too.
+      const cond = where.join(" AND ");
+      const [countRow] = ((await queryDB(`/*unscoped*/ SELECT COUNT(*) AS n FROM users WHERE ${cond}`, args).catch(() => [])) as any[]) || [];
+      const users: any[] =
+        ((await queryDB(
+          `/*unscoped*/ SELECT id, name, email, username, role, group_id, can_view_group_directory, can_work_all_companies FROM users WHERE ${cond} ORDER BY name, id LIMIT ${limit} OFFSET ${offset}`,
+          args
+        ).catch(() => [])) as any[]) || [];
+      const ids = users.map((u) => Number(u.id));
+      const marks = ids.map(() => "?").join(",");
+      const [access, perms] = ids.length
+        ? await Promise.all([
+            queryDB(`SELECT user_id, company_id, is_default FROM user_company_access WHERE user_id IN (${marks})`, ids).catch(() => []),
+            queryDB(`SELECT user_id, company_id, COUNT(*) AS n FROM admin_module_permissions WHERE user_id IN (${marks}) GROUP BY user_id, company_id`, ids).catch(() => [])
+          ])
+        : [[], []];
+      const accessBy = new Map<number, any[]>();
+      for (const a of access as any[]) {
+        if (!companyIds.has(Number(a.company_id))) continue;
+        const k = Number(a.user_id);
+        if (!accessBy.has(k)) accessBy.set(k, []);
+        accessBy.get(k)!.push(a);
+      }
+      const modulesBy = new Map<number, Record<number, number>>();
+      for (const p of perms as any[]) {
+        const k = Number(p.user_id);
+        const m = modulesBy.get(k) || {};
+        const cid = Number(p.company_id ?? DEFAULT_COMPANY_ID);
+        m[cid] = (m[cid] || 0) + Number(p.n || 0);
+        modulesBy.set(k, m);
+      }
       res.json({
-        users: (users as any[])
-          .filter((u) => Number(u.group_id ?? DEFAULT_GROUP_ID) === groupId)
-          .map((u) => {
-            const mine = (access as any[]).filter((a) => Number(a.user_id) === Number(u.id) && companyIds.has(Number(a.company_id)));
-            const modules: Record<number, number> = {};
-            for (const p of perms as any[])
-              if (Number(p.user_id) === Number(u.id)) {
-                const cid = Number(p.company_id ?? DEFAULT_COMPANY_ID);
-                modules[cid] = (modules[cid] || 0) + 1;
-              }
-            return {
-              id: Number(u.id),
-              name: u.name,
-              email: u.email || u.username || null,
-              role: u.role,
-              company_ids: u.role === "superadmin" ? [...companyIds] : mine.length ? mine.map((a) => Number(a.company_id)) : [motherId],
-              can_view_group_directory: u.role === "superadmin" || !!Number(u.can_view_group_directory || 0),
-              can_work_all_companies: u.role === "superadmin" || !!Number(u.can_work_all_companies || 0),
-              default_company_id: Number(mine.find((a) => Number(a.is_default) === 1)?.company_id || 0) || (mine.length ? Number(mine[0].company_id) : motherId),
-              module_counts: modules
-            };
-          })
-          .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        total: Number(countRow?.n ?? users.length),
+        offset,
+        limit,
+        users: users.map((u) => {
+          const mine = accessBy.get(Number(u.id)) || [];
+          return {
+            id: Number(u.id),
+            name: u.name,
+            email: u.email || u.username || null,
+            role: u.role,
+            company_ids: u.role === "superadmin" ? [...companyIds] : mine.length ? mine.map((a) => Number(a.company_id)) : [motherId],
+            can_view_group_directory: u.role === "superadmin" || !!Number(u.can_view_group_directory || 0),
+            can_work_all_companies: u.role === "superadmin" || !!Number(u.can_work_all_companies || 0),
+            default_company_id: Number(mine.find((a) => Number(a.is_default) === 1)?.company_id || 0) || (mine.length ? Number(mine[0].company_id) : motherId),
+            module_counts: modulesBy.get(Number(u.id)) || {}
+          };
+        })
       });
     } catch (err) {
       fail(res, err);

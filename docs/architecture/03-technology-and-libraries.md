@@ -134,6 +134,23 @@
 |---|---|---|---|---|---|---|
 | `pm2` | 5.4.3 | AGPL-3.0 | 0 | — | production-এ একাধিক worker, auto-restart | মাল্টি-কোর ব্যবহার; ক্র্যাশে নিজে চালু। ⚠ লাইসেন্স AGPL-3.0 (সরঞ্জাম হিসেবে চালানো, কোডে মেশানো নয়)। |
 
+### ভারী লাইব্রেরি কখন নামে (মোবাইলে দ্রুত খোলার জন্য)
+
+`xlsx`, `jspdf` / `jspdf-autotable`, `pdfjs-dist`, `leaflet`, `lottie-web` আর বড় অ্যানিমেশন JSON অ্যাপের প্রথম download-এ থাকে না; যে বোতাম বা পাতা সেগুলো ব্যবহার করে, প্রথম ব্যবহারের সময় নামে (`import()`):
+
+- Admin Panel-এর প্রতিটা module-এর পাতা আলাদা ফাইল (`lazyPanel` in `AdminPanel.tsx`) — সব module-ওয়ালা account (Superadmin) আর সব পাতা একসাথে download করে না।
+- Profile, Credence Assistant, Profile → Service Book / My Asset, মানচিত্রের popup, Tracking report: খুললে তবেই।
+- Excel / PDF export: বোতাম চাপলে লাইব্রেরি নামে; PDF দেখা `src/lib/pdfjs.ts` দিয়ে।
+- অ্যানিমেশন JSON: `useLottieJson` (`LazyLottie.tsx`)।
+- খুব ছোট টুকরো (২০ KB-র কম) `vite.config.ts`-এর `experimentalMinChunkSize`-এ জুড়ে যায়, যাতে ফোনে অনেকগুলো ছোট request না যায়।
+
+মাপা ফল (production build, মোবাইল আকার, CPU ৪ গুণ ধীর, ২০২৬-১১-০৫): Superadmin-এর শুরুর download ১,৪২৪ KB → ৬৪২ KB, JS memory ৩৩ → ১৭ MB, Home দেখা যায় ~২.৭ → ~২.১ সেকেন্ডে; সাধারণ account ৮৮৬ → ৩৯৪ KB। নতুন কোনো ভারী লাইব্রেরি যোগ করলে সেটাও এভাবে দরকারের সময় import করুন।
+
+- **ফোনে জমা থাকে (cache):** `dist/assets`-এর সব ফাইল (কোড, অ্যানিমেশন, CSS, ছবি, font) নামে hash থাকে, server সেগুলো `Cache-Control: public, max-age=31536000, immutable` দিয়ে পাঠায় (`server.ts`); অ্যাপ আবার খুললে এগুলো আর নামে না (মেপে দেখা: দ্বিতীয়বার ০টা file network থেকে)। নতুন build হলে নাম বদলায়, তাই পুরনো জিনিস আটকে থাকে না। শুধু `index.html` প্রতিবার যাচাই হয় (`no-cache`)। সামনে nginx থাকলে সে যেন এই header না বদলায়।
+- প্রতিটা অ্যানিমেশন (`src/assets/*.json`) নিজের ফাইল (`anim-*`, `vite.config.ts` `manualChunks`), যাতে শুধু যে কার্ড দেখায় সে-ই নামায়।
+- ফোনের অ্যাপে Admin Panel-এর কোড আগাম নামানো হয় না (খুললে তবেই); ওয়েবে আগের মতো ফাঁকা সময়ে আগাম নামে (`App.tsx`)।
+- একই সময়ে কয়েক জায়গা থেকে চাওয়া `companies/mine`, `chat/unread-count`, `site-attendance/my-teams` একটাই request (`dedupedFetchJson`, `lib/siteSupervisor.ts`)।
+
 ## ৩. পরিষ্কার করার তালিকা (গুরুত্বপূর্ণ)
 
 | সমস্যা | ঝুঁকি | করণীয় |

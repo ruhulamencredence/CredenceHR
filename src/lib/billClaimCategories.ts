@@ -5,12 +5,12 @@
 
 import { useEffect, useState } from 'react';
 import { apiUrl } from './api';
-import { BillClaimCategory, USER_CLAIM_CATEGORIES } from '../types';
+import { BillClaimCategory, BILL_CLAIM_CATEGORIES } from '../types';
 
 // Active Bill Claim category names (Bill Claim Policy), for the Admin's claim
 // edit forms. Falls back to the starting five while loading or offline.
 export function useBillClaimCategoryNames(token: string): string[] {
-  const [names, setNames] = useState<string[]>(USER_CLAIM_CATEGORIES);
+  const [names, setNames] = useState<string[]>(BILL_CLAIM_CATEGORIES);
   useEffect(() => {
     let cancelled = false;
     fetch(apiUrl('/api/bill-claim-categories'), { headers: { Authorization: `Bearer ${token}` } })

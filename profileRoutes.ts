@@ -26,6 +26,7 @@ import type { Express } from "express";
 import { endAllSessions, sessionKeyOf } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { passwordProblem } from "./src/lib/passwordPolicy";
+import { createAlert } from "./Alerts";
 
 interface ProfileRouteDeps {
   authenticateToken: any;
@@ -36,8 +37,63 @@ interface ProfileRouteDeps {
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PHOTO_MIME = /^image\/(jpeg|jpg|png)$/i;
 
+// A new profile photo needs the Superadmin's OK: everyone else's upload waits
+// here (status 'pending') while the old photo stays; Approve copies it into
+// user_profile_details, Reject keeps the old one (with a reason). A newer
+// upload replaces a pending one. A Superadmin's own photo, and a joiner's
+// during onboarding (HR reviews the whole onboarding), go straight in.
+export async function ensureProfilePhotoRequestSchema(dbPool: any) {
+  if (!dbPool) return;
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS profile_photo_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        photo_mimetype VARCHAR(150) NULL,
+        photo_data LONGBLOB NULL,
+        status ENUM('pending', 'approved', 'rejected', 'cancelled') NOT NULL DEFAULT 'pending',
+        decided_by INT NULL,
+        decided_at TIMESTAMP NULL DEFAULT NULL,
+        reject_reason VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ppr_user (user_id, status),
+        INDEX idx_ppr_status (status, created_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure profile_photo_requests table exists: " + err.message);
+  }
+}
+
 export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
   const { authenticateToken, queryDB } = deps;
+
+  const isSuper = (req: any) => req.user?.role === "superadmin" && !req.user?.onb;
+  const superOnly = (req: any, res: any, next: any) => (isSuper(req) ? next() : res.status(403).json({ error: "Only the Superadmin approves profile photos." }));
+  // Writes (or replaces) the live profile photo.
+  async function savePhoto(userId: number, mimetype: string, buffer: Buffer) {
+    const existing = await queryDB("SELECT user_id FROM user_profile_details WHERE user_id = ?", [userId]);
+    if (existing.length > 0) {
+      await queryDB("UPDATE user_profile_details SET photo_mimetype = ?, photo_data = ? WHERE user_id = ?", [mimetype, buffer, userId]);
+    } else {
+      await queryDB("INSERT INTO user_profile_details (user_id, photo_mimetype, photo_data) VALUES (?, ?, ?)", [userId, mimetype, buffer]);
+    }
+  }
+  // This account's own waiting photo and its last refusal (for the profile page).
+  async function ownPhotoState(userId: number) {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT id, status, created_at, decided_at, reject_reason FROM profile_photo_requests
+          WHERE user_id = ? AND status IN ('pending', 'rejected') ORDER BY id DESC LIMIT 1`,
+        [userId]
+      ).catch(() => [])) || [];
+    const r = rows[0];
+    return {
+      photo_pending: r?.status === "pending" ? { id: Number(r.id), requested_at: r.created_at } : null,
+      photo_rejected: r?.status === "rejected" ? { reason: r.reject_reason || null, decided_at: r.decided_at } : null
+    };
+  }
 
   // GET /api/profile/personal-data — everything the Personal Data screen
   // needs in one call. When no user_profile_details row exists yet (never
@@ -81,7 +137,12 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
         full_address: detail?.full_address || null,
         has_photo: !!(detail && Number(detail.has_photo)),
         position: emp?.designation || null,
-        department: emp?.department || null
+        department: emp?.department || null,
+        // Whether a new photo waits for the Superadmin (not for the Superadmin
+        // themself, nor a joiner during onboarding) — the page shows the photo
+        // rules first when it does.
+        photo_needs_approval: !(isSuper(req) || req.user.onb),
+        ...(await ownPhotoState(userId))
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -130,8 +191,8 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
   });
 
   // POST /api/profile/photo — base64 upload, same FileReader/Base64 ->
-  // LONGBLOB pattern already used for Conveyance Bill Claim attachments
-  // (user_claims.file_data) and Attendance Correction attachments — no
+  // LONGBLOB pattern already used for Bill Claim attachments
+  // (bill_claims.file_data) and Attendance Correction attachments — no
   // multipart/multer anywhere else in this app, so this doesn't introduce a
   // second upload mechanism.
   app.post("/api/profile/photo", authenticateToken, async (req: any, res) => {
@@ -151,20 +212,126 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
         return res.status(400).json({ error: "Photo must be less than 5MB." });
       }
 
-      const existing = await queryDB("SELECT user_id FROM user_profile_details WHERE user_id = ?", [userId]);
-      if (existing.length > 0) {
-        await queryDB("UPDATE user_profile_details SET photo_mimetype = ?, photo_data = ? WHERE user_id = ?", [
-          mimetype,
-          buffer,
-          userId
-        ]);
-      } else {
-        await queryDB(
-          "INSERT INTO user_profile_details (user_id, photo_mimetype, photo_data) VALUES (?, ?, ?)",
-          [userId, mimetype, buffer]
-        );
+      // The Superadmin's own photo, and a joiner's during onboarding, go straight in.
+      if (isSuper(req) || req.user.onb) {
+        await savePhoto(userId, mimetype, buffer);
+        return res.json({ success: true, applied: true });
       }
+      // Anyone else's waits for the Superadmin; a newer upload replaces a waiting one.
+      const waiting: any[] = (await queryDB("SELECT id FROM profile_photo_requests WHERE user_id = ? AND status = 'pending' ORDER BY id DESC", [userId])) || [];
+      let id = waiting[0] ? Number(waiting[0].id) : 0;
+      if (id) {
+        await queryDB("UPDATE profile_photo_requests SET photo_mimetype = ?, photo_data = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?", [mimetype, buffer, id]);
+        if (waiting.length > 1) await queryDB(`UPDATE profile_photo_requests SET status = 'cancelled', photo_data = NULL WHERE id IN (${waiting.slice(1).map(() => "?").join(",")})`, waiting.slice(1).map((w) => Number(w.id)));
+      } else {
+        const r: any = await queryDB("INSERT INTO profile_photo_requests (user_id, photo_mimetype, photo_data) VALUES (?, ?, ?)", [userId, mimetype, buffer]);
+        id = Number(r.insertId);
+        const supers: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' AND COALESCE(is_blocked, 0) = 0").catch(() => [])) || [];
+        for (const s of supers) {
+          await createAlert(queryDB, {
+            userId: Number(s.id),
+            type: "profile_photo",
+            title: "New Profile Photo to Approve",
+            message: `${req.user.name || "Someone"} uploaded a new profile photo. Approve or reject it in Admin Panel → Users → Photo approvals.`,
+            relatedType: "profile_photo_request",
+            relatedId: id
+          }).catch(() => {});
+        }
+      }
+      res.json({ success: true, pending: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Profile photo approval ---------------------------------------------
+  // The asker's own waiting photo (to show "waiting for approval") — and
+  // cancelling it.
+  app.get("/api/profile/photo/pending", authenticateToken, async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT photo_mimetype, photo_data FROM profile_photo_requests WHERE user_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1", [req.user.id]);
+      const row = rows[0];
+      if (!row || !row.photo_data) return res.status(204).setHeader("Cache-Control", "no-store").end();
+      res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/profile/photo/pending", authenticateToken, async (req: any, res) => {
+    try {
+      await queryDB("UPDATE profile_photo_requests SET status = 'cancelled', photo_data = NULL WHERE user_id = ? AND status = 'pending'", [req.user.id]);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin only: the waiting photos (Admin Panel -> Users -> Photo approvals).
+  app.get("/api/profile/photo-requests", authenticateToken, superOnly, async (req: any, res) => {
+    try {
+      const rows: any[] =
+        (await queryDB(
+          `SELECT r.id, r.user_id, r.created_at, u.name, u.email,
+                  e.employee_id AS employee_code, e.designation, e.department,
+                  (d.photo_data IS NOT NULL) AS has_current
+             FROM profile_photo_requests r
+             JOIN users u ON u.id = r.user_id
+             LEFT JOIN all_employees e ON e.user_id = r.user_id
+             LEFT JOIN user_profile_details d ON d.user_id = r.user_id
+            WHERE r.status = 'pending'
+            ORDER BY r.created_at ASC`
+        )) || [];
+      res.json(rows.map((r) => ({ ...r, id: Number(r.id), user_id: Number(r.user_id), has_current: !!Number(r.has_current) })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get("/api/profile/photo-requests/:id/image", authenticateToken, superOnly, async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT photo_mimetype, photo_data FROM profile_photo_requests WHERE id = ?", [Number(req.params.id)]);
+      const row = rows[0];
+      if (!row || !row.photo_data) return res.status(404).json({ error: "Photo not found." });
+      res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/profile/photo-requests/:id/:decision", authenticateToken, superOnly, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const decision = String(req.params.decision);
+      if (decision !== "approve" && decision !== "reject") return res.status(404).json({ error: "Not found." });
+      const rows: any[] = await queryDB("SELECT * FROM profile_photo_requests WHERE id = ?", [id]);
+      const r = rows[0];
+      if (!r) return res.status(404).json({ error: "Request not found." });
+      if (r.status !== "pending") return res.status(409).json({ error: "This photo was already decided or replaced." });
+      const reason = String(req.body?.reason || "").trim().slice(0, 255);
+      if (decision === "reject" && reason.length < 3) return res.status(400).json({ error: "Write why the photo is rejected." });
+      // Decided once: a second click at the same moment stops here.
+      const got: any = await queryDB(
+        `UPDATE profile_photo_requests SET status = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP, reject_reason = ? WHERE id = ? AND status = 'pending'`,
+        [decision === "approve" ? "approved" : "rejected", req.user.id, decision === "reject" ? reason : null, id]
+      );
+      if (got && got.affectedRows === 0) return res.status(409).json({ error: "This photo was already decided or replaced." });
+      if (decision === "approve") {
+        const buffer: Buffer = Buffer.isBuffer(r.photo_data) ? r.photo_data : Buffer.from(r.photo_data || "");
+        await savePhoto(Number(r.user_id), r.photo_mimetype || "image/jpeg", buffer);
+      }
+      // The live photo has it now (or it was refused): the copy isn't kept.
+      await queryDB("UPDATE profile_photo_requests SET photo_data = NULL WHERE id = ?", [id]);
+      await createAlert(queryDB, {
+        userId: Number(r.user_id),
+        type: "profile_photo",
+        title: decision === "approve" ? "Profile Photo Approved" : "Profile Photo Not Approved",
+        message: decision === "approve" ? "Your new profile photo was approved and is now shown." : `Your new profile photo was not approved: ${reason}. Your previous photo stays.`,
+        relatedType: "profile_photo_decision",
+        relatedId: id
+      }).catch(() => {});
+      res.json({ success: true, status: decision === "approve" ? "approved" : "rejected" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -187,10 +354,15 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       // No photo is the normal case for most people, not an error: 204, so the
       // browser console doesn't fill with a red 404 per colleague. Callers
       // treat 204 as "show the initials".
-      if (!row || !row.photo_data) return res.status(204).end();
+      if (!row || !row.photo_data) return res.status(204).setHeader("Cache-Control", "no-store").end();
       const buffer: Buffer = Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data);
       res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
-      res.setHeader("Cache-Control", "private, max-age=300");
+      // "/api/profile/photo" (own photo) is one URL for every account, so it is
+      // never cached — on a phone shared by two people the browser handed the
+      // previous account's photo back after a switch. A colleague's photo by id
+      // may be kept a few minutes.
+      res.setHeader("Cache-Control", req.params.userId ? "private, max-age=300" : "no-store");
+      res.setHeader("Vary", "Authorization");
       res.send(buffer);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

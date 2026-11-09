@@ -55,7 +55,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
@@ -407,7 +407,7 @@ function exportExcel(title: string, r: ReportResult) {
       'Summary'
     );
   }
-  XLSX.writeFile(wb, `${title.replace(/[^\w]+/g, '_')}.xlsx`);
+  void saveWorkbookCrossPlatform(wb, `${title.replace(/[^\w]+/g, '_')}.xlsx`);
 }
 
 async function exportPdf(title: string, r: ReportResult, filtersText: string, mode: 'save' | 'email' = 'save') {

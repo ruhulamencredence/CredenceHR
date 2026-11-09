@@ -1,4 +1,22 @@
 erDiagram
+  candidate_emails {
+    int id PK
+    int candidate_id FK
+    int interview_id
+    varchar kind
+    varchar to_email
+    varchar subject
+    text body
+  }
+  candidate_interview_events {
+    int id PK
+    int interview_id FK
+    int candidate_id FK
+    int done_by FK
+    varchar action
+    datetime old_scheduled_at
+    datetime new_scheduled_at
+  }
   candidate_interviews {
     int id PK
     int candidate_id FK
@@ -184,6 +202,10 @@ erDiagram
   users {
     int id PK
   }
+  job_candidates ||--o{ candidate_emails : "candidate_id"
+  users ||--o{ candidate_interview_events : "done_by"
+  candidate_interviews ||--o{ candidate_interview_events : "interview_id"
+  job_candidates ||..o{ candidate_interview_events : "candidate_id"
   job_candidates ||--o{ candidate_interviews : "candidate_id"
   users ||--o{ candidate_interviews : "interviewer_id"
   users ||..o{ employee_requisitions : "user_id"

@@ -19,10 +19,11 @@
 // PayrollModule.tsx.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2 } from 'lucide-react';
+import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2, Search, Paperclip } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { LoadingBlock } from './LoadingBlock';
+import { SearchSelect } from './Combobox';
 
 interface RunPayrollWizardProps {
   token: string;
@@ -209,6 +210,73 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
 
   const includedRows = rows.filter((r) => r.included);
 
+  // Steps 2–4: find people by name / Employee ID / designation / department
+  // and narrow to one Department. Only what is shown changes — every included
+  // employee is still calculated and submitted.
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const departments = useMemo(() => [...new Set(rows.map((r) => r.department || '').filter(Boolean))].sort((a, b) => a.localeCompare(b)), [rows]);
+  const filtering = !!search.trim() || !!deptFilter;
+  const matchesFilter = (r: WizardRow) => {
+    if (deptFilter && (r.department || '') !== deptFilter) return false;
+    const q = search.trim().toLowerCase();
+    return !q || [r.employee_name, r.employee_code, r.designation, r.department].some((t) => (t || '').toLowerCase().includes(q));
+  };
+  const shownRows = rows.filter(matchesFilter);
+  const shownIncluded = includedRows.filter(matchesFilter);
+  const selectable = (r: WizardRow) => r.has_salary_structure && !r.already_generated;
+  const shownSelectable = shownRows.filter(selectable);
+  const shownSelected = shownSelectable.filter((r) => r.included).length;
+  const setIncludedFor = (list: WizardRow[], on: boolean) => {
+    const ids = new Set(list.filter(selectable).map((r) => r.employee_id));
+    setRows((prev) => prev.map((r) => (ids.has(r.employee_id) ? { ...r, included: on } : r)));
+  };
+
+  const filterBar = (shown: number, total: number, extra?: React.ReactNode) => (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+      <div className="relative flex-1 min-w-0">
+        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search name, Employee ID, designation, department…"
+          aria-label="Search employees"
+          className="w-full pl-8 pr-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
+      <SearchSelect
+        value={deptFilter}
+        onChange={(e) => setDeptFilter(e.target.value)}
+        aria-label="Filter by department"
+        className="w-full sm:w-56 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+      >
+        <option value="">All departments</option>
+        {departments.map((d) => (
+          <option key={d} value={d}>
+            {d}
+          </option>
+        ))}
+      </SearchSelect>
+      {extra}
+      <span className="text-[11px] text-slate-500 whitespace-nowrap">
+        {filtering ? `Showing ${shown} of ${total}` : `${total} employee${total === 1 ? '' : 's'}`}
+        {filtering && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setDeptFilter('');
+            }}
+            className="ml-2 font-semibold text-blue-600 hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </span>
+    </div>
+  );
+
   const runPreview = async () => {
     setCalculating(true);
     setPreviewError('');
@@ -336,8 +404,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-2 sm:p-3">
+      {/* Nearly the whole screen, so every column of the step tables fits without scrolling sideways. */}
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[1680px] max-h-[94vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
           <h2 className="text-sm font-semibold text-slate-800">Run Payroll — {monthLabel(monthYear)}</h2>
@@ -415,6 +484,36 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   <RefreshCw className="w-3.5 h-3.5" /> Re-sync
                 </button>
               </div>
+              {!loadingSummary &&
+                !summaryError &&
+                filterBar(
+                  shownRows.length,
+                  rows.length,
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIncludedFor(shownRows, true)}
+                      disabled={shownSelectable.length === 0 || shownSelected === shownSelectable.length}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-40"
+                    >
+                      {filtering ? `Select shown (${shownSelectable.length})` : 'Select all'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIncludedFor(shownRows, false)}
+                      disabled={shownSelected === 0}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      {filtering ? 'Unselect shown' : 'Unselect all'}
+                    </button>
+                  </span>
+                )}
+              {!loadingSummary && !summaryError && (
+                <p className="text-[11px] text-slate-500 -mt-1 mb-2">
+                  <span className="font-semibold text-slate-700">{includedRows.length}</span> of {rows.filter(selectable).length} employees included in this run
+                  {filtering ? ` · ${shownSelected} of the ${shownSelectable.length} shown` : ''}
+                </p>
+              )}
               {loadingSummary ? (
                 <LoadingBlock />
               ) : summaryError ? (
@@ -424,7 +523,21 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
                       <tr>
-                        <th className="px-3 py-2 text-left">Include</th>
+                        <th className="px-3 py-2 text-left">
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              aria-label={filtering ? 'Include every employee shown' : 'Include every employee'}
+                              checked={shownSelectable.length > 0 && shownSelected === shownSelectable.length}
+                              ref={(el) => {
+                                if (el) el.indeterminate = shownSelected > 0 && shownSelected < shownSelectable.length;
+                              }}
+                              disabled={shownSelectable.length === 0}
+                              onChange={(e) => setIncludedFor(shownRows, e.target.checked)}
+                            />
+                            Include
+                          </label>
+                        </th>
                         <th className="px-3 py-2 text-left">Employee</th>
                         <th className="px-3 py-2 text-right">Working Days</th>
                         <th className="px-3 py-2 text-right">Present</th>
@@ -436,7 +549,14 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs">
-                      {rows.map((r) => (
+                      {shownRows.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-8 text-center text-slate-400">
+                            No employee matches the search.
+                          </td>
+                        </tr>
+                      )}
+                      {shownRows.map((r) => (
                         <tr key={r.employee_id} className={!r.included ? 'bg-slate-50/60' : ''}>
                           <td className="px-3 py-2">
                             <input
@@ -448,7 +568,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <p className="font-medium text-slate-800">{r.employee_name}</p>
-                            <p className="text-[10px] text-slate-400">{r.employee_code || '—'} · {r.department || '—'}</p>
+                            <p className="text-[10px] text-slate-400">{[r.employee_code || '—', r.designation, r.department || '—'].filter(Boolean).join(' · ')}</p>
                           </td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'total_working_days')}</td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'present_days')}</td>
@@ -510,6 +630,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 Add any manual Bonus/Incentive, Overtime, or Fine for this run — only for the {includedRows.length} employee
                 {includedRows.length === 1 ? '' : 's'} included from Step 2.
               </p>
+              {filterBar(shownIncluded.length, includedRows.length)}
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
@@ -524,9 +645,12 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {includedRows.map((r) => (
+                    {shownIncluded.map((r) => (
                       <tr key={r.employee_id}>
-                        <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <p className="font-medium text-slate-800">{r.employee_name}</p>
+                          <p className="text-[10px] text-slate-400">{[r.employee_code || '—', r.department || '—'].join(' · ')}</p>
+                        </td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_hours')}</td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_rate', 'w-20')}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-slate-800" title={`${r.overtime_hours || 0} h × ${r.overtime_rate || 0}`}>
@@ -550,12 +674,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                         </td>
                       </tr>
                     ))}
-                    {includedRows.length === 0 && (
+                    {includedRows.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
                           No employees included — go back to Step 2.
                         </td>
                       </tr>
+                    ) : (
+                      shownIncluded.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
+                            No employee matches the search.
+                          </td>
+                        </tr>
+                      )
                     )}
                   </tbody>
                 </table>
@@ -580,6 +712,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 <p className="text-xs text-rose-600 text-center py-16">{previewError}</p>
               ) : (
                 <>
+                  {filterBar(shownIncluded.length, includedRows.length)}
                   <div className="overflow-x-auto border border-slate-200 rounded-xl">
                     <table className="min-w-full divide-y divide-slate-200">
                       <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
@@ -592,12 +725,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-xs">
-                        {includedRows.map((r) => {
+                        {shownIncluded.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-8 text-center text-slate-400">
+                              No employee matches the search.
+                            </td>
+                          </tr>
+                        )}
+                        {shownIncluded.map((r) => {
                           const p = previewResults.get(r.employee_id);
                           return (
                             <tr key={r.employee_id}>
                               <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">
                                 {r.employee_name}
+                                <p className="text-[10px] font-normal text-slate-400">{[r.employee_code || '—', r.department || '—'].join(' · ')}</p>
                                 {p && !p.error && p.payment_split && p.payment_split.length > 0 && (
                                   <div className="mt-0.5 flex flex-wrap gap-1">
                                     {p.payment_split.map((s, i) => (
@@ -645,7 +786,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-50 font-semibold text-slate-700">
-                          <td className="px-3 py-2">Total ({previewTotals.count} employee{previewTotals.count === 1 ? '' : 's'})</td>
+                          <td className="px-3 py-2">
+                            Total ({previewTotals.count} employee{previewTotals.count === 1 ? '' : 's'})
+                            {filtering && <span className="block text-[10px] font-normal text-slate-400">whole run, not only those shown</span>}
+                          </td>
                           <td className="px-3 py-2 text-right">{money(previewTotals.gross)}</td>
                           <td className="px-3 py-2 text-right text-rose-600">{money(previewTotals.deductions)}</td>
                           <td className="px-3 py-2 text-right">{money(previewTotals.net)}</td>
@@ -790,6 +934,7 @@ interface LateDay {
   waived: boolean;
   waiver_id: number | null;
   reason: string | null;
+  attachment_name?: string | null;
 }
 
 const LateDaysModal: React.FC<{
@@ -811,6 +956,9 @@ const LateDaysModal: React.FC<{
   const [error, setError] = useState('');
   const [busyDate, setBusyDate] = useState<string | null>(null);
   const [reasonDraft, setReasonDraft] = useState<Record<string, string>>({});
+  // Optional supporting file per day (approval mail, doctor's note…).
+  const [fileDraft, setFileDraft] = useState<Record<string, File | null>>({});
+  const [rowError, setRowError] = useState<Record<string, string>>({});
 
   const load = async () => {
     setLoading(true);
@@ -837,16 +985,59 @@ const LateDaysModal: React.FC<{
   }, [employeeId, monthYear]);
 
   const waive = async (date: string) => {
+    const reason = (reasonDraft[date] || '').trim();
+    if (reason.length < 3) {
+      setRowError((p) => ({ ...p, [date]: 'Write why this day is waived.' }));
+      return;
+    }
+    const file = fileDraft[date] || null;
+    if (file && file.size > 5 * 1024 * 1024) {
+      setRowError((p) => ({ ...p, [date]: 'Attachment must be 5MB or smaller.' }));
+      return;
+    }
+    setRowError((p) => ({ ...p, [date]: '' }));
     setBusyDate(date);
     try {
+      const file_base64 = file
+        ? await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result).split(',')[1] || '');
+            r.onerror = () => reject(new Error('Could not read the file.'));
+            r.readAsDataURL(file);
+          })
+        : undefined;
       const res = await fetch(apiUrl('/api/payroll/late-waivers'), {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id: employeeId, waiver_date: date, reason: reasonDraft[date] || null })
+        body: JSON.stringify({ employee_id: employeeId, waiver_date: date, reason, file_base64, file_name: file?.name, file_mimetype: file?.type })
       });
-      if (res.ok) await load();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRowError((p) => ({ ...p, [date]: data.error || 'Could not waive this day.' }));
+        return;
+      }
+      setFileDraft((p) => ({ ...p, [date]: null }));
+      await load();
+    } catch (e: any) {
+      setRowError((p) => ({ ...p, [date]: e.message || 'Could not waive this day.' }));
     } finally {
       setBusyDate(null);
+    }
+  };
+
+  const openAttachment = async (day: LateDay) => {
+    if (!day.waiver_id) return;
+    const win = window.open('', '_blank');
+    try {
+      const res = await fetch(apiUrl(`/api/payroll/late-waivers/${day.waiver_id}/attachment`), { headers: authHeaders });
+      if (!res.ok) throw new Error();
+      const url = URL.createObjectURL(await res.blob());
+      if (win) win.location.href = url;
+      else window.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      win?.close();
+      setError('Could not open the attachment.');
     }
   };
 
@@ -867,14 +1058,15 @@ const LateDaysModal: React.FC<{
   const extremeDeductionDays = policy ? Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1)) : 0;
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+    <div className="liquid-glass-backdrop fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/50">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Late Days — {employeeName}</h2>
-            <p className="text-[11px] text-slate-400">{monthLabel(monthYear)}</p>
+            <p className="text-[11px] text-slate-500">{monthLabel(monthYear)}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -916,7 +1108,12 @@ const LateDaysModal: React.FC<{
                             </span>
                           )}
                         </p>
-                        {d.waived && d.reason && <p className="text-[10px] text-slate-400 mt-0.5">Waived: {d.reason}</p>}
+                        {d.waived && d.reason && <p className="text-[10px] text-slate-500 mt-0.5">Waived: {d.reason}</p>}
+                        {d.waived && d.attachment_name && (
+                          <button type="button" onClick={() => openAttachment(d)} className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 hover:underline">
+                            <Paperclip className="w-3 h-3" /> {d.attachment_name}
+                          </button>
+                        )}
                       </div>
                       {d.waived ? (
                         <button
@@ -929,7 +1126,8 @@ const LateDaysModal: React.FC<{
                       ) : (
                         <button
                           onClick={() => waive(d.date)}
-                          disabled={busyDate === d.date}
+                          disabled={busyDate === d.date || (reasonDraft[d.date] || '').trim().length < 3}
+                          title={(reasonDraft[d.date] || '').trim().length < 3 ? 'Write the reason first' : undefined}
                           className="px-2 py-1 text-[11px] font-semibold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md disabled:opacity-50"
                         >
                           {busyDate === d.date ? <Spinner size={12} /> : 'Waive'}
@@ -937,13 +1135,43 @@ const LateDaysModal: React.FC<{
                       )}
                     </div>
                     {!d.waived && (
-                      <input
-                        type="text"
-                        value={reasonDraft[d.date] || ''}
-                        onChange={(e) => setReasonDraft((prev) => ({ ...prev, [d.date]: e.target.value }))}
-                        placeholder="Reason (optional) — e.g. approved late start"
-                        className="w-full mt-2 px-2 py-1 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      />
+                      <div className="mt-2 space-y-1.5">
+                        <label className="block">
+                          <span className="sr-only">Reason</span>
+                          <input
+                            type="text"
+                            required
+                            value={reasonDraft[d.date] || ''}
+                            onChange={(e) => setReasonDraft((prev) => ({ ...prev, [d.date]: e.target.value }))}
+                            placeholder="Reason * — e.g. approved late start, client meeting"
+                            className="w-full px-2 py-1.5 text-[11px] bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                          />
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <label className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-md cursor-pointer hover:bg-slate-50">
+                            <Paperclip className="w-3 h-3" /> {fileDraft[d.date] ? 'Change file' : 'Attach file (optional)'}
+                            <input
+                              type="file"
+                              accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                              className="sr-only"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] || null;
+                                setFileDraft((prev) => ({ ...prev, [d.date]: f }));
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                          {fileDraft[d.date] && (
+                            <span className="flex items-center gap-1 min-w-0 text-[10px] text-slate-600">
+                              <span className="truncate max-w-[180px]">{fileDraft[d.date]!.name}</span>
+                              <button type="button" aria-label="Remove file" onClick={() => setFileDraft((prev) => ({ ...prev, [d.date]: null }))} className="text-slate-400 hover:text-rose-600">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          )}
+                        </div>
+                        {rowError[d.date] && <p className="text-[10px] text-rose-600">{rowError[d.date]}</p>}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -952,11 +1180,12 @@ const LateDaysModal: React.FC<{
           )}
         </div>
 
-        <div className="px-5 py-4 border-t border-slate-200">
-          <button onClick={onClose} className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">
+        <div className="px-5 py-4 border-t border-white/50">
+          <button type="button" onClick={onClose} className="liquid-glass-button rounded-full w-full px-4 py-2 text-xs font-semibold">
             Done
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -6,15 +6,29 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, ChevronLeft, Trash2 } from 'lucide-react';
-import { confirmDialog } from '../lib/confirmDialog';
+import { BellRing, Check, ChevronLeft, Mail, MailOpen } from 'lucide-react';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
 import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
+import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
+import { useIsPhone } from '../lib/useScrolling';
+import { CardButton, SelfCard, type CardTone } from './SelfCard';
+
+// Phone card tint from what the alert says: turned down / missed -> rose,
+// done -> green, waiting on someone -> amber, anything else violet.
+const alertTone = (title: string): CardTone =>
+  /reject|declin|cancel|stuck|never started|overdue|absent|expired|failed|block/i.test(title)
+    ? 'rose'
+    : /approved|complete|received|issued|signed|paid|settled|accepted|done|ready|assigned/i.test(title)
+    ? 'green'
+    : /waiting|request|pending|press start|due|reminder|return|no approver/i.test(title)
+    ? 'amber'
+    : 'violet';
 import { LoadingBlock } from './LoadingBlock';
+import { PagerBar } from './PagerBar';
 
 interface AlertsPageProps {
   token: string;
@@ -29,8 +43,8 @@ interface AlertsPageProps {
   // 'assign' — a ride already approved that still needs a vehicle (or one
   // that expired): open where vehicles are assigned instead of Approvals.
   onOpenVehicleManagement?: (target?: 'status' | 'assign' | 'trips') => void;
-  // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
-  onOpenConveyanceClaim?: () => void;
+  // The claimant's own Bill Claim updates -> Bill Claim.
+  onOpenBillClaim?: () => void;
   // The requester's own Asset Requisition updates -> My Asset (Status for
   // the requisition's approval updates, My Assets for handed-over items).
   onOpenMyAsset?: (target: MyAssetTarget) => void;
@@ -54,22 +68,36 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenBillClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
+  usePhoneHeaderTitle('Alerts');
+  const isPhone = useIsPhone();
+  // Every alert this account ever got, 50 (or the chosen size) per page;
+  // nothing is ever removed from here.
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
+  const [show, setShow] = useState<'all' | 'unread' | 'read'>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [counts, setCounts] = useState({ total: 0, unread: 0, read: 0, shown: 0 });
 
   const fetchAlerts = useCallback(async () => {
-    setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/alerts'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setAlerts(await res.json());
+      const res = await fetch(apiUrl(`/api/alerts?page=${page}&page_size=${pageSize}&show=${show}`), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+        setCounts({ total: Number(data.total) || 0, unread: Number(data.unread) || 0, read: Number(data.read) || 0, shown: Number(data.shown_total) || 0 });
+        // A page past the end (e.g. after marking the last unread one read) -> last page.
+        const last = Math.max(1, Math.ceil((Number(data.shown_total) || 0) / pageSize));
+        if (page > last) setPage(last);
+      }
     } catch {
       // Offline or server unreachable — page just stays empty/stale.
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, page, pageSize, show]);
   // New alerts appear without a page reload.
   useLiveRefresh(() => fetchAlerts());
 
@@ -77,15 +105,23 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     fetchAlerts();
   }, [fetchAlerts]);
 
-  const unreadCount = alerts.filter((a) => !a.is_read).length;
+  const unreadCount = counts.unread;
 
-  const markRead = async (id: number) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, is_read: true } : a)));
+  const setRead = async (id: number, read: boolean) => {
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, is_read: read } : a)));
     try {
-      await fetch(apiUrl(`/api/alerts/${id}/read`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      await fetch(apiUrl(`/api/alerts/${id}/${read ? 'read' : 'unread'}`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {
-      // Best-effort — a failed mark-read just means it may show unread again next refresh.
+      // Best-effort — the next refresh shows the real state.
     }
+    fetchAlerts();
+  };
+  const markRead = (id: number) => setRead(id, true);
+
+  // Read <-> Unread on one alert (the row's envelope button).
+  const toggleRead = (alert: Alert, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRead(alert.id, !alert.is_read);
   };
 
   const markAllRead = async () => {
@@ -93,28 +129,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     try {
       await fetch(apiUrl('/api/alerts/read-all'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {
-      // Best-effort, same as markRead above.
+      // Best-effort, same as setRead above.
     }
-  };
-
-  const clearAll = async () => {
-    if (!(await confirmDialog('Clear all alerts? They will be removed from your list.', { tone: 'danger' }))) return;
-    setAlerts([]);
-    try {
-      await fetch(apiUrl('/api/alerts'), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort, same as markRead above.
-    }
-  };
-
-  const removeAlert = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-    try {
-      await fetch(apiUrl(`/api/alerts/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    } catch {
-      // Best-effort, same as markRead above.
-    }
+    fetchAlerts();
   };
 
   const handleAlertClick = (alert: Alert) => {
@@ -130,14 +147,14 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         ? () => onOpenVehicleManagement('assign')
         : rideForDriver && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('trips')
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'bill_claim_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
-        : alert.type === 'vehicle_requisition' && onOpenVehicleManagement
+        : alert.type === 'vehicle_requisition' && alert.related_type !== 'vehicle_driver' && onOpenVehicleManagement
         ? () => onOpenVehicleManagement('status')
-        : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
-        ? onOpenConveyanceClaim
-        : alert.type === 'asset_requisition' && onOpenMyAsset
-        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
+        : alert.type === 'bill_claim' || alert.type === 'conveyance_disbursed'
+        ? onOpenBillClaim
+        : alert.type === 'asset_requisition' && alert.related_type !== 'asset_return' && onOpenMyAsset
+        ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : alert.related_type === 'asset_return_incoming' ? 'returns' : 'my-assets')
         : alert.type === 'resignation'
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
@@ -182,6 +199,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'onboarding' })), 0);
           }
+        : alert.type === 'hr_action' && alert.related_type === 'attendance_correction' && !/Awaiting Your Approval/.test(alert.title)
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'timesheet' }))
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
@@ -261,6 +280,12 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'mobile_bill'
         ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
+        : alert.type === 'device_request' && alert.related_type === 'user_device_decision'
+        ? undefined
+        : alert.type === 'vehicle_requisition' && alert.related_type === 'vehicle_driver'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'vehicle_management' }))
+        : alert.type === 'asset_requisition' && alert.related_type === 'asset_return'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'asset_management' }))
         : alert.type === 'device_request'
         ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))
@@ -274,6 +299,17 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             }
             window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
           }
+        : alert.type === 'zk_machine' || (alert.type === 'site_attendance' && alert.title === 'Attendance machine offline')
+        ? // Admin Panel -> Office Attendance, with the Machines popup open.
+          () => {
+            try {
+              sessionStorage.setItem('open_zk_machines', '1');
+            } catch {
+              // storage unavailable — Office Attendance opens without the popup
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'office_attendance' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:open-zk-machines')), 400);
+          }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'document_sign'
@@ -282,6 +318,15 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'notice_draft'
         ? // Admin Panel -> Notices, where the draft waits to be published.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }))
+        : alert.type === 'interview'
+        ? // Admin Panel -> Recruitment (ATS); opens only for an account with that module.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'recruitment' }))
+        : alert.type === 'profile_photo' && alert.related_type === 'profile_photo_request'
+        ? // Admin Panel -> Users -> Photo approvals (Superadmin; AdminPanel.tsx listens).
+          () => {
+            window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'users' }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:photo-requests')), 300);
+          }
         : alert.type === 'password_request'
         ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
           () => {
@@ -309,48 +354,32 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Phone: the title and Back are in the header (usePhoneHeaderTitle). */}
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'Alerts']} />
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" /> Back
-            </button>
-          </>
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'Alerts']} onBack={onBack} />
+          </div>
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
           <div className="p-5 sm:p-6 max-sm:px-3 max-sm:pt-2 max-sm:pb-3 sm:border-b border-slate-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               {isNativeApp && (
-                <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
+                <button type="button" onClick={onBack} className="hidden md:block p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
                   <ChevronLeft className="w-5 h-5" />
                 </button>
               )}
-              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
+              <div className="hidden md:flex w-10 h-10 rounded-full bg-rose-50 items-center justify-center shrink-0">
                 <BellRing className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-slate-800">Alerts</h1>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <h1 className="hidden md:block text-lg font-semibold text-slate-800">Alerts</h1>
+                <p className="text-xs text-slate-500 md:mt-0.5">
                   {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-            {alerts.length > 0 && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors shrink-0 max-sm:rounded-full max-sm:font-semibold max-sm:bg-white/60 max-sm:border max-sm:border-white/80"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Clear all
-              </button>
-            )}
             {unreadCount > 0 && (
               <button
                 type="button"
@@ -369,13 +398,56 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               liquid-glass Alerts sheet in AlertsBell.tsx) with a dot while
               unread; no backdrop blur per card, so long lists still scroll
               smoothly. */}
+          {counts.total > 0 && (
+            <div className="px-4 sm:px-6 py-3 max-sm:px-3 sm:border-b border-slate-100 flex items-center gap-1.5">
+              {(
+                [
+                  ['all', `All (${counts.total})`],
+                  ['unread', `Unread (${counts.unread})`],
+                  ['read', `Read (${counts.read})`]
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => { setShow(k); setPage(1); }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${show === k ? 'text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}
+                  style={show === k ? { background: 'var(--g-accent)' } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="max-sm:px-2 max-sm:space-y-2">
             {loading ? (
               <LoadingBlock />
-            ) : alerts.length === 0 ? (
+            ) : counts.total === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">No alerts yet.</div>
+            ) : alerts.length === 0 ? (
+              <div className="px-4 py-16 text-center text-sm text-slate-400">{show === 'unread' ? 'No unread alerts.' : 'No read alerts.'}</div>
             ) : (
-              alerts.map((alert) => (
+              alerts.map((alert) =>
+                isPhone ? (
+                  // Phone: the shared Directory-style card; a dot while unread.
+                  <SelfCard
+                    key={alert.id}
+                    tone={alertTone(alert.title)}
+                    lead={<BellRing className="w-[18px] h-[18px]" />}
+                    dot={alert.is_read ? undefined : 'violet'}
+                    title={<span className={alert.is_read ? 'font-medium' : 'font-bold'}>{alert.title}</span>}
+                    sub={formatDate(alert.created_at)}
+                    actions={
+                      <CardButton label={alert.is_read ? 'Mark as unread' : 'Mark as read'} onClick={(e) => toggleRead(alert, e)}>
+                        {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
+                      </CardButton>
+                    }
+                    chips={[{ label: alert.is_read ? 'Read' : 'New', tone: alert.is_read ? undefined : 'violet' }]}
+                    onClick={() => handleAlertClick(alert)}
+                  >
+                    <p className="text-xs text-slate-700">{alert.message}</p>
+                  </SelfCard>
+                ) : (
                 <div
                   key={alert.id}
                   onClick={() => handleAlertClick(alert)}
@@ -385,23 +457,25 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                 >
                   <span className={`sm:hidden mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
                   <div className="flex-1 min-w-0">
-                    <div className={`text-sm text-slate-900 ${alert.is_read ? 'font-medium' : 'font-medium max-sm:font-semibold'}`}>{alert.title}</div>
+                    <div className={`text-sm text-slate-900 ${alert.is_read ? 'font-medium' : 'font-bold'}`}>{alert.title}</div>
                     <div className="text-xs mt-1 text-slate-600">{alert.message}</div>
                     <div className="text-[11px] mt-1.5 text-slate-400">{formatDate(alert.created_at)}</div>
                   </div>
                   <button
                     type="button"
-                    onClick={(e) => removeAlert(alert.id, e)}
+                    onClick={(e) => toggleRead(alert, e)}
                     className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    title="Remove"
-                    aria-label="Remove alert"
+                    title={alert.is_read ? 'Mark as unread' : 'Mark as read'}
+                    aria-label={alert.is_read ? 'Mark as unread' : 'Mark as read'}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    {alert.is_read ? <Mail className="w-3.5 h-3.5" /> : <MailOpen className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-              ))
+                )
+              )
             )}
           </div>
+          <PagerBar page={page} pageSize={pageSize} total={counts.shown} onPage={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
         </div>
       </div>
     </div>

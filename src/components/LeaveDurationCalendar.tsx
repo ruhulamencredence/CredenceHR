@@ -74,7 +74,7 @@ function buildGrid(year: number, month: number): Cell[] {
 //
 // The popup itself is portaled straight onto document.body and positioned
 // with `fixed` coordinates measured off the trigger button — same reasoning
-// as NewConveyanceClaimModal/NewLeaveApplicationModal's own portal: this
+// as NewBillClaimModal/NewLeaveApplicationModal's own portal: this
 // field sits inside the modal's scrolling body, and a plain absolutely-
 // positioned dropdown (like the Approver picker's) would get clipped by that
 // scroll container the moment the calendar is taller than the remaining

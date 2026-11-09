@@ -3,12 +3,13 @@ import React, { useEffect, useState } from 'react';
 import {
   LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
 } from 'lucide-react';
-import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
+import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { MultiSelectFilter } from './MultiSelectFilter';
 interface ApprovalTemplateManagerProps {
   token: string;
   user: User;
@@ -16,7 +17,7 @@ interface ApprovalTemplateManagerProps {
 }
 
 const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
-  { key: 'conveyance', label: 'Conveyance Bill Claim' },
+  { key: 'bill_claim', label: 'Bill Claim' },
   { key: 'leave', label: 'Leave Application' },
   { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
   { key: 'asset', label: 'Asset Requisition' },
@@ -97,7 +98,7 @@ const isAdminRole = (role: string) => role === 'admin' || role === 'superadmin';
 export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = ({ token, user, users }) => {
   const isSuperAdmin = user.role === 'superadmin';
   const [subView, setSubView] = useState<'templates' | 'assign'>('templates');
-  const [requestType, setRequestType] = useState<ApprovalRequestType>('conveyance');
+  const [requestType, setRequestType] = useState<ApprovalRequestType>('bill_claim');
 
   const [templates, setTemplates] = useState<ApprovalTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -107,7 +108,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [showEditor, setShowEditor] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameDraft, setNameDraft] = useState('');
-  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('conveyance');
+  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('bill_claim');
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [isActiveDraft, setIsActiveDraft] = useState(true);
   const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
@@ -122,6 +123,18 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [defaultTemplate, setDefaultTemplate] = useState<{ id: number; name: string } | null>(null);
   const [assignLoading, setAssignLoading] = useState(false);
   const [savingAssignFor, setSavingAssignFor] = useState<number | null>(null);
+  // Assign screen filters (empty = no filter) + the template to give everyone shown
+  const [fDept, setFDept] = useState<string[]>([]);
+  const [fDesig, setFDesig] = useState<string[]>([]);
+  const [fUser, setFUser] = useState<string[]>([]);
+  const [fTemplate, setFTemplate] = useState<string[]>([]);
+  const [bulkTemplate, setBulkTemplate] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Edit/Add layer of Module Access -> Approvals (the server enforces it too)
+  const canAssign = isSuperAdmin || (() => {
+    const saved = user.module_permission_layers?.approvals;
+    return saved && saved.length > 0 ? saved.includes('edit_add') : !EXPLICIT_ONLY_LAYERS.includes('edit_add');
+  })();
 
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
 
@@ -369,6 +382,88 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     }
   };
 
+  const DEFAULT_KEY = '__default';
+  // Each filter only offers what the OTHER filters still leave on screen
+  // (with how many), so a combination can't end in an empty list by accident;
+  // anything already ticked stays in its list so it can be unticked.
+  type FKey = 'dept' | 'desig' | 'user' | 'tpl';
+  const tplKey = (r: any) => (r.assigned_template_id ? String(r.assigned_template_id) : DEFAULT_KEY);
+  const passes = (r: any, skip?: FKey) =>
+    (skip === 'dept' || !fDept.length || fDept.includes((r.department || '').trim())) &&
+    (skip === 'desig' || !fDesig.length || fDesig.includes((r.designation || '').trim())) &&
+    (skip === 'user' || !fUser.length || fUser.includes(String(r.employee_user_id))) &&
+    (skip === 'tpl' || !fTemplate.length || fTemplate.includes(tplKey(r)));
+  const facet = (skip: FKey, keyOf: (r: any) => string, labelOf: (k: string, r: any) => string, keep: string[]) => {
+    const seen = new Map<string, { label: string; count: number }>();
+    for (const r of assignRows) {
+      if (!passes(r, skip)) continue;
+      const k = keyOf(r);
+      if (!k) continue;
+      const cur = seen.get(k);
+      if (cur) cur.count++;
+      else seen.set(k, { label: labelOf(k, r), count: 1 });
+    }
+    for (const k of keep) if (!seen.has(k)) {
+      const r = assignRows.find((x) => keyOf(x) === k);
+      seen.set(k, { label: r ? labelOf(k, r) : k, count: 0 });
+    }
+    return [...seen.entries()].map(([value, v]) => ({ value, label: v.label, count: v.count })).sort((x, y) => x.label.localeCompare(y.label));
+  };
+  const deptOptions = facet('dept', (r) => (r.department || '').trim(), (k) => k, fDept);
+  const desigOptions = facet('desig', (r) => (r.designation || '').trim(), (k) => k, []);
+  const userOptions = facet('user', (r) => String(r.employee_user_id), (_k, r) => [r.employee_name, r.employee_code, r.designation, r.department].filter(Boolean).join(' · '), []);
+  const templateFilterOptions = facet(
+    'tpl',
+    tplKey,
+    (k) => (k === DEFAULT_KEY ? 'Using the default' : templates.find((t) => String(t.id) === k)?.name || `Template #${k}`),
+    fTemplate
+  );
+  const shownRows = assignRows.filter((r) => passes(r));
+  // Department -> Designation -> User narrow each other: picking a Department
+  // drops ticked Designations / Users outside it, so the User list (and the
+  // table) only ever holds people of the chosen Departments.
+  const inDept = (r: any) => !fDept.length || fDept.includes((r.department || '').trim());
+  const inDesig = (r: any) => !fDesig.length || fDesig.includes((r.designation || '').trim());
+  useEffect(() => {
+    setFDesig((cur) => {
+      const next = cur.filter((v) => assignRows.some((r) => inDept(r) && (r.designation || '').trim() === v));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, assignRows]);
+  useEffect(() => {
+    setFUser((cur) => {
+      const next = cur.filter((id) => assignRows.some((r) => String(r.employee_user_id) === id && inDept(r) && inDesig(r)));
+      return next.length === cur.length ? cur : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDept, fDesig, assignRows]);
+  const anyFilter = fDept.length + fDesig.length + fUser.length + fTemplate.length > 0;
+  const clearFilters = () => { setFDept([]); setFDesig([]); setFUser([]); setFTemplate([]); };
+
+  const handleBulkAssign = async () => {
+    if (!shownRows.length) return;
+    const tpl = templates.find((t) => String(t.id) === bulkTemplate);
+    const what = tpl ? `the template “${tpl.name}”` : 'the default template';
+    if (!(await confirmDialog(`Assign ${what} to ${shownRows.length} employee${shownRows.length === 1 ? '' : 's'} for ${REQUEST_TYPES.find((r) => r.key === requestType)?.label}?`))) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch(apiUrl('/api/template-assignments/bulk'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ employee_user_ids: shownRows.map((r) => r.employee_user_id), request_type: requestType, template_id: bulkTemplate ? Number(bulkTemplate) : null })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to assign');
+      setMessage({ type: 'success', text: `${data.updated} employee${data.updated === 1 ? '' : 's'} assigned.` });
+      fetchAssignments();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to assign' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
       <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
@@ -547,6 +642,41 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               </span>
             )}
           </div>
+          {!assignLoading && (
+            <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
+              <MultiSelectFilter label="Department" options={deptOptions} selected={fDept} onChange={setFDept} />
+              <MultiSelectFilter label="Designation" options={desigOptions} selected={fDesig} onChange={setFDesig} />
+              <MultiSelectFilter label="User" options={userOptions} selected={fUser} onChange={setFUser} width={360} />
+              <MultiSelectFilter label="Template" options={templateFilterOptions} selected={fTemplate} onChange={setFTemplate} />
+              {anyFilter && (
+                <button type="button" onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:underline">Clear filters</button>
+              )}
+              <span className="text-[11px] text-slate-500 ml-auto">Showing {shownRows.length} of {assignRows.length}</span>
+            </div>
+          )}
+          {!assignLoading && canAssign && (
+            <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-600">Give everyone shown:</span>
+              <SearchSelect
+                value={bulkTemplate}
+                onChange={(e) => setBulkTemplate(e.target.value)}
+                className="w-64 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <option value="">{defaultTemplate ? `Use default (${defaultTemplate.name})` : 'Use default (none — auto-approve)'}</option>
+                {templates.filter((t) => t.is_active).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </SearchSelect>
+              <button
+                type="button"
+                onClick={handleBulkAssign}
+                disabled={bulkBusy || shownRows.length === 0}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> {bulkBusy ? 'Assigning…' : `Assign (${shownRows.length})`}
+              </button>
+            </div>
+          )}
           {assignLoading ? (
             <LoadingBlock />
           ) : (
@@ -558,11 +688,31 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {assignRows.map((row) => (
+                {shownRows.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-14 text-center">
+                      <Users2 className="w-8 h-8 mx-auto text-slate-300" />
+                      <div className="mt-2 text-sm font-semibold text-slate-700">
+                        {assignRows.length === 0 ? 'No employee accounts yet' : 'No employee matches these filters'}
+                      </div>
+                      {anyFilter && (
+                        <>
+                          <div className="mt-1 text-xs text-slate-500">Change a filter above, or show everyone again.</div>
+                          <button type="button" onClick={clearFilters} className="mt-3 px-4 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+                            Clear filters
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {shownRows.map((row) => (
                   <tr key={row.employee_user_id} className="hover:bg-slate-50/60">
                     <td className="px-4 py-3">
                       <div className="font-medium text-slate-900">{row.employee_name}</div>
-                      <div className="text-[11px] text-slate-500">{row.employee_role}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {[row.employee_role, row.employee_code, row.designation, row.department].filter(Boolean).join(' · ')}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <SearchSelect
@@ -783,7 +933,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               </span>
                             </label>
                           )}
-                          {typeDraft === 'conveyance' && isLastLayer && (
+                          {typeDraft === 'bill_claim' && isLastLayer && (
                             <label className="flex items-start gap-2 pl-7 cursor-pointer">
                               <input
                                 type="checkbox"

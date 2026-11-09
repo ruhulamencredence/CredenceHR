@@ -110,6 +110,14 @@ export async function ensurePayrollItemsSchema(dbPool: any): Promise<void> {
         INDEX idx_payroll_line_items_source (source, source_id)
       )
     `);
+    // A pay item's kind of money, where it matters on the sheet: 'fine'
+    // (Fine / Penalty column), and what an MD correction added
+    // ('late_waiver', 'fine_waiver', 'md_correction' — PayrollApprovalRoutes.ts).
+    try {
+      await dbPool.query(`ALTER TABLE employee_pay_items ADD COLUMN category VARCHAR(20) NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add employee_pay_items.category: " + err.message);
+    }
     for (const col of ["item_earnings", "item_deductions"]) {
       try {
         await dbPool.query(`ALTER TABLE payrolls ADD COLUMN ${col} DECIMAL(10, 2) NOT NULL DEFAULT 0.00`);
@@ -196,6 +204,43 @@ export async function savePayLines(queryDB: QueryDB, payrollId: number, employee
   }
 }
 
+// Works one run's Allowance & Adjustment lines out again (after a pay item
+// was added for it) and puts its totals right; the rest of the run stays.
+export async function refreshRunItems(queryDB: QueryDB, payrollId: number): Promise<{ before: number; after: number }> {
+  const run: any = ((await queryDB("SELECT * FROM payrolls WHERE id = ?", [payrollId])) || [])[0];
+  if (!run) throw new Error("Salary run not found.");
+  const pay = await computePayLines(queryDB, Number(run.employee_id), String(run.month_year), Number(run.id));
+  const gross = money(num(run.gross_earned) - num(run.item_earnings) + pay.earnings);
+  const total = money(num(run.total_deduction) - num(run.item_deductions) + pay.deductions);
+  const net = money(gross - total);
+  if (net < 0) throw new Error(`That would make the net salary negative (${net}).`);
+  await queryDB("UPDATE payrolls SET gross_earned = ?, total_deduction = ?, net_salary = ?, item_earnings = ?, item_deductions = ? WHERE id = ?", [
+    gross, total, net, pay.earnings, pay.deductions, payrollId
+  ]);
+  await savePayLines(queryDB, payrollId, Number(run.employee_id), String(run.month_year), pay.lines);
+  return { before: money(num(run.net_salary)), after: net };
+}
+
+// Fines on each run (Fine / Penalty pay items) less any MD waived — or,
+// with gross, the fines alone (the waiver is an earning line of its own, so
+// the salary sheet shows the fine as a deduction and the waiver as pay).
+export async function finesByRun(queryDB: QueryDB, payrollIds: number[], gross = false): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const ids = Array.from(new Set(payrollIds.filter((n) => Number.isFinite(n) && n > 0)));
+  if (!ids.length) return out;
+  const rows: any[] =
+    (await queryDB(
+      `SELECT li.payroll_id, li.kind, li.amount, i.category FROM payroll_line_items li JOIN employee_pay_items i ON i.id = li.source_id
+        WHERE li.source = 'pay_item' AND i.category IN ('fine', 'fine_waiver') AND li.payroll_id IN (${ids.map(() => "?").join(",")})`,
+      ids
+    ).catch(() => [])) || [];
+  for (const r of rows) {
+    const k = Number(r.payroll_id);
+    out.set(k, money((out.get(k) || 0) + (r.category === "fine" ? num(r.amount) : gross ? 0 : -num(r.amount))));
+  }
+  return out;
+}
+
 /** payroll id -> its lines, for the list / payslip / salary sheet. */
 export async function loadPayLines(queryDB: QueryDB, payrollIds: number[]) {
   const out = new Map<number, { name: string; kind: string; amount: number; source: string }[]>();
@@ -264,6 +309,7 @@ export function registerPayrollItemsRoutes(app: Express, deps: PayrollItemsDeps)
               component_id: r.component_id ? Number(r.component_id) : null,
               name: r.name,
               kind: r.kind,
+              category: r.category || null,
               amount: num(r.amount),
               start_month: r.start_month,
               end_month: r.end_month || null,
@@ -285,7 +331,9 @@ export function registerPayrollItemsRoutes(app: Express, deps: PayrollItemsDeps)
       const employeeIds: number[] = (Array.isArray(b.employee_ids) ? b.employee_ids : [b.employee_id]).map(Number).filter((n: number) => n > 0);
       if (employeeIds.length === 0) throw bad("Choose at least one employee.");
       let name = clean(b.name, 100);
-      let kind = b.kind === "deduction" ? "deduction" : b.kind === "earning" ? "earning" : "";
+      // A Fine / Penalty is a deduction with its own column on the sheet.
+      const category = b.category === "fine" ? "fine" : null;
+      let kind = category ? "deduction" : b.kind === "deduction" ? "deduction" : b.kind === "earning" ? "earning" : "";
       const componentId = Number(b.component_id) || null;
       if (componentId) {
         const comp: any[] = await queryDB("SELECT * FROM salary_components WHERE id = ?", [componentId]);
@@ -306,9 +354,9 @@ export function registerPayrollItemsRoutes(app: Express, deps: PayrollItemsDeps)
       for (const id of employeeIds) {
         if (!emps.has(id)) continue;
         await queryDB(
-          `INSERT INTO employee_pay_items (employee_id, component_id, name, kind, amount, start_month, end_month, remarks, is_active, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-          [id, componentId, name, kind, amount, start, end, clean(b.remarks, 255) || null, req.user.id]
+          `INSERT INTO employee_pay_items (employee_id, component_id, name, kind, amount, start_month, end_month, remarks, is_active, created_by, category)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          [id, componentId, name, kind, amount, start, end, clean(b.remarks, 255) || null, req.user.id, category]
         );
         created++;
       }

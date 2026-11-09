@@ -19,15 +19,15 @@
 // row in this account's inbox; the account only ever sees its OWN alerts.
 //
 // `type` is deliberately a plain string (not a DB enum) so more alert types
-// can be added later without an ALTER TABLE each time. 'conveyance_claim'
-// (Conveyance Bill Claim submitted — the current-step approver is notified,
+// can be added later without an ALTER TABLE each time. 'bill_claim'
+// (Bill Claim submitted — the current-step approver is notified,
 // same idea as the Leave Application Reliever alert) was the second type
 // added, after 'leave_application'.
 
 import type { Express } from "express";
 import { sendPushToUserIds } from "./PushNotificationService";
 
-export type AlertType = "leave_application" | "leave_approval" | "conveyance_claim" | "conveyance_approval" | "conveyance_disbursed" | "asset_requisition" | "asset_approval" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary" | "resignation" | "exit_clearance" | "exit_offboarding" | "hr_action" | "hr_letter" | "hr_report" | "hr_request" | "site_attendance" | "device_request" | "task" | "mobile_bill" | "mobile_limit_approval" | "loan_request" | "loan_approval" | "payroll_approval" | "hr_reminder" | "assistant_support" | "target" | "mail" | "roster" | "document_sign" | "mpr_dispatch" | "password_request" | "notice_draft" | "requisition";
+export type AlertType = "leave_application" | "leave_approval" | "bill_claim" | "bill_claim_approval" | "conveyance_disbursed" | "asset_requisition" | "asset_approval" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary" | "resignation" | "exit_clearance" | "exit_offboarding" | "hr_action" | "hr_letter" | "hr_report" | "hr_request" | "site_attendance" | "zk_machine" | "device_request" | "task" | "mobile_bill" | "mobile_limit_approval" | "loan_request" | "loan_approval" | "payroll_approval" | "hr_reminder" | "assistant_support" | "target" | "mail" | "roster" | "document_sign" | "mpr_dispatch" | "password_request" | "profile_photo" | "notice_draft" | "requisition" | "interview";
 
 export interface AlertRow {
   id: number;
@@ -70,6 +70,13 @@ export async function ensureAlertsSchema(dbPool: any): Promise<void> {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure alerts table exists: " + err.message);
+  }
+  // The bell popup's own "Clear all" / remove only hides alerts there; the
+  // Alerts page keeps showing them.
+  try {
+    await dbPool.query("ALTER TABLE alerts ADD COLUMN hidden_in_bell TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (!/Duplicate column/i.test(err.message || "")) console.warn("⚠️ Could not add alerts.hidden_in_bell: " + err.message);
   }
 }
 
@@ -145,10 +152,38 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
   // GET /api/alerts — this account's own inbox, newest first. No module gate:
   // every signed-in account (User/Admin/Superadmin) always has this. Capped
   // at 50 so the bell dropdown stays fast; older read alerts just fall off.
+  // ?bell=1 (the bell popup) leaves out what was cleared from the popup.
+  const bellOnly = (req: any) => String(req.query?.bell || "") === "1";
   app.get("/api/alerts", authenticateToken, async (req: any, res) => {
     try {
+      // ?page= (the Alerts page): every alert this account ever got, a page
+      // at a time, with All / Unread / Read and their counts.
+      if (req.query?.page !== undefined) {
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const size = Math.min(200, Math.max(1, Math.floor(Number(req.query.page_size)) || 50));
+        const show = String(req.query.show || "all");
+        const where = show === "unread" ? " AND is_read = 0" : show === "read" ? " AND is_read = 1" : "";
+        const counts: any = await queryDB("SELECT COUNT(*) AS total, COALESCE(SUM(is_read = 0), 0) AS unread FROM alerts WHERE user_id = ?", [req.user.id]);
+        const total = Number(counts[0]?.total || 0);
+        const unread = Number(counts[0]?.unread || 0);
+        const rows: any = await queryDB(
+          `SELECT * FROM alerts WHERE user_id = ?${where} ORDER BY created_at DESC, id DESC LIMIT ${size} OFFSET ${(page - 1) * size}`,
+          [req.user.id]
+        );
+        return res.json({
+          alerts: rows.map((r: any) => ({ ...r, is_read: !!r.is_read })),
+          page,
+          page_size: size,
+          total,
+          unread,
+          read: total - unread,
+          shown_total: show === "unread" ? unread : show === "read" ? total - unread : total
+        });
+      }
       const rows: any = await queryDB(
-        "SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
+        bellOnly(req)
+          ? "SELECT * FROM alerts WHERE user_id = ? AND hidden_in_bell = 0 ORDER BY created_at DESC LIMIT 50"
+          : "SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
         [req.user.id]
       );
       res.json(rows.map((r: any) => ({ ...r, is_read: !!r.is_read })));
@@ -163,7 +198,9 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
   app.get("/api/alerts/unread-count", authenticateToken, async (req: any, res) => {
     try {
       const rows: any = await queryDB(
-        "SELECT COUNT(*) AS cnt FROM alerts WHERE user_id = ? AND is_read = 0",
+        bellOnly(req)
+          ? "SELECT COUNT(*) AS cnt FROM alerts WHERE user_id = ? AND is_read = 0 AND hidden_in_bell = 0"
+          : "SELECT COUNT(*) AS cnt FROM alerts WHERE user_id = ? AND is_read = 0",
         [req.user.id]
       );
       res.json({ count: Number(rows[0]?.cnt || 0) });
@@ -183,6 +220,16 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
     }
   });
 
+  // POST /api/alerts/:id/unread — the Alerts page's "Mark unread" (own alert only).
+  app.post("/api/alerts/:id/unread", authenticateToken, async (req: any, res) => {
+    try {
+      await queryDB("UPDATE alerts SET is_read = 0 WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/alerts/read-all — the bell dropdown's "Mark all read".
   app.post("/api/alerts/read-all", authenticateToken, async (req: any, res) => {
     try {
@@ -193,24 +240,27 @@ export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {
     }
   });
 
-  // DELETE /api/alerts — "Clear all": empties THIS account's own inbox only.
-  app.delete("/api/alerts", authenticateToken, async (req: any, res) => {
+  // POST /api/alerts/bell-clear — the bell popup's "Clear all": hides this
+  // account's alerts from the popup only (the Alerts page still lists them).
+  app.post("/api/alerts/bell-clear", authenticateToken, async (req: any, res) => {
     try {
-      await queryDB("DELETE FROM alerts WHERE user_id = ?", [req.user.id]);
+      await queryDB("UPDATE alerts SET hidden_in_bell = 1 WHERE user_id = ?", [req.user.id]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // DELETE /api/alerts/:id — clear a single alert out of THIS account's own
-  // inbox.
-  app.delete("/api/alerts/:id", authenticateToken, async (req: any, res) => {
+  // POST /api/alerts/:id/bell-hide — one alert out of the popup only.
+  app.post("/api/alerts/:id/bell-hide", authenticateToken, async (req: any, res) => {
     try {
-      await queryDB("DELETE FROM alerts WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
+      await queryDB("UPDATE alerts SET hidden_in_bell = 1 WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // No DELETE: an alert is never removed — the bell popup only hides it
+  // (bell-clear / bell-hide above) and the Alerts page keeps every one.
 }

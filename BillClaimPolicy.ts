@@ -4,7 +4,7 @@
  */
 
 // Bill Claim Policy (Admin Panel -> HRM -> Claims/Bill/Disbursement -> Bill
-// Claim Policy) — the rules a Conveyance Bill Claim is checked against, and the
+// Claim Policy) — the rules a Bill Claim is checked against, and the
 // list of bill categories, both kept in the database so the Superadmin changes
 // them from the screen, never in code.
 //
@@ -21,7 +21,7 @@
 //                      category is never removed from old claims: each bill
 //                      line keeps the category NAME it was filed under, so
 //                      deleting or renaming one leaves past claims as they were.
-//   user_claim_items   the bill lines of a claim — one per category/date/amount.
+//   bill_claim_items   the bill lines of a claim — one per category/date/amount.
 //   checkClaimBills()  applies every rule to a claim being filed.
 //   bill_claim_policy_history
 //                      every change anyone makes here (and every refused
@@ -243,18 +243,18 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_bcp_company_key (company_id, policy_key)
   )`);
-  await queryDB(`CREATE TABLE IF NOT EXISTS user_claim_items (
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_claim_id INT NOT NULL,
+    bill_claim_id INT NOT NULL,
     category_id INT NULL,
     category_name VARCHAR(100) NOT NULL,
     bill_date DATE NOT NULL,
     amount DECIMAL(12, 2) NOT NULL,
     description VARCHAR(500) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    KEY idx_uci_claim (user_claim_id),
+    KEY idx_uci_claim (bill_claim_id),
     KEY idx_uci_date (bill_date),
-    FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE
+    FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE
   )`);
   await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_policy_history (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -301,9 +301,9 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
   }
   // Categories come from bill_claim_categories now, so the claim's own
   // category column holds any name (or "Fuel, Toll" for a multi-category claim).
-  const cols: any[] = (await queryDB("SHOW COLUMNS FROM user_claims LIKE 'category'")) || [];
+  const cols: any[] = (await queryDB("SHOW COLUMNS FROM bill_claims LIKE 'category'")) || [];
   if (cols[0] && /^enum/i.test(String(cols[0].Type))) {
-    await queryDB("ALTER TABLE user_claims MODIFY COLUMN category VARCHAR(255) NOT NULL DEFAULT 'Others'");
+    await queryDB("ALTER TABLE bill_claims MODIFY COLUMN category VARCHAR(255) NOT NULL DEFAULT 'Others'");
   }
 }
 
@@ -535,7 +535,7 @@ export async function claimedDates(
   const oneClaim = !!policy.one_claim_per_date;
   if (!oneClaim && !policy.lock_dates_after_day) return out;
   const claims: any[] =
-    (await queryDB("SELECT id, status, created_at, from_date, to_date FROM user_claims WHERE user_id = ?", [userId])) || [];
+    (await queryDB("SELECT id, status, created_at, from_date, to_date FROM bill_claims WHERE user_id = ?", [userId])) || [];
   const others = claims.filter((c) => Number(c.id) !== Number(excludeClaimId));
   const holding = oneClaim
     ? others
@@ -543,11 +543,11 @@ export async function claimedDates(
   if (holding.length === 0) return out;
   const ids = holding.map((c) => Number(c.id));
   const items: any[] =
-    (await queryDB(`SELECT user_claim_id, bill_date FROM user_claim_items WHERE user_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
-  const withItems = new Set(items.map((i) => Number(i.user_claim_id)));
+    (await queryDB(`SELECT bill_claim_id, bill_date FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
+  const withItems = new Set(items.map((i) => Number(i.bill_claim_id)));
   for (const i of items) {
     const d = dhakaDate(i.bill_date);
-    if (d >= from && d <= to && !out.has(d)) out.set(d, Number(i.user_claim_id));
+    if (d >= from && d <= to && !out.has(d)) out.set(d, Number(i.bill_claim_id));
   }
   // Claims filed before bill lines existed — and, with "a claim holds every
   // date from its From Date to its To Date", every claim — hold their whole
@@ -565,7 +565,7 @@ export async function claimedDates(
 
 /** The claim this user already filed on `day` (its Claim Date), if any — for "One new claim per day". */
 export async function claimFiledOn(queryDB: QueryDB, userId: number, day: string, excludeClaimId: number | null = null): Promise<number | null> {
-  const rows: any[] = (await queryDB("SELECT id, claim_date FROM user_claims WHERE user_id = ?", [userId])) || [];
+  const rows: any[] = (await queryDB("SELECT id, claim_date FROM bill_claims WHERE user_id = ?", [userId])) || [];
   const hit = rows.find((r) => Number(r.id) !== Number(excludeClaimId) && dhakaDate(r.claim_date) === day);
   return hit ? Number(hit.id) : null;
 }
@@ -698,10 +698,10 @@ export async function checkClaimBills(
   if (policy.enforce_category_limits) {
     const limited = categories.filter((c) => c.monthly_limit != null && lines.some((l) => l.category_id === c.id));
     if (limited.length) {
-      const mine: any[] = (await queryDB("SELECT id, status FROM user_claims WHERE user_id = ?", [userId])) || [];
+      const mine: any[] = (await queryDB("SELECT id, status FROM bill_claims WHERE user_id = ?", [userId])) || [];
       const ids = mine.filter((c) => c.status !== "rejected" && Number(c.id) !== Number(args.editingClaimId)).map((c) => Number(c.id));
       const past: any[] = ids.length
-        ? (await queryDB(`SELECT category_id, category_name, bill_date, amount FROM user_claim_items WHERE user_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || []
+        ? (await queryDB(`SELECT category_id, category_name, bill_date, amount FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || []
         : [];
       for (const c of limited) {
         const months = new Set(lines.filter((l) => l.category_id === c.id).map((l) => l.bill_date.slice(0, 7)));
@@ -728,10 +728,10 @@ export async function attachClaimItems(queryDB: QueryDB, rows: any[]): Promise<a
   if (!rows.length) return rows;
   const ids = rows.map((r) => Number(r.id));
   const items: any[] =
-    (await queryDB(`SELECT * FROM user_claim_items WHERE user_claim_id IN (${ids.map(() => "?").join(",")}) ORDER BY bill_date, id`, ids)) || [];
+    (await queryDB(`SELECT * FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")}) ORDER BY bill_date, id`, ids)) || [];
   const by: Record<number, any[]> = {};
   for (const i of items) {
-    (by[Number(i.user_claim_id)] ||= []).push({
+    (by[Number(i.bill_claim_id)] ||= []).push({
       id: Number(i.id),
       category_id: i.category_id != null ? Number(i.category_id) : null,
       category_name: i.category_name,
@@ -749,16 +749,16 @@ export function registerBillClaimPolicyRoutes(
   app: Express,
   deps: {
     authenticateToken: any;
-    requireConveyanceClaimAccess: any;
+    requireBillClaimAccess: any;
     queryDB: QueryDB;
     getAdminModules: (userId: number) => Promise<string[]>;
     todayInDhaka: () => string;
   }
 ) {
-  const { authenticateToken, requireConveyanceClaimAccess, queryDB, getAdminModules, todayInDhaka } = deps;
+  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka } = deps;
 
   // Viewing: Superadmin and the Bill Claim (conveyance) module. Changing: Superadmin.
-  const canView = async (req: any) => req.user?.role === "superadmin" || (await getAdminModules(req.user.id)).includes("conveyance");
+  const canView = async (req: any) => req.user?.role === "superadmin" || (await getAdminModules(req.user.id)).includes("bill_claim");
   const requireView = async (req: any, res: any, next: any) => {
     try {
       if (await canView(req)) return next();
@@ -983,9 +983,9 @@ export function registerBillClaimPolicyRoutes(
     }
   });
 
-  // What the "New Conveyance Claim" form needs: rules, active categories,
+  // What the "New Bill Claim" form needs: rules, active categories,
   // allowed date window and the dates already closed for this user.
-  app.get("/api/bill-claim-policy/mine", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
+  app.get("/api/bill-claim-policy/mine", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
     try {
       const policy = await loadPolicy(queryDB);
       const today = todayInDhaka();
@@ -993,7 +993,7 @@ export function registerBillClaimPolicyRoutes(
       // closed to it, and its window counts from the day it was first filed.
       let editing: any = null;
       if (req.query.claim_id) {
-        const rows: any[] = (await queryDB("SELECT id, user_id, first_submitted_at, created_at FROM user_claims WHERE id = ?", [Number(req.query.claim_id)])) || [];
+        const rows: any[] = (await queryDB("SELECT id, user_id, first_submitted_at, created_at FROM bill_claims WHERE id = ?", [Number(req.query.claim_id)])) || [];
         if (rows.length && Number(rows[0].user_id) === Number(req.user.id)) editing = rows[0];
       }
       const firstFiled = editing ? dhakaDate(editing.first_submitted_at || editing.created_at) : null;

@@ -6,12 +6,14 @@
 // Sign-in routes (/api/auth/register, /api/auth/login, /api/auth/me), moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { listAttendanceProjects } from "./AttendanceProjects";
 import { checkWorkspaceLogin } from "./CompanyRoutes";
 import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
 import { workspaceStartCompany } from "./CompanyRoutes";
 import { checkAppDevice } from "./DeviceRoutes";
-import { loginBlocked, recordLogin } from "./LoginGuard";
+import { APP_FLAG_KEYS, APP_OFF_MESSAGE, appAccessFor, appMaskStore } from "./AppAccess";
+import { loginBlocked, recordLogin, trustedDeviceFor, trustedDeviceToken } from "./LoginGuard";
 import { clientIp } from "./ActiveUsersRoutes";
 import { activeCompanyId } from "./companyContext";
 import { activeGroupId } from "./companyContext";
@@ -75,7 +77,10 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       // login IDs are counted the same way, so nothing tells them apart.
       const ip = clientIp(req);
       const knownId = users.length ? Number(users[0].id) : null;
-      const blocked = await loginBlocked(queryDB, ip, identifier, knownId);
+      // A phone / browser this account signed in on before (LoginGuard.ts
+      // trusted devices): only that device's own limit applies to it.
+      const deviceId = users.length ? trustedDeviceFor(JWT_SECRET, req.body?.trusted_devices, users[0]) : null;
+      const blocked = await loginBlocked(queryDB, ip, identifier, knownId, deviceId);
       if (blocked) return res.status(429).json({ error: blocked, code: "LOGIN_LOCKED" });
       if (users.length === 0) {
         await recordLogin(queryDB, ip, identifier, null, false);
@@ -85,11 +90,12 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       const user = users[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
-        await recordLogin(queryDB, ip, identifier, knownId, false);
+        await recordLogin(queryDB, ip, identifier, knownId, false, deviceId);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
-      await recordLogin(queryDB, ip, identifier, knownId, true);
-      await finishLogin(deps, req, res, user);
+      await recordLogin(queryDB, ip, identifier, knownId, true, deviceId);
+      // Refreshed on every sign-in (same device id), so a device in use stays trusted.
+      await finishLogin(deps, req, res, user, { trusted_device: trustedDeviceToken(JWT_SECRET, Number(user.id), deviceId) });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Login failed" });
     }
@@ -98,13 +104,27 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_disappearing, can_use_chat, can_use_mail, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
       const u = users[0];
+      // Whether this login has its own Employee record — the Profile page
+      // hides My Service Book for a Superadmin without one (nothing to show,
+      // and "contact HR" makes no sense to them).
+      const ownEmployee: any[] = await queryDB("SELECT id FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]).catch(() => []);
+      // Remote Attendance: the Projects this account may check in at today
+      // (AttendanceProjects.ts). attendance_project_id stays the one Project
+      // when there's exactly one, so screens that drop their picker for a
+      // single Project keep working.
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
+      const checkIn = u.role === "superadmin" ? [] : await listAttendanceProjects(queryDB, Number(req.user.id), today).catch(() => []);
+      const activeCheckIn = checkIn.filter((r) => r.active);
       res.json({
         ...u,
+        has_employee: ownEmployee.length > 0,
+        attendance_projects: activeCheckIn.map((r) => ({ id: r.project_id, name: r.project_name, valid_to: r.valid_to })),
+        attendance_projects_limited: checkIn.length > 0,
         active_company_id: activeCompanyId(),
         pepm_enabled: pepmEnabled(activeGroupId()),
         is_onboarding: !!Number(u.is_onboarding || 0),
@@ -113,17 +133,18 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit) && pepmEnabled(activeGroupId()),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
-        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
+        attendance_project_id: checkIn.length > 0 && activeCheckIn.length === 1 ? activeCheckIn[0].project_id : null,
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
         can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
         can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
         can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
-        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
+        can_view_bill_claims: u.role === "superadmin" ? true : !!Number(u.can_view_bill_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
+        can_use_disappearing: u.role === "superadmin" ? true : !!Number(u.can_use_disappearing || 0),
         can_use_chat: u.role === "superadmin" ? true : Number(u.can_use_chat ?? 1) !== 0,
         can_use_mail: u.role === "superadmin" ? true : !!Number(u.can_use_mail),
         can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
@@ -132,6 +153,10 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_use_fingerprint: u.role === "superadmin" ? true : !!Number(u.can_use_fingerprint || 0),
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
         can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
+        can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
+        can_update_check_out: u.role === "superadmin" ? true : !!Number(u.can_update_check_out),
+        can_add_adhoc_approver: u.role === "superadmin" ? true : !!Number(u.can_add_adhoc_approver || 0),
+        can_use_assistant_voice: u.role === "superadmin" ? true : !!Number(u.can_use_assistant_voice || 0),
         can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
         can_view_payslip: u.role === "superadmin" ? true : !!Number(u.can_view_payslip),
         can_request_items: u.role === "superadmin" ? true : !!Number(u.can_request_items),
@@ -191,6 +216,10 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
   // The app signs in on one phone per account unless a Superadmin allows
   // more (DeviceRoutes.ts). The website isn't limited.
   let deviceRowId: number | null = null;
+  // Mobile App switched off for this account (Module Access, AppAccess.ts).
+  if (isAppClient && !(await appAccessFor(queryDB, Number(user.id), 0)).canUse) {
+    return void res.status(403).json({ error: APP_OFF_MESSAGE, code: "APP_ACCESS_OFF" });
+  }
   if (isAppClient) {
     const device = await checkAppDevice(queryDB, user, req.body);
     if (!device.ok) {
@@ -226,7 +255,14 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
   const startCompany = await workspaceStartCompany(queryDB, req.body.workspace, user).catch(() => undefined);
   const companyCtx = await resolveCompanyContext(queryDB, user, startCompany).catch(() => ({ companyId: 1, groupId: 1 }));
 
-  res.json(await companyStore.run(companyCtx, async () => ({
+  // The app's narrower access, if any (AppAccess.ts): the switches and
+  // modules below are the app's, not the website's.
+  const appMask = isAppClient ? (await appAccessFor(queryDB, Number(user.id), companyCtx.companyId)).mask : null;
+  if (appMask) {
+    for (const k of APP_FLAG_KEYS) if (!appMask.flags.has(k === "can_view_my_leave" ? "can_view_leave_application" : k)) user[k] = 0;
+  }
+
+  res.json(await companyStore.run(companyCtx, () => appMaskStore.run(appMask, async () => ({
     token,
     ...extra,
     active_company_id: companyCtx.companyId,
@@ -273,12 +309,12 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // Admin-only grant above.
       can_manage_leave: user.role === "superadmin" ? true : !!Number(user.can_manage_leave),
       // Superadmin-granted (or implicit for the Superadmin itself): can this
-      // account see/use the Movement Claim (GPS Check In/Out) and Conveyance
+      // account see/use the Check In/Out (GPS Check In/Out) and Conveyance
       // Bill Claim sections on its own User Panel at all? Applies to both
       // 'admin' and 'user' roles, same pattern as can_manage_leave above —
       // OFF (hidden) until the Superadmin explicitly grants it.
       can_view_movement_claims: user.role === "superadmin" ? true : !!Number(user.can_view_movement_claims),
-      can_view_conveyance_claims: user.role === "superadmin" ? true : !!Number(user.can_view_conveyance_claims),
+      can_view_bill_claims: user.role === "superadmin" ? true : !!Number(user.can_view_bill_claims),
       // Superadmin-granted (or implicit for the Superadmin itself, and ON
       // by default for everyone else — see the ALTER TABLE): can this
       // account see/use "Select a Budget", "Jobs" and "Job Entry Details"
@@ -296,6 +332,7 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // default — same pattern as can_view_movement_claims above.
       can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
       can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
+      can_use_disappearing: user.role === "superadmin" ? true : !!Number(user.can_use_disappearing || 0),
       can_use_chat: user.role === "superadmin" ? true : Number(user.can_use_chat ?? 1) !== 0,
       can_use_mail: user.role === "superadmin" ? true : !!Number(user.can_use_mail),
       can_receive_material: user.role === "superadmin" ? true : !!Number(user.can_receive_material || 0),
@@ -304,6 +341,10 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       can_use_fingerprint: user.role === "superadmin" ? true : !!Number(user.can_use_fingerprint || 0),
       can_view_roster: user.role === "superadmin" ? true : !!Number(user.can_view_roster),
       can_take_break: user.role === "superadmin" ? true : !!Number(user.can_take_break),
+      can_save_ride_places: user.role === "superadmin" ? true : !!Number(user.can_save_ride_places),
+      can_update_check_out: user.role === "superadmin" ? true : !!Number(user.can_update_check_out),
+      can_add_adhoc_approver: user.role === "superadmin" ? true : !!Number(user.can_add_adhoc_approver || 0),
+      can_use_assistant_voice: user.role === "superadmin" ? true : !!Number(user.can_use_assistant_voice || 0),
       can_sign_documents: user.role === "superadmin" ? true : !!Number(user.can_sign_documents),
       can_view_payslip: user.role === "superadmin" ? true : !!Number(user.can_view_payslip),
       can_request_items: user.role === "superadmin" ? true : !!Number(user.can_request_items),
@@ -328,5 +369,5 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
       // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
       module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
     }
-  })));
+  }))));
 }

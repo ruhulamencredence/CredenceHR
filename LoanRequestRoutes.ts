@@ -66,6 +66,24 @@ export async function ensureLoanRequestSchema(dbPool: any) {
   } catch (err: any) {
     console.warn("⚠️ Could not widen advance_requests.status: " + err.message);
   }
+  // Loan or Salary Advance on the running row too (employee_advances.kind),
+  // so a salary run can show the two apart (Payroll -> Approval -> Top
+  // Sheet's Advance and Loan columns; payrolls.loan_deduction holds a run's
+  // loan part). Added once: rows that came from a request take its kind,
+  // anything typed in by HR before this counts as an advance.
+  try {
+    await dbPool.query("ALTER TABLE employee_advances ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'advance'");
+    await dbPool.query(
+      "UPDATE employee_advances a JOIN advance_requests r ON r.advance_id = a.id SET a.kind = CASE WHEN r.request_kind = 'advance' THEN 'advance' ELSE 'loan' END"
+    );
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add employee_advances.kind: ${err.message}`);
+  }
+  try {
+    await dbPool.query("ALTER TABLE payrolls ADD COLUMN loan_deduction DECIMAL(10, 2) NOT NULL DEFAULT 0.00");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add payrolls.loan_deduction: ${err.message}`);
+  }
 }
 
 async function employeeUserId(queryDB: QueryDB, employeeId: number): Promise<number | null> {
@@ -90,8 +108,8 @@ export async function finalizeAdvanceRequest(queryDB: QueryDB, createAlert: Crea
   );
   if (took && took.affectedRows === 0) throw Object.assign(new Error("This request has already been decided."), { statusCode: 409 });
   const result: any = await queryDB(
-    "INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by) VALUES (?, ?, ?, ?, ?)",
-    [r.employee_id, money(r.total_amount), money(r.monthly_installment), r.reason, actorId]
+    "INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind) VALUES (?, ?, ?, ?, ?, ?)",
+    [r.employee_id, money(r.total_amount), money(r.monthly_installment), r.reason, actorId, r.request_kind === "advance" ? "advance" : "loan"]
   );
   await queryDB("UPDATE advance_requests SET advance_id = ? WHERE id = ?", [result.insertId, requestId]);
   const uid = await employeeUserId(queryDB, Number(r.employee_id));

@@ -34,6 +34,7 @@
 import ZKLib from "node-zklib";
 import cron from "node-cron";
 import type { Pool } from "mysql2/promise";
+import { pinMapperFor } from "./zkMachines";
 
 interface ZkDeviceRow {
   id: number;
@@ -41,6 +42,10 @@ interface ZkDeviceRow {
   ip_address: string;
   port: number;
   is_active: number;
+  // 'lan' machines are pulled here; 'push' ones send their punches
+  // themselves (zkMachines.ts). 'own' PIN machines map PINs per machine.
+  connection?: string | null;
+  pin_mode?: string | null;
 }
 
 // node-zklib doesn't always reject with a proper Error — depending on the
@@ -193,6 +198,44 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+// Opens the connection to a machine. node-zklib tries TCP and falls back to
+// UDP only when TCP is *refused*; when TCP gets no answer at all (a router
+// or VPN that drops it — "connect ETIMEDOUT") it gives up without trying
+// UDP, though many machines (and older firmware) answer only on UDP. So a
+// TCP failure of any kind is followed by one UDP try here.
+async function openZkSocket(zk: any, ms: number, label: string): Promise<void> {
+  try {
+    await withTimeout(zk.createSocket(), ms, label);
+    return;
+  } catch (tcpErr) {
+    try {
+      await zk.zklibTcp?.disconnect?.();
+    } catch {}
+    if (zk.zklibTcp) zk.zklibTcp.socket = null;
+    try {
+      await withTimeout(
+        (async () => {
+          if (!zk.zklibUdp.socket) await zk.zklibUdp.createSocket();
+          await zk.zklibUdp.connect();
+        })(),
+        Math.min(ms, 20_000),
+        `${label} (UDP)`
+      );
+      zk.connectionType = "udp";
+    } catch (udpErr) {
+      try {
+        await zk.zklibUdp?.disconnect?.();
+      } catch {}
+      throw new Error(`${describeError(tcpErr)}; UDP: ${describeError(udpErr)}`);
+    }
+  }
+}
+
+// A free local UDP port for each connection (0 = the system picks one):
+// a fixed one (4000) clashed when two machines, or a machine's sync and its
+// real-time listener, used UDP at the same moment (EADDRINUSE).
+const newZk = (device: ZkDeviceRow) => new ZKLib(device.ip_address, device.port, 30000, 0);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -212,18 +255,20 @@ function toMysqlDateTimeLocal(d: Date): string {
 // one punch record in, one INSERT IGNORE out. Returns false (no-op) for a
 // malformed record instead of throwing, since a single bad row from either
 // path shouldn't take down the whole batch/connection.
-async function insertPunchRow(dbPool: Pool, deviceId: number, log: any): Promise<boolean> {
+async function insertPunchRow(dbPool: Pool, deviceId: number, log: any, mapPin: (raw: string) => string = (raw) => raw): Promise<boolean> {
   // node-zklib returns { userId/deviceUserId, recordTime, ... } depending on
   // device firmware — deviceUserId is the PIN enrolled on the terminal.
-  const pin = String(log.deviceUserId ?? log.userId ?? "").trim();
+  const pin = String(log.deviceUserId ?? log.userId ?? "").trim().slice(0, 20);
   const punchTime = log.recordTime ?? log.attTime;
   if (!pin || !punchTime) return false;
 
   const mysqlDateTime = toMysqlDateTimeLocal(new Date(punchTime));
+  // A machine with its own PIN numbers stores the punch under the linked
+  // person's office-wide PIN (zkMachines.ts); raw_pin keeps what it sent.
   await dbPool.execute(
-    `INSERT IGNORE INTO zk_attendance_logs (device_id, device_user_pin, punch_time, verify_mode, work_code)
-     VALUES (?, ?, ?, ?, ?)`,
-    [deviceId, pin, mysqlDateTime, log.verifyMode ?? null, log.workCode ?? null]
+    `INSERT IGNORE INTO zk_attendance_logs (device_id, device_user_pin, raw_pin, punch_time, verify_mode, work_code)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [deviceId, mapPin(pin), pin, mysqlDateTime, log.verifyMode ?? null, log.workCode ?? null]
   );
   return true;
 }
@@ -241,7 +286,7 @@ export async function syncZkDevice(
 ): Promise<{ ok: boolean; count: number; error?: string }> {
   // Bumped connection timeout from 10000 -> 30000 to match the more
   // generous DEVICE_SYNC_TIMEOUT_MS ceiling above.
-  const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+  const zk = newZk(device);
 
   // How many records the device itself reports holding, if we can get it
   // cheaply. Purely informational — lets last_sync_status distinguish "this
@@ -249,7 +294,7 @@ export async function syncZkDevice(
   let deviceLogCount: number | null = null;
 
   try {
-    await withTimeout(zk.createSocket(), DEVICE_SYNC_TIMEOUT_MS, "createSocket");
+    await openZkSocket(zk, DEVICE_SYNC_TIMEOUT_MS, "createSocket");
 
     try {
       const info: any = await withTimeout(zk.getInfo(), INFO_TIMEOUT_MS, "getInfo");
@@ -263,13 +308,14 @@ export async function syncZkDevice(
     const rows: any[] = logs?.data || [];
 
     let count = 0;
+    const mapPin = await pinMapperFor(dbPool, device);
     for (const log of rows) {
-      if (await insertPunchRow(dbPool, device.id, log)) count++;
+      if (await insertPunchRow(dbPool, device.id, log, mapPin)) count++;
     }
 
     const countNote = deviceLogCount != null ? `, device reports ${deviceLogCount} total` : "";
     await dbPool.execute(
-      `UPDATE zk_devices SET last_synced_at = NOW(), last_sync_status = ? WHERE id = ?`,
+      `UPDATE zk_devices SET last_synced_at = NOW(), last_seen_at = NOW(), offline_alerted_at = NULL, last_sync_status = ? WHERE id = ?`,
       [`ok (${count} logs seen${countNote})`.slice(0, 255), device.id]
     );
 
@@ -308,7 +354,7 @@ export async function syncZkDevice(
 // above, since one run of this function had to fully finish, one device
 // after another, before the next poll tick could begin).
 export async function syncAllZkDevices(dbPool: Pool): Promise<{ device: string; ok: boolean; count: number; error?: string }[]> {
-  const [devices] = (await dbPool.query(`SELECT * FROM zk_devices WHERE is_active = 1`)) as any;
+  const [devices] = (await dbPool.query(`SELECT * FROM zk_devices WHERE is_active = 1 AND COALESCE(connection, 'lan') <> 'push'`)) as any;
   const results = await Promise.all(
     (devices as ZkDeviceRow[]).map(async (device) => {
       const result = await syncZkDevice(dbPool, device);
@@ -324,9 +370,9 @@ export async function syncAllZkDevices(dbPool: Pool): Promise<{ device: string; 
 // Left in only as a standalone, manually-callable option in case that
 // changes for you down the line; nothing wires it up automatically.
 export async function clearZkDeviceLog(dbPool: Pool, device: ZkDeviceRow): Promise<{ ok: boolean; error?: string }> {
-  const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+  const zk = newZk(device);
   try {
-    await withTimeout(zk.createSocket(), DEVICE_SYNC_TIMEOUT_MS, "createSocket");
+    await openZkSocket(zk, DEVICE_SYNC_TIMEOUT_MS, "createSocket");
     await withTimeout(zk.clearAttendanceLog(), DEVICE_SYNC_TIMEOUT_MS, "clearAttendanceLog");
     try { await zk.disconnect(); } catch {}
     return { ok: true };
@@ -457,13 +503,15 @@ async function listenRealtimeForDevice(dbPool: Pool, device: ZkDeviceRow): Promi
 
   try {
     while (realtimeEnabled) {
-      const zk = new ZKLib(device.ip_address, device.port, 30000, 4000);
+      const zk = newZk(device);
       try {
-        await withTimeout(zk.createSocket(), REALTIME_CONNECT_TIMEOUT_MS, "createSocket (real-time)");
+        await openZkSocket(zk, REALTIME_CONNECT_TIMEOUT_MS, "createSocket (real-time)");
+        // Own-PIN machines: the same PIN translation as a pull (zkMachines.ts).
+        const mapPin = await pinMapperFor(dbPool, device);
         activeZkSockets.set(device.id, zk);
         await zk.getRealTimeLogs(async (log: any) => {
           try {
-            await insertPunchRow(dbPool, device.id, log);
+            await insertPunchRow(dbPool, device.id, log, mapPin);
           } catch (err) {
             console.warn(`⚠️ Failed to save a real-time punch from ${device.name}: ${describeError(err)}`);
           }
@@ -507,7 +555,7 @@ async function listenRealtimeForDevice(dbPool: Pool, device: ZkDeviceRow): Promi
 // device being offline never affects the others' listeners.
 export async function startZkRealtimeListeners(dbPool: Pool): Promise<void> {
   realtimeEnabled = true;
-  const [devices] = (await dbPool.query(`SELECT * FROM zk_devices WHERE is_active = 1`)) as any;
+  const [devices] = (await dbPool.query(`SELECT * FROM zk_devices WHERE is_active = 1 AND COALESCE(connection, 'lan') <> 'push'`)) as any;
   for (const device of devices as ZkDeviceRow[]) {
     listenRealtimeForDevice(dbPool, device); // no-op if a loop is already running for this device
   }

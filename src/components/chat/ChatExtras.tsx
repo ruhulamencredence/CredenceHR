@@ -15,11 +15,10 @@
 //     groups, the wallpaper picker; and editing one's own About.
 
 import React, { useEffect, useState } from 'react';
-import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
+import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil, Star } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
-import { CHAT_CONVERSATION_BACKGROUND } from '../../lib/backgroundTheme';
 import type { ChatMessage, ChatReaction, ChatRoom, ChatDirectoryUser } from '../../types';
 import { UserAvatar } from '../UserAvatar';
 
@@ -31,11 +30,13 @@ const DOODLE =
 
 export const CHAT_WALLPAPERS: { id: string; label: string; css: string; swatch: string }[] = [
   {
-    // The look Chat always had: Frosted Glass under a soft lavender wash.
-    id: 'frosted',
-    label: 'Frosted',
-    swatch: '#ece6fb',
-    css: `radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.22), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.3), transparent 65%), linear-gradient(180deg, rgba(253,252,255,0.86), rgba(245,240,255,0.86)), ${CHAT_CONVERSATION_BACKGROUND}`
+    // The default: an almost white page with a soft lavender wash in two
+    // corners. (Replaced "Frosted", the Frosted Glass look, which was
+    // removed; a chat still saved as "frosted" shows this one.)
+    id: 'soft',
+    label: 'Soft',
+    swatch: '#f1ecfd',
+    css: 'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.28), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.4), transparent 65%), linear-gradient(180deg, #fdfcff 0%, #f5f0ff 100%)'
   },
   { id: 'doodle', label: 'Doodle', swatch: '#efeae2', css: `${DOODLE} 0 0 / 140px 140px repeat, #efeae2` },
   { id: 'plain', label: 'Plain', swatch: '#f4f4f5', css: '#f4f4f5' },
@@ -64,7 +65,7 @@ export const WallpaperPicker: React.FC<{ token: string; roomId: number; current?
       setBusy(false);
     }
   };
-  const on = current || 'frosted';
+  const on = CHAT_WALLPAPERS.some((w) => w.id === current) ? current : CHAT_WALLPAPERS[0].id;
   return (
     <div className="px-4 py-3">
       <div className="text-xs font-semibold uppercase text-slate-400 mb-2 flex items-center gap-2">
@@ -110,12 +111,14 @@ export const MessageMenu: React.FC<{
   isPinned: boolean;
   onPin: () => void;
   onUnpin: () => void;
+  // Starred: this account's own bookmark of the message.
+  onStarred: (starred: boolean) => void;
   onClose: () => void;
   onReacted: (reactions: ChatReaction[]) => void;
   onHidden: () => void;
   onUnsent: () => void;
   confirm: (message: string) => Promise<boolean>;
-}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, isPinned, onPin, onUnpin, onClose, onReacted, onHidden, onUnsent, confirm }) => {
+}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, isPinned, onPin, onUnpin, onStarred, onClose, onReacted, onHidden, onUnsent, confirm }) => {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const mine = msg.sender_id === meId;
@@ -208,6 +211,14 @@ export const MessageMenu: React.FC<{
                   onPin();
                   onClose();
                 }))}
+          {!unsent &&
+            item('star', <Star className={`w-4 h-4 ${msg.starred ? 'fill-amber-400 text-amber-500' : ''}`} />, msg.starred ? 'Unstar' : 'Star', async () => {
+              const data = await call('star', `/api/chat/messages/${msg.id}/star`, { starred: !msg.starred });
+              if (data) {
+                onStarred(!!data.starred);
+                onClose();
+              }
+            })}
           {!unsent &&
             item('forward', <Forward className="w-4 h-4" />, 'Forward', () => {
               onForward();
@@ -315,10 +326,24 @@ export const ReactionsWho: React.FC<{ token: string; msg: ChatMessage; meId: num
 
 // ---- Chat profile ---------------------------------------------------------------
 export interface ChatProfile {
-  room: { id: number; type: string; title: string | null; created_at: string };
+  room: {
+    id: number;
+    type: string;
+    title: string | null;
+    created_at: string;
+    description?: string;
+    created_by_name?: string | null;
+    info_admins_only?: boolean;
+    send_admins_only?: boolean;
+    disappear_seconds?: number;
+    // Only for group admins.
+    invite_code?: string | null;
+  };
+  links?: { message_id: number; url: string; created_at: string; sender_name: string }[];
   person: null | { id: number; name: string; username: string; about: string; email: string; phone: string; designation: string; department: string; branch: string; employee_id: string };
   commonGroups: { id: number; type: string; title: string | null }[];
   media: { id: number; message_type: 'image' | 'file' | 'audio'; attachment_filename: string | null; created_at: string; sender_name: string }[];
+  starredCount?: number;
 }
 
 export function useChatProfile(token: string, roomId: number | null, tick: number): ChatProfile | null {
@@ -370,8 +395,13 @@ export const PersonDetails: React.FC<{ person: NonNullable<ChatProfile['person']
   );
 };
 
-export const SharedMedia: React.FC<{ media: ChatProfile['media']; renderImage: (id: number) => React.ReactNode; onOpenFile: (id: number) => void }> = ({ media, renderImage, onOpenFile }) => {
-  const [tab, setTab] = useState<'media' | 'docs'>('media');
+export const SharedMedia: React.FC<{
+  media: ChatProfile['media'];
+  links?: ChatProfile['links'];
+  renderImage: (id: number) => React.ReactNode;
+  onOpenFile: (id: number) => void;
+}> = ({ media, links = [], renderImage, onOpenFile }) => {
+  const [tab, setTab] = useState<'media' | 'docs' | 'links'>('media');
   const images = media.filter((m) => m.message_type === 'image');
   const docs = media.filter((m) => m.message_type !== 'image');
   return (
@@ -379,14 +409,33 @@ export const SharedMedia: React.FC<{ media: ChatProfile['media']; renderImage: (
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs font-semibold uppercase text-slate-400">Media, files and voice</div>
         <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
-          {(['media', 'docs'] as const).map((k) => (
+          {(['media', 'docs', 'links'] as const).map((k) => (
             <button key={k} type="button" onClick={() => setTab(k)} className={`px-2 py-0.5 rounded-md ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
-              {k === 'media' ? `Photos ${images.length}` : `Files ${docs.length}`}
+              {k === 'media' ? `Photos ${images.length}` : k === 'docs' ? `Files ${docs.length}` : `Links ${links.length}`}
             </button>
           ))}
         </div>
       </div>
-      {tab === 'media' ? (
+      {tab === 'links' ? (
+        links.length ? (
+          <div className="space-y-1">
+            {links.map((l, i) => (
+              <a
+                key={`${l.message_id}-${i}`}
+                href={/^https?:\/\//i.test(l.url) ? l.url : `https://${l.url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block px-2 py-1.5 rounded-lg hover:bg-slate-50"
+              >
+                <div className="text-sm text-blue-600 truncate">{l.url}</div>
+                <div className="text-[11px] text-slate-400">{l.sender_name} · {formatDate(l.created_at)}</div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 py-2">No links yet.</p>
+        )
+      ) : tab === 'media' ? (
         images.length ? (
           <div className="grid grid-cols-3 gap-1.5">
             {images.map((m) => (

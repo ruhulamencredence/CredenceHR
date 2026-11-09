@@ -15,22 +15,23 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import { UserAvatar } from './UserAvatar';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer
 } from 'lucide-react';
+import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
+import { formatDate } from '../lib/formatDate';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { confirmDialog } from '../lib/confirmDialog';
-// The app's own microphone recorder, when this app build has it; an older
-// app (and the website) records through the WebView's MediaRecorder.
-const nativeMic = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('VoiceRecorder');
 
 interface ChatPanelProps {
   token: string;
@@ -189,11 +190,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roomSearch, setRoomSearch] = useState('');
+  // Chat list: only one-to-one chats with people of these Departments (empty = all).
+  const [roomDepts, setRoomDepts] = useState<string[]>([]);
   // Phone bottom bar: which list the room column shows, and the "+" menu.
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
   const [newMenuOpen, setNewMenuOpen] = useState(false);
-  // Audio / video calls are not part of this deployment.
-  const canCall = false;
+  const canCall = user.role === 'superadmin' || !!user.can_use_calls;
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -212,12 +214,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   // Voice message recording. On the native Android app this goes through
   // the capacitor-voice-recorder plugin (native mic APIs) rather than the
-  // browser's getUserMedia — the WebView here loads the app over plain
-  // http:// (see capacitor.config.ts's server.url), and getUserMedia is
-  // gated behind a secure-context check (https:// or localhost) that a
-  // plain LAN/IP http:// origin never satisfies, so it always failed with a
-  // generic "no permission" error regardless of what AndroidManifest.xml
-  // declared. The native plugin talks to Android's mic APIs directly and
+  // browser's getUserMedia — getUserMedia is gated behind a secure-context
+  // check (https:// or localhost) that a plain LAN/IP http:// origin never
+  // satisfies, so it failed with a generic "no permission" error regardless
+  // of what AndroidManifest.xml declared (the APK now only opens the https
+  // domain — see capacitor.config.ts — so calls get the secure address they
+  // need). The native plugin talks to Android's mic APIs directly and
   // isn't subject to that browser restriction. getUserMedia + MediaRecorder
   // is kept as the path for the web build (desktop/mobile browsers, usually
   // served over a real https:// domain where the secure-context check
@@ -230,6 +232,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  // Swipe-to-reply on a phone: the message being pulled and how far.
+  const swipeRef = useRef<{ id: number; x: number; y: number; dx: number; el: HTMLElement | null } | null>(null);
   // WhatsApp-style message menu / who reacted / own About (chat/ChatExtras.tsx).
   const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
   // Editing one of your own text messages (menu -> Edit): the box below
@@ -286,8 +290,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     el.classList.add('chat-flash');
     setTimeout(() => el.classList.remove('chat-flash'), 1200);
   };
+  // Latest jumpToMessage (it reads `messages`), for a jump after a room opens.
+  const jumpToMessageRef = useRef(jumpToMessage);
+  jumpToMessageRef.current = jumpToMessage;
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [members, setMembers] = useState<ChatRoomMember[]>([]);
+  // Starred messages: this chat's (info panel) or every chat's (list menu).
+  const [starredFor, setStarredFor] = useState<{ roomId: number | null } | null>(null);
+  // Search inside the open chat.
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearch, setMsgSearch] = useState('');
+  const [msgResults, setMsgResults] = useState<ChatMessage[] | null>(null);
+  // A group call on in the open chat (GroupCallRoutes.ts gcall:room).
+  const [groupCall, setGroupCall] = useState<{ callId: string; kind: 'audio' | 'video'; count: number } | null>(null);
+  useEffect(() => {
+    setGroupCall(null);
+    if (!activeRoomId || !canCall) return;
+    const roomId = activeRoomId;
+    getChatSocket()?.emit('gcall:active', { roomId }, (r: any) => {
+      if (activeRoomIdRef.current === roomId) setGroupCall(r?.callId ? { callId: r.callId, kind: r.kind, count: Number(r.count || 0) } : null);
+    });
+  }, [activeRoomId, canCall]);
+  // Join a group with an invite link — opened from the list, or by a link
+  // (…/chat?invite=CODE) this page was opened with.
+  const [joinCode, setJoinCode] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('invite');
+    } catch {
+      return null;
+    }
+  });
   const [showNewChatModal, setShowNewChatModal] = useState<'direct' | 'group' | 'community' | null>(null);
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [showLinkGroup, setShowLinkGroup] = useState(false);
@@ -398,7 +430,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           last_message_type: msg.message_type,
           last_message_sender_id: msg.sender_id,
           last_message_at: msg.created_at,
-          unread_count: isActive || msg.sender_id === user.id ? next[idx].unread_count : next[idx].unread_count + 1
+          unread_count: isActive || msg.sender_id === user.id || msg.message_type === 'system' ? next[idx].unread_count : next[idx].unread_count + 1
         };
         const [room] = next.splice(idx, 1);
         next.unshift(room);
@@ -439,6 +471,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       if (roomId === activeRoomIdRef.current) fetchMembers(roomId);
       fetchRooms();
     };
+    // Group name / photo / description / settings changed.
+    const onRoomUpdated = ({ roomId }: { roomId: number }) => {
+      fetchRooms();
+      if (roomId === activeRoomIdRef.current) setProfileTick((t) => t + 1);
+    };
+    socket.on('room_updated', onRoomUpdated);
+    const onGroupCall = (d: { roomId: number; callId: string | null; kind?: 'audio' | 'video'; count?: number }) => {
+      if (d.roomId !== activeRoomIdRef.current) return;
+      setGroupCall(d.callId ? { callId: d.callId, kind: d.kind || 'audio', count: d.count || 0 } : null);
+    };
+    socket.on('gcall:room', onGroupCall);
 
     const onReactions = ({ roomId, messageId, reactions }: { roomId: number; messageId: number; reactions: ChatReaction[] }) => {
       if (roomId === activeRoomIdRef.current) patchMessage(messageId, { reactions });
@@ -479,6 +522,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('message_read', onRead);
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
+      socket.off('room_updated', onRoomUpdated);
+      socket.off('gcall:room', onGroupCall);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchRooms, fetchMembers, user.id, patchMessage, fetchPins]);
@@ -541,7 +586,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const lastOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].sender_id === user.id) return messages[i].id;
+      if (messages[i].sender_id === user.id && messages[i].message_type !== 'system') return messages[i].id;
     }
     return null;
   }, [messages, user.id]);
@@ -767,26 +812,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const uploadAttachmentMessage = useCallback(
     async (params: { blob: Blob; messageType: 'image' | 'file' | 'audio'; filename: string; mimetype: string }) => {
       if (!activeRoomId) return;
-      if (params.blob.size > 5 * 1024 * 1024) {
-        alert('Attachment must be less than 5MB.');
+      if (params.blob.size > 50 * 1024 * 1024) {
+        alert('Attachment must be 50 MB or less.');
         return;
       }
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = reject;
-        reader.readAsDataURL(params.blob);
-      });
       try {
-        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages`), {
+        // The file itself is the body (no base64) — up to 50 MB.
+        const qs = new URLSearchParams({ messageType: params.messageType, filename: params.filename, mimetype: params.mimetype || 'application/octet-stream' });
+        const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?${qs}`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            messageType: params.messageType,
-            attachment_base64: base64,
-            attachment_mimetype: params.mimetype,
-            attachment_filename: params.filename
-          })
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+          body: params.blob
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
@@ -795,6 +831,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           // every room member, sender included — whichever of the two
           // arrives second needs to no-op instead of adding a duplicate.
           setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+        } else {
+          const d = await res.json().catch(() => ({}));
+          alert(d.error || (res.status === 413 ? 'Attachment must be 50 MB or less.' : 'Could not send the attachment.'));
         }
       } catch {
         alert('Could not send — check your connection and try again.');
@@ -841,7 +880,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   }
 
   const startRecording = useCallback(async () => {
-    if (nativeMic()) {
+    if (Capacitor.isNativePlatform()) {
       try {
         const { value: canRecord } = await VoiceRecorder.canDeviceVoiceRecord();
         if (!canRecord) throw new Error('Device cannot record audio');
@@ -882,7 +921,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // send=false discards the recording (mic X button); send=true uploads it.
   const stopRecording = useCallback(
     (send: boolean) => {
-      if (nativeMic()) {
+      if (Capacitor.isNativePlatform()) {
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
@@ -931,7 +970,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      if (nativeMic()) {
+      if (Capacitor.isNativePlatform()) {
         VoiceRecorder.stopRecording().catch(() => {
           // Nothing was recording — expected the vast majority of the time.
         });
@@ -967,9 +1006,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const byTab = rooms.filter((r) =>
       listTab === 'groups' ? r.type !== 'direct' : listTab === 'calls' ? r.type === 'direct' && !!r.other_participant : true
     );
-    if (!q) return byTab;
-    return byTab.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id, listTab]);
+    const deptOf = new Map(directory.map((d) => [d.id, (d.department || '').trim()]));
+    const byDept = roomDepts.length
+      ? byTab.filter((r) => r.type === 'direct' && !!r.other_participant && roomDepts.includes(deptOf.get(r.other_participant.id) || ''))
+      : byTab;
+    if (!q) return byDept;
+    return byDept.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
+  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory]);
   const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
     window.dispatchEvent(
       new CustomEvent('credence:start-call', {
@@ -978,6 +1021,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     );
 
   const isRoomAdmin = activeRoom?.my_role === 'admin';
+  // "Only admins can send messages" (group setting) — the server refuses it too.
+  const cannotSend = !!activeRoom && activeRoom.type !== 'direct' && !!Number(activeRoom.send_admins_only) && !isRoomAdmin && user.role !== 'superadmin';
+  const canEditGroupInfo = !!activeRoom && activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin' || !Number(activeRoom.info_admins_only));
   const typingNamesInActiveRoom = activeRoomId ? [...(typingByRoom[activeRoomId] || [])] : [];
   const isTypingInActiveRoom = typingNamesInActiveRoom.length > 0;
 
@@ -1000,6 +1046,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
+          <button type="button" onClick={() => setStarredFor({ roomId: null })} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full" title="Starred messages" aria-label="Starred messages">
+            <Star className="w-5 h-5" />
+          </button>
           <button type="button" onClick={() => setShowMyAbout(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full" title="My chat profile (About)" aria-label="My chat profile">
             <UserRound className="w-5 h-5" />
           </button>
@@ -1017,6 +1066,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               <button type="button" onClick={() => setShowNewChatModal('community')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-slate-400" /> New Community
               </button>
+              <button type="button" onClick={() => setJoinCode('')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
+                <LinkIcon className="w-4 h-4 text-slate-400" /> Join with a link
+              </button>
             </div>
           </div>
         </div>
@@ -1031,17 +1083,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          {listTab !== 'groups' && directory.some((d) => d.department) && (
+            <div className="mt-2 flex items-center gap-2">
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={roomDepts} onChange={setRoomDepts} width={260} />
+              {roomDepts.length > 0 && (
+                <button type="button" onClick={() => setRoomDepts([])} className="text-xs font-semibold text-slate-500 hover:underline">
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {filteredRooms.length === 0 && (
             <div className="p-8 text-center text-sm text-slate-400">
-              {listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+              {roomDepts.length > 0
+                ? 'No chat with anyone in these departments yet — tap + to start one.'
+                : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
             </div>
           )}
           {filteredRooms.map((room) => {
             const name = roomDisplayName(room, user.id);
             const isOnline = room.type === 'direct' && room.other_participant && onlineUserIds.has(room.other_participant.id);
-            const previewPrefix = room.last_message_sender_id === user.id ? 'You: ' : '';
+            const previewPrefix = room.last_message_sender_id === user.id && room.last_message_type !== 'system' ? 'You: ' : '';
             const previewText =
               room.last_message_type === 'image'
                 ? '📷 Photo'
@@ -1060,6 +1124,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }`}
               >
                 <div className="relative shrink-0">
+                  {room.type !== 'direct' && !!Number(room.has_avatar) ? (
+                    <GroupAvatar token={token} room={room} color={avatarColor(name)} className="w-11 h-11" />
+                  ) : (
                   <UserAvatar
                     userId={room.type === 'direct' ? room.other_participant?.id : null}
                     name={name}
@@ -1067,6 +1134,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     className="w-11 h-11 text-sm"
                     fallback={room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
                   />
+                  )}
                   {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
                 </div>
                 {listTab === 'calls' && canCall ? (
@@ -1099,11 +1167,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </div>
                   <div className="flex justify-between items-center gap-2">
                     <span className="text-xs text-slate-500 truncate">{previewPrefix}{previewText}</span>
-                    {room.unread_count > 0 && (
-                      <span className="shrink-0 bg-emerald-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                        {room.unread_count > 99 ? '99+' : room.unread_count}
-                      </span>
-                    )}
+                    <span className="shrink-0 flex items-center gap-1">
+                      {isMuted(room) && <BellOff className="w-3.5 h-3.5 text-slate-400" aria-label="Muted" />}
+                      {room.unread_count > 0 && (
+                        <span className={`${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1`}>
+                          {room.unread_count > 99 ? '99+' : room.unread_count}
+                        </span>
+                      )}
+                    </span>
                   </div>
                 </div>
                 )}
@@ -1176,6 +1247,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         <Icon className="w-4 h-4 text-violet-600" /> {label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewMenuOpen(false);
+                        setJoinCode('');
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                    >
+                      <LinkIcon className="w-4 h-4 text-violet-600" /> Join with a link
+                    </button>
                   </div>
                   </div>
                 </>
@@ -1195,7 +1276,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       </div>
 
       {/* Main chat window */}
-      <div className={`flex-1 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
+      <div className={`flex-1 min-w-0 flex-col bg-[#F7F8FA] ${activeRoomId ? 'flex' : 'hidden md:flex'}`}>
         {!activeRoom ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-2">
             <MessageSquare className="w-12 h-12" />
@@ -1218,6 +1299,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }}
                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
               >
+                {activeRoom.type !== 'direct' && !!Number(activeRoom.has_avatar) ? (
+                  <GroupAvatar token={token} room={activeRoom} color={avatarColor(roomDisplayName(activeRoom, user.id))} className="w-10 h-10" />
+                ) : (
                 <UserAvatar
                   userId={activeRoom.type === 'direct' ? activeRoom.other_participant?.id : null}
                   name={roomDisplayName(activeRoom, user.id)}
@@ -1225,6 +1309,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   className="w-10 h-10 text-sm"
                   fallback={activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
                 />
+                )}
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-slate-900 truncate">{roomDisplayName(activeRoom, user.id)}</h3>
                   <span className="text-xs text-slate-500">
@@ -1238,9 +1323,45 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </span>
                 </div>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMsgSearchOpen((v) => !v);
+                  setMsgSearch('');
+                  setMsgResults(null);
+                }}
+                className="p-2 rounded-full text-slate-500 hover:bg-slate-100 shrink-0"
+                aria-label="Search in this chat"
+                title="Search in this chat"
+              >
+                <Search className="w-5 h-5" />
+              </button>
               {/* Audio / video call (CallLayer.tsx) — one-to-one chats, for
                   accounts with Calls access. */}
-              {canCall && activeRoom.type === 'direct' && activeRoom.other_participant && (
+              {/* Group call (GroupCallLayer.tsx) — groups / communities, same Calls access. */}
+              {activeRoom.type !== 'direct' && canCall && !cannotSend && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          groupCall?.callId
+                            ? new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                            : new CustomEvent('credence:start-group-call', { detail: { roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: k } })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                      title={k === 'audio' ? 'Group audio call' : 'Group video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {activeRoom.type === 'direct' && activeRoom.other_participant && (user.role === 'superadmin' || user.can_use_calls) && (
                 <div className="flex items-center gap-1 shrink-0">
                   {(['audio', 'video'] as const).map((k) => (
                     <button
@@ -1268,6 +1389,78 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
+            {groupCall?.callId && activeRoom.type !== 'direct' && canCall && (
+              <div className="px-3 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="flex-1 min-w-0 truncate text-emerald-800">
+                  Group {groupCall.kind === 'video' ? 'video' : 'audio'} call on · {groupCall.count} joined
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('credence:join-group-call', { detail: { callId: groupCall.callId, roomId: activeRoom.id, title: roomDisplayName(activeRoom, user.id), kind: groupCall.kind } })
+                    )
+                  }
+                  className="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5"
+                >
+                  Join
+                </button>
+              </div>
+            )}
+            {msgSearchOpen && (
+              <div className="relative px-3 py-2 bg-white border-b border-slate-200">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    autoFocus
+                    value={msgSearch}
+                    onChange={(e) => {
+                      const q = e.target.value;
+                      setMsgSearch(q);
+                      if (q.trim().length < 2) return setMsgResults(null);
+                      const roomId = activeRoom.id;
+                      fetch(apiUrl(`/api/chat/rooms/${roomId}/search?q=${encodeURIComponent(q.trim())}`), { headers: { Authorization: `Bearer ${token}` } })
+                        .then((r) => (r.ok ? r.json() : []))
+                        .then((rows) => activeRoomIdRef.current === roomId && setMsgResults(Array.isArray(rows) ? rows : []))
+                        .catch(() => {});
+                    }}
+                    placeholder="Search messages and files…"
+                    aria-label="Search messages in this chat"
+                    className="w-full pl-8 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                  <button type="button" onClick={() => setMsgSearchOpen(false)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400" aria-label="Close search">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                {msgResults && (
+                  <div className="absolute left-3 right-3 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg max-h-72 overflow-y-auto divide-y divide-slate-100">
+                    {msgResults.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-slate-400">No messages found.</div>
+                    ) : (
+                      msgResults.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setMsgResults(null);
+                            void jumpToMessage(m.id);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50"
+                        >
+                          <div className="flex justify-between gap-2 text-[11px] text-slate-500">
+                            <span className="font-semibold truncate">{m.sender_id === user.id ? 'You' : m.sender_name}</span>
+                            <span className="shrink-0">{formatDate(m.created_at)} {timeOnly(m.created_at)}</span>
+                          </div>
+                          <div className="text-sm text-slate-800 line-clamp-2 break-words">{m.content || `📎 ${m.attachment_filename || 'File'}`}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <PinnedBar
               pins={pins}
               index={pinIndex}
@@ -1279,8 +1472,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               }}
             />
             {/* The account's wallpaper for this chat (Contact / Group info ->
-                Chat wallpaper); "Frosted" — faint Frosted Glass under a soft
-                lavender wash — when none is picked. */}
+                Chat wallpaper); "Soft" — a soft lavender wash — when none is
+                picked. */}
             <div
               ref={messagesContainerRef}
               className="flex-1 overflow-y-auto p-4 space-y-2"
@@ -1288,6 +1481,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
+                // "Rahim added Karim", "… changed the group name": a centred note.
+                if (msg.message_type === 'system')
+                  return (
+                    <div key={msg.id} data-msg-id={msg.id} className="flex justify-center py-1">
+                      <span className="max-w-[85%] text-center text-[11px] leading-snug text-slate-600 bg-white/85 border border-white rounded-xl px-3 py-1.5 shadow-sm">
+                        {msg.content}
+                      </span>
+                    </div>
+                  );
                 const isMe = msg.sender_id === user.id;
                 const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
                 const unsent = !!msg.unsent_at;
@@ -1298,9 +1500,63 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   if (longPressRef.current) clearTimeout(longPressRef.current);
                   longPressRef.current = null;
                 };
+                // Not in a group where only admins may send (the box is hidden there).
+                const startReply = () => {
+                  if (cannotSend) return;
+                  setEditing(null);
+                  setReplyTo(msg);
+                  messageInputRef.current?.focus();
+                };
                 return (
-                  <div key={msg.id} data-msg-id={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}>
-                    <div className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div
+                    key={msg.id}
+                    data-msg-id={msg.id}
+                    className={`group/row flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'} rounded-2xl transition-colors`}
+                    // Phone: pull a message to the right to reply (like WhatsApp).
+                    onTouchStart={(e) => {
+                      if (unsent) return;
+                      swipeRef.current = { id: msg.id, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, el: e.currentTarget.querySelector('[data-swipe]') as HTMLElement | null };
+                    }}
+                    onTouchMove={(e) => {
+                      const sw = swipeRef.current;
+                      if (!sw || sw.id !== msg.id) return;
+                      const dx = e.touches[0].clientX - sw.x;
+                      const dy = Math.abs(e.touches[0].clientY - sw.y);
+                      if (dy > 30 && Math.abs(dx) < dy) {
+                        swipeRef.current = null;
+                        if (sw.el) sw.el.style.transform = '';
+                        return;
+                      }
+                      sw.dx = Math.max(0, Math.min(80, dx));
+                      if (sw.el) sw.el.style.transform = sw.dx ? `translateX(${sw.dx}px)` : '';
+                    }}
+                    onTouchEnd={() => {
+                      const sw = swipeRef.current;
+                      swipeRef.current = null;
+                      if (!sw || sw.id !== msg.id) return;
+                      if (sw.el) {
+                        sw.el.style.transition = 'transform 160ms ease-out';
+                        sw.el.style.transform = '';
+                        setTimeout(() => sw.el && (sw.el.style.transition = ''), 180);
+                      }
+                      if (sw.dx >= 56) {
+                        navigator.vibrate?.(10);
+                        startReply();
+                      }
+                    }}
+                  >
+                    {/* Computer: Reply / Forward beside your own message. */}
+                    {isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
+                    <div data-swipe className={`max-w-[75%] md:max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       {!isMe && activeRoom.type !== 'direct' && (
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
@@ -1375,6 +1631,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           </>
                         )}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
+                          {msg.expires_at && !unsent && <Timer className="w-3 h-3" aria-label="Disappearing message" />}
+                          {msg.starred && !unsent && <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
                           {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
                           {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
@@ -1388,6 +1646,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         </div>
                       )}
                     </div>
+                    {/* Computer: Reply / Forward beside someone else's message. */}
+                    {!isMe && !unsent && (
+                      <span className="hidden md:flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button type="button" onClick={startReply} disabled={cannotSend} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80 disabled:hidden" aria-label="Reply" title="Reply">
+                          <Reply className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={() => setForwardMsg(msg)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-white/80" aria-label="Forward" title="Forward">
+                          <Forward className="w-4 h-4" />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -1415,8 +1684,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
             {replyTo && !editing && (
-              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
-                <div className="text-xs text-slate-600 truncate">
+              <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between gap-2 min-w-0">
+                <div className="text-xs text-slate-600 truncate min-w-0 flex-1">
                   Replying to <span className="font-semibold">{replyTo.sender_id === user.id ? 'yourself' : replyTo.sender_name}</span>:{' '}
                   {replyTo.content || (replyTo.message_type === 'image' ? '📷 Photo' : replyTo.message_type === 'audio' ? '🎤 Voice message' : `📎 ${replyTo.attachment_filename || 'File'}`)}
                 </div>
@@ -1426,7 +1695,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
 
-            <div className="relative p-3 bg-white/85 border-t border-violet-100/70 flex items-center gap-2">
+            {cannotSend && (
+              <div className="p-3 bg-white/85 border-t border-violet-100/70 text-center text-xs text-slate-500">
+                Only <span className="font-semibold">group admins</span> can send messages.
+              </div>
+            )}
+            <div className={`relative p-3 bg-white/85 border-t border-violet-100/70 items-center gap-2 ${cannotSend ? 'hidden' : 'flex'}`}>
               {mentionQuery !== null && activeRoom.type !== 'direct' && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
                   {mentionCandidates.map((m) => (
@@ -1530,7 +1804,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
       {/* Contact info (a direct chat) / Group & Community info */}
       {showInfoPanel && activeRoom && (
-        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-0 md:inset-auto z-10">
+        // Phone: covers the conversation, but inside .chat-shell's safe-area
+        // padding — `inset-0` would put its header under the status bar.
+        <div className="w-full md:w-[340px] border-l border-slate-200 bg-white flex flex-col absolute md:relative inset-x-0 top-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] bottom-[var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))] md:inset-auto z-10">
           <div className="p-4 border-b border-slate-200 flex items-center gap-2">
             <button type="button" onClick={() => setShowInfoPanel(false)} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
               <ArrowLeft className="w-5 h-5" />
@@ -1538,6 +1814,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <h3 className="font-bold text-slate-900">{activeRoom.type === 'direct' ? 'Contact info' : activeRoom.type === 'community' ? 'Community Info' : 'Group Info'}</h3>
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+            {activeRoom.type !== 'direct' ? (
+              <GroupHeader
+                token={token}
+                room={activeRoom}
+                color={avatarColor(roomDisplayName(activeRoom, user.id))}
+                memberCount={members.length}
+                canEditInfo={canEditGroupInfo}
+                description={profile?.room.description || activeRoom.description || ''}
+                createdBy={profile?.room.created_by_name}
+                createdAt={profile?.room.created_at}
+                confirm={(m) => confirmDialog(m, { tone: 'danger' })}
+                onChanged={() => {
+                  fetchRooms();
+                  setProfileTick((t) => t + 1);
+                }}
+              />
+            ) : (
             <div className="p-5 text-center">
               {activeRoom.type === 'direct' ? (
                 <UserAvatar userId={activeRoom.other_participant?.id} name={roomDisplayName(activeRoom, user.id)} token={token} className="w-24 h-24 text-2xl mx-auto mb-3" />
@@ -1572,8 +1865,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 </div>
               )}
             </div>
+            )}
+            {/* Mute, starred messages, and (admins) the group settings. */}
+            <div className="divide-y divide-slate-100">
+              <MuteRow token={token} room={activeRoom} onChanged={fetchRooms} />
+              <DisappearRow
+                token={token}
+                roomId={activeRoom.id}
+                value={Number(profile?.room.disappear_seconds ?? activeRoom.disappear_seconds ?? 0)}
+                canEdit={activeRoom.type === 'direct' || canEditGroupInfo}
+                allowOn={user.role === 'superadmin' || !!user.can_use_disappearing}
+                onChanged={() => {
+                  fetchRooms();
+                  setProfileTick((t) => t + 1);
+                }}
+              />
+              {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && (
+                <InviteLinkRow token={token} roomId={activeRoom.id} code={profile?.room.invite_code} onChanged={() => setProfileTick((t) => t + 1)} confirm={(m) => confirmDialog(m, { tone: 'danger' })} />
+              )}
+              <button type="button" onClick={() => setStarredFor({ roomId: activeRoom.id })} className="w-full px-4 py-3 flex items-center gap-3 text-sm text-slate-800 hover:bg-slate-50 text-left">
+                <Star className="w-4 h-4 text-slate-500" />
+                <span className="flex-1">Starred messages</span>
+                {!!profile?.starredCount && <span className="text-xs text-slate-400">{profile.starredCount}</span>}
+              </button>
+              {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && profile && (
+                <GroupSettings
+                  token={token}
+                  roomId={activeRoom.id}
+                  infoAdminsOnly={!!profile.room.info_admins_only}
+                  sendAdminsOnly={!!profile.room.send_admins_only}
+                  onChanged={() => {
+                    fetchRooms();
+                    setProfileTick((t) => t + 1);
+                  }}
+                />
+              )}
+            </div>
             {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
-            {profile && <SharedMedia media={profile.media} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
             {activeRoom.type === 'direct' && profile && (
               <CommonGroups
                 groups={profile.commonGroups}
@@ -1649,6 +1978,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!(await confirmDialog('Clear this chat? Its messages are removed for you only (starred ones are kept). Others still see them.', { tone: 'danger' }))) return;
+              const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/clear`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ keepStarred: true })
+              });
+              if (res.ok) {
+                setMessages((prev) => prev.filter((m) => m.starred));
+                fetchRooms();
+              }
+            }}
+            className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+          >
+            <Eraser className="w-4 h-4" /> Clear chat
+          </button>
           {activeRoom.type !== 'direct' && (
             <button
               type="button"
@@ -1670,6 +2017,51 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         </div>
       )}
 
+      {joinCode !== null && (
+        <JoinInvitePopup
+          token={token}
+          initialCode={joinCode}
+          onClose={() => {
+            setJoinCode(null);
+            try {
+              const u = new URL(window.location.href);
+              if (u.searchParams.has('invite')) {
+                u.searchParams.delete('invite');
+                window.history.replaceState(null, '', u.toString());
+              }
+            } catch {
+              // nothing to tidy
+            }
+          }}
+          onJoined={async (roomId) => {
+            setJoinCode(null);
+            await fetchRooms();
+            void openRoom(roomId);
+          }}
+        />
+      )}
+
+      {starredFor && (
+        <StarredPopup
+          token={token}
+          roomId={starredFor.roomId}
+          meId={user.id}
+          roomName={(id) => {
+            const r = rooms.find((x) => x.id === id);
+            return r ? roomDisplayName(r, user.id) : 'Chat';
+          }}
+          onClose={() => setStarredFor(null)}
+          onOpen={async (m) => {
+            setStarredFor(null);
+            setShowInfoPanel(false);
+            if (activeRoomIdRef.current !== m.room_id) {
+              await openRoom(m.room_id);
+              setTimeout(() => void jumpToMessageRef.current(m.id), 400);
+            } else void jumpToMessage(m.id);
+          }}
+        />
+      )}
+
       {/* Message menu: react, reply, copy, delete for me / for everyone. */}
       {menuMsg && activeRoom && (
         <MessageMenu
@@ -1688,6 +2080,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           isPinned={pins.some((p) => p.message.id === menuMsg.id)}
           onPin={() => setPinMsg(menuMsg)}
           onUnpin={() => activeRoom && void fetchPins(activeRoom.id)}
+          onStarred={(starred) => patchMessage(menuMsg.id, { starred })}
           onEdit={() => {
             setReplyTo(null);
             setEditError('');
@@ -1788,32 +2181,71 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 };
 
+// Departments in the chat directory, with how many people each — the options
+// of the Department filters below.
+const deptOptionsOf = (people: ChatDirectoryUser[]) => {
+  const n = new Map<string, number>();
+  for (const d of people) {
+    const k = (d.department || '').trim();
+    if (k) n.set(k, (n.get(k) || 0) + 1);
+  }
+  return [...n.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count }));
+};
+
 // Shared "pick people from the directory" list used by both the New Chat/
 // Group/Community modal and the Add Members modal below.
 const MemberPickerModal: React.FC<{
   directory: ChatDirectoryUser[];
   title: string;
   confirmLabel?: string;
+  // New Chat picks one person; groups / communities / Add Members pick many.
+  single?: boolean;
   onClose: () => void;
   onConfirm: (ids: number[]) => void;
-}> = ({ directory, title, confirmLabel = 'Add', onClose, onConfirm }) => {
+}> = ({ directory, title, confirmLabel = 'Add', single = false, onClose, onConfirm }) => {
   const [search, setSearch] = useState('');
+  const [depts, setDepts] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   useBackButtonClose(true, onClose);
+  // Phone keyboard: lift the sheet above it (the fixed backdrop doesn't
+  // shrink when the keyboard opens, so the list ended up underneath it).
+  const keyboardInset = useKeyboardInset();
 
   const q = search.trim().toLowerCase();
-  const filtered = directory.filter((d) => `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q));
+  const filtered = directory.filter(
+    (d) =>
+      (!depts.length || depts.includes((d.department || '').trim())) &&
+      `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
+  );
+  const allShownOn = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
+  const toggleAllShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const d of filtered) {
+        if (allShownOn) next.delete(d.id);
+        else next.add(d.id);
+      }
+      return next;
+    });
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-30 flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="bg-white w-full md:w-96 md:rounded-2xl rounded-t-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+    <div
+      className="fixed inset-0 liquid-glass-backdrop z-30 flex items-end md:items-center justify-center p-2 md:p-4"
+      style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
+      onClick={onClose}
+    >
+      <div
+        className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
+        style={{ maxHeight: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : '80dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between">
           <h3 className="font-bold text-slate-900">{title}</h3>
-          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-600">
+            <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-3 border-b border-slate-100">
+        <div className="px-3 pb-3">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -1824,8 +2256,19 @@ const MemberPickerModal: React.FC<{
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
+          <div className="mt-2 flex items-center gap-2">
+            {directory.some((d) => d.department) && (
+              <MultiSelectFilter label="Department" options={deptOptionsOf(directory)} selected={depts} onChange={setDepts} width={260} />
+            )}
+            {!single && filtered.length > 0 && (
+              <button type="button" onClick={toggleAllShown} className="ml-auto text-xs font-semibold text-emerald-700 hover:underline">
+                {allShownOn ? 'Unselect all shown' : `Select all shown (${filtered.length})`}
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="liquid-glass-inset mx-3 rounded-2xl flex-1 min-h-0 overflow-y-auto">
+            {filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
           {filtered.map((d) => {
             const isSelected = selected.has(d.id);
             return (
@@ -1834,13 +2277,13 @@ const MemberPickerModal: React.FC<{
                 type="button"
                 onClick={() =>
                   setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(d.id)) next.delete(d.id);
+                    const next = new Set(single ? [] : prev);
+                    if (prev.has(d.id)) next.delete(d.id);
                     else next.add(d.id);
                     return next;
                   })
                 }
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/50"
               >
                 <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
                 <span className="flex-1 min-w-0 text-left">
@@ -1856,12 +2299,12 @@ const MemberPickerModal: React.FC<{
             );
           })}
         </div>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3">
           <button
             type="button"
             disabled={selected.size === 0}
             onClick={() => onConfirm([...selected])}
-            className="w-full py-2.5 bg-emerald-600 text-white font-semibold rounded-xl disabled:opacity-40"
+            className="liquid-glass-button rounded-full w-full py-2.5 bg-emerald-600 text-white font-semibold disabled:opacity-40"
           >
             {confirmLabel} ({selected.size})
           </button>
@@ -1887,6 +2330,7 @@ const NewRoomModal: React.FC<{
         directory={directory}
         title="New Chat"
         confirmLabel="Start Chat"
+        single
         onClose={onClose}
         onConfirm={(ids) => ids[0] && onCreate('direct', '', [ids[0]])}
       />

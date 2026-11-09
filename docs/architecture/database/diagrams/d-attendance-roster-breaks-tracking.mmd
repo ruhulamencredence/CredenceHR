@@ -74,6 +74,8 @@ erDiagram
     int waived_by FK
     date waiver_date
     varchar reason
+    varchar attachment_name
+    varchar attachment_mime
   }
   location_pings {
     int id PK
@@ -125,6 +127,11 @@ erDiagram
     int backup_user_id
     decimal lat
   }
+  tracking_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
   tracking_device_state {
     int user_id PK,FK
     tinyint location_on
@@ -134,6 +141,11 @@ erDiagram
     varchar mode
     int battery_pct
   }
+  tracking_employee_access {
+    int id PK
+    int user_id FK
+    int employee_pk
+  }
   tracking_notice_recipients {
     int id PK
     int notice_id FK
@@ -142,6 +154,13 @@ erDiagram
     varchar reason
     datetime last_ping
     timestamp sent_at
+  }
+  user_attendance_projects {
+    int id PK
+    int user_id FK
+    int project_id FK
+    date valid_from
+    date valid_to
   }
   vehicle_ride_settings {
     int id PK
@@ -156,6 +175,13 @@ erDiagram
     int verify_mode
     int work_code
     timestamp synced_at
+  }
+  zk_device_pins {
+    int id PK
+    int device_id FK
+    int employee_id FK
+    varchar pin
+    int linked_by
   }
   zk_devices {
     int id PK
@@ -196,7 +222,13 @@ erDiagram
   site_attendance_teams ||--o{ site_attendance_members : "team_id"
   site_attendance_teams ||--o{ site_attendance_sheets : "team_id"
   projects ||..o{ site_attendance_teams : "project_id"
+  users ||--o{ tracking_department_access : "user_id"
   users ||--o{ tracking_device_state : "user_id"
+  users ||--o{ tracking_employee_access : "user_id"
   notices ||--o{ tracking_notice_recipients : "notice_id"
   users ||--o{ tracking_notice_recipients : "user_id"
+  projects ||--o{ user_attendance_projects : "project_id"
+  users ||--o{ user_attendance_projects : "user_id"
   zk_devices ||--o{ zk_attendance_logs : "device_id"
+  zk_devices ||--o{ zk_device_pins : "device_id"
+  all_employees ||--o{ zk_device_pins : "employee_id"

@@ -66,3 +66,73 @@ export function addDaysToDateStr(dateStr: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+// ---- Material conditions (Condition Set -> Material conditions) ----
+// A named group of materials (Description of Material) with its own minimum
+// days' notice, for New Job Entry / Add MPR and/or Job Edit
+// (MaterialConditionsRoutes.ts). Where it applies together with the
+// Global / Project / Budget rule above, the stricter one (more days) wins.
+
+/** The one way a material name is compared: case, spaces and ends ignored. */
+export const materialKey = (s: unknown): string =>
+  String(s ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+export interface MaterialRule {
+  key: string;
+  days: number;
+  name: string;
+}
+
+// The material conditions that apply to this account for this kind of change
+// (on, ticked for the type, and for an Admin only when "Admins too").
+export async function materialRules(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  conditionType: DeliveryConditionType,
+  userRole: string
+): Promise<Map<string, MaterialRule>> {
+  const col = conditionType === "entry" ? "c.applies_entry" : "c.applies_job_edit";
+  const isAdmin = userRole === "admin" || userRole === "superadmin";
+  const rows: any[] =
+    (await queryDB(
+      `SELECT c.name, c.min_lead_days, c.apply_to_admins, i.material_key
+         FROM delivery_material_conditions c
+         JOIN delivery_material_condition_items i ON i.condition_id = c.id
+        WHERE c.enabled = 1 AND ${col} = 1`
+    ).catch(() => [])) || [];
+  const out = new Map<string, MaterialRule>();
+  for (const r of rows) {
+    if (isAdmin && !Number(r.apply_to_admins)) continue;
+    out.set(String(r.material_key), { key: String(r.material_key), days: Number(r.min_lead_days), name: String(r.name) });
+  }
+  return out;
+}
+
+// Checks every item's Delivery Date against the stricter of the general rule
+// and its material's rule; the first one too early gives the message.
+export async function leadTimeProblem(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  conditionType: DeliveryConditionType,
+  opts: { projectId?: number | null; budgetId?: number | null; userRole: string },
+  items: { material: string; date: string }[],
+  today: string
+): Promise<string | null> {
+  const general = await resolveMinLeadDays(queryDB, conditionType, opts);
+  const rules = await materialRules(queryDB, conditionType, opts.userRole);
+  for (const it of items) {
+    const d = String(it.date || "").slice(0, 10);
+    if (!d) continue;
+    const m = rules.get(materialKey(it.material));
+    const days = Math.max(general ?? -1, m?.days ?? -1);
+    if (days < 0) continue;
+    const earliest = addDaysToDateStr(today, days);
+    if (d < earliest) {
+      return m && m.days >= (general ?? -1)
+        ? `"${String(it.material).trim()}" needs at least ${days} day(s) notice (${m.name}) — the earliest allowed date is ${earliest}.`
+        : `Delivery Date needs at least ${days} day(s) notice — the earliest allowed date is ${earliest}.`;
+    }
+  }
+  return null;
+}

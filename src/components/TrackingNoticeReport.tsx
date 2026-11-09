@@ -18,7 +18,7 @@ import { ChevronDown, ChevronRight, FileDown, FileSpreadsheet, X } from 'lucide-
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
@@ -173,7 +173,7 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.length ? summary : [{ Note: 'No notices this month' }]), 'Summary');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(details.length ? details : [{ Note: 'No notices this month' }]), 'Details');
-    XLSX.writeFile(wb, `Tracking-Notice-Report-${report.month}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `Tracking-Notice-Report-${report.month}.xlsx`);
   };
 
   return createPortal(

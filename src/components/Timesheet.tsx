@@ -15,13 +15,14 @@ import { AttendanceCorrectionModal } from './AttendanceCorrectionModal';
 import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusModal';
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { LoadingBlock } from './LoadingBlock';
-import { AttendanceGauge, DayStatus, PeriodButton, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, periodLabel, useIsPhone } from './TimesheetPhone';
+import { AttendanceGauge, DayStatus, PeriodPill, PeriodSheet, PhoneDayCard, StatusFilter, TimesheetPeriod, TodayCheckInPill, periodLabel, useIsPhone } from './TimesheetPhone';
 
 interface TimesheetProps {
   token: string;
   // Kept for the caller's mobile tile-menu wiring, but no longer rendered as
-  // a Back button — matches ConveyanceClaimCard/ClaimCard, which accept this
+  // a Back button — matches BillClaimCard/ClaimCard, which accept this
   // same prop and rely on the bottom nav to leave the section instead.
   onBack?: () => void;
   // Superadmin/Admin-pinned Project for Remote Attendance (Admin Panel ->
@@ -158,14 +159,16 @@ const DateCard: React.FC<{
       // a blur layer each is what made other list pages stutter on Android
       // (see the Employee Directory / Job Entry Details fix). A flatter,
       // more opaque white gives the same glass look at no per-card cost.
-      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
+      // Desktop: one line per day (date | project | in | out | status) instead
+      // of a tall card with most of it empty; phone keeps the card.
+      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 md:px-4 md:py-2.5 md:flex md:items-center md:gap-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-2 md:contents">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 md:w-44 md:shrink-0">
           <Pencil className="w-3.5 h-3.5 text-slate-300" />
           {formatDate(dateStr)} <DayOfWeek dateStr={dateStr} />
         </span>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 md:order-3 md:ml-auto md:justify-end">
           {present ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
               <CheckCircle2 className="w-3 h-3" /> Present
@@ -202,18 +205,18 @@ const DateCard: React.FC<{
           )}
         </div>
       </div>
-      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Project</p>
-          <p className="font-semibold text-slate-700 mt-0.5 truncate">{present ? (projectNames || '—') : '—'}</p>
+      <div className="mt-2.5 grid grid-cols-3 gap-3 text-xs md:order-2 md:mt-0 md:flex-1 md:min-w-0 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Project</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0 truncate">{present ? (projectNames || '—') : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">In Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(earliestIn) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">In</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(earliestIn) : '—'}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Out Time</p>
-          <p className="font-semibold text-slate-700 mt-0.5">{present ? formatTime(latestOut) : '—'}</p>
+        <div className="md:flex md:items-baseline md:gap-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">Out</p>
+          <p className="font-semibold text-slate-700 mt-0.5 md:mt-0">{present ? formatTime(latestOut) : '—'}</p>
         </div>
       </div>
     </div>
@@ -283,6 +286,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // module access (GET /api/holidays is open to every signed-in account), so
   // Weekend/Holiday dates never show as Absent below.
   const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
+  // From GET /api/attendance/my-calendar — the same rules as the Monthly
+  // Attendance Report and payroll: days before joining are never Absent,
+  // and Leave on a supervisor's team sheet is Leave.
+  const [joiningDate, setJoiningDate] = useState<string | null>(null);
+  const [siteLeaveDates, setSiteLeaveDates] = useState<string[]>([]);
   // "YYYY-MM-DD" -> Delay / Extreme Delay, from GET /api/my-late-days
   // (fetched per visible window below, merged as the window moves).
   const [lateDays, setLateDays] = useState<Record<string, LateKind>>({});
@@ -348,7 +356,20 @@ useLiveRefresh(() => loadData());
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })),
+        // This account's own calendar with its Duty Roster laid over it
+        // (an Off day is a Weekend, a rostered shift on a holiday a working
+        // day). The plain calendar of its group if that isn't available.
+        fetch(apiUrl('/api/attendance/my-calendar'), { headers: { Authorization: `Bearer ${token}` } })
+          .then(async (r) => {
+            if (!r.ok) throw new Error('no calendar');
+            const d = await r.json();
+            if (!cancelledRef?.cancelled) {
+              setJoiningDate(d.joining_date || null);
+              setSiteLeaveDates(Array.isArray(d.site_leave_dates) ? d.site_leave_dates : []);
+            }
+            return new Response(JSON.stringify(d.holidays || []), { status: 200 });
+          })
+          .catch(() => groupReq.then((appliesTo) => fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } }))),
         fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
@@ -444,11 +465,14 @@ useLiveRefresh(() => loadData());
         map.set(d, l.leave_type_label || l.leave_type || 'Leave');
       }
     }
+    for (const d of siteLeaveDates) if (!map.has(d)) map.set(d, 'Leave (team sheet)');
     return map;
-  }, [leaves]);
+  }, [leaves, siteLeaveDates]);
 
-  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
-  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Days before this person joined aren't shown (never Absent), as on the
+  // Monthly Attendance Report.
+  const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today).filter((d) => !joiningDate || d >= joiningDate), [selYear, selMonth, today, joiningDate]);
+  const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo).filter((d) => !joiningDate || d >= joiningDate), [rangeFrom, rangeTo, joiningDate]);
   // Newest-to-oldest for display (today/last date at top) — monthDates/
   // rangeDates themselves stay oldest-to-newest since buildRangeDates'
   // MAX_DAYS cap and the Present/Absent counts below don't care about order.
@@ -548,7 +572,7 @@ useLiveRefresh(() => loadData());
       <div className="flex flex-col gap-3">
         <AttendanceGauge counts={gaugeCounts(datesAsc)} period={periodLabel(period)} filter={statusFilter} onFilter={setStatusFilter} />
         <div className="flex items-center justify-between px-1 pt-1">
-          <div className="text-[13px] font-bold text-zinc-700">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
+          <div className="text-[17px] font-bold text-slate-900">{statusFilter ? FILTER_TITLE[statusFilter] : 'Every day'}</div>
           {statusFilter && (
             <button type="button" onClick={() => setStatusFilter(null)} className="text-xs font-semibold text-[color:var(--g-accent,#7f00ff)] px-1 py-1.5">
               Show all
@@ -565,8 +589,17 @@ useLiveRefresh(() => loadData());
             const outs = (recs.map((r) => r.check_out_at).filter(Boolean) as string[]).sort();
             const holiday = holidayByDate.get(d);
             const times = recs.length ? `${formatTime(ins[0])} – ${outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}` : st === 'weekend' ? 'Weekend' : st === 'holiday' ? 'Holiday' : '—';
+            // First In to last Out, e.g. "8 h 44 m".
+            const worked =
+              ins.length && outs.length
+                ? (() => {
+                    const mins = Math.round((new Date(outs[outs.length - 1]).getTime() - new Date(ins[0]).getTime()) / 60000);
+                    return mins > 0 ? `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, '0')} m` : '';
+                  })()
+                : '';
+            const projects = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
             const where = recs.length
-              ? Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ') || 'Checked in'
+              ? [worked, projects].filter(Boolean).join(' · ') || 'Checked in'
               : st === 'leave'
               ? leaveByDate.get(d) || 'Leave'
               : holiday
@@ -578,6 +611,8 @@ useLiveRefresh(() => loadData());
                 key={d}
                 dateStr={d}
                 status={st}
+                inAt={ins.length ? formatTime(ins[0]) : undefined}
+                outAt={outs.length ? formatTime(outs[outs.length - 1]) : d === today ? 'now' : '—'}
                 times={times}
                 where={where}
                 correction={corr?.status === 'pending' ? 'pending' : corr?.status === 'rejected' ? 'rejected' : undefined}
@@ -606,7 +641,7 @@ useLiveRefresh(() => loadData());
           </div>
         )}
         {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
-            big rounded corners), same as Conveyance Bill Claim / My Claims /
+            big rounded corners), same as Bill Claim / My Claims /
             Leave Applications; the md: overrides keep the original plain
             white panel on desktop. */}
         {/* On a phone the cards (period button, gauge, days) sit straight on
@@ -633,11 +668,19 @@ useLiveRefresh(() => loadData());
               switcher uses. Extra top padding on mobile since the header row
               above is hidden there. */}
           {isPhone ? (
-            <div className="mx-3 mt-1">
-              <PeriodButton period={period} onClick={() => setSheetOpen(true)} />
+            <div className="mx-3 mt-2 flex flex-col gap-3" data-tour="ts-period">
+              <PeriodPill period={period} today={today} minYear={yearOptions[yearOptions.length - 1]} onOpen={() => setSheetOpen(true)} onChange={applyPeriod} />
+              {(() => {
+                // Today's check-in, whatever period is on screen.
+                const recs = byDate.get(today) || [];
+                const ins = (recs.map((r) => r.check_in_at).filter(Boolean) as string[]).sort();
+                if (!ins.length) return null;
+                const where = Array.from(new Set(recs.map((r) => r.project_name).filter(Boolean))).join(', ');
+                return <TodayCheckInPill at={formatTime(ins[0])} status={dayStatus(today)} where={where} />;
+              })()}
             </div>
           ) : (
-          <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
+          <div data-tour="ts-period" className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
@@ -662,9 +705,10 @@ useLiveRefresh(() => loadData());
             </div>
           )}
           {loading ? (
-            <LoadingBlock />
+            // Phone: the gauge and day cards' shape (SelfPageSkeleton).
+            isPhone ? <SelfBodySkeleton shape="timesheetDays" className="px-3 pt-3 pb-5" /> : <LoadingBlock />
           ) : (
-            <div className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
+            <div data-tour="ts-days" className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
               {/* Month Wise */}
               {tab === 'month' && isPhone && renderPhoneDays(monthDates, monthDatesDesc, "This month hasn't started yet.")}
               {tab === 'month' && !isPhone && (
@@ -689,7 +733,7 @@ useLiveRefresh(() => loadData());
                       <p className="text-sm">This month hasn't started yet.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 md:space-y-1.5">
                       {monthDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
@@ -815,7 +859,7 @@ useLiveRefresh(() => loadData());
                       <p className="text-sm">Pick a valid From / To date to see the report.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 md:space-y-1.5">
                       {rangeDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}

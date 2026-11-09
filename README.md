@@ -60,7 +60,7 @@ android/, capacitor.config.ts  ← APK বিল্ডের জন্য (৬ �
 তাই নতুন server-এ শুধু:
 1. খালি database বানান (নাম `.env`-এর `DB_NAME`-এর মতো)।
 2. `.env` ঠিক করুন (নিচে ৩ নং ধাপ)।
-3. `npm install` → `npm run build` → `npm start` (বা `npm run dev`)।
+3. `npm install` → `npm run build` → `npm start`। (`npm run dev` শুধু কোডে কাজ করার জন্য। live server-এ এটা চালালে কিছুই cache হয় না, মোবাইল অ্যাপ প্রতিবার খোলার সময় পুরো প্রোগ্রাম আবার নামায়।)
 
 Log-এ দেখাবে: `✅ Empty database: created the base tables from schema.sql.`
 
@@ -100,10 +100,11 @@ ADMIN_PASSWORD="ChangeThisPassword123"
 ```
 
 ⚠️ **Superadmin account UI থেকে register করা যায় না** — শুধু `.env` এর
-`ADMIN_EMAIL` / `ADMIN_PASSWORD` দিয়েই তৈরি হয়। সার্ভার প্রতিবার চালু
-হওয়ার সময় এই ভ্যালু অনুযায়ী Superadmin account create বা sync
-(name/password) করে নেয়। পাসওয়ার্ড বদলাতে চাইলে `.env` এ
-`ADMIN_PASSWORD` বদলে সার্ভার রিস্টার্ট করুন। **প্রথমবার লগইনের পরেই
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` দিয়েই তৈরি হয়। প্রথমবার চালু হলে
+account তৈরি হয়; পরে `.env`-এ `ADMIN_PASSWORD` বা `ADMIN_NAME` বদলে
+সার্ভার রিস্টার্ট করলে তবেই সেটা বসে (password ভুলে গেলে এভাবেই
+reset করুন)। App থেকে (Profile → Change Password) বদলানো password ও
+নাম রিস্টার্টে আর `.env`-এরটায় ফিরে যায় না। **প্রথমবার লগইনের পরেই
 ডিফল্ট পাসওয়ার্ড বদলে ফেলা উচিত।**
 
 ---
@@ -134,6 +135,7 @@ npm run dev
 npm run build     # frontend build (dist/) + server.ts কে dist/server.cjs এ bundle করে
 npm start          # dist/server.cjs চালায় (production)
 ```
+`npm start` (`dist/server.cjs`) সবসময় build করা app দেয়, `/assets/*` এক বছরের cache সহ, `NODE_ENV` দেওয়া না থাকলেও। শুধু `NODE_ENV=development` দিলে Vite dev server চলে। Dev server চললে log-এ `*** DEV MODE ***` লেখা আসে। live server-এ এটা দেখলে বুঝবেন ভুল ভাবে চলছে।
 Production সার্ভার হিসেবে permanently চালাতে PM2 ব্যবহার করতে পারেন:
 ```bash
 npm install -g pm2
@@ -257,7 +259,7 @@ Screen → Add, এই তিন ধাপ দেখায়। Home Screen-এ
 | সমস্যা | সমাধান |
 |---|---|
 | `⚠️ MySQL Connection failed` | XAMPP এ MySQL চালু আছে কিনা, `.env` এর DB_HOST/DB_USER/DB_PASSWORD/DB_NAME/DB_PORT ঠিক আছে কিনা চেক করুন |
-| Superadmin দিয়ে লগইন হচ্ছে না | `.env` এ `ADMIN_EMAIL`/`ADMIN_PASSWORD` সেট আছে কিনা দেখুন, সার্ভার রিস্টার্ট করুন — কনসোলে superadmin sync এর লগ দেখুন |
+| Superadmin দিয়ে লগইন হচ্ছে না | `.env` এ `ADMIN_EMAIL`/`ADMIN_PASSWORD` সেট আছে কিনা দেখুন; password ভুলে গেলে `.env`-এ নতুন `ADMIN_PASSWORD` দিয়ে সার্ভার রিস্টার্ট করুন — কনসোলে "Superadmin password set from .env" লগ দেখুন |
 | `Table 'xxx' doesn't exist` কোনো নতুন ফিচারে | `zk_devices`/`zk_attendance_logs` হলে ৫ নং ধাপ অনুসরণ করুন; অন্য টেবিল হলে সার্ভার একবার রিস্টার্ট দিন (self-healing migration আবার চলবে) |
 | APK তে লগইন/ডাটা লোড হচ্ছে না | Sign In স্ক্রিনে Server Address ঠিক দিয়েছেন কিনা দেখুন (PC এর LAN IP:PORT, একই WiFi তে থাকা লাগবে), Windows Firewall এ Node.js/পোর্ট 3000 allow করা আছে কিনা চেক করুন |
 | Employee Tracking কাজ করছে না (APK) | `capacitor.config.ts` এ `useLegacyBridge: true` আছে কিনা, ফোনে background location permission দেওয়া আছে কিনা দেখুন |

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 import { useScrolling } from '../lib/useScrolling';
 
-export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
+export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'billClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
 
 interface BottomNavProps {
   active: MobileSection;
@@ -91,7 +91,7 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
 export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [] }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
-    ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Claim', icon: Route }] : []),
+    ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Check In/Out', icon: Route }] : []),
     ...(canViewTimesheet ? [{ key: 'timesheet' as MobileSection, label: 'Timesheet', icon: Clock }] : []),
     canViewLeave
       ? { key: 'leave' as MobileSection, label: 'Leave', icon: CalendarClock }
@@ -212,6 +212,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         <button
           type="button"
           onClick={() => setMoreOpen((v) => !v)}
+          data-tour="nav-more"
           aria-label="More"
           aria-expanded={moreOpen}
           // Steps aside while the page scrolls, so it doesn't sit on the
@@ -299,6 +300,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         </svg>
 
         <div
+          data-tour="nav-bar"
           className="absolute inset-0 flex items-end gap-1 pb-1"
           style={{ paddingLeft: EDGE_PAD_PCT, paddingRight: EDGE_PAD_PCT }}
         >

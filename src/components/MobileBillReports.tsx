@@ -20,7 +20,7 @@ import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { MobileLimitHistoryReport } from './MobileLimitHistoryReport';
 import { inputCls, labelCls, MbSim, mbApi, monthLabel, monthsBetween, num, OperatorBadge, shiftMonth, thisMonth, tk } from './MobileBillParts';
@@ -203,7 +203,7 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([[current.title], filterText.map(([k, v]) => `${k}: ${v}`), [], current.head, ...current.body]);
     XLSX.utils.book_append_sheet(wb, ws, current.title.slice(0, 28).replace(/[\\/?*[\]:]/g, ''));
-    XLSX.writeFile(wb, `${current.title.replace(/[^\w]+/g, '-')}-${to}.xlsx`);
+    void saveWorkbookCrossPlatform(wb, `${current.title.replace(/[^\w]+/g, '-')}-${to}.xlsx`);
   };
   const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);

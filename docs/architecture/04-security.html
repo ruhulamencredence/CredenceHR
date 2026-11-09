@@ -84,8 +84,28 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
+<td>Asset ফেরত গ্রহণ</td>
+<td>ফেরত গ্রহণ (<code>POST /api/assets/assignments/:id/receive</code>) শুধু যিনি item-টা দিয়েছিলেন (assigned_by, অ্যাকাউন্ট বন্ধ না) বা Asset Management / Superadmin — অন্য কেউ, এমনকি কর্মী নিজেও না (403)। ফেরত পাঠাতে পারেন শুধু যাঁর নামে item। Returns to receive তালিকায় store keeper শুধু নিজের দেওয়া item দেখেন। এক item-এর ইতিহাস (<code>/api/assets/:id/timeline</code>) দেখে শুধু Asset Management, item-এর কর্মী (নিজের অংশ) আর যিনি দিয়েছিলেন; বাকিদের 403। বাইরের লোকের নাম ও মোবাইল শুধু এই হাতবদলের রেকর্ডে থাকে</td>
+<td><code>AssetManagementRoutes.ts</code></td>
+</tr>
+<tr>
+<td>অনুমোদনের approver বদল</td>
+<td>block / inactive / চলে যাওয়া account কোনো আবেদনের approver হিসেবে ধরা হয় না (server-এ <code>getCurrentStepApprovers</code>), নতুন আবেদনও তাঁর কাছে যায় না; অপেক্ষায় থাকা আবেদন কর্মীর এখনকার Supervisor বা Layer-এর active লোকের কাছে যায়, কেউ না থাকলে শুধু Superadmin সিদ্ধান্ত দেন — alert যায় শুধু আবেদনকারীর নিজের workspace-এর Superadmin (ও system owner)-এর কাছে, অন্য workspace-এর কাছে নয়। এই মিলিয়ে দেখা কোনো একটা company-র Admin Panel scope-এ চলে না, তাই sister company-র Supervisor হারিয়ে যান না। কে কখন approve করলেন <code>actions_json</code>-এ আগের মতোই থাকে</td>
+<td><code>server.ts</code> reconcilePendingApprovals</td>
+</tr>
+<tr>
+<td>Ride বাতিল</td>
+<td>start-এর আগের ride বাতিল server-এ যাচাই হয়: Pending — শুধু rider; Approved (গাড়ি নেই) — rider, শেষ approver বা Vehicle Management / Maintainer; গাড়ি দেওয়া — rider, driver, যিনি দিয়েছেন বা Vehicle Management; বাকিদের 403। শুরু হওয়া ride বাতিল হয় না</td>
+<td><code>VehicleManagementRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Vehicle drivers</td>
+<td>Inventory → Drivers দেখা Vehicle Management module-এ; driver যোগ / বদল / বাদ আলাদা 🔒 layer <code>manage_drivers</code> (ডিফল্টে কারও নেই, API-ও <code>requireModuleLayer</code> দিয়ে বন্ধ)। ride-এ driver বাছাই server-এও যাচাই হয়: তালিকা চালু থাকলে শুধু Active, মেয়াদি License-এর driver</td>
+<td><code>VehicleManagementRoutes.ts</code></td>
+</tr>
+<tr>
 <td>Login ID</td>
-<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো</td>
+<td>কর্মীর Login ID হলো তার Employee ID (যেমন <code>CPL-0201</code>), <code>users.username</code>-এ রাখা (ডাটাবেসে UNIQUE)। একই Employee ID দুবার দেওয়া যায় না: অন্য কোম্পানির কর্মী, অন্য অ্যাকাউন্টের username বা email-এর সাথে মিললেও সার্ভার 409 দেয় (নতুন কর্মী, এডিট, Data Import)। Employee ID বদলালে Login ID-ও বদলায়। ইমেইল দিয়েও লগইন চলে; Superadmin ও Project login আগের মতো। Admin Panel → Users → Change Login ID-এ (Users module + <code>edit_add</code> layer, সার্ভারেও যাচাই) বর্তমান email ও username দুটোই দেখায়, নতুন username দেওয়া যায় (<code>PUT /api/users/:id/username</code>): ৩–৫০ অক্ষর, শুধু অক্ষর/সংখ্যা/<code>.</code>/<code>-</code>/<code>_</code>, অন্যের username, email বা অন্য কর্মীর Employee ID হলে 400; হাতে দেওয়া username পরে Employee save-এ বদলায় না</td>
 <td><code>EmployeeLoginId.ts</code>, <code>EmployeeRoutes.ts</code>, <code>DataImportRoutes.ts</code></td>
 </tr>
 <tr>
@@ -95,7 +115,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>Superadmin</td>
-<td><code>.env</code>-এর <code>ADMIN_EMAIL/PASSWORD</code> থেকে তৈরি; API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role <code>user</code> হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না</td>
+<td><code>.env</code>-এর <code>ADMIN_EMAIL/PASSWORD</code> থেকে তৈরি; app থেকে বদলানো password restart-এ আর <code>.env</code>-এরটায় ফেরে না — <code>.env</code>-এ <code>ADMIN_PASSWORD</code> বদলে restart করলে তবেই সেটা বসে (শেষ বসানো password-এর bcrypt hash <code>startup_migrations</code>-এ, <code>startupOnce.ts</code>); API দিয়ে বানানো যায় না (নতুন "superadmin" চাইলেও role <code>user</code> হয়); ব্লক করা যায় না; পাসওয়ার্ড রিসেট প্রবাহে বদলানো যায় না</td>
 <td><code>server.ts</code> <code>seedAdminFromEnv</code>, <code>AccountBlock.ts</code>, টেস্ট</td>
 </tr>
 <tr>
@@ -105,8 +125,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>ভুল পাসওয়ার্ড</td>
-<td>অ্যাকাউন্টে ৫ বার ভুলে ১৫ মিনিট লক (সঠিক পাসওয়ার্ডও তখন চলে না); এক IP-তে ৩০ বার ভুলে অপেক্ষা; অচেনা ID-ও একইভাবে গোনা হয়</td>
-<td><code>LoginGuard.ts</code>, টেস্ট (২৫ ভুলের পর আটকায়)</td>
+<td>অ্যাকাউন্টে ৫ বার ভুলে ১৫ মিনিট লক (সঠিক পাসওয়ার্ডও তখন চলে না); এক IP-তে ৩০ বার ভুলে অপেক্ষা; অচেনা ID-ও একইভাবে গোনা হয়। <strong>চেনা ডিভাইস:</strong> আগে সফল login হওয়া ফোন / browser-এর সই করা token (HMAC, account-এ বাঁধা, ১৮০ দিন, password বদলালে বাতিল) থাকলে এই দুই লক তাকে আটকায় না — তার নিজের সীমা ১৫ মিনিটে ১০ বার ভুল। তাই অন্য কেউ ভুল password দিয়ে কাউকে বা পুরো অফিসকে আটকে রাখতে পারে না</td>
+<td><code>LoginGuard.ts</code>, টেস্ট (২৫ ভুলের পর আটকায়; trusted device ১৫টি case — <code>docs/test-logs/2026-11-07/scripts/trusted-device-login.mts</code>)</td>
 </tr>
 <tr>
 <td>অ্যাকাউন্ট আন্দাজ</td>
@@ -132,6 +152,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>একটি ফোন নিয়ম (অ্যাপ)</td>
 <td>নতুন ফোনে লগইন Superadmin-এর অনুমতির অপেক্ষায়; ফোন সরালে ওই ফোনের সেশন বন্ধ</td>
 <td><code>DeviceRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Bill Claim-এর নাম বদল</td>
+<td>আগের <code>conveyance</code> Admin module, <code>can_view_conveyance_claims</code> switch আর <code>/api/user-claims</code> এখন <code>bill_claim</code>, <code>can_view_bill_claims</code>, <code>/api/bill-claims</code>। চালু হওয়ার সময় দেওয়া অনুমতিগুলো (module, layer, App access, Access Template) নতুন নামে সরে যায়, তাই কেউ access হারায় না বা বেশি পায় না; পুরনো API path আর নেই (404)। প্রতিটা route আগের মতোই <code>requireModule("bill_claim")</code> / layer / switch দিয়ে আটকানো</td>
+<td><code>billClaimRename.ts</code>, <code>BillClaimRoutes.ts</code></td>
+</tr>
+<tr>
+<td>মোবাইল অ্যাপের আলাদা অনুমতি</td>
+<td>অ্যাপ (APK) পুরো বন্ধ করা যায়, বা module / Self Service switch আলাদা করে অ্যাপ থেকে সরানো যায়; অ্যাপ কখনো ওয়েবসাইটের চেয়ে বেশি পায় না। সার্ভারে প্রতিটা অ্যাপ request-এ <code>queryDB</code> অনুমতি ছোট করে দেয়, তাই UI আর API দুটোই আটকায়। নতুন অ্যাকাউন্টে অ্যাপ ডিফল্টে বন্ধ</td>
+<td><code>AppAccess.ts</code></td>
 </tr>
 <tr>
 <td>onboarding লগইন</td>
@@ -160,17 +190,28 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>Role:</strong> <code>superadmin</code> (সব), <code>admin</code> (শুধু যে মডিউল দেওয়া), <code>user</code> (কর্মী: শুধু নিজের তথ্য + চালু সুইচ)।</li>
 <li><strong>মডিউল অনুমতি:</strong> <code>requireModule("payroll")</code>; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট <code>AUTHZ-04</code>)।</li>
 <li><strong>Layer:</strong> মডিউলের ভেতরের সূক্ষ্ম ধাপ (<code>requireModuleLayer</code>)। <strong>🔒 layer</strong> ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: <code>salary_hold</code>, <code>audit_approve</code>, <code>accounts_pay</code>, <code>permanent_delete</code>, <code>mail_password</code>, <code>block_account</code>।</li>
-<li><strong>বিভাগ-সীমা:</strong> Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।</li>
+<li><strong>বিভাগ-সীমা:</strong> Attendance Report, Leave, Duty Roster, Bill Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে। Employee Tracking-এ বিভাগের সাথে একক কর্মীও বাছা যায় (<code>TrackingScope.ts</code>, <code>tracking_department_access</code>, <code>tracking_employee_access</code>): কিছু বাছা থাকলে live map, status, notice, notice report, path history, Stay Report ও Live Follow — সব route শুধু সেই মানুষদের দেখায়; বাইরের কারও id পাঠালে 403। কিছু বাছা না থাকলে আগের মতো সবাই।</li>
 <li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। <strong>Admin Panel-এর কাজে (strict scope)</strong> — <code>requireModule</code>/<code>requireModuleLayer</code> পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট <code>qa-companies.mjs</code> CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)। মাদার কোম্পানির HR-কে Superadmin sister company-র প্রবেশাধিকার ও সেখানকার Module Access দিলে তিনি company switcher-এ ওই কোম্পানিতে গিয়ে পুরো HR কাজ করেন — কর্মী, ব্যাংক অ্যাকাউন্ট, বেতন, payroll (টেস্ট <code>qa-group-hr.mjs</code> GH-01..09)। <strong>All companies mode</strong> (<code>users.can_work_all_companies</code>, ডিফল্টে বন্ধ, শুধু Superadmin দিতে পারেন, বদল <code>user_access_audit</code>-এ): request-এ <code>X-Company-Scope: all</code> থাকলে সার্ভার শুধু অনুমতি থাকলে মানে, এবং শুধু সেই কোম্পানিগুলো খোলে যেগুলোতে ওই অ্যাকাউন্টের প্রবেশাধিকার আছে; অনুমতি না থাকলে header কিছুই বদলায় না। Settings, Module Access ও নতুন রেকর্ড বাছা কোম্পানির থাকে; payroll চালানো প্রতি কোম্পানিতে আলাদা (টেস্ট GH-10..21)। একদম নতুন ডাটাবেসে প্রথম চালুতে <code>departments</code>, Module Access layer, <code>access_templates</code> ও <code>zk_devices</code>-এ <code>company_id</code> আসত না (তাই নতুন কর্মী যোগ ভেঙে যেত); এখন প্রথম চালুতেই আসে (QA tests workflow এটা প্রতিবার খালি ডাটাবেসে পরীক্ষা করে)।</li>
-<li><strong>Self-service সুইচ:</strong> Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant, SIM &amp; ID Card request ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ। SIM/ID card issue করা HR Operations-এর আলাদা <code>requisitions</code> layer (ডিফল্টে বন্ধ); কর্মী শুধু নিজের request দেখেন ও বাতিল করেন, joiner-এর request-এর route শুধু onboarding login-এর জন্য (<code>RequisitionRoutes.ts</code>)।</li>
-<li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → Audit approve → Accounts pay। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
+<li><strong>Self-service সুইচ:</strong> Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant, SIM &amp; ID Card request ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ। SIM/ID card issue করা HR Operations-এর আলাদা <code>requisitions</code> layer (ডিফল্টে বন্ধ); কর্মী শুধু নিজের request দেখেন ও বাতিল করেন, joiner-এর request-এর route শুধু onboarding login-এর জন্য (<code>RequisitionRoutes.ts</code>)। Book a Ride-এর save করা জায়গা (<code>users.can_save_ride_places</code>, <code>ride_saved_places</code>) এমনই একটা সুইচ, আর জায়গাগুলো শুধু নিজের — প্রতিটা অনুরোধ নিজের <code>user_id</code>-এ সীমিত, অন্যের id দিলে 404।</li>
+<li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → HR Director review (<code>hrd_review</code>) → MD কাগজে (HR তাঁর কপি attach করে, correction লেখে) → Accounts pay → Audit পরে, ঐচ্ছিক। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস পাঠিয়েছে সে অ্যাপে HR Director review দিতে পারে না; যে চালিয়েছে, পাঠিয়েছে বা Accounts-এ পাঠিয়েছে সে pay করতে পারে না; যে বানিয়েছে, পাঠিয়েছে বা pay করেছে সে audit করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। কাগজের ধাপ (HR Director-এর সই, MD-র কপি) সই করা scan/photo attach না করলে এগোয় না, আর প্রতিটি correction কে লিখল, কে apply করল, আগে-পরে net কত — <code>payroll_corrections</code>-এ থাকে। প্রতিটি print-এ নতুন version নম্বর ছাপা হয়, তাই পুরোনো কপিতে লেখা বদল ধরা যায়। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
 <li><strong>নিজের দাবি নিজে অনুমোদন নয়:</strong> কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট <code>LEAVE-12</code>)।</li>
 <li><strong>নিয়ম (<code>CLAUDE.md</code>):</strong> নতুন যেকোনো ফিচার/মেনু/বোতাম/API অনুমতির পেছনে থাকবে। UI লুকানো <strong>এবং</strong> API বন্ধ।</li>
-<li><strong>Admin Dashboard:</strong> পাতাটা সব Admin খোলেন, কিন্তু প্রতিটি অংশ আসে শুধু সেই মডিউল থাকলে — জন্মদিন (Employees), probation/চুক্তি/ডকুমেন্টের মেয়াদ (Employees বা HR Operations), উপস্থিতির অনুমোদন (Attendance), প্রতিটি "অপেক্ষার কাজ"-এর সংখ্যা তার নিজের মডিউলে (<code>AdminDashboardRoutes.ts</code>; টেস্ট QA-01)।</li>
+<li><strong>Admin Dashboard:</strong> পাতাটা সব Admin খোলেন, কিন্তু প্রতিটি অংশ আসে শুধু সেই মডিউল থাকলে — জন্মদিন (Employees), probation/চুক্তি/ডকুমেন্টের মেয়াদ (Employees বা HR Operations), উপস্থিতির অনুমোদন (Attendance), প্রতিটি "অপেক্ষার কাজ"-এর সংখ্যা তার নিজের মডিউলে (<code>AdminDashboardRoutes.ts</code>; টেস্ট QA-01)। "Coming up — next 60 days" (probation, চুক্তি, ডকুমেন্ট, অবসর, increment) শুধু HR Operations-এর <code>reminders_receive</code> layer থাকলে আসে — UI-তে না দেখানোর পাশাপাশি <code>/api/hr-ops/reminders/upcoming</code>-ও বন্ধ (<code>AdminDashboardReminders.tsx</code>)।</li>
 <li><strong>কর্মীর তথ্য যাচাই:</strong> ইমেইল <code>name@domain.tld</code> হতে হবে; জন্মতারিখ আসল, ভবিষ্যতের নয়, বয়স ১৪–১০০ (শ্রম আইন ২০০৬, ধারা ৩৪; <code>EmployeeValidation.ts</code>)। পুরনো রেকর্ডে শুধু বদলানো ঘরটা যাচাই হয়।</li>
+<li><strong>HR Data Import আলাদা অনুমতি:</strong> কোনো মডিউল (Employees, Leave, Attendance…) থাকলেই সেখানে Excel থেকে ডাটা ঢোকানো যায় না। লাগে নিজস্ব মডিউল <code>data_import</code> আর প্রতিটি ধরনের 🔒 layer (<code>import_employees</code>, <code>import_leave</code>, <code>import_movement_claims</code>, <code>import_bill_claims</code>, <code>import_attendance</code>, <code>import_office_attendance</code>) — সব ডিফল্টে বন্ধ। সার্ভারে <code>DataImportRoutes.ts</code> → <code>allowedKinds</code> মডিউল ও layer দুটোই দেখে (না থাকলে 403), মেনু ও পাতা <code>data_import</code> ছাড়া দেখায় না। বেতন import আগের মতো Payroll layer <code>salary_bulk_upload</code>।</li>
+<li><strong>Payroll-এর Salary sheet (Approval):</strong> প্রতিটি কর্মীর বেতনের ভাঙন স্ক্রিনে দেখা Payroll layer <code>approval_sheet</code>-এর পেছনে (<code>requireModuleLayer("payroll","approval_sheet")</code>, UI-ও লুকায়)। Month comparison (আগের মাসের সাথে তুলনা) আলাদা layer <code>month_compare</code>-এর পেছনে, একইভাবে। এটা শুধু দেখা — review / pay / audit <code>hrd_review</code> / <code>accounts_pay</code> / <code>audit_approve</code> আর কাজের বিভাজনের নিয়ম মেনে। Top Sheet (মাসের বেতন Branch / site অনুযায়ী, প্রতি সাইটের কর্মী-ভিত্তিক sheet, Excel / PDF) আলাদা layer <code>top_sheet</code>-এর পেছনে, একইভাবে (<code>requireModuleLayer("payroll","top_sheet")</code>, UI-ও লুকায়; শুধু "View only" থাকা Audit / Accounts-কে আলাদা টিক দিতে হয়)। টেস্ট: Payroll module নেই → 403, layer সেভ করা কিন্তু <code>top_sheet</code> নেই → 403, View only → 403, View only + Top Sheet → 200।</li>
+<li><strong>Attendance Report Builder (Custom Report):</strong> শর্ত দিয়ে হাজিরা খোঁজা Attendance Reports-এর layer <code>custom_report</code>-এর পেছনে — সার্ভারে <code>POST /api/attendance/report/custom</code> ও <code>GET …/custom/people</code> দুটোই <code>requireAdmin</code> + <code>hasModuleLayer("attendance_reports","custom_report")</code> (না থাকলে 403), UI-তে ট্যাবও লুকায়। ডাটা আসে <code>computeMonthlyReport</code> থেকে, তাই Department সীমা ও কোম্পানি ফিল্টার একই — সীমার বাইরের department চাইলে খালি ফেরে। একবারে সর্বোচ্চ ৯২ দিন, ১২টা শর্ত। AI Assistant-এর <code>attendance_custom_report</code> একই API প্রশ্নকারীর token দিয়ে ডাকে, তাই layer বা module না থাকলে Assistant-ও "অনুমতি নেই" বলে (টেস্ট: module নেই → 403, layer বাছা কিন্তু <code>custom_report</code> নেই → 403, HR-সীমিত Admin → শুধু HR)।</li>
+<li><strong>Assistant-এর Email নিজের mailbox থেকে:</strong> Assistant থেকে রিপোর্ট mail করলে Credence Mail-এর New message window খোলে আর mail যায় প্রেরকের নিজের mailbox দিয়ে, Mail module-এর নিজের সব নিয়মে (<code>users.can_use_mail</code>, শুধু নিজের mailbox, group-এ লেখার অনুমতি, encrypted password; অন্যের mailbox "view-as" খোলা থাকলে window খোলে না, আর server-ও view-as-এ পাঠানো আটকায়) — server-এর SMTP account দিয়ে নয়, তাই কেউ কোম্পানির সাধারণ ঠিকানা থেকে নিজের নামে mail পাঠাতে পারেন না, প্রাপক আসল প্রেরককে দেখেন। Email বোতাম দেখায় শুধু "Email reports" (<code>can_email_reports</code>) থাকলে; Mail না থাকলে বা mailbox না থাকলে পাঠানো যায় না। <code>/api/reports/email</code>-এর <code>via: "own"</code> একই নিয়মে (Mail না থাকলে 403, mailbox না থাকলে 409, ব্যর্থ চেষ্টাও <code>report_email_log</code>-এ)।</li>
+<li><strong>Profile ছবি Superadmin-এর অনুমোদনে:</strong> কেউ নিজের profile ছবি বদলালে নতুন ছবি সরাসরি বসে না, Superadmin Approve করলে তবেই (অনুপযুক্ত বা অন্যের ছবি দিয়ে পরিচয় গোলমাল ঠেকাতে)। অনুমোদনের তালিকা, ছবি আর Approve / Reject-এর API শুধু Superadmin-এর (অন্য admin 403, টেস্ট করা); একবারের বেশি সিদ্ধান্ত হয় না (409); Reject-এ কারণ বাধ্যতামূলক; সিদ্ধান্তের পর অনুরোধের ছবির কপি মুছে ফেলা হয়। Superadmin-এর নিজের ছবি আর onboarding-এর joiner-এর ছবি সরাসরি বসে।</li>
+<li><strong>Check-in project ও তারিখ:</strong> কে কোন project-এ কোন তারিখে check-in করবেন তা server ঠিক করে (<code>AttendanceProjects.ts</code> restrictedAttendanceProjects) — check-in, Correct Attendance ও Data Import তিন জায়গাতেই; ফোন থেকে অন্য project id পাঠালে 403। তালিকা বদলাতে লাগে Users module + <code>edit_add</code> layer, Superadmin-এর তালিকা কেউ বদলায় না, Admin-এর তালিকা শুধু Superadmin।</li>
+<li><strong>ZKTeco Cloud push (<code>/iclock/*</code>):</strong> ADMS protocol-এ কোনো password / token নেই, তাই এই route login ছাড়া খোলা। রক্ষা: (ক) শুধু Machines-এ register করা, চালু, "Cloud push" ধরনের মেশিনের Serial number মানা হয়, অচেনা SN কিছুই লিখতে পারে না; (খ) "Only from this internet address" দিলে শুধু সেই public IP; (গ) শুধু ATTLOG punch লেখা হয়, অন্য কোনো টেবিল ছোঁয় না, মেশিনকে কোনো command পাঠানো হয় না; (ঘ) একই punch দুবার লেখা হয় না (unique key)। SN জেনে কেউ ভুয়া punch পাঠাতে পারে — তাই সাইটের fixed IP থাকলে অবশ্যই দিন (সীমাবদ্ধতা ১৩)।</li>
+<li><strong>Payroll-এর সই করা কপি (scan / photo):</strong> <code>PAYROLL_FILES_DIR</code> ফোল্ডারে (public নয়) এলোমেলো নামে থাকে, ডাটাবেসে শুধু path; path ফোল্ডারের বাইরে গেলে বাতিল। শুধু PDF / JPG / PNG / WebP, ২০ MB পর্যন্ত, আর ফাইলের প্রথম বাইট ধরন মেলাতে হয় (নাম বদলানো ফাইল বাতিল)। Attach ও মোছা শুধু HR (<code>read</code>), আর শুধু সেই ধাপে (HR Director-এর কপি hrd_review-এ, MD-র কপি md_review / corrections-এ) — তারপর কপি বদলায় না। খোলা যায় শুধু অনুমোদনের পথে থাকা layer দিয়ে (<code>read</code>, <code>hrd_review</code>, <code>accounts_pay</code>, <code>audit_approve</code>, <code>payroll_view</code>), <code>nosniff</code> সহ।</li>
 </ol>
 <hr />
 <h2 id="_2">৫. ডাটা সুরক্ষা</h2>
+<ul>
+<li><strong>নিজের profile ছবি cache হয় না:</strong> <code>/api/profile/photo</code> সব অ্যাকাউন্টের জন্য একই URL, তাই <code>Cache-Control: no-store</code> (আর <code>Vary: Authorization</code>)। আগে ৫ মিনিট cache থাকত বলে একই ফোনে account বদলালে আগের জনের ছবি দেখাত। অন্যের ছবি id দিয়ে (<code>/api/profile/photo/:userId</code>) আগের মতো কয়েক মিনিট রাখা হয়।</li>
+</ul>
 <table>
 <thead>
 <tr>
@@ -211,6 +252,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>টেস্ট <code>qa-concurrency.mjs</code> C1–C9</td>
 </tr>
 <tr>
+<td>Chat-এর ফাইল (folder-এ)</td>
+<td>ফাইলের নাম এলোমেলো (পাঠানো নাম নয়), path ঠিক folder-এর ভেতরে কিনা প্রতিবার যাচাই হয় (<code>..</code> বা অন্য folder দিলে 404); folder ওয়েবে খোলা নয়, শুধু chat-এর সদস্য API দিয়ে পান (অন্যরা 403); <code>X-Content-Type-Options: nosniff</code>। folder-এর অনুমতি (শুধু server account) আর ব্যাকআপ আপনাদের হাতে</td>
+<td><code>chatFiles.ts</code>, <code>ChatRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Notice-এর ছবি ও সংযুক্তি</td>
+<td>ফাইল folder-এ (<code>NOTICE_FILES_DIR</code>), নাম এলোমেলো, path folder-এর বাইরে গেলে খোলে না; folder ওয়েবে খোলা নয় — ফাইল পান শুধু Notices module-এর লোক আর যাঁর জন্য notice এখন live (অন্যরা 403)। শুধু ছবি (PNG/JPG/WebP/GIF — প্রথম byte মিলিয়ে, নাম বদলানো ফাইল নয়) ও অফিস-ডকুমেন্ট নেওয়া হয়, .exe ইত্যাদি নয়; ছবি ৫ MB, ফাইল ২০ MB। লেখা আগের মতো server-এ পরিষ্কার হয় (script, iframe, event handler বাদ)। "Who read it" ও email আলাদা 🔒 layer (<code>notice_read_report</code>, <code>notice_email</code>)। Animation library-তে Lottie যোগ / মোছা আলাদা 🔒 layer <code>notice_animations</code> (API-তেও 403); শুধু Lottie JSON (layers, w, h থাকতে হবে), ৩ MB পর্যন্ত, আর ভেতরের expression (JavaScript) server-এ বাদ দিয়ে রাখা হয় — notice-এ বসানো animation-ও একইভাবে</td>
+<td><code>NoticeRoutes.ts</code>, <code>noticeFiles.ts</code>, <code>NoticeSafety.ts</code></td>
+</tr>
+<tr>
 <td>সময়ের সঠিকতা</td>
 <td>Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল</td>
 <td>টেস্ট <code>qa-dates.mjs</code> DT-11..13b</td>
@@ -236,8 +287,43 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>TrackingNoticeCard.tsx</code>, <code>locationDisclosure.tsx</code></td>
 </tr>
 <tr>
+<td>Chat group-এর তথ্য ও setting</td>
+<td>নাম / photo / description বদল: group admin (বা "Edit group info" সবার জন্য খোলা থাকলে যেকোনো member); "Only admins…" setting শুধু admin; "Only admins can send" REST, socket ও forward তিন পথেই server আটকায়। Group photo শুধু member-রা আনতে পারে। Star, Mute, Clear chat প্রত্যেকের নিজের — অন্য কেউ দেখে না, অন্যের message মোছে না। Superadmin সবসময় admin।</td>
+<td><code>ChatRoutes.ts</code> <code>roomRules</code>, <code>PushNotificationService.ts</code> (mute)</td>
+</tr>
+<tr>
+<td>Chat group invite link ও disappearing message</td>
+<td>Link শুধু group admin বানায় / reset / বন্ধ করে; code ১৬ byte random (<code>crypto.randomBytes</code>), অনুমান করা যায় না; link-এ শুধু নাম, সদস্য-সংখ্যা ও description দেখায়, member বা message নয়; যোগ দিতে Chat-এর অনুমতি লাগে, আর যোগ দিলে সবাই chat-এ "joined using this group's invite link" দেখে। Disappearing message সময় পেরোলে সব API থেকে বাদ, তারপর ডাটাবেস ও ফাইল থেকে মুছে যায় (ব্যাকআপে আগের কপি থাকতে পারে)।</td>
+<td><code>ChatRoutes.ts</code> (invite, sweep)</td>
+</tr>
+<tr>
+<td>Group call</td>
+<td>শুরু ও যোগ দেওয়া: শুধু ওই group-এর member, যাঁর Calls অনুমতি আছে (server প্রতিবার যাচাই করে); signal শুধু একই call-এর দুই participant-এর মাঝে যায়; সর্বোচ্চ ৮ জন; media phone-to-phone বা TURN দিয়ে (DTLS-SRTP এনক্রিপ্টেড), server-এ কোনো audio / video জমা হয় না।</td>
+<td><code>GroupCallRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Project-এর বাইরে থেকে হাজিরা</td>
+<td>নিজের check-in project-এর radius-এর বাইরে দেওয়া In / Out সরাসরি হাজিরা হয় না; কারণ সহ approval-এর অনুরোধ হয়ে Timesheet-এর approval chain পার হলে তবেই <code>attendance</code>-এ লেখা হয়। জায়গা (GPS) ও দূরত্ব অনুরোধে থাকে, approver দেখেন। Server নিজে GPS দিয়ে আবার মাপে, তাই app-এর পাঠানো "offsite" দিয়ে কেউ নিজের project-এর নিয়ম এড়াতে পারে না (ভেতরে থাকলে সাধারণ হাজিরা)।</td>
+<td><code>AttendanceRoutes.ts</code> <code>offsitePunch</code>, <code>finalizeAttendanceCorrection</code></td>
+</tr>
+<tr>
+<td>বেতন বন্ধ হওয়া মাসের হাজিরা</td>
+<td>যে বেতন-মাসের payroll Processed / Paid, সেখানে Timesheet সংশোধন জমা দেওয়া ও approve করা দুটোই server আটকায় (approve-এর আগেই যাচাই, তাই আধা-approve হয় না) — দেওয়া বেতন আর হাজিরার রেকর্ড আলাদা হয়ে যায় না।</td>
+<td><code>PayrollRoutes.ts</code> <code>closedPayMonthFor</code>, <code>server.ts</code> performApprovalAction / finalizeAttendanceCorrection</td>
+</tr>
+<tr>
+<td>ফোন / ব্রাউজারে Dashboard-এর জমানো কপি</td>
+<td>Dashboard যেন loading ছাড়া খোলে, তাই কার্ডগুলোর শেষ data (আজকের In/Out, ছুটির হিসাব, Pending Approvals, ছুটির calendar, Ride / Asset / Team badge, Tracking-এর শুধু সংখ্যা — মানুষের তালিকা নয়) ডিভাইসের <code>localStorage</code>-এ থাকে (<code>src/lib/screenCache.ts</code>)। চাবি অ্যাকাউন্ট + কোম্পানি অনুযায়ী, তাই অন্য login বা অন্য কোম্পানির data কখনো দেখায় না; ৭ দিনের পুরোনো হলে বাদ; <strong>logout ও নতুন login-এ সব মুছে যায়</strong>। শুধু সেটুকুই থাকে যা ওই অ্যাকাউন্টকে server আগেই দেখিয়েছে; প্রতিবার খোলার পর একই API (একই অনুমতি যাচাই) থেকে নতুন data এসে বদলে দেয়, অনুমতি বাতিল হলে কার্ড সরে যায়। Approve / Reject সবসময় server-এ যাচাই হয়।</td>
+<td><code>screenCache.ts</code>, <code>App.tsx</code> (<code>clearScreenCache</code>)</td>
+</tr>
+<tr>
+<td>ফোন / ব্রাউজারে না পাঠানো form-এর খসড়া</td>
+<td>Bill Claim-এর নতুন claim আর Check In/Out-এর Purpose লেখার মাঝে অ্যাপ reload / বন্ধ হলে লেখা যেন না হারায়, তাই নিজের লেখা অংশটুকু (তারিখ, bill-এর সারি, বিবরণ — ফাইল নয়) ডিভাইসের <code>localStorage</code>-এ থাকে (<code>src/lib/formDraft.ts</code>)। চাবি অ্যাকাউন্ট অনুযায়ী, অন্য login দেখে না; ৩ দিন পর বাদ; পাঠালে মুছে যায়; <strong>logout-এ সব খসড়া মুছে যায়</strong>। পাঠানোর সময় server আগের মতোই সব যাচাই করে — খসড়া কোনো অনুমতি দেয় না।</td>
+<td><code>formDraft.ts</code>, <code>App.tsx</code> (<code>clearAllDrafts</code>)</td>
+</tr>
+<tr>
 <td>AI Assistant</td>
-<td>আসল API-কে প্রশ্নকারীর <strong>নিজের token</strong> দিয়ে ডাকে, তাই অধিকারের বাইরে কিছু দেখায় না; কিছু লেখে না; Gemini চালু না থাকলে কোনো ডাটা বাইরে যায় না</td>
+<td>আসল API-কে প্রশ্নকারীর <strong>নিজের token</strong> দিয়ে ডাকে, তাই অধিকারের বাইরে কিছু দেখায় না — সব রিপোর্টও সেই রিপোর্টের নিজের API দিয়ে, database সরাসরি কখনো নয়; যেখানে API পাতার চেয়ে ঢিলা (PEPM entries) সেখানে পাতার module + layer নিয়ম আগে যাচাই (<code>hasModuleLayer</code>); ৮ রকম অনুমতি-মিশ্রণে (module নেই, শুধু Claims, Payroll view-only / sheet+log, admin+Roster, Reports layer আছে/নেই, Superadmin) ২২টা রিপোর্ট-প্রশ্নে পরীক্ষিত; নিজে কিছু লেখে না — ছুটি, Book a Ride, হাজিরা ঠিক করা, Check In/Out-এর খসড়া কার্ড শুধু কর্মী নিজে বোতাম চাপলে পাতার একই API-তে যায় (একই যাচাই, একই অনুমোদন); Gemini চালু না থাকলে কোনো ডাটা বাইরে যায় না। Voice আলাদা সুইচ (<code>can_use_assistant_voice</code>, শুরুতে বন্ধ, server-এও যাচাই): কণ্ঠের রেকর্ড শুধু লিখে নেওয়ার জন্য Google-এ যায়, আমাদের সার্ভারে বা ডাটাবেসে জমা হয় না; সর্বোচ্চ ৪ MB, প্রশ্নের হার-সীমা একই</td>
 <td><code>AiAssistantRoutes.ts</code></td>
 </tr>
 </tbody>
@@ -246,13 +332,28 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <h2 id="xss-cors-header">৬. ওয়েব নিরাপত্তা (XSS, CORS, Header)</h2>
 <ul>
 <li><strong>XSS:</strong> React ডিফল্টে সব লেখা escape করে। যেখানে HTML দেখানো দরকার (Notice, Mail): সার্ভারে <code>sanitize-html</code> (<code>NoticeSafety.ts</code>: শুধু সাধারণ ট্যাগ; script, frame, form, <code>onerror</code>, <code>javascript:</code> লিংক, CSS <code>url()</code> বাদ; Lottie expression বাদ), সংরক্ষণ ও পড়া <strong>দুবারই</strong>; ব্রাউজারে DOMPurify (<code>noticeHtml.ts</code>, <code>MailBody.tsx</code>)। টেস্ট: <code>&lt;script&gt;</code> ও <code>onerror</code> ফেরে না।</li>
-<li><strong>CORS:</strong> <code>CORS_ORIGINS</code> সেট করলে শুধু ওই ঠিকানা (টেস্টে <code>evil.example</code> পায় না)। <strong>সেট না করলে সবাই ডাকতে পারে</strong> ও সার্ভার চালুর সময় সতর্কবার্তা ছাপে (<code>WebSecurity.ts</code>)।</li>
+<li><strong>CORS:</strong> <code>CORS_ORIGINS</code> সেট করলে শুধু ওই ঠিকানা (টেস্টে <code>evil.example</code> পায় না)। <strong>সেট না করলে সবাই ডাকতে পারে</strong> ও সার্ভার চালুর সময় সতর্কবার্তা ছাপে (<code>WebSecurity.ts</code>)। আগে <code>.env</code>-এ দেওয়া <code>CORS_ORIGINS</code> কাজ করত না, কারণ <code>.env</code> লোড হওয়ার আগেই মানটা পড়া হয়ে যেত, তাই CORS সবার জন্য খোলা থাকত। এখন <code>server.ts</code>-এর একেবারে প্রথম import হিসেবে <code>dotenv/config</code> লোড হয়, তাই <code>.env</code>-এর মানই কাজ করে।</li>
 <li><strong>Header (প্রতি উত্তরে):</strong> <code>X-Content-Type-Options: nosniff</code>, <code>X-Frame-Options: SAMEORIGIN</code>, <code>Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'</code>, <code>Referrer-Policy: strict-origin-when-cross-origin</code>, <code>Permissions-Policy</code> (ক্যামেরা, মাইক, লোকেশন শুধু নিজের); HTTPS হলে <code>Strict-Transport-Security</code>।</li>
 <li><strong>CSRF:</strong> token <code>Authorization</code> header-এ যায়, কুকিতে নয়; তাই ব্রাউজার নিজে থেকে অন্য সাইট থেকে অনুরোধ পাঠালে token যাবে না।</li>
 <li><strong>Android app download (<code>/downloads/*.apk</code>, লগইন ছাড়াই খোলা):</strong> শুধু <code>downloads/</code> (বা <code>APK_DIR</code>) ফোল্ডারের নির্দিষ্ট নামের ফাইল পাঠায়। নামে <code>/</code> বা <code>..</code> থাকলে 404, তাই ফোল্ডারের বাইরের ফাইল পাওয়া যায় না। ফাইলটা সত্যিই APK কিনা (ভেতরে <code>AndroidManifest.xml</code>) পরীক্ষা করে পাঠায়, নইলে 404। APK-কে ঘিরে থাকা zip-এর ভেতরের APK বের করে পাঠায়, অন্য কিছু নয় (<code>AndroidApkRoute.ts</code>, টেস্ট <code>npm run test:apk</code>)। <code>GET /api/app/android-latest</code>-ও লগইন ছাড়া খোলা, কারণ লগইন পাতাতেও app-কে update-এর কথা জানাতে হয়। এটা শুধু ওই APK-এর version নম্বর আর download ঠিকানা দেয়, অন্য কোনো তথ্য নয়। app (<code>MainActivity.java</code>) পাতার কোনো download নিজে খোলে না, শুধু <code>http(s)</code> ঠিকানা ফোনের browser-কে দিয়ে দেয়।</li>
+<li><strong>Android app শুধু domain-এ চলে (<code>capacitor.config.ts</code>):</strong> APK server-এর IP-তে নয়, শুধু <code>https://</code> domain খোলে। বানানোর সময় <code>CAP_SERVER_URL</code>-এ IP বা সাধারণ <code>http://</code> ঠিকানা দিলে build-ই থামে (ব্যতিক্রম শুধু USB দিয়ে পরীক্ষার <code>http://localhost</code>)। কারণ: চ্যাট call আর voice-এ microphone দিতে WebView নিরাপদ (https, domain) ঠিকানা চায়, আর domain-এর certificate IP-র জন্য নয়। live build-এ <code>cleartext</code> বন্ধ, আর WebView শুধু ওই domain-এর ভেতরে চলে; অন্য ঠিকানার (যেমন IP) লিংক ফোনের browser-এ খোলে, app-এর ভেতরে নয়।</li>
 <li><strong>ত্রুটির উত্তর:</strong> সব <code>/api</code> উত্তর JSON; অজানা ঠিকানায় 404 <code>{error}</code>; ভাঙা JSON-এ 400 <code>{error}</code>; ভেতরের ত্রুটির বিবরণ বাইরে যায় না (<code>ApiErrors.ts</code>)।</li>
 </ul>
 <hr />
+<ul>
+<li><strong>ফোনের কল-পর্দা থেকে Decline:</strong> <code>POST /api/calls/push-decline</code> sign-in ছাড়া চলে, কিন্তু শুধু সেই কলের ৪৮-অক্ষরের এলোমেলো চাবি দিলে — চাবিটা শুধু callee-র নিজের ফোনের push-এ যায়, আর কাজ করে শুধু কল বাজতে থাকা অবস্থায়, শুধু Decline-এর জন্য (<code>CallRoutes.ts</code>)।</li>
+<li><strong>কল চলাকালীন foreground service:</strong> নতুন Android অনুমতি <code>FOREGROUND_SERVICE_MICROPHONE</code> ও <code>FOREGROUND_SERVICE_CAMERA</code> (<code>CallService.java</code>)। service শুধু কল চলার সময় চলে, সবসময় দেখা যায় এমন "Call in progress" notification সহ। microphone/camera-র অনুমতি আগে থেকে দেওয়া না থাকলে সেই type নেওয়া হয় না, আর কল শেষ হলেই বন্ধ হয়। Hang up বোতাম app-এর ভেতরের receiver (<code>exported=false</code>), বাইরের কোনো app সেটা চালাতে পারে না।</li>
+<li><strong>Partner app থেকে SSO (360 ERP ও অন্যান্য, <code>Erp360InboundSsoRoutes.ts</code>, guide <code>docs/CredenceHR-SSO-API.md</code>):</strong> প্রতিটা application-এর নিজের App ID ও Secret, IP তালিকা, সীমা ও চালু/বন্ধ, একটা বন্ধ বা মুছলে বাকিগুলো চলে। service API শুধু HTTPS-এ, <code>X-App-Id</code> + <code>X-App-Secret</code> দিয়ে। secret ৬৪ অক্ষরের এলোমেলো, database-এ শুধু SHA-256, তুলনা timing-safe। client-ভিত্তিক IP তালিকা, প্রতি মিনিটের সীমা আর route-এর অনুমতি। প্রতিটা call <code>api_access_logs</code>-এ। মানুষ মেলে email আর Employee ID দুটো দিয়েই, কোনো account নতুন তৈরি হয় না। sign-in link-এর token ২৫৬-bit, একবারই চলে (এক <code>UPDATE</code>-এ ব্যবহৃত), মেয়াদ ৩০–৬০০ সেকেন্ড (ডিফল্ট ১২০), database-এ শুধু hash, পেজ খুলেই ঠিকানা থেকে মুছে যায়। consume-এ IP-প্রতি মিনিটে ৩০ চেষ্টার সীমা। sign-in-এর বাকি সব যাচাই password-এর একই <code>finishLogin()</code>। সব চেষ্টা <code>sso_login_logs</code>-এ। application শুধু Superadmin যোগ করতে, বদলাতে, বন্ধ করতে ও মুছতে পারেন।</li>
+<li>
+<p><strong>কল আবার জোড়া লাগা:</strong> নেট কাটার পর <code>call:rejoin</code> শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (<code>CallRoutes.ts</code>)।</p>
+</li>
+<li>
+<p><strong>Disappearing messages:</strong> চালু করা আলাদা switch (<code>users.can_use_disappearing</code>, শুরুতে বন্ধ) ছাড়া হয় না — server নিজে যাচাই করে; কারণ সেই message চিরতরে মুছে যায়, কোম্পানি চাইলে কাউকেই না দিয়ে chat-এর রেকর্ড রাখতে পারে।</p>
+</li>
+<li>
+<p><strong>Live all (Employee Tracking):</strong> <code>watch-many</code> / <code>unwatch-many</code> একক Live Follow-এর মতোই <code>tracking</code> module + <code>live</code> layer চায়, প্রতিটা id-কে অ্যাকাউন্টের Tracking সীমায় যাচাই করে, একবারে সর্বোচ্চ ১০০ জন (<code>LiveTrackingRoutes.ts</code>)।</p>
+</li>
+</ul>
 <h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
 <p>(<code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>, <code>DocumentVaultRoutes.ts</code>)
 - পাঠানোর সময় মূল ফাইলের <strong>SHA-256</strong> স্থির; প্রতি স্বাক্ষরে আবার মেলানো; সই করা PDF-এর SHA-256-ও রাখা।
@@ -318,6 +419,21 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>—</td>
 </tr>
 <tr>
+<td>Recruitment: interview-এর প্রতিটি বদল (আগের/নতুন সময় ও জায়গা, কারণ, কে) ও candidate-কে পাঠানো প্রতিটি email (কাকে, বিষয়, লেখা, পাঠানো/ব্যর্থ)</td>
+<td><code>candidate_interview_events</code>, <code>candidate_emails</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>অনুমোদনে ad-hoc approver যোগ (কে, কাকে, কারণ) ও তাঁর সিদ্ধান্ত</td>
+<td><code>approval_requests.actions_json</code> (<code>adhoc_added</code>, <code>adhoc: true</code>)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Alerts — কখনো মোছা হয় না (মোছার API নেই; বেলের popup শুধু লুকায়)</td>
+<td><code>alerts</code> (<code>hidden_in_bell</code>)</td>
+<td>—</td>
+</tr>
+<tr>
 <td>সেশন</td>
 <td><code>user_sessions</code> (token hash, শেষ ব্যবহার)</td>
 <td>৩০ দিন অব্যবহৃত হলে পরিষ্কার</td>
@@ -326,7 +442,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </table>
 <hr />
 <h2 id="secret">৯. Secret ব্যবস্থাপনা</h2>
-<p><code>.env</code> git-এ নেই (<code>.gitignore</code>: <code>.env*</code>, শুধু <code>.env.example</code> আছে); <code>.jwt-secret</code>-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (<code>GEMINI_API_KEY</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>ESIGN_CERT_*</code>, <code>ERP360_APP_SECRET</code>, Firebase, SMTP সবই <code>.env</code>/পরিবেশ থেকে)।
+<p><code>.env</code> git-এ নেই (<code>.gitignore</code>: <code>.env*</code>, শুধু <code>.env.example</code> আছে); <code>.jwt-secret</code>-ও git-এ নেই। কোডে কোনো API key/পাসওয়ার্ড লেখা নেই (<code>GEMINI_API_KEY</code> / <code>GEMINI_API_KEYS</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>ESIGN_CERT_*</code>, <code>ERP360_APP_SECRET</code>, Firebase, SMTP সবই <code>.env</code>/পরিবেশ থেকে)।
 <strong>মনে রাখার:</strong> <code>.env.example</code>-এ <code>ADMIN_PASSWORD="ChangeThisPassword123"</code>। লাইভে অবশ্যই বদলাবেন।</p>
 <hr />
 <h2 id="_3">১০. জানা সীমাবদ্ধতা (সৎ তালিকা)</h2>
@@ -412,11 +528,41 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>নিম্ন</td>
 <td>অ্যাপ forge দিয়ে শুধু সার্টিফিকেট খোলে ও স্বাক্ষর দেয়, যাচাই করে না; নতুন সংস্করণ এলে আপডেট</td>
 </tr>
+<tr>
+<td>১৩</td>
+<td>ZKTeco Cloud push-এ (ADMS) মেশিনের কোনো গোপন চাবি নেই — শুধু Serial number ও (দিলে) IP দিয়ে চেনা হয়</td>
+<td>নিম্ন–মাঝারি (ভুয়া punch)</td>
+<td>সাইটের fixed IP "Only from this internet address"-এ দিন; HTTPS চালু রাখুন; Machines-এ আজকের punch সংখ্যা নজরে রাখুন</td>
+</tr>
+<tr>
+<td>১৪</td>
+<td>Bill Claim-এর সংযুক্তি ফাইলের ভেতর যাচাই হয় না (HTML-কে "PDF" নাম দিলে জমা হয়; ফেরত দেয় PDF হিসেবে, <code>nosniff</code> সহ)</td>
+<td>নিম্ন</td>
+<td>পরিকল্পনা L1: payroll ফাইলের মতো <code>looksLikeType</code> বসানো (<code>docs/test-logs/2026-11-07/</code>)</td>
+</tr>
+<tr>
+<td>১৫</td>
+<td>এক বিলের কোনো সাধারণ সর্বোচ্চ সীমা নেই (category-তে না দিলে)</td>
+<td>নিম্ন (approval লাগে)</td>
+<td>পরিকল্পনা L2: Bill Claim Policy-তে কোম্পানি-জুড়ে সীমা</td>
+</tr>
+<tr>
+<td>১৬</td>
+<td>চেনা ডিভাইসের token ফোন / browser-এর localStorage-এ থাকে; কেউ সেটা চুরি করলে ওই account-এ ১৫ মিনিটে ১০ বার পর্যন্ত password চেষ্টা করতে পারে (account-এর ৫-বার লক তাকে আটকায় না)। নতুন ফোনে প্রথম login আর বন্ধ account আগের মতোই অন্য কেউ ১৫ মিনিট আটকাতে পারে</td>
+<td>নিম্ন</td>
+<td>XSS রোধ কড়া রাখা (token-এর মতোই); password বদলালে সব token বাতিল হয় (আগে অফিস-জুড়ে ১৫ মিনিট আটকে যাওয়ার সমস্যা ছিল — ৭ নভেম্বর ঠিক করা)</td>
+</tr>
+<tr>
+<td>১৭</td>
+<td>Mail template editor-এ HTML পরিষ্কার না করে দেখায় (template শুধু নিজের)</td>
+<td>খুব নিম্ন</td>
+<td>পরিকল্পনা L7: <code>sanitizeMailHtml</code></td>
+</tr>
 </tbody>
 </table>
 <hr />
 <h2 id="_4">১১. আমাদের নিজস্ব টেস্ট (প্রমাণ হিসেবে দেখানো যায়)</h2>
-<p>লগ: <code>docs/test-logs/2026-10-19/</code> ও <code>2026-10-25/</code>।</p>
+<p>লগ: <code>docs/test-logs/2026-10-19/</code>, <code>2026-10-25/</code> ও <code>2026-11-07/</code> (পুরো অ্যাপ: ১৩টা QA suite ২৬৯ check পাস, ৯৬৪টা API-র অনুমতি sweep, ৪ রকম user-এর ৫৫২ বার পাতা খোলা — JS/server error ০)।</p>
 <table>
 <thead>
 <tr>
@@ -476,6 +622,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>এই টেস্টগুলো প্রতি push-এ GitHub-এ নিজে চলে: <strong>QA tests</strong> workflow (<code>.github/workflows/qa-tests.yml</code>, <code>tests/qa/run-all.sh</code>) — প্রতিটা টেস্ট নতুন খালি ডাটাবেসে; ফল Actions-এর "qa-results"-এ।</p>
+<p>৭ নভেম্বরের টেস্টে ধরা এবং <strong>ঠিক হওয়া</strong>: PEPM Budget / item / MPR No / Job-এর API Budget switch দেখত না (এখন <code>requireBudgetRead</code>), Admin Dashboard অনুমতি-ছাড়া module-এর tile দেখাত ও আটকানো request পাঠাত।</p>
 <p>২৫ অক্টোবরের আগে ধরা এবং এখন <strong>ঠিক হওয়া</strong> জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।</p>
 <hr />
 <h2 id="_5">১২. দুর্ঘটনা ঘটলে কী করা যায় (প্রযুক্তিগত হাতিয়ার)</h2>

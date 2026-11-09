@@ -21,6 +21,24 @@ erDiagram
     varchar module_key
     int company_id
   }
+  api_access_logs {
+    int id PK
+    int client_id
+    varchar app_id
+    varchar route
+    varchar ip
+    int status
+    varchar message
+  }
+  api_clients {
+    int id PK
+    varchar name
+    varchar app_id
+    tinyint is_active
+    text allowed_ips
+    varchar allowed_routes
+    int rate_per_minute
+  }
   employee_template_assignments {
     int id PK
     int employee_user_id FK
@@ -42,6 +60,7 @@ erDiagram
     varchar ip
     varchar identifier
     tinyint success
+    varchar device
   }
   password_reset_codes {
     int id PK
@@ -86,6 +105,15 @@ erDiagram
     int company_id
     timestamp visited_at
   }
+  profile_photo_requests {
+    int id PK
+    int user_id FK
+    varchar photo_mimetype
+    longblob photo_data
+    enum status
+    timestamp decided_at
+    varchar reject_reason
+  }
   session_policy {
     int id PK
     int web_hours
@@ -93,12 +121,39 @@ erDiagram
     int app_days
     int app_idle_days
   }
+  sso_login_logs {
+    int id PK
+    int user_id FK
+    int request_id
+    int client_id
+    varchar ip
+    varchar platform
+    tinyint success
+  }
+  sso_login_requests {
+    int id PK
+    int user_id FK
+    int client_id
+    varchar request_ip
+    datetime expires_at
+    datetime used_at
+  }
+  startup_migrations {
+    varchar name PK
+    datetime done_at
+    varchar value
+  }
   user_access_audit {
     int id PK
     int target_user_id
     int actor_user_id
     varchar action
     text detail
+  }
+  user_app_access {
+    int user_id PK,FK
+    varchar item_key PK
+    int company_id
   }
   user_company_access {
     int id PK
@@ -165,6 +220,12 @@ erDiagram
     varchar user_agent
     timestamp last_used_at
   }
+  welcome_slides_settings {
+    int id PK
+    tinyint enabled
+    datetime reset_at
+    tinyint tutorials_enabled
+  }
   approval_templates {
     int id PK
   }
@@ -182,6 +243,10 @@ erDiagram
   users ||--o{ password_reset_requests : "user_id"
   users ||..o{ payroll_access_log : "user_id"
   users ||..o{ platform_visits : "user_id"
+  users ||--o{ profile_photo_requests : "user_id"
+  users ||..o{ sso_login_logs : "user_id"
+  users ||..o{ sso_login_requests : "user_id"
+  users ||..o{ user_app_access : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_devices : "user_id"
   users ||--o{ user_profile_details : "user_id"

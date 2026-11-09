@@ -1,62 +1,17 @@
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import * as XLSX from 'xlsx';
-import { readWorkbook } from '../lib/readWorkbook';
-import jsPDF from '../lib/jspdf';
-import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
-import { savePdfCrossPlatform } from '../lib/saveFile';
+import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
-import LocationMapPicker from './LocationMapPicker';
-import { NoticeManager } from './NoticeManager';
-import { EmployeesPanel } from './EmployeesPanel';
-import { ClaimsPanel } from './ClaimsPanel';
-import { ConveyanceBillPanel } from './ConveyanceBillPanel';
-import { BillClaimPolicyPanel } from './BillClaimPolicyPanel';
-import { DisbursementPanel } from './DisbursementPanel';
-import { ApprovalManager } from './ApprovalManager';
-import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
-import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
-import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
-import { SystemCompanies } from './SystemCompanies';
-import { DeviceAccess } from './DeviceAccess';
-import { ActiveUsers } from './ActiveUsers';
-import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
-import { HolidayCalendarPanel } from './HolidayCalendarPanel';
-import { AssetManagementAdmin } from './AssetManagementAdmin';
-import { VehicleManagementAdmin } from './VehicleManagementAdmin';
-import { ExitOffboardingPanel } from './ExitOffboardingPanel';
-import { PerformanceManagementPanel } from './PerformanceManagementPanel';
-import { RecruitmentPanel } from './RecruitmentPanel';
-import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
-import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
-import { ReportsInsights } from './ReportsInsights';
-import { DataImport } from './DataImport';
-import { DocumentVaultPanel } from './DocumentVaultPanel';
-import { HROperationsPanel } from './HROperationsPanel';
-import { TaskManagement } from './TaskManagement';
-import { TargetReports } from './TargetReports';
-import { MailAdministration } from './mail/MailAdministration';
-import { DutyRoster } from './DutyRoster';
-import { BreakTimeAdmin } from './BreakTimeAdmin';
-import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
-import { ModuleAccessPage } from './ModuleAccessPage';
-import { PasswordRequestsPopup } from './PasswordRequestsPopup';
-import { JobEditDetailsPopup } from './JobEditDetailsPopup';
-import { FeedbackAdmin } from './feedback/FeedbackAdmin';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
-import { AccessTemplatesModal } from './AccessTemplatesModal';
-import { BudgetSubmissionReport } from './BudgetSubmissionReport';
-import { MprPoImport } from './MprPoImport';
-import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
@@ -71,12 +26,76 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
+import { selfViewToPath } from '../lib/selfUrl';
+import type { DashPage, DashPageLink } from './ManagementDashboard';
 import { LoadingBlock } from './LoadingBlock';
+import { retryImport } from '../lib/chunkReload';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
+
+// Each module's page is downloaded only when it is opened, not all at once
+// with the Admin Panel: an account with many modules (a Superadmin) used to
+// download every page — megabytes of code — before the first one showed,
+// which made the phone app slow. lazyPanel = React.lazy + its own loader.
+function lazyPanel<P extends object>(load: () => Promise<{ default: React.ComponentType<P> }>): React.FC<P> {
+  const Lazy = React.lazy(retryImport(load));
+  const Panel: React.FC<P> = (props) => (
+    <React.Suspense fallback={<LoadingBlock />}>
+      <Lazy {...(props as any)} />
+    </React.Suspense>
+  );
+  return Panel;
+}
+const NoticeManager = lazyPanel(() => import('./NoticeManager').then((m) => ({ default: m.NoticeManager })));
+const EmployeesPanel = lazyPanel(() => import('./EmployeesPanel').then((m) => ({ default: m.EmployeesPanel })));
+const ClaimsPanel = lazyPanel(() => import('./ClaimsPanel').then((m) => ({ default: m.ClaimsPanel })));
+const ConveyanceBillPanel = lazyPanel(() => import('./ConveyanceBillPanel').then((m) => ({ default: m.ConveyanceBillPanel })));
+const BillClaimPolicyPanel = lazyPanel(() => import('./BillClaimPolicyPanel').then((m) => ({ default: m.BillClaimPolicyPanel })));
+const DisbursementPanel = lazyPanel(() => import('./DisbursementPanel').then((m) => ({ default: m.DisbursementPanel })));
+const ApprovalManager = lazyPanel(() => import('./ApprovalManager').then((m) => ({ default: m.ApprovalManager })));
+const ApprovalTemplateManager = lazyPanel(() => import('./ApprovalTemplateManager').then((m) => ({ default: m.ApprovalTemplateManager })));
+const ManagementDashboard = lazyPanel(() => import('./ManagementDashboard').then((m) => ({ default: m.ManagementDashboard })));
+const DepartmentAttendanceSummary = lazyPanel(() => import('./DepartmentAttendanceSummary').then((m) => ({ default: m.DepartmentAttendanceSummary })));
+const AttendanceReportBuilder = lazyPanel(() => import('./AttendanceReportBuilder').then((m) => ({ default: m.AttendanceReportBuilder })));
+const EmployeeTrackingPanel = lazyPanel(() => import('./EmployeeTrackingPanel').then((m) => ({ default: m.EmployeeTrackingPanel })));
+const OfficeAttendanceHub = lazyPanel(() => import('./SiteAttendanceAdmin').then((m) => ({ default: m.OfficeAttendanceHub })));
+const SystemCompanies = lazyPanel(() => import('./SystemCompanies').then((m) => ({ default: m.SystemCompanies })));
+const DeviceAccess = lazyPanel(() => import('./DeviceAccess').then((m) => ({ default: m.DeviceAccess })));
+const ActiveUsers = lazyPanel(() => import('./ActiveUsers').then((m) => ({ default: m.ActiveUsers })));
+const DeliveryDateConditionsPanel = lazyPanel(() => import('./DeliveryDateConditionsPanel').then((m) => ({ default: m.DeliveryDateConditionsPanel })));
+const HolidayCalendarPanel = lazyPanel(() => import('./HolidayCalendarPanel').then((m) => ({ default: m.HolidayCalendarPanel })));
+const AssetManagementAdmin = lazyPanel(() => import('./AssetManagementAdmin').then((m) => ({ default: m.AssetManagementAdmin })));
+const VehicleManagementAdmin = lazyPanel(() => import('./VehicleManagementAdmin').then((m) => ({ default: m.VehicleManagementAdmin })));
+const ExitOffboardingPanel = lazyPanel(() => import('./ExitOffboardingPanel').then((m) => ({ default: m.ExitOffboardingPanel })));
+const PerformanceManagementPanel = lazyPanel(() => import('./PerformanceManagementPanel').then((m) => ({ default: m.PerformanceManagementPanel })));
+const RecruitmentPanel = lazyPanel(() => import('./RecruitmentPanel').then((m) => ({ default: m.RecruitmentPanel })));
+const GrievanceDisciplinaryPanel = lazyPanel(() => import('./GrievanceDisciplinaryPanel').then((m) => ({ default: m.GrievanceDisciplinaryPanel })));
+const HRAnalyticsDashboard = lazyPanel(() => import('./HRAnalyticsDashboard').then((m) => ({ default: m.HRAnalyticsDashboard })));
+const ReportsInsights = lazyPanel(() => import('./ReportsInsights').then((m) => ({ default: m.ReportsInsights })));
+const DataImport = lazyPanel(() => import('./DataImport').then((m) => ({ default: m.DataImport })));
+const DocumentVaultPanel = lazyPanel(() => import('./DocumentVaultPanel').then((m) => ({ default: m.DocumentVaultPanel })));
+const HROperationsPanel = lazyPanel(() => import('./HROperationsPanel').then((m) => ({ default: m.HROperationsPanel })));
+const TaskManagement = lazyPanel(() => import('./TaskManagement').then((m) => ({ default: m.TaskManagement })));
+const TargetReports = lazyPanel(() => import('./TargetReports').then((m) => ({ default: m.TargetReports })));
+const MailAdministration = lazyPanel(() => import('./mail/MailAdministration').then((m) => ({ default: m.MailAdministration })));
+const DutyRoster = lazyPanel(() => import('./DutyRoster').then((m) => ({ default: m.DutyRoster })));
+const BreakTimeAdmin = lazyPanel(() => import('./BreakTimeAdmin').then((m) => ({ default: m.BreakTimeAdmin })));
+const MobileBillAdmin = lazyPanel(() => import('./MobileBillAdmin').then((m) => ({ default: m.MobileBillAdmin })));
+const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) => ({ default: m.ModuleAccessPage })));
+const FeedbackAdmin = lazyPanel(() => import('./feedback/FeedbackAdmin').then((m) => ({ default: m.FeedbackAdmin })));
+const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport').then((m) => ({ default: m.BudgetSubmissionReport })));
+const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
+const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
+const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
+const PasswordRequestsPopup = lazyPanel(() => import('./PasswordRequestsPopup').then((m) => ({ default: m.PasswordRequestsPopup })));
+const ProfilePhotoRequestsPopup = lazyPanel(() => import('./ProfilePhotoRequestsPopup').then((m) => ({ default: m.ProfilePhotoRequestsPopup })));
+const JobEditDetailsPopup = lazyPanel(() => import('./JobEditDetailsPopup').then((m) => ({ default: m.JobEditDetailsPopup })));
+const UserEmployeeModal = lazyPanel(() => import('./UserEmployeeModal').then((m) => ({ default: m.UserEmployeeModal })));
+const LocationMapPicker = lazyPanel(() => import('./LocationMapPicker'));
+
 interface AdminPanelProps {
   token: string;
   // The logged-in Admin/Superadmin viewing this panel — used to decide which tabs
@@ -85,7 +104,7 @@ interface AdminPanelProps {
   // (role promotion, Module Access) render in the Users tab.
   user: User;
   // Navbar's web-only "Claims" header menu — jumps this panel's activeTab to
-  // 'claims' (Movement Claims) or 'conveyance' (Conveyance Bill Claim). Ignored
+  // 'claims' (Check In/Out) or 'bill_claim' (Bill Claim). Ignored
   // if this Admin hasn't been granted that module.
   claimsNavRequest?: ClaimsNavRequest | null;
   // Navbar's web-only "Budget" header menu — jumps this panel's activeTab to
@@ -487,7 +506,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
   const canSeeDashboard = isAdminRole || canSee('admin_dashboard');
   const canSeeReportsInsights = isSuperAdmin || REPORTS_INSIGHTS_MODULES.some((m) => visibleModules.includes(m));
-  const canSeeDataImport = isSuperAdmin || DATA_IMPORT_MODULES.some((m) => visibleModules.includes(m));
+  const canSeeDataImport = isSuperAdmin || visibleModules.includes('data_import');
   // Whether THIS logged-in Admin/Superadmin can see the "Last Login Location"
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
@@ -501,18 +520,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
   // Whether this account may open that tab. 'bill_claim_policy' isn't its own
-  // module_permissions entry — it rides along with 'conveyance'.
+  // module_permissions entry — it rides along with 'bill_claim'.
   // 'permanent_delete_log' isn't either — Superadmin-only, never granted via
   // module_permissions (see GET /api/entries/permanent-delete-log).
   const isTabVisible = (tab: string) =>
     tab === 'dashboard' ? canSeeDashboard :
     tab === 'reports_insights' ? canSeeReportsInsights :
     tab === 'data_import' ? canSeeDataImport :
-    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
+    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('bill_claim') :
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -597,7 +616,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Silently ignored if this Admin hasn't been granted that module.
   useEffect(() => {
     if (!claimsNavRequest) return;
-    const wanted = claimsNavRequest.target === 'movementClaims' ? 'claims' : 'conveyance';
+    const wanted = claimsNavRequest.target === 'movementClaims' ? 'claims' : 'bill_claim';
     if (canSee(wanted as AdminModuleKey)) setActiveTab(wanted as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsNavRequest]);
@@ -626,8 +645,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       return;
     }
     // 'bill_claim_policy' isn't its own module_permissions entry — it rides along
-    // with 'conveyance' (see the "Bill Claim Policy" item in GlobalSidebar).
-    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    // with 'bill_claim' (see the "Bill Claim Policy" item in GlobalSidebar).
+    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('bill_claim') : canSee(adminNavRequest.target as AdminModuleKey);
     if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
@@ -641,7 +660,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       activeTab === 'reports_insights' ? canSeeReportsInsights :
       activeTab === 'data_import' ? canSeeDataImport :
       activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' || activeTab === 'active_users' ? isSuperAdmin :
-      activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
+      activeTab === 'bill_claim_policy' ? canSee('bill_claim') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -661,7 +680,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // no old value needed (see PUT /api/users/:id/email).
   const [changingEmailFor, setChangingEmailFor] = useState<User | null>(null);
   const [newEmailInput, setNewEmailInput] = useState('');
+  // The other Login ID: users.username (an employee's starts as their Employee ID).
+  const [newUsernameInput, setNewUsernameInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
+  const [loginIdError, setLoginIdError] = useState('');
   // Accounts the Module Access page opened with (ModuleAccessPage.tsx).
   const [moduleAccessIds, setModuleAccessIds] = useState<number[]>([]);
 
@@ -672,9 +694,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setManagingUserId(null);
     }
   }, [activeTab]);
-  const openManageModules = (u: User | User[]) => {
+  // Where Back on the Module Access page goes: the Users page, or Employees
+  // when it was opened from an Employees row's key button.
+  const [moduleAccessFrom, setModuleAccessFrom] = useState<'users' | 'employees'>('users');
+  // Users -> "Employee" on a row: that account's Employee record (needs the Employees module).
+  const [employeeOf, setEmployeeOf] = useState<{ id: number; name: string } | null>(null);
+  const openManageModules = (u: User | User[], from: 'users' | 'employees' = 'users') => {
     const list = Array.isArray(u) ? u : [u];
     if (list.length === 0) return;
+    setModuleAccessFrom(from);
     setModuleAccessIds(list.map((x) => x.id));
     setManagingModulesFor(list[0]);
     // Opens as a page: start at its top.
@@ -732,6 +760,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Users -> Password requests (Forgot password, layer "password_requests");
   // a "Password reset request" alert opens it too.
   const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // Users -> Photo approvals (Superadmin only): new profile photos waiting;
+  // a "New Profile Photo to Approve" alert opens it too.
+  const [showPhotoRequests, setShowPhotoRequests] = useState(false);
+  const [photoRequestCount, setPhotoRequestCount] = useState(0);
   // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
   const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
   useEffect(() => {
@@ -740,17 +772,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     return () => window.removeEventListener('credence:password-requests', open);
   }, []);
   useEffect(() => {
+    const open = () => setShowPhotoRequests(true);
+    window.addEventListener('credence:photo-requests', open);
+    return () => window.removeEventListener('credence:photo-requests', open);
+  }, []);
+  useEffect(() => {
     if (pendingModuleAccessUser == null || activeTab !== 'users') return;
     const u = users.find((x) => x.id === pendingModuleAccessUser);
     if (!u) return;
     setPendingModuleAccessUser(null);
-    openManageModules(u);
+    openManageModules(u, 'employees');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingModuleAccessUser, activeTab, users]);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
-    return users.filter((u) => {
+    // Your own account, then the Superadmin, at the top — not on whichever
+    // page the alphabetical order happens to put them.
+    const pin = (u: (typeof users)[number]) => (u.id === user.id ? 0 : u.role === 'superadmin' ? 1 : 2);
+    return [...users].sort((a, b) => pin(a) - pin(b)).filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
       if (accessFilter && !accessFilter.match(u)) return false;
       if (userDeptFilter) {
@@ -764,7 +804,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter, user.id]);
   // Only one page of the (filtered) accounts is drawn at a time.
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(50);
@@ -787,6 +827,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (activeTab === 'users') loadAccessTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+  // How many new profile photos wait for the Superadmin (badge on Photo approvals).
+  useEffect(() => {
+    if (activeTab !== 'users' || !isSuperAdmin) return;
+    fetch(apiUrl('/api/profile/photo-requests'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPhotoRequestCount(Array.isArray(d) ? d.length : 0))
+      .catch(() => {});
+  }, [activeTab, isSuperAdmin, token]);
   const toggleUserSelected = (id: number) =>
     setSelectedUserIds((prev) => {
       const next = new Set(prev);
@@ -1053,7 +1101,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // User's day-by-day Present/Absent grid for one month) and Date Wise
   // (Present vs Absent split for one specific day).
   const now = new Date();
-  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date'>('month');
+  const [attendanceReportView, setAttendanceReportView] = useState<'month' | 'date' | 'dept' | 'custom'>(() => {
+    // The Assistant's "Attendance Report Builder খুলুন" opens straight on the
+    // Custom Report tab (still shown only with the custom_report layer).
+    try {
+      // Read, not removed: the panel can mount twice while it opens; the
+      // Assistant clears the key a few seconds later.
+      const v = sessionStorage.getItem('credence_attendance_report_view');
+      if (v === 'custom' || v === 'dept' || v === 'date') return v;
+    } catch {
+      /* no storage */
+    }
+    return 'month';
+  });
+  useEffect(() => {
+    const onView = (e: Event) => {
+      const v = (e as CustomEvent).detail;
+      if (v === 'custom' || v === 'dept' || v === 'date' || v === 'month') setAttendanceReportView(v);
+    };
+    window.addEventListener('credence:attendance-report-view', onView);
+    return () => window.removeEventListener('credence:attendance-report-view', onView);
+  }, []);
   // Admin Panel -> Approvals has two engines side by side: the OLD single
   // global chain (ApprovalManager — its own "Queue"/"Manage Chain" views) and
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
@@ -1180,6 +1248,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fit legibly across that many columns on paper, so the PDF always uses
   // symbols regardless of which mode the on-screen toggle is set to.
   const handleExportMonthlyReportPdf = async (mode: 'save' | 'email' = 'save') => {
+    // PDF / Excel libraries are fetched when first used, not with the Admin Panel.
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import('../lib/jspdf'), import('jspdf-autotable')]);
     if (!monthlyReport || monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport) return;
     setExportingMonthlyReport(true);
     try {
@@ -1260,6 +1330,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // groups (Present / Absent / Holiday) with a colored Status column, same
   // convention as ConveyanceBillPanel/UserPanel's own PDF exports.
   const handleExportDailyReportPdf = async (mode: 'save' | 'email' = 'save') => {
+    // PDF / Excel libraries are fetched when first used, not with the Admin Panel.
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([import('../lib/jspdf'), import('jspdf-autotable')]);
     if (!dailyReport) return;
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1281,7 +1353,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         p.project_name || '—',
         timeOnly(p.check_in_at),
         timeOnly(p.check_out_at),
-        p.source === 'office' ? 'ZKT' : 'GPS'
+        p.source === 'office' ? 'ZKT' : p.source === 'site' ? 'Team' : 'GPS'
       ]),
       ...dailyReport.absent.map((a: any) => ['Absent', a.user_name, a.department || '—', '—', '—', '—', '—']),
       ...dailyReport.on_holiday.map((h: any) => ['Holiday', h.user_name, h.department || '—', '—', '—', '—', '—'])
@@ -1339,7 +1411,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     if (activeTab !== 'attendance_reports') return;
     if (attendanceReportView === 'month') fetchMonthlyReport();
-    else fetchDailyReport();
+    else if (attendanceReportView === 'date') fetchDailyReport();
     if (reportDepartments.length === 0) fetchReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, attendanceReportView]);
@@ -1441,7 +1513,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // --- Export the (currently searched/filtered) MPR Edit Log to Excel (.xlsx) ---
   // Same flat row shape as the on-screen table, minus the day-grouping (a plain sheet
   // is easier to re-filter/pivot in Excel than the day-header rows would be).
-  const handleExportEditLogExcel = () => {
+  const handleExportEditLogExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = mprEditLogByDay().flatMap(([day, records]) =>
       records.map((h) => ({
         Date: day,
@@ -1461,7 +1534,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(10).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'MPR Edit Log');
-    XLSX.writeFile(workbook, `MPR_Edit_Log_${todayDateOnlyString()}.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `MPR_Edit_Log_${todayDateOnlyString()}.xlsx`);
   };
 
   // Manage-Projects modal (Admin sets which Projects a User can access)
@@ -1673,7 +1746,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
-    'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
+    'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'management_dashboard', 'exit_offboarding', 'performance_management',
     'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
@@ -1681,13 +1754,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // only for the Users tab. Tabs that just pick or filter by an account get the light
   // `people` list (id, name, role…); every other tab loads neither.
   const PEOPLE_TABS = new Set<string>([
-    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
+    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'bill_claim', 'disbursement', 'approvals'
   ]);
+  const PEPM_LIST_TABS = new Set<string>(['imports', 'mprs', 'reports']);
   const sharedFor = (tab: string): SharedKey[] =>
     SELF_CONTAINED_TABS.has(tab)
       ? []
       : ALL_SHARED.filter(
-          (k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || tab === 'users') && (k !== 'people' || PEOPLE_TABS.has(tab))
+          (k) =>
+            (k !== 'entries' || tab === 'reports') &&
+            (k !== 'users' || tab === 'users') &&
+            (k !== 'people' || PEOPLE_TABS.has(tab)) &&
+            // Budgets / MPR Nos: only the PEPM tabs that show them (the
+            // server lets only PEPM accounts read them — requireBudgetRead).
+            ((k !== 'budgets' && k !== 'mprNumbers') || PEPM_LIST_TABS.has(tab))
         );
 
   useEffect(() => {
@@ -1745,10 +1825,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Downloads the current Missing Rate / Missing Category list from an Approve &
   // Calculate result as a .xlsx — same column shape shown on screen, so it can be
   // filled in and merged back into the Rate File for re-import.
-  const downloadMissingListExcel = (
+  const downloadMissingListExcel = async (
     kind: 'rate' | 'category',
     result: { budgetName: string; missing_rate: { item_name: string; specification: string }[]; missing_category: string[] }
   ) => {
+    const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
     if (kind === 'rate') {
       const sheetRows = result.missing_rate.map((r) => ({
@@ -1759,7 +1840,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const ws = XLSX.utils.json_to_sheet(sheetRows);
       ws['!cols'] = [{ wch: 35 }, { wch: 25 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, 'Missing Rate');
-      XLSX.writeFile(wb, `Missing_Rate_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Missing_Rate_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
     } else {
       const sheetRows = result.missing_category.map((name) => ({
         'Materials Name': name,
@@ -1772,7 +1853,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const ws = XLSX.utils.json_to_sheet(sheetRows);
       ws['!cols'] = [{ wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, 'Missing Category');
-      XLSX.writeFile(wb, `Missing_Category_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
+      void saveWorkbookCrossPlatform(wb, `Missing_Category_${result.budgetName.replace(/[^a-z0-9]+/gi, '_')}.xlsx`);
     }
   };
 
@@ -2332,6 +2413,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleBudgetFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     const budgetId = pendingImportBudgetId.current;
     e.target.value = ''; // allow re-selecting the same file later
@@ -2459,6 +2542,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
 
   const handleRateFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file later
     if (!file) return;
@@ -2742,6 +2827,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // optional/ignored, header names are matched loosely so "Project" / "Password" /
   // "Pass" etc. still work) and fills the rows table below for review before Import.
   const handleBulkUsersFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { readWorkbook } = await import('../lib/readWorkbook');
+    const XLSX = await import('xlsx');
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file later
     if (!file) return;
@@ -2934,6 +3021,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const saved = user.module_permission_layers?.hr_operations;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
+  // Attendance Reports layers (Module Access -> Monthly Attendance Report).
+  const attendanceReportsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.attendance_reports;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -2992,28 +3085,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Change Login ID: saves whichever of email / username was changed.
   const handleChangeEmail = async () => {
     if (!changingEmailFor) return;
-    const trimmed = (newEmailInput || '').trim();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+    const email = (newEmailInput || '').trim();
+    const username = (newUsernameInput || '').trim();
+    const emailChanged = email !== (changingEmailFor.email || '');
+    const usernameChanged = username !== (changingEmailFor.username || '');
+    if (!emailChanged && !usernameChanged) {
+      setChangingEmailFor(null);
+      return;
+    }
+    if (emailChanged && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLoginIdError('Enter a valid email address.');
+      return;
+    }
+    if (usernameChanged && !/^[A-Za-z0-9._-]{3,50}$/.test(username)) {
+      setLoginIdError('Username: 3–50 letters, digits, dot (.), dash (-) or underscore (_) — no spaces or @.');
       return;
     }
     setChangingEmail(true);
-    try {
-      const res = await fetch(apiUrl(`/api/users/${changingEmailFor.id}/email`), {
+    setLoginIdError('');
+    const put = async (path: string, body: unknown) => {
+      const res = await fetch(apiUrl(`/api/users/${changingEmailFor.id}/${path}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ new_email: trimmed })
+        body: JSON.stringify(body)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to update Login ID');
+    };
+    try {
+      if (usernameChanged) await put('username', { new_username: username });
+      if (emailChanged) await put('email', { new_email: email });
       setMessage({ type: 'success', text: `Login ID updated for ${changingEmailFor.name}.` });
       setChangingEmailFor(null);
       setNewEmailInput('');
+      setNewUsernameInput('');
       fetchAllData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setLoginIdError(err.message);
+      fetchAllData();
     } finally {
       setChangingEmail(false);
     }
@@ -3326,7 +3438,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
   const reportWidthTotal = reportVisibleCols.reduce((n, c) => n + c.w, 0);
 
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
+    const XLSX = await import('xlsx');
     const rows = filteredEntries.map((ent) => ({
       'Job No': ent.job_no,
       'Job Name': ent.job_name,
@@ -3370,11 +3483,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(Object.keys(rows[0] || {}).length || 1).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'MPR Entries');
-    XLSX.writeFile(workbook, `MPR_Report_${todayDateOnlyString()}.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `MPR_Report_${todayDateOnlyString()}.xlsx`);
   };
 
   // --- Export a Budget's raw imported sheet (every column, every row) to Excel ---
-  const handleDownloadBudgetItemsExcel = (budget: Budget, items: BudgetItem[]) => {
+  const handleDownloadBudgetItemsExcel = async (budget: Budget, items: BudgetItem[]) => {
+    const XLSX = await import('xlsx');
     const rows = items.map((it) => ({
       'Sl.No.': it.sl_no || '',
       'Project Name': it.project_name || '',
@@ -3397,7 +3511,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     worksheet['!cols'] = new Array(16).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Budget Items');
-    XLSX.writeFile(workbook, `${budget.budget_name.replace(/[^\w\- ]+/g, '')}_ImportedSheet.xlsx`);
+    void saveWorkbookCrossPlatform(workbook, `${budget.budget_name.replace(/[^\w\- ]+/g, '')}_ImportedSheet.xlsx`);
   };
 
   return (
@@ -4145,8 +4259,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 >
                   Date Wise
                 </button>
+                {attendanceReportsLayer('dept_summary') && (
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceReportView('dept')}
+                    className={`text-xs px-3 py-2 font-semibold transition-colors border-l border-slate-200 ${
+                      attendanceReportView === 'dept' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Department Summary
+                  </button>
+                )}
+                {attendanceReportsLayer('custom_report') && (
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceReportView('custom')}
+                    className={`text-xs px-3 py-2 font-semibold transition-colors border-l border-slate-200 ${
+                      attendanceReportView === 'custom' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Custom Report
+                  </button>
+                )}
               </div>
 
+              {attendanceReportView !== 'dept' && attendanceReportView !== 'custom' && (<>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
                 <SearchSelect
@@ -4310,10 +4447,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                 </>
               )}
+              </>)}
             </div>
           </div>
 
-          {attendanceReportView === 'month' ? (
+          {attendanceReportView === 'dept' && attendanceReportsLayer('dept_summary') ? (
+            <DepartmentAttendanceSummary token={token} projects={projects} departments={reportDepartments} />
+          ) : attendanceReportView === 'custom' && attendanceReportsLayer('custom_report') ? (
+            <AttendanceReportBuilder token={token} departments={reportDepartments} />
+          ) : attendanceReportView === 'month' ? (
             loadingMonthlyReport && !monthlyReport ? (
               <p className="text-xs text-slate-400 text-center py-12">Loading report...</p>
             ) : monthlyReportTotal(monthlyReport) === 0 ? (
@@ -4346,7 +4488,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           const isHoliday = !!d.day_type;
                           const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '·';
                           const colorClass = d.present
-                            ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
+                            ? d.source === 'office' ? 'text-sky-600' : d.source === 'site' ? 'text-orange-600' : 'text-emerald-600'
                             : isHoliday
                               ? d.day_type === 'weekend' ? 'text-violet-500' : 'text-amber-500'
                               : d.leave_type ? 'text-teal-600' : 'text-slate-300';
@@ -4356,7 +4498,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           const remarksPart = [d.check_in_remarks && `In: ${d.check_in_remarks}`, d.check_out_remarks && `Out: ${d.check_out_remarks}`]
                             .filter(Boolean)
                             .join(' \u2022 ');
-                          const sourcePart = d.present ? (d.source === 'office' ? ' \u2014 ZKT' : ' \u2014 GPS') : '';
+                          const sourcePart = d.present ? (d.source === 'office' ? ' \u2014 ZKT' : d.source === 'site' ? ' \u2014 Team sheet' : ' \u2014 GPS') : '';
                           // Compact "8:58a"/"5:32p" — short enough to fit two
                           // stacked lines in a day column without wrapping.
                           const shortTime = (v: string | null) => {
@@ -4463,6 +4605,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
                                 ZKT
                               </span>
+                            ) : r.source === 'site' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
+                                Team
+                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
                                 GPS
@@ -4470,7 +4616,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             )}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
-                            {r.source === 'office' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
+                            {r.source === 'office' || r.source === 'site' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-xs">
                             {r.check_in_at ? (
@@ -4639,7 +4785,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               {/* Mobile — stacked cards instead of the same table squeezed
                   into a horizontal scroll (same pattern as ClaimsPanel.tsx /
-                  ConveyanceClaimCard.tsx's own mobile treatment). */}
+                  BillClaimCard.tsx's own mobile treatment). */}
               <div className="md:hidden divide-y divide-slate-100">
                 {leaveApplicationsReport
                   .map((a) => (
@@ -4778,6 +4924,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
+      {activeTab === 'management_dashboard' && canSee('management_dashboard') && (
+        <ManagementDashboard
+          token={token}
+          pageLink={(page: DashPage): DashPageLink => {
+            // Only pages this account may open (same checks as the menu).
+            if (page === 'payroll') {
+              if (!(isSuperAdmin || canSee('payroll')) || !adminUrlEnabled()) return null;
+              return { href: selfViewToPath('payroll'), go: () => undefined };
+            }
+            if (!ADMIN_TAB_KEYS.has(page) || !isTabVisible(page)) return null;
+            return { href: adminUrlEnabled() ? adminTabToPath(page) : null, go: () => setActiveTab(page as any) };
+          }}
+        />
+      )}
+      {employeeOf && canSee('employees') && (
+        <UserEmployeeModal
+          token={token}
+          account={employeeOf}
+          onClose={() => setEmployeeOf(null)}
+          onOpenEmployees={(search) => {
+            setEmployeeOf(null);
+            try {
+              sessionStorage.setItem('credence_employees_return_view', JSON.stringify({ search, status: 'all', dept: '', page: 1, pageSize: 50, scrollY: 0 }));
+            } catch {
+              // storage unavailable — Employees opens unsearched
+            }
+            setActiveTab('employees');
+          }}
+        />
+      )}
       {activeTab === 'reports_insights' && <ReportsInsights token={token} />}
       {/* TAB: DATA IMPORT — employees, leave, claims and attendance history from Excel/CSV (DataImport.tsx). */}
       {activeTab === 'data_import' && canSeeDataImport && <DataImport token={token} />}
@@ -6489,6 +6665,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               >
                 <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
               </button>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoRequests(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <UserCheck className="w-3.5 h-3.5" /> Photo approvals
+                  {photoRequestCount > 0 && <span className="ml-0.5 min-w-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] text-center">{photoRequestCount}</span>}
+                </button>
+              )}
               {usersLayer('password_requests') && (
                 <button
                   type="button"
@@ -6536,6 +6722,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               onDone={() => fetchAllData()}
               onOpenTemplates={() => setShowAccessTemplates(true)}
               onOpenModuleAccess={canGrantModuleAccess ? (list) => openManageModules(list) : undefined}
+              projects={projects}
             />
           )}
 
@@ -6624,7 +6811,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           )}
                         </td>
                       )}
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-5 py-3 text-right whitespace-nowrap">
+                        {canSee('employees') && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEmployeeOf({ id: u.id, name: u.name });
+                            }}
+                            title="Show this account's Employee record"
+                            className="mr-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white hover:border-violet-300 hover:text-violet-700 transition-colors"
+                          >
+                            Employee
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -6677,6 +6877,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
+                      {canSee('employees') && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEmployeeOf({ id: u.id, name: u.name });
+                          }}
+                          className="mt-2 text-xs font-semibold text-violet-700"
+                        >
+                          Employee record →
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -6899,20 +7111,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* TAB: CONVEYANCE BILL CLAIM — Superadmin + explicitly-granted Admins only.
           Build a travel/conveyance claim bill for a User: pull items in from their
-          completed Movement Claims (computing Amount at a Rate/KM) or add items by
+          completed Check In/Out (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
-      {activeTab === 'conveyance' && (
+      {activeTab === 'bill_claim' && (
         <ConveyanceBillPanel token={token} users={people} currentUserId={user.id} />
       )}
 
-      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;
+      {/* TAB: BILL CLAIM POLICY — same "bill_claim" grant as the Bill Claim tab;
           only the Superadmin can change it (BillClaimPolicyPanel.tsx). */}
       {activeTab === 'bill_claim_policy' && <BillClaimPolicyPanel token={token} />}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins
           only. Marks a Conveyance Bill's claim(s) as actually paid out (voucher
           no. + disbursed date/by) and prints a Payment Voucher PDF for it. Kept
-          as its own module (separate from 'conveyance' above) so an Admin can be
+          as its own module (separate from 'bill_claim' above) so an Admin can be
           allowed to BUILD bills without also being able to authorize payouts. */}
       {activeTab === 'disbursement' && (
         <DisbursementPanel token={token} users={people} />
@@ -7357,6 +7569,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               onOpenProjects={() => openManageProjects(mu)}
               onChangeLoginId={() => {
                 setNewEmailInput(mu.email || '');
+                setNewUsernameInput(mu.username || '');
+                setLoginIdError('');
                 setChangingEmailFor(mu);
               }}
               onResetPassword={() => {
@@ -7502,6 +7716,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
+      {showPhotoRequests && isSuperAdmin && (
+        <ProfilePhotoRequestsPopup token={token} onClose={() => setShowPhotoRequests(false)} onChanged={setPhotoRequestCount} />
+      )}
       {showPasswordRequests && usersLayer('password_requests') && (
         <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />
       )}
@@ -7516,7 +7733,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           initialIds={moduleAccessIds}
           departments={departments}
           viewer={{ isSuperAdmin, canGrantModuleAccess }}
-          onClose={() => setManagingModulesFor(null)}
+          backTo={moduleAccessFrom === 'employees' && canSee('employees') ? 'Employees' : 'Users'}
+          onClose={() => {
+            setManagingModulesFor(null);
+            if (moduleAccessFrom === 'employees' && canSee('employees')) setActiveTab('employees');
+          }}
           onSaved={(text, ok) => {
             fetchAllData();
             setMessage({ type: ok ? 'success' : 'error', text });
@@ -7593,59 +7814,88 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* Change Login ID modal — Admin/Superadmin changes the email address a user
-          logs in with. No old value confirmation asked for, same as Reset
-          Password (see PUT /api/users/:id/email). */}
+      {/* Change Login ID modal — shows how this account signs in now (email
+          and username, either one works) and lets an Admin set a new email,
+          a new username or both (PUT /api/users/:id/email, /username). */}
       {changingEmailFor && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4"
           onClick={() => !changingEmail && setChangingEmailFor(null)}
         >
-          <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Change Login ID</h3>
-                <p className="text-xs text-slate-500">{changingEmailFor.name} • {changingEmailFor.email}</p>
+          <div className="liquid-glass liquid-glass-in rounded-[32px] max-w-md w-full max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setChangingEmailFor(null)}
+              disabled={changingEmail}
+              aria-label="Close"
+              className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 text-slate-600 hover:text-slate-900 rounded-full disabled:opacity-50"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="px-6 pt-6 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">Change Login ID</h3>
+              <p className="text-xs text-slate-500">{changingEmailFor.name}</p>
+            </div>
+            <div className="px-6 pb-2">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Current Login ID</p>
+              <div className="liquid-glass-inset rounded-2xl divide-y divide-white/70 text-sm">
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-xs text-slate-500">Email</span>
+                  <span className="font-semibold text-slate-900 truncate">{changingEmailFor.email || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-xs text-slate-500">Username</span>
+                  <span className="font-semibold text-slate-900 truncate">{changingEmailFor.username || '— none —'}</span>
+                </div>
               </div>
+              <p className="text-[11px] text-slate-500 mt-1.5">They can sign in with either one.</p>
+            </div>
+            <div className="px-6 py-3 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">New email</label>
+                <input
+                  type="email"
+                  value={newEmailInput || ''}
+                  onChange={(e) => setNewEmailInput(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-3 py-2 bg-white/80 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">New username</label>
+                <input
+                  type="text"
+                  value={newUsernameInput || ''}
+                  onChange={(e) => setNewUsernameInput(e.target.value.replace(/\s+/g, ''))}
+                  placeholder="e.g. bipul.sarker"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full px-3 py-2 bg-white/80 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Letters, digits, dot, dash or underscore. Can't be someone else's username, email or Employee ID.</p>
+              </div>
+              {loginIdError && <p className="text-xs font-semibold text-rose-600">{loginIdError}</p>}
+            </div>
+            <div className="px-6 pb-6 pt-2 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setChangingEmailFor(null)}
                 disabled={changingEmail}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-3">
-              <label className="block text-xs font-semibold text-slate-600">New Login ID (email)</label>
-              <input
-                type="email"
-                value={newEmailInput || ''}
-                onChange={(e) => setNewEmailInput(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-              />
-              <p className="text-xs text-slate-500">
-                {changingEmailFor.name} will need to use this new email to log in going forward.
-              </p>
-            </div>
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
-              <button
-                onClick={() => setChangingEmailFor(null)}
-                disabled={changingEmail}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                className="liquid-glass-chip px-4 py-2 text-sm font-semibold text-slate-700 rounded-full disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleChangeEmail}
-                disabled={changingEmail || !(newEmailInput || '').trim()}
-                className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                disabled={
+                  changingEmail ||
+                  ((newEmailInput || '').trim() === (changingEmailFor.email || '') && (newUsernameInput || '').trim() === (changingEmailFor.username || ''))
+                }
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-50"
               >
-                {changingEmail ? 'Saving…' : 'Save New Login ID'}
+                {changingEmail ? 'Saving…' : 'Save Login ID'}
               </button>
             </div>
           </div>

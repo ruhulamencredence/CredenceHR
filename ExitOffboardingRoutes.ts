@@ -239,7 +239,7 @@ export async function collectExitDues(queryDB: (sql: string, params?: any[]) => 
     safe("SELECT * FROM mobile_sims"),
     safe("SELECT * FROM employee_advances"),
     safe("SELECT * FROM advance_requests"),
-    safe("SELECT id, user_id, claim_date, category, amount, status FROM user_claims WHERE user_id = ?", [userId]),
+    safe("SELECT id, user_id, claim_date, category, amount, status FROM bill_claims WHERE user_id = ?", [userId]),
     safe("SELECT id, user_id, bill_date, is_disbursed FROM conveyance_bills WHERE user_id = ?", [userId]),
     safe("SELECT bill_id, amount FROM conveyance_bill_items"),
     safe("SELECT id, employee_user_id, purpose, ride_date, status FROM vehicle_requisitions WHERE employee_user_id = ?", [userId])

@@ -1,14 +1,18 @@
+// Load .env before any other module: imports run before this file's own
+// code, so modules that read process.env when imported (WebSecurity,
+// MailRoutes, AiAssistantRoutes, companyScope…) otherwise saw it empty.
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fsSync from "fs";
 import http from "http";
 import compression from "compression";
-import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
 import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
@@ -16,14 +20,14 @@ import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
-import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
+import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerApkDownload } from "./AndroidApkRoute";
-import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave } from "./PayrollRoutes";
+import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave, closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { registerPayrollApprovalRoutes, ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
 import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
@@ -37,6 +41,7 @@ import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
 import { ensureFeedbackSchema, registerFeedbackRoutes } from "./FeedbackRoutes";
 import { ensureFingerprintSchema, registerFingerprintRoutes } from "./FingerprintRoutes";
 import { ensureSchemaMigrations } from "./schemaMigrations";
+import { renameConveyanceClaimToBillClaim } from "./billClaimRename";
 import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
 import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
 import { registerOfficeAttendanceRoutes } from "./OfficeAttendanceRoutes";
@@ -48,18 +53,25 @@ import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
-import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
+import { startTrackingWakeJob } from "./TrackingWake";
+import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
+import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { registerHrReminderRoutes } from "./HrRemindersRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
-import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
+import { registerCallRoutes, setupCallSocket, callAccess } from "./CallRoutes";
+import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
+import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
+import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
@@ -85,21 +97,25 @@ import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
-import { recordClaimHistory } from "./ConveyanceClaimHistory";
+import { recordClaimHistory } from "./BillClaimHistory";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
 import { companyStore, activeCompanyId, activeGroupId, type CompanyContext } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
+import { registerManagementDashboardRoutes } from "./ManagementDashboardRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
+import { ensureErp360InboundSsoSchema, registerErp360InboundSsoRoutes } from "./Erp360InboundSsoRoutes";
+import { ensureWelcomeSlidesSchema, registerWelcomeSlidesRoutes } from "./WelcomeSlidesRoutes";
+import { ensureMaterialConditionsSchema, registerMaterialConditionsRoutes } from "./MaterialConditionsRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import { runsBackgroundJobs } from "./jobRunner";
 import { resolveJwtSecret } from "./JwtSecret";
 import { installWebSecurity, socketCorsOrigin } from "./WebSecurity";
+import { getStartupMarker, setStartupMarker } from "./startupOnce";
 
-dotenv.config();
 
 // Never a key written in the code: a weak or missing JWT_SECRET is replaced
 // by a random one kept in .jwt-secret (JwtSecret.ts).
@@ -266,11 +282,16 @@ async function initDB() {
     isMySQLConnected = true;
     connection.release();
     await bootstrapBaseSchema(dbPool);
+    // Old "Conveyance claim" tables / keys -> Bill Claim, before anything
+    // below creates the new names empty (billClaimRename.ts).
+    await renameConveyanceClaimToBillClaim(dbPool);
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    // Employee Tracking: whom each account may see (TrackingScope.ts).
+    await ensureTrackingScopeSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
     await ensureBreakSchema(dbPool);
     // Forgot password (PasswordResetRoutes.ts).
@@ -280,12 +301,28 @@ async function initDB() {
     // User feedback about the app (FeedbackRoutes.ts).
     await ensureFeedbackSchema(dbPool);
     await ensureFingerprintSchema(dbPool);
+    // 360 ERP -> CredenceHR sign-in: partner apps, one-time links, logs.
+    await ensureErp360InboundSsoSchema(dbPool);
+    // Welcome slides on an account's first sign-in (WelcomeSlidesRoutes.ts).
+    await ensureWelcomeSlidesSchema(dbPool);
+    await ensureMaterialConditionsSchema(dbPool);
     // Approval requests with no approver yet (rehomeAwaitingApprovals).
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
     });
+    // reconcilePendingApprovals: stuck_since — the request's current Layer has
+    // nobody active on it (a Superadmin decides meanwhile); supervisor_pinned —
+    // Layer 1 is an approver someone picked by hand (Emergency Requisition),
+    // not "the employee's Supervisor", so a Supervisor change leaves it.
+    for (const [col, def] of [["stuck_since", "DATETIME NULL"], ["supervisor_pinned", "TINYINT(1) NOT NULL DEFAULT 0"]]) {
+      await dbPool.query(`ALTER TABLE approval_requests ADD COLUMN ${col} ${def}`).catch((err: any) => {
+        if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ approval_requests.${col}: ` + err.message);
+      });
+    }
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
+    // Notices: pictures / attachments, audience groups, schedule, reads.
+    await ensureNoticeV2Schema(dbPool);
     // Measurement Sheet was taken out of the software: drop its table and the
     // module's saved permissions (no-ops once they are gone).
     for (const sql of [
@@ -305,6 +342,11 @@ async function initDB() {
     // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
     await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
+    // Several ZKTeco machines: office, LAN / internet push, own PIN numbers (zkMachines.ts).
+    await ensureZkMachinesSchema(dbPool);
+    // Remote Attendance: the Projects each account may check in at, with
+    // From/To dates (AttendanceProjects.ts) — after users and projects.
+    await ensureAttendanceProjectsSchema(dbPool);
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
@@ -313,7 +355,19 @@ async function initDB() {
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
-    if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
+    if (runsBackgroundJobs()) {
+      startZkSyncSchedule(dbPool);
+      // An attendance machine not heard from for an hour (07:00–21:00):
+      // the Office Attendance people and the Superadmin hear it once.
+      setInterval(() => {
+        void checkZkMachinesOffline(dbPool, async (title, message) => {
+          const to: any[] = await queryDB(
+            "/*unscoped*/ SELECT id FROM users WHERE role = 'superadmin' OR id IN (SELECT user_id FROM admin_module_permissions WHERE module_key = 'office_attendance')"
+          ).catch(() => []);
+          for (const u of to) await createAlert(queryDB, { userId: Number(u.id), type: "zk_machine", title, message }).catch(() => {});
+        }).catch(() => {});
+      }, 10 * 60 * 1000);
+    }
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");
     isMySQLConnected = false;
@@ -322,7 +376,7 @@ async function initDB() {
 
 // Every Admin Panel tab, gated per-Admin by the Superadmin. Kept as a single source
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
-const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
+const BILL_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
 // 'vehicle_maintainer' — deliberately separate from 'vehicle_management':
 // grants ONLY the Vehicle Requisition bypass actions in
@@ -331,7 +385,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -344,7 +398,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -359,8 +413,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // an account it is ticked for (and the Superadmin) can change it.
 // "salary_hold" = holding / releasing one employee's salary for a month
 // (kept out of disbursement until released) — also explicit-only.
-// "audit_approve" = Audit approves / returns a month's salary sheet;
-// "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
+// "hrd_review" = the HR Director checks a submitted month in the app (or HR
+// records the signed paper copy) before it goes to the MD on paper;
+// "audit_approve" = Audit checks a month after it is paid (optional, never
+// blocks pay); "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
 // Activity Log (who opened Payroll, what they looked at and did). All
 // explicit-only (PayrollApprovalRoutes.ts).
 // "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
@@ -368,7 +424,17 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "payroll_view" = View only: opens every Payroll page and report but can't
 // change anything — for Audit and Accounts, so seeing the sheet they approve /
 // pay doesn't also hand them HR's "read" (= run payroll, salaries, loans).
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload"] as const;
+// "approval_sheet" = Payroll -> Approval -> Salary sheet: every employee's
+// days, earnings, deductions and net for the month, on screen, for whoever
+// checks it before approving / paying. Plain reading, so it is part of the
+// no-saved-layers default ("read" + "approval_sheet").
+// "month_compare" = Payroll -> Approval -> Month comparison: this month vs
+// last month — totals, departments, who is new, who left and why each
+// person's net changed. Plain reading too, so also in that default.
+// "top_sheet" = Payroll -> Approval -> Top Sheet: the month's salary by
+// Branch / site (Accounts' top sheet, with each site's own sheet), Excel /
+// PDF. Plain reading too, so also in that default.
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -377,10 +443,15 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
 const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
-// Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
-// Conveyance Bill Claim for another employee (it goes through that
+// Notices: who has read a notice (report, send again), sending it by
+// email, and adding / removing animations in the shared Animation library
+// (using one from it only needs the module) — all only when ticked
+// (EXPLICIT_ONLY_LAYERS in src/types.ts).
+const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice_animations"] as const;
+// Bill Claim: "read" = the module as it was; "on_behalf" = file a
+// Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
-const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
+const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // HR Operations: "read" = the module as it was; New Joiner Onboarding
 // (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
 // application and its temporary login), "onboarding_review" (see, reject,
@@ -402,8 +473,12 @@ const EXIT_LAYER_KEYS = ["read", "exit_dues", "exit_pdf", "exit_clearance_setup"
 const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
 // Attendance Reports: "read" = the reports as they always were; "late_list"
 // = who came late on a day, by name (the Assistant's "aj ke ke late").
-// Explicit-only — the no-saved-layers default is "read" alone.
-const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
+// Explicit-only. "dept_summary" = Monthly Attendance Report -> Department
+// Summary (present / absent / leave / delay / extreme delay per department,
+// a day or a month): plain reading, so the no-saved-layers default is
+// "read" + "dept_summary". "custom_report" = Monthly Attendance Report ->
+// Custom Report (the Attendance Report Builder) — reading too, also default.
+const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary", "custom_report"] as const;
 // Mail Administration (MailRoutes.ts): "read" = the list of everyone's
 // connected Credence Mail mailboxes; "mail_open" = open someone's mailbox
 // (read only); "mail_password" = see a mailbox's saved password. Both
@@ -422,6 +497,15 @@ const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const BREAK_LAYER_KEYS = ["read", "break_manage"] as const;
+// Recruitment (ATS, RecruitmentRoutes.ts): "read" = everything the module did
+// before; "email_candidates" = email a candidate about their interview (set,
+// moved, cancelled), an offer or a regret. Explicit-only.
+const RECRUITMENT_LAYER_KEYS = ["read", "email_candidates"] as const;
+// Vehicle Management: "read" = the module as it was (requests, inventory,
+// drivers list); "manage_drivers" = add / change / remove drivers
+// (VehicleManagementRoutes.ts). Explicit-only — the no-saved-layers default
+// is "read" alone.
+const VEHICLE_LAYER_KEYS = ["read", "manage_drivers"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
@@ -451,6 +535,12 @@ const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete
 // "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
 // left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
 const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+// HR Data Import's layers: one tick per kind of data that can be imported.
+// Having a module (Employees, Leave, Payroll…) is NOT enough to import into
+// it — the account also needs the HR Data Import module and that kind's tick
+// here. All explicit-only: an account with no saved layers gets none.
+// (Salary import keeps its own explicit Payroll layer "salary_bulk_upload".)
+const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_bill_claims", "import_attendance", "import_office_attendance"] as const;
 const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
@@ -469,7 +559,8 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
-  conveyance: CONVEYANCE_LAYER_KEYS,
+  notices: NOTICE_LAYER_KEYS,
+  bill_claim: BILL_CLAIM_LAYER_KEYS,
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
   target_reports: TARGET_LAYER_KEYS,
@@ -477,9 +568,12 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
   break_time: BREAK_LAYER_KEYS,
+  recruitment: RECRUITMENT_LAYER_KEYS,
+  vehicle_management: VEHICLE_LAYER_KEYS,
   employees: EMPLOYEE_LAYER_KEYS,
   document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
+  data_import: DATA_IMPORT_LAYER_KEYS,
 };
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
@@ -607,14 +701,14 @@ async function getLeaveApplicationDeptScope(userId: number): Promise<string[] | 
   }
 }
 
-// Department-wise scope for the 'conveyance' module — same shape and same
+// Department-wise scope for the 'bill_claim' module — same shape and same
 // "no rows = unrestricted" convention as getAttendanceReportDeptScope/
 // getLeaveApplicationDeptScope above, backed by
-// conveyance_claim_department_access instead. See that table's comment in
+// bill_claim_department_access instead. See that table's comment in
 // initDB() for the full design.
-async function getConveyanceClaimDeptScope(userId: number): Promise<string[] | null> {
+async function getBillClaimDeptScope(userId: number): Promise<string[] | null> {
   try {
-    const rows: any = await queryDB("SELECT department FROM conveyance_claim_department_access WHERE user_id = ?", [userId]);
+    const rows: any = await queryDB("SELECT department FROM bill_claim_department_access WHERE user_id = ?", [userId]);
     if (rows.length === 0) return null;
     return rows.map((r: any) => r.department);
   } catch {
@@ -635,12 +729,12 @@ async function getApprovalChain(): Promise<any[]> {
 }
 
 // Fires an Approval Request through the configured global chain whenever a User
-// Checks In / Checks Out (Remote Attendance OR Movement Claims). This is called
+// Checks In / Checks Out (Remote Attendance OR Check In/Out). This is called
 // AFTER the check-in/out itself is already recorded, and deliberately never throws
 // — the workflow is non-blocking, so a failure here must never undo or block the
 // User's actual check-in/out. If no chain is configured yet, this is a no-op.
 async function createApprovalRequest(
-  sourceType: "attendance" | "claim" | "user_claim",
+  sourceType: "attendance" | "claim" | "bill_claim",
   eventType: "check_in" | "check_out" | "submit",
   sourceId: number,
   requestedBy: number
@@ -659,10 +753,10 @@ async function createApprovalRequest(
 
 // ============================================================================
 // Dynamic Approval Engine (Part 3 of 5) — reads the Templates built in Part 2
-// to route a freshly-submitted Conveyance Bill Claim / Timesheet (Attendance
+// to route a freshly-submitted Bill Claim / Timesheet (Attendance
 // Correction) request. (Leave Application is intentionally NOT wired to this
 // yet — see the Leave Balance + migration work grouped into Part 5.) Remote
-// Attendance / Movement Claims ('attendance'/'claim' source types) are also
+// Attendance / Check In/Out ('attendance'/'claim' source types) are also
 // untouched — they keep using the OLD global chain (createApprovalRequest
 // above) exactly as before.
 //
@@ -678,7 +772,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -767,16 +861,45 @@ async function resolveEmployeeDirectSupervisor(employeeUserId: number): Promise<
 // Employee's own Direct Supervisor (resolveEmployeeDirectSupervisor) first;
 // only when that resolves to null does the Department Supervisor
 // (resolveDepartmentSupervisor) apply as the fallback.
+// The employee's Supervisor for an approval: their own Direct Supervisor,
+// else their Department's — skipping anyone blocked, set inactive or whose
+// Job Status says they have left (a request never goes to someone who can't
+// act on it).
 async function resolveSupervisorApprover(employeeUserId: number): Promise<number | null> {
   const direct = await resolveEmployeeDirectSupervisor(employeeUserId);
-  if (direct) return direct;
-  return resolveDepartmentSupervisor(employeeUserId);
+  if (direct && !(await inactiveUserIds([direct])).has(direct)) return direct;
+  const dept = await resolveDepartmentSupervisor(employeeUserId);
+  if (dept && !(await inactiveUserIds([dept])).has(dept)) return dept;
+  return null;
+}
+
+// Of these accounts, the ones that can't act any more: missing, blocked, or
+// whose Employee record is inactive / has a Job Status meaning they left.
+async function inactiveUserIds(ids: number[]): Promise<Set<number>> {
+  const uniq = [...new Set(ids.map(Number).filter((x) => Number.isFinite(x) && x > 0))];
+  const out = new Set<number>(uniq);
+  if (!uniq.length) return out;
+  const rows: any[] =
+    (await queryDB(
+      `/*unscoped*/ SELECT u.id, COALESCE(u.is_blocked, 0) AS blocked, e.id AS emp_id, e.is_active AS emp_active, e.job_status
+         FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+        WHERE u.id IN (${uniq.map(() => "?").join(",")})`,
+      uniq
+    ).catch(() => null)) || null;
+  if (!rows) return new Set(); // can't tell — treat everyone as active
+  const ok = new Set<number>();
+  for (const r of rows) {
+    if (Number(r.blocked)) continue;
+    if (r.emp_id == null || (Number(r.emp_active) === 1 && !isSeparatedJobStatus(r.job_status))) ok.add(Number(r.id));
+  }
+  for (const id of ok) out.delete(id);
+  return out;
 }
 
 // Creates a Template-driven approval_requests row for a just-submitted
 // Conveyance/Timesheet request, OR reports back that no Template applies at
 // all (autoApproved: true) so the caller finalizes the request immediately
-// instead — see the two POST /api/user-claims and POST
+// instead — see the two POST /api/bill-claims and POST
 // /api/attendance/corrections call sites below for how that edge case is
 // actually handled (each source type finalizes differently).
 //
@@ -791,8 +914,8 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
+  requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
+  sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
   sourceId: number,
   requestedBy: number,
   // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
@@ -850,11 +973,17 @@ async function createTemplateApprovalRequest(
     return { autoApproved: false, template: null };
   }
 
-  await queryDB(
+  const ins: any = await queryDB(
     `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
      VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?)`,
     [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
   );
+  const newId = Number(ins?.insertId);
+  if (newId) {
+    if (supervisorId && overrideSupervisorId) await queryDB("UPDATE approval_requests SET supervisor_pinned = 1 WHERE id = ?", [newId]).catch(() => {});
+    // A first Layer with nobody active on it goes to a Superadmin straight away.
+    await reconcilePendingApprovals(newId).catch(() => 0);
+  }
   return { autoApproved: false, template };
 }
 
@@ -865,8 +994,8 @@ async function createTemplateApprovalRequest(
 // Supervisor or Template exists for that employee later, the request moves
 // to it (step 1) and that approver is alerted. Runs when an approvals list
 // is opened, when the request's approver is looked up, and every 10 minutes.
-const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
-  user_claim: "conveyance",
+const APPROVAL_REQUEST_TYPE: Record<string, "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
+  bill_claim: "bill_claim",
   attendance_correction: "timesheet",
   leave_application: "leave",
   asset_requisition: "asset",
@@ -875,7 +1004,7 @@ const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet"
   advance_request: "loan"
 };
 const APPROVAL_ALERT: Record<string, { type: AlertType; label: string }> = {
-  user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
+  bill_claim: { type: "bill_claim_approval", label: "Bill Claim" },
   attendance_correction: { type: "hr_action", label: "Attendance Correction" },
   leave_application: { type: "leave_approval", label: "Leave Application" },
   asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
@@ -945,7 +1074,7 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
       const total = (sup ? 1 : 0) + steps;
       if (!total) continue;
       const done: any = await queryDB(
-        "UPDATE approval_requests SET awaiting_approver = 0, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
         [template ? template.id : null, sup || null, total, r.id]
       );
       if (!Number(done?.affectedRows)) continue;
@@ -979,6 +1108,198 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
 // supervisor_step_user_id is set on the request, step_order 1 is that
 // Supervisor and the Template's own steps are shifted down by one (its own
 // step_order 1 is this request's step_order 2, and so on).
+// Everyone on a request's current Template Layer (active or not).
+async function templateLayerApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
+  if (!request?.template_id) return [];
+  const templateStepOrder = request.supervisor_step_user_id ? Number(request.current_step) - 1 : Number(request.current_step);
+  const rows: any[] =
+    (await queryDB(
+      `SELECT sa.user_id, u.name AS user_name
+       FROM approval_template_step_approvers sa
+       JOIN approval_template_steps s ON s.id = sa.step_id
+       LEFT JOIN users u ON u.id = sa.user_id
+       WHERE s.template_id = ? AND s.step_order = ?`,
+      [request.template_id, templateStepOrder]
+    )) || [];
+  return rows.map((r: any) => ({ user_id: Number(r.user_id), user_name: r.user_name }));
+}
+
+// Moves every pending request (or just `onlyId`) to whoever should have it
+// now, and tells them:
+//  - an ad-hoc approver who is no longer active: back to the Layer;
+//  - waiting on the Supervisor Layer: the employee's CURRENT active
+//    Supervisor (a hand-picked approver stays unless they are inactive);
+//    with no Supervisor any more it goes to the Template's first Layer, or,
+//    without one, to "no approver" (a Superadmin decides; it moves on once a
+//    Supervisor / Template exists — rehomeAwaitingApprovals);
+//  - a Template Layer with nobody active on it: a Superadmin is told and can
+//    decide it (stuck_since); once someone active is on it again they are told.
+// Template Layers are read live, so new people on a Layer see its waiting
+// requests at once (PUT /api/approval-templates/:id alerts them).
+let reconcileRunning: Promise<number> | null = null;
+async function reconcilePendingApprovals(onlyId?: number): Promise<number> {
+  if (!onlyId && reconcileRunning) return reconcileRunning;
+  // Outside any request's company scope: a save in one company's Admin Panel
+  // (strict scope) must not hide a Supervisor who sits in a sister company.
+  const run = companyStore.exit(() => (async () => {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT * FROM approval_requests WHERE status = 'pending' AND COALESCE(awaiting_approver, 0) = 0${onlyId ? " AND id = ?" : ""}`,
+        onlyId ? [onlyId] : []
+      ).catch(() => [])) || [];
+    let changed = 0;
+    for (const r of rows) {
+      try {
+        changed += await reconcileOneApproval(r);
+      } catch (err: any) {
+        console.warn(`⚠️ Could not reconcile approval request #${r.id}: ` + err.message);
+      }
+    }
+    return changed;
+  })());
+  if (!onlyId) {
+    reconcileRunning = run;
+    run.finally(() => (reconcileRunning = null)).catch(() => {});
+  }
+  return run;
+}
+
+// The Superadmins of the requester's own workspace (group), plus the system
+// owner — never another workspace's (reconcile runs without a company scope).
+async function superadminIds(requesterId: number): Promise<number[]> {
+  const rows: any[] =
+    (await queryDB(
+      `/*unscoped*/ SELECT s.id FROM users s
+        WHERE s.role = 'superadmin' AND COALESCE(s.is_blocked, 0) = 0 AND s.id <> ?
+          AND (COALESCE(s.is_platform_admin, 0) = 1
+               OR COALESCE(s.group_id, 1) = (SELECT COALESCE(u.group_id, 1) FROM users u WHERE u.id = ?))`,
+      [requesterId, requesterId]
+    ).catch(() => [])) || [];
+  return rows.map((x) => Number(x.id));
+}
+
+async function reconcileOneApproval(r: any): Promise<number> {
+  const mapping = APPROVAL_ALERT[r.source_type];
+  const label = mapping?.label || "request";
+  const alertType = mapping?.type || "hr_action";
+  const nameOf = async (id: number) => (((await queryDB("SELECT name FROM users WHERE id = ?", [id]).catch(() => [])) || [])[0]?.name as string) || "someone";
+  const requester = Number(r.requested_by);
+  let requesterName: string | null = null;
+  const whoName = async () => (requesterName ??= await nameOf(requester));
+  const tell = (userId: number, title: string, message: string) =>
+    createAlert(queryDB, { userId, type: alertType, title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
+  // The employee's own alert opens their own request, not Approve Application.
+  const REQUESTER_TYPE: Record<string, AlertType> = {
+    bill_claim: "bill_claim",
+    attendance_correction: "hr_action",
+    leave_application: "leave_application",
+    asset_requisition: "asset_requisition",
+    vehicle_requisition: "vehicle_requisition",
+    mobile_limit_request: "mobile_bill",
+    advance_request: "loan_request"
+  };
+  const tellRequester = (title: string, message: string) =>
+    createAlert(queryDB, { userId: requester, type: REQUESTER_TYPE[r.source_type] || "hr_action", title, message, relatedType: r.source_type, relatedId: Number(r.source_id) }).catch(() => {});
+  let changed = 0;
+
+  // An ad-hoc approver who can't act any more: back to the Layer.
+  if (r.adhoc_approver_id) {
+    const adhoc = Number(r.adhoc_approver_id);
+    if (!(await inactiveUserIds([adhoc])).has(adhoc)) return 0;
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET adhoc_approver_id = NULL, adhoc_added_by = NULL, adhoc_note = NULL WHERE id = ? AND status = 'pending' AND adhoc_approver_id = ?",
+      [r.id, adhoc]
+    );
+    if (!Number(done?.affectedRows)) return 0;
+    r.adhoc_approver_id = null;
+    changed++;
+  }
+
+  // Waiting on the Supervisor Layer.
+  if (r.supervisor_step_user_id && Number(r.current_step) === 1) {
+    const stored = Number(r.supervisor_step_user_id);
+    const storedGone = (await inactiveUserIds([stored])).has(stored);
+    if (Number(r.supervisor_pinned) && !storedGone) return changed;
+    const desired = await resolveSupervisorApprover(requester);
+    if (desired === stored && !storedGone) return changed;
+    const who = await whoName();
+    const oldName = await nameOf(stored);
+    const why = storedGone ? `${oldName} is no longer active` : `${oldName} is no longer ${who}'s supervisor`;
+    if (desired && desired !== stored) {
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET supervisor_step_user_id = ?, supervisor_pinned = 0 WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+        [desired, r.id, stored]
+      );
+      if (!Number(done?.affectedRows)) return changed;
+      const newName = await nameOf(desired);
+      await tell(desired, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it now waits on you as their supervisor.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${newName}.`);
+      return changed + 1;
+    }
+    // No (active) supervisor now: on to the Template's first Layer, or to "no approver".
+    const steps: any[] = r.template_id ? (await queryDB("SELECT id FROM approval_template_steps WHERE template_id = ?", [r.template_id]).catch(() => [])) || [] : [];
+    if (steps.length) {
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+        [steps.length, r.id, stored]
+      );
+      if (!Number(done?.affectedRows)) return changed;
+      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length });
+      const next = await getCurrentStepApprovers(r);
+      for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why} and no other supervisor is set, so it moved on to you.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
+      return changed + 1 + (await reconcileOneApproval(r));
+    }
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, awaiting_approver = 1 WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
+      [r.id, stored]
+    );
+    if (!Number(done?.affectedRows)) return changed;
+    for (const id of await superadminIds(requester)) {
+      await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set their Supervisor and it moves there by itself, or decide it yourself in Approve Application.`);
+    }
+    await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
+    return changed + 1;
+  }
+
+  // Waiting on a Template Layer.
+  if (r.template_id) {
+    const layer = await templateLayerApprovers(r);
+    const gone = await inactiveUserIds(layer.map((a) => a.user_id));
+    const active = layer.filter((a) => !gone.has(a.user_id));
+    const layerNo = Number(r.current_step);
+    if (!active.length && !r.stuck_since) {
+      // Only while it is still on this Layer.
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET stuck_since = NOW() WHERE id = ? AND stuck_since IS NULL AND status = 'pending' AND current_step = ? AND adhoc_approver_id IS NULL",
+        [r.id, Number(r.current_step)]
+      );
+      if (!Number(done?.affectedRows)) return changed;
+      const who = await whoName();
+      const names = layer.map((a) => a.user_name).filter(Boolean).join(", ");
+      for (const id of await superadminIds(requester)) {
+        await tell(
+          id,
+          "Approval stuck — nobody active on the Layer",
+          `${who}'s ${label} is waiting on Layer ${layerNo}${names ? ` (${names})` : ""}, but nobody on that Layer is active any more. Add someone to the Layer in Approval Chain -> Templates and it goes to them, or decide it yourself in Approve Application.`
+        );
+      }
+      return changed + 1;
+    }
+    if (active.length && r.stuck_since) {
+      const done: any = await queryDB("UPDATE approval_requests SET stuck_since = NULL WHERE id = ? AND stuck_since IS NOT NULL AND status = 'pending' AND current_step = ?", [
+        r.id,
+        Number(r.current_step)
+      ]);
+      if (!Number(done?.affectedRows)) return changed;
+      const who = await whoName();
+      for (const a of active) if (a.user_id !== requester) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} is waiting on you (Layer ${layerNo}).`);
+      return changed + 1;
+    }
+  }
+  return changed;
+}
+
 async function getCurrentStepApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
   // No approver yet: move it to a Supervisor / Template if one exists now,
   // else nobody (only a Superadmin's override can decide it).
@@ -988,22 +1309,24 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
     if (!fresh || Number(fresh.awaiting_approver) === 1) return [];
     Object.assign(request, fresh);
   }
-  const hasSupervisorStep = !!request.supervisor_step_user_id;
-  if (hasSupervisorStep && Number(request.current_step) === 1) {
-    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
+  // An ad-hoc approver added by this Layer's approver: only they can act
+  // until they approve (it then comes back to this Layer).
+  if (request.adhoc_approver_id) {
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.adhoc_approver_id]);
     return rows.length > 0 ? [{ user_id: Number(rows[0].id), user_name: rows[0].name }] : [];
   }
+  const hasSupervisorStep = !!request.supervisor_step_user_id;
+  // Nobody blocked / inactive / gone counts as an approver
+  // (reconcilePendingApprovals moves the request on from them).
+  if (hasSupervisorStep && Number(request.current_step) === 1) {
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
+    if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
+    return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
+  }
   if (request.template_id) {
-    const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
-    const rows = await queryDB(
-      `SELECT sa.user_id, u.name AS user_name
-       FROM approval_template_step_approvers sa
-       JOIN approval_template_steps s ON s.id = sa.step_id
-       LEFT JOIN users u ON u.id = sa.user_id
-       WHERE s.template_id = ? AND s.step_order = ?`,
-      [request.template_id, templateStepOrder]
-    );
-    return rows.map((r: any) => ({ user_id: Number(r.user_id), user_name: r.user_name }));
+    const rows = await templateLayerApprovers(request);
+    const gone = await inactiveUserIds(rows.map((r) => r.user_id));
+    return rows.filter((r) => !gone.has(r.user_id));
   }
   const chain = await getApprovalChain();
   const step = chain.find((s: any) => Number(s.step_order) === Number(request.current_step));
@@ -1031,7 +1354,7 @@ async function isVehicleMaintainerStep(request: any): Promise<boolean> {
 async function isAssetFulfillerStep(request: any): Promise<boolean> {
   return (await getCurrentTemplateStepType(request)) === "asset_fulfiller";
 }
-// Conveyance counterpart — a 'conveyance' Template's last Layer set to
+// Conveyance counterpart — a 'bill_claim' Template's last Layer set to
 // 'conveyance_disburser': that approver pays the claim out (Bill + voucher)
 // instead of only approving it. See performApprovalAction.
 async function isConveyanceDisburserStep(request: any): Promise<boolean> {
@@ -1065,7 +1388,7 @@ async function performApprovalAction(
   billId: number | null,
   approvedAmount?: number | null,
   voucherNo?: string | null,
-  // Conveyance Bill Claims only: `claimVersion` = the claim version the
+  // Bill Claims only: `claimVersion` = the claim version the
   // approver looked at (refused if the employee has edited it since);
   // `allowReclaim` = Reject, but let the employee edit and resubmit it.
   claimOpts: { claimVersion?: number | null; allowReclaim?: boolean } = {}
@@ -1084,6 +1407,14 @@ async function performApprovalAction(
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
+  // An attendance correction for a day whose salary is already processed /
+  // paid can't be approved (it would change a closed month) — checked before
+  // anything is recorded, so the request is never left half-approved.
+  if (request.source_type === "attendance_correction" && action === "approved") {
+    const c: any = ((await queryDB("SELECT user_id, attendance_date FROM attendance_corrections WHERE id = ?", [request.source_id])) || [])[0];
+    const closed = c ? await closedPayMonthFor(Number(c.user_id), String(c.attendance_date instanceof Date ? c.attendance_date.toLocaleDateString("en-CA") : c.attendance_date).slice(0, 10)) : null;
+    if (closed) throw new ApprovalActionError(400, `${closedPayMonthMessage(closed)} Reject this request instead.`);
+  }
 
   const currentApprovers = await getCurrentStepApprovers(request);
   const isAssignedApprover = currentApprovers.some((a) => Number(a.user_id) === Number(actorUser.id));
@@ -1091,12 +1422,46 @@ async function performApprovalAction(
     throw new ApprovalActionError(403, "This request isn't waiting on you yet.");
   }
 
-  // Conveyance Bill Claim review rules (Bill Claim Policy -> Editing & review).
+  // Ad-hoc approver (POST /api/my-approvals/:id/adhoc): their Approve only
+  // hands the request back to the Layer that asked — it doesn't move on.
+  // Reject / Return end the ad-hoc step and then work as usual.
+  if (request.adhoc_approver_id) {
+    const addedBy = Number(request.adhoc_added_by || 0);
+    const cleared: any = await queryDB(
+      "UPDATE approval_requests SET adhoc_approver_id = NULL, adhoc_added_by = NULL, adhoc_note = NULL WHERE id = ? AND status = 'pending' AND adhoc_approver_id = ?",
+      [requestId, request.adhoc_approver_id]
+    );
+    if (cleared && cleared.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
+    request.adhoc_approver_id = null;
+    request.adhoc_added_by = null;
+    if (action === "approved") {
+      let trail: any[] = [];
+      try {
+        trail = JSON.parse(request.actions_json || "[]");
+      } catch {
+        trail = [];
+      }
+      trail.push({
+        step_order: Number(request.current_step),
+        approver_id: actorUser.id,
+        approver_name: actorUser.name,
+        action: "approved",
+        adhoc: true,
+        remarks,
+        acted_at: new Date().toISOString()
+      });
+      await queryDB("UPDATE approval_requests SET actions_json = ? WHERE id = ?", [JSON.stringify(trail), requestId]);
+      if (addedBy > 0) notifyRecordChanged([addedBy], { relatedType: request.source_type, relatedId: Number(request.source_id) });
+      return { status: "pending", current_step: Number(request.current_step), billInfo: null };
+    }
+  }
+
+  // Bill Claim review rules (Bill Claim Policy -> Editing & review).
   let claimPolicy: any = null;
-  if (request.source_type === "user_claim") {
+  if (request.source_type === "bill_claim") {
     claimPolicy = await loadBillClaimPolicy(queryDB);
     if (claimOpts.claimVersion != null) {
-      const v = await queryDB("SELECT version FROM user_claims WHERE id = ?", [request.source_id]);
+      const v = await queryDB("SELECT version FROM bill_claims WHERE id = ?", [request.source_id]);
       if (v.length > 0 && Number(v[0].version || 1) !== Number(claimOpts.claimVersion)) {
         throw new ApprovalActionError(409, "The employee changed this claim after you opened it — reload it and check the changes first.");
       }
@@ -1108,7 +1473,7 @@ async function performApprovalAction(
       throw new ApprovalActionError(400, "Returning claims is turned off in the Bill Claim Policy.");
     }
   } else if (action === "returned") {
-    throw new ApprovalActionError(400, "Only a Conveyance Bill Claim can be returned for correction.");
+    throw new ApprovalActionError(400, "Only a Bill Claim can be returned for correction.");
   }
 
   // Return for correction: the claim goes back to the employee (out of every
@@ -1129,28 +1494,28 @@ async function performApprovalAction(
       acted_at: new Date().toISOString()
     });
     const back: any = await queryDB(
-      "UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
+      "UPDATE approval_requests SET status = 'returned', current_step = 1, stuck_since = NULL, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
       [JSON.stringify(trail), requestId, Number(request.current_step)]
     );
     if (back && back.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
-    await queryDB("UPDATE user_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
+    await queryDB("UPDATE bill_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
     await recordClaimHistory(queryDB, Number(request.source_id), "returned", { id: actorUser.id, name: actorUser.name }, remarks);
     try {
-      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM user_claims WHERE id = ?", [request.source_id]);
+      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM bill_claims WHERE id = ?", [request.source_id]);
       const uc = ucRows[0];
       const notifyIds = [...new Set([Number(uc?.user_id), Number(uc?.filed_by || 0)].filter((x) => x > 0))];
       for (const uid of notifyIds) {
         await createAlert(queryDB, {
           userId: uid,
-          type: "conveyance_claim",
-          title: "Conveyance Bill Claim Returned",
-          message: `${actorUser.name} returned Conveyance Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
-          relatedType: "user_claim",
+          type: "bill_claim",
+          title: "Bill Claim Returned",
+          message: `${actorUser.name} returned Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
+          relatedType: "bill_claim",
           relatedId: Number(request.source_id)
         });
       }
     } catch (alertErr: any) {
-      console.warn("⚠️ Could not notify about returned Conveyance Bill Claim #" + request.source_id + ": " + alertErr.message);
+      console.warn("⚠️ Could not notify about returned Bill Claim #" + request.source_id + ": " + alertErr.message);
     }
     return { status: "returned", current_step: 1, billInfo: null };
   }
@@ -1158,7 +1523,7 @@ async function performApprovalAction(
   // own new Bill (never folded into an existing one) and that Bill is marked
   // disbursed in the same action.
   const disburseOnApprove =
-    request.source_type === "user_claim" &&
+    request.source_type === "bill_claim" &&
     action === "approved" &&
     Number(request.current_step) >= Number(request.total_steps) &&
     (await isConveyanceDisburserStep(request));
@@ -1170,9 +1535,9 @@ async function performApprovalAction(
     actions = [];
   }
 
-  // Approved Amount history (for the Admin's Conveyance Bill Claim "History" —
-  // ConveyanceBillPanel.tsx's UserClaimDetailModal): only meaningful for a
-  // 'user_claim' Approve. Records the amount THIS Layer actually decided
+  // Approved Amount history (for the Admin's Bill Claim "History" —
+  // ConveyanceBillPanel.tsx's AdminBillClaimDetailModal): only meaningful for a
+  // 'bill_claim' Approve. Records the amount THIS Layer actually decided
   // (whatever was submitted, or whatever was already on record if they left
   // it untouched) and whether that's a change from what was on record
   // immediately before this action — so "who approved" and "how many times
@@ -1181,8 +1546,8 @@ async function performApprovalAction(
   // table.
   let actionApprovedAmount: number | null = null;
   let actionAmountEdited = false;
-  if (request.source_type === "user_claim" && action === "approved") {
-    const ucRows = await queryDB("SELECT amount, approved_amount FROM user_claims WHERE id = ?", [request.source_id]);
+  if (request.source_type === "bill_claim" && action === "approved") {
+    const ucRows = await queryDB("SELECT amount, approved_amount FROM bill_claims WHERE id = ?", [request.source_id]);
     if (ucRows.length > 0) {
       // Checked before anything is written, so a refused amount leaves the
       // request exactly where it was.
@@ -1224,7 +1589,8 @@ async function performApprovalAction(
 
   // Only if nobody acted on this step meanwhile (two approvers, a
   // double-click): the second one changes nothing and runs no side effects.
-  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
+  // A new Layer (or the end): whether it is stuck is worked out afresh.
+  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, stuck_since = NULL, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
     newStatus,
     newStep,
     JSON.stringify(actions),
@@ -1232,9 +1598,9 @@ async function performApprovalAction(
     Number(request.current_step)
   ]);
   if (moved && moved.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
-  // Conveyance Bill Claim: keep this approver's signature with this approval
+  // Bill Claim: keep this approver's signature with this approval
   // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
-  if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
+  if (request.source_type === "bill_claim" && action === "approved" && claimPolicy?.approver_signature) {
     try {
       const sig: any[] = (await queryDB("SELECT image FROM user_signatures WHERE user_id = ?", [actorUser.id])) || [];
       if (sig[0]?.image) {
@@ -1251,29 +1617,29 @@ async function performApprovalAction(
   // other tabs refresh at once, even when this layer sends no alert.
   notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
 
-  // Only a 'user_claim' request actually gates something further — a
-  // Conveyance Bill Claim only becomes a real Bill line item the moment its
+  // Only a 'bill_claim' request actually gates something further — a
+  // Bill Claim only becomes a real Bill line item the moment its
   // request finishes 'approved' here (the LAST step), and is freed up again
-  // the moment it's 'rejected' (at any step). Attendance/Movement Claims are
+  // the moment it's 'rejected' (at any step). Attendance/Check In/Out are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
   let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
-  if (request.source_type === "user_claim") {
+  if (request.source_type === "bill_claim") {
     try {
       if (newStatus === "approved") {
-        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
+        billInfo = await finalizeBillClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
         if (disburseOnApprove) {
           billInfo.voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, billInfo.bill_id, actorUser.id, voucherNo);
         }
       } else if (newStatus === "rejected") {
-        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
+        await rejectBillClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
       } else if (action === "approved" && approvedAmount != null) {
         // Approved on a NON-final step (e.g. the Supervisor auto-layer at
         // step 1 of a multi-step chain) with an Approved Amount edit — same
         // capability the last step already had, just recorded as a running
         // draft instead of finalizing a Bill line item yet. See
-        // updateUserClaimApprovedAmountDraft.
-        await updateUserClaimApprovedAmountDraft(Number(request.source_id), approvedAmount);
+        // updateBillClaimApprovedAmountDraft.
+        await updateBillClaimApprovedAmountDraft(Number(request.source_id), approvedAmount);
       }
     } catch (finalizeErr: any) {
       // The Approval Request itself already recorded above — surface the
@@ -1402,12 +1768,12 @@ async function attachApprovalStatuses(sourceType: "attendance" | "claim", rows: 
 // Also resolves current_approver_name (who the request is sitting with right
 // now, while still 'pending') and the request's actions trail — same
 // enrichment attachAttendanceCorrectionApproval does for Timesheet — so a User
-// can tell exactly which Layer their Conveyance Bill Claim is waiting on.
-async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
+// can tell exactly which Layer their Bill Claim is waiting on.
+async function attachBillClaimApproval(rows: any[]): Promise<any[]> {
   if (rows.length === 0) return rows;
   let requests: any[] = [];
   try {
-    requests = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["user_claim"]);
+    requests = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["bill_claim"]);
   } catch {
     requests = [];
   }
@@ -1440,7 +1806,7 @@ async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
   );
 }
 
-// Same idea as attachUserClaimApproval above, but for Attendance Correction
+// Same idea as attachBillClaimApproval above, but for Attendance Correction
 // requests (single Approval Request per request, event_type 'submit').
 // Additionally resolves current_approver_name (who the request is sitting
 // with right now, while still 'pending') and the request's actions trail —
@@ -1499,21 +1865,52 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
   if (rows.length === 0) throw new Error("Correction request not found");
   const c = rows[0];
   if (c.status !== "pending") throw new Error("This request has already been reviewed.");
+  {
+    const closed = await closedPayMonthFor(Number(c.user_id), toDateOnlyString(c.attendance_date) || "");
+    if (closed) throw new Error(closedPayMonthMessage(closed));
+  }
 
   const existing = await queryDB("SELECT * FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ?", [
     c.user_id,
     c.project_id,
     c.attendance_date
   ]);
+  // An off-site In / Out (AttendanceRoutes.ts offsitePunch) also brings the
+  // place it was given; an ordinary correction has none and changes no place.
+  const offIn = Number(c.offsite_in) === 1 && c.requested_check_in_at;
+  const offOut = Number(c.offsite_out) === 1 && c.requested_check_out_at;
+  const inGeo = offIn ? [c.in_lat, c.in_lng, c.in_distance_m] : [null, null, null];
+  const outGeo = offOut ? [c.out_lat, c.out_lng, c.out_distance_m] : [null, null, null];
+  const inNote = offIn ? `Off-site: ${c.in_place || "outside the project area"} (approved)` : null;
+  const outNote = offOut ? `Off-site: ${c.out_place || "outside the project area"} (approved)` : null;
+  const inPlace = offIn ? String(c.in_place || "Outside the project area").slice(0, 255) : null;
+  const outPlace = offOut ? String(c.out_place || "Outside the project area").slice(0, 255) : null;
   if (existing.length > 0) {
     await queryDB(
-      "UPDATE attendance SET check_in_at = COALESCE(?, check_in_at), check_out_at = COALESCE(?, check_out_at) WHERE id = ?",
-      [c.requested_check_in_at, c.requested_check_out_at, existing[0].id]
+      `UPDATE attendance SET check_in_at = COALESCE(?, check_in_at), check_out_at = COALESCE(?, check_out_at),
+              check_in_lat = COALESCE(?, check_in_lat), check_in_lng = COALESCE(?, check_in_lng), check_in_distance_m = COALESCE(?, check_in_distance_m),
+              check_in_remarks = COALESCE(?, check_in_remarks),
+              check_out_lat = COALESCE(?, check_out_lat), check_out_lng = COALESCE(?, check_out_lng), check_out_distance_m = COALESCE(?, check_out_distance_m),
+              check_out_remarks = COALESCE(?, check_out_remarks),
+              check_in_place = CASE WHEN ? THEN ? WHEN ? IS NOT NULL THEN NULL ELSE check_in_place END,
+              check_out_place = CASE WHEN ? THEN ? WHEN ? IS NOT NULL THEN NULL ELSE check_out_place END,
+              check_out_project_id = CASE WHEN ? THEN NULL ELSE check_out_project_id END
+        WHERE id = ?`,
+      // Off-site: the real place (and no other Project's name for the Out);
+      // an ordinary correction of that time drops an old off-site place.
+      [c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote,
+        offIn ? 1 : 0, inPlace, c.requested_check_in_at,
+        offOut ? 1 : 0, outPlace, c.requested_check_out_at,
+        offOut ? 1 : 0,
+        existing[0].id]
     );
   } else {
     await queryDB(
-      "INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at) VALUES (?, ?, ?, ?, ?)",
-      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at]
+      `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at,
+                               check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks,
+                               check_in_place, check_out_place)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.user_id, c.project_id, c.attendance_date, c.requested_check_in_at, c.requested_check_out_at, ...inGeo, inNote, ...outGeo, outNote, inPlace, outPlace]
     );
   }
 
@@ -1522,6 +1919,52 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     approvedBy,
     correctionId
   ]);
+  await createAlert(queryDB, {
+    userId: Number(c.user_id),
+    type: "hr_action",
+    title: offIn || offOut ? "Off-site Attendance Approved" : "Attendance Correction Approved",
+    message:
+      offIn || offOut
+        ? `Your off-site attendance for ${toDateOnlyString(c.attendance_date)} was approved — it now counts as attendance.${remarks ? ` Note: ${remarks}` : ""}`
+        : `Your attendance correction for ${toDateOnlyString(c.attendance_date)} was approved — the Timesheet now shows the corrected time.${remarks ? ` Note: ${remarks}` : ""}`,
+    relatedType: "attendance_correction",
+    relatedId: Number(correctionId)
+  }).catch(() => {});
+}
+
+// Timesheet -> Correct Attendance: tells the first step's approver(s) a
+// correction is waiting on them (Leave does the same with
+// notifyLeaveFirstApprovers). Later steps are told by ApprovalRoutes.ts's
+// notifyNextStepApprovers.
+async function notifyAttendanceCorrectionFirstApprovers(correctionId: number) {
+  try {
+    const [rows, requests] = await Promise.all([
+      queryDB("SELECT * FROM attendance_corrections WHERE id = ?", [correctionId]),
+      queryDB("SELECT * FROM approval_requests WHERE source_type = 'attendance_correction' AND source_id = ? AND status = 'pending'", [correctionId])
+    ]);
+    const c = rows[0];
+    const request = requests[0];
+    if (!c || !request || Number(request.awaiting_approver)) return;
+    const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [c.user_id])) || [];
+    const hm = (v: any) => (v ? String(v).replace("T", " ").slice(11, 16) : "");
+    const times = [c.requested_check_in_at ? `In ${hm(c.requested_check_in_at)}` : "", c.requested_check_out_at ? `Out ${hm(c.requested_check_out_at)}` : ""].filter(Boolean).join(", ");
+    for (const a of await getCurrentStepApprovers(request)) {
+      if (Number(a.user_id) === Number(c.user_id)) continue;
+      await createAlert(queryDB, {
+        userId: a.user_id,
+        type: "hr_action",
+        title: Number(c.offsite_in) || Number(c.offsite_out) ? "Off-site Attendance Awaiting Your Approval" : "Attendance Correction Awaiting Your Approval",
+        message:
+          Number(c.offsite_in) || Number(c.offsite_out)
+            ? `${who[0]?.name || "An employee"} gave attendance from outside their project area on ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""} — ${c.in_place || c.out_place || "off-site"}. It counts only once approved.`
+            : `${who[0]?.name || "An employee"} asked to correct their attendance for ${toDateOnlyString(c.attendance_date)}${times ? ` (${times})` : ""}. Please review it.`,
+        relatedType: "attendance_correction",
+        relatedId: Number(correctionId)
+      }).catch(() => {});
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the approver(s) for Attendance Correction #" + correctionId + ": " + err.message);
+  }
 }
 
 // Rejects an Attendance Correction request — never touches `attendance` at all.
@@ -1532,6 +1975,17 @@ async function rejectAttendanceCorrection(correctionId: number, rejectedBy: numb
     rejectedBy,
     correctionId
   ]);
+  const rows: any[] = (await queryDB("SELECT user_id, attendance_date FROM attendance_corrections WHERE id = ?", [correctionId])) || [];
+  if (rows[0]) {
+    await createAlert(queryDB, {
+      userId: Number(rows[0].user_id),
+      type: "hr_action",
+      title: "Attendance Correction Rejected",
+      message: `Your attendance correction for ${toDateOnlyString(rows[0].attendance_date)} was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
+      relatedType: "attendance_correction",
+      relatedId: Number(correctionId)
+    }).catch(() => {});
+  }
 }
 
 // Sets an Asset Requisition to 'approved' once every step of its Approval
@@ -1650,18 +2104,18 @@ async function rejectVehicleRequisitionRecord(requisitionId: number, rejectedBy:
 
 // Actually attaches an Approved User Claim onto a Conveyance Bill as a line item
 // (creating a new Bill for that User if billId isn't given) and flips the claim to
-// 'approved'. Shared by two callers: POST /api/user-claims/:id/decision (the
+// 'approved'. Shared by two callers: POST /api/bill-claims/:id/decision (the
 // no-chain-configured / legacy single-step path) and POST /api/approvals/:id/act
-// (the moment the LAST step of a configured chain approves a 'user_claim'
+// (the moment the LAST step of a configured chain approves a 'bill_claim'
 // request). Throws on any problem — callers decide how to surface that.
-async function finalizeUserClaimApproval(
-  userClaimId: number,
+async function finalizeBillClaimApproval(
+  billClaimId: number,
   approvedBy: number,
   billId: number | null,
   remarks: string | null,
   approvedAmount?: number | null
 ) {
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length === 0) throw new Error("Claim not found");
   const uc = rows[0];
   if (uc.status !== "pending") throw new Error("This claim has already been reviewed.");
@@ -1669,10 +2123,10 @@ async function finalizeUserClaimApproval(
   // Approver may partially approve — Approved Amount must be a positive number
   // no greater than what was actually claimed. Falls back to whatever an
   // EARLIER Layer already set as a running draft (see
-  // updateUserClaimApprovedAmountDraft — e.g. the Supervisor auto-layer
+  // updateBillClaimApprovedAmountDraft — e.g. the Supervisor auto-layer
   // editing it at step 1 of a multi-step chain), and only falls back further
   // to the full Claim Amount when nobody has touched it yet (also covers the
-  // legacy /api/user-claims/:id/decision path, which never supports partial
+  // legacy /api/bill-claims/:id/decision path, which never supports partial
   // approval).
   let finalAmount = uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount);
   if (approvedAmount != null) {
@@ -1694,7 +2148,7 @@ async function finalizeUserClaimApproval(
   } else {
     const created = await queryDB(
       "INSERT INTO conveyance_bills (user_id, bill_date, remarks, created_by) VALUES (?, CURDATE(), ?, ?)",
-      [uc.user_id, "Auto-created from an approved Conveyance Bill Claim", approvedBy]
+      [uc.user_id, "Auto-created from an approved Bill Claim", approvedBy]
     );
     targetBillId = created.insertId;
   }
@@ -1704,62 +2158,62 @@ async function finalizeUserClaimApproval(
     String(uc.from_date) !== String(uc.to_date)
       ? `Covers ${toDateOnlyString(uc.from_date)} to ${toDateOnlyString(uc.to_date)}.`
       : null;
-  const refRows = await queryDB("SELECT claim_id FROM user_claim_references WHERE user_claim_id = ?", [uc.id]);
+  const refRows = await queryDB("SELECT claim_id FROM bill_claim_references WHERE bill_claim_id = ?", [uc.id]);
   const refNote = refRows.length > 0 ? `Includes ${refRows.length} referenced check-in/out(s).` : null;
   const itemRemarks = [dateRangeNote, refNote, remarks].filter(Boolean).join(" ") || null;
 
   const item = await queryDB(
     `INSERT INTO conveyance_bill_items
-       (bill_id, source, user_claim_id, entry_date, particulars, amount, remarks)
-     VALUES (?, 'user_claim', ?, ?, ?, ?, ?)`,
+       (bill_id, source, bill_claim_id, entry_date, particulars, amount, remarks)
+     VALUES (?, 'bill_claim', ?, ?, ?, ?, ?)`,
     [targetBillId, uc.id, toDateOnlyString(uc.claim_date), particulars, finalAmount, itemRemarks]
   );
 
   await queryDB(
-    "UPDATE user_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
-    [finalAmount, remarks, approvedBy, userClaimId]
+    "UPDATE bill_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
+    [finalAmount, remarks, approvedBy, billClaimId]
   );
-  await notifyUserClaimDecision(uc, "approved", finalAmount, remarks);
+  await notifyBillClaimDecision(uc, "approved", finalAmount, remarks);
 
   return { bill_id: Number(targetBillId), bill_item_id: Number(item.insertId) };
 }
 
-// Tells the claimant their Conveyance Bill Claim was approved or rejected.
-async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
+// Tells the claimant their Bill Claim was approved or rejected.
+async function notifyBillClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
   try {
     const amt = amount != null ? `\u09f3${Number(amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
     await createAlert(queryDB, {
       userId: Number(uc.user_id),
-      type: "conveyance_claim",
-      title: decision === "approved" ? "Conveyance Bill Claim Approved" : "Conveyance Bill Claim Rejected",
+      type: "bill_claim",
+      title: decision === "approved" ? "Bill Claim Approved" : "Bill Claim Rejected",
       message:
         decision === "approved"
           ? `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) has been approved${amt ? ` for ${amt}` : ""}.${remarks ? ` Remarks: ${remarks}` : ""}`
           : `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
-      relatedType: "user_claim",
+      relatedType: "bill_claim",
       relatedId: Number(uc.id)
     });
   } catch (err: any) {
-    console.warn("⚠️ Could not notify the claimant for Conveyance Bill Claim #" + uc.id + ": " + err.message);
+    console.warn("⚠️ Could not notify the claimant for Bill Claim #" + uc.id + ": " + err.message);
   }
 }
 
 // Records an Approved Amount edit made at a NON-final step of a still-pending
-// 'user_claim' chain (e.g. the Department/Direct Supervisor auto-layer at
+// 'bill_claim' chain (e.g. the Department/Direct Supervisor auto-layer at
 // step 1 of a 2+ step chain, or any earlier Template Layer) — same Approved
-// Amount capability the LAST step already had via finalizeUserClaimApproval,
+// Amount capability the LAST step already had via finalizeBillClaimApproval,
 // just without creating a Bill line item yet, since the claim isn't decided
 // until the chain finishes. The value is stored as a running draft on
-// user_claims.approved_amount so it carries forward as the next Layer's
+// bill_claims.approved_amount so it carries forward as the next Layer's
 // pre-fill (GET /api/my-approvals' source_approved_amount) and as
-// finalizeUserClaimApproval's own fallback if the LAST approver doesn't
-// change it. Same validation as finalizeUserClaimApproval: positive, and
+// finalizeBillClaimApproval's own fallback if the LAST approver doesn't
+// change it. Same validation as finalizeBillClaimApproval: positive, and
 // never more than the Claim Amount. No-ops quietly if the claim was somehow
 // already decided by the time this runs (status changed underneath it) or
 // the row is gone — the Approval Request's own step still advanced either
 // way, this only affects the pre-fill an approver later sees.
-async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedAmount: number) {
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+async function updateBillClaimApprovedAmountDraft(billClaimId: number, approvedAmount: number) {
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length === 0) return;
   const uc = rows[0];
   if (uc.status !== "pending") return;
@@ -1770,11 +2224,11 @@ async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedA
   }
   assertWithinApprovedCap(uc, amt);
 
-  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+  await queryDB("UPDATE bill_claims SET approved_amount = ? WHERE id = ?", [amt, billClaimId]);
 }
 
 // A Layer may cut a claim's amount but never raise it: the ceiling is what the
-// previous Layer approved (user_claims.approved_amount, the running draft), or
+// previous Layer approved (bill_claims.approved_amount, the running draft), or
 // the Claim Amount when no Layer has set one yet.
 function assertWithinApprovedCap(uc: any, amt: number) {
   const prior = uc.approved_amount != null ? Number(uc.approved_amount) : null;
@@ -1791,20 +2245,20 @@ function assertWithinApprovedCap(uc: any, amt: number) {
 // Rejects a User Claim — frees up any referenced check-in/out(s) (a rejected claim
 // never becomes a Bill line item, so there's no reason to keep them unavailable)
 // and marks the claim 'rejected'. Shared by the same two callers as
-// finalizeUserClaimApproval above.
+// finalizeBillClaimApproval above.
 // allowReclaim: the approver ticked "Allow re-claim" — the employee may edit
 // and resubmit this same claim (its check-in/outs stay with it). Otherwise the
 // rejection is final: its check-in/outs are freed, its dates stay closed.
-async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
-  if (!allowReclaim) await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
+async function rejectBillClaimRecord(billClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
+  if (!allowReclaim) await queryDB("DELETE FROM bill_claim_references WHERE bill_claim_id = ?", [billClaimId]);
   await queryDB(
-    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
-    [remarks, rejectedBy, allowReclaim ? 1 : 0, userClaimId]
+    "UPDATE bill_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
+    [remarks, rejectedBy, allowReclaim ? 1 : 0, billClaimId]
   );
-  await recordClaimHistory(queryDB, userClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
-  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  await recordClaimHistory(queryDB, billClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
+  const rows = await queryDB("SELECT * FROM bill_claims WHERE id = ?", [billClaimId]);
   if (rows.length > 0) {
-    await notifyUserClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
+    await notifyBillClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
   }
 }
 
@@ -1813,7 +2267,7 @@ async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, re
 // so approving here only flips status + notifies the applicant; nothing else
 // to move. Shared by the no-Template auto-approve edge case and
 // performApprovalAction's LAST-step approval — same pattern as
-// finalizeAttendanceCorrection/finalizeUserClaimApproval above.
+// finalizeAttendanceCorrection/finalizeBillClaimApproval above.
 // --- Leave Type helpers (fixed Casual/Sick/Leave-without-Pay + custom Leave
 // Categories) ---
 // leave_applications.leave_type (and, before it, POST /api/leave-applications'
@@ -2026,7 +2480,7 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
 // assigned, otherwise leaving it 'pending' on the Template's first Layer.
 // Tells whoever a just-routed Leave Application is now sitting with (the
 // Supervisor, or the Template's first Layer) that it's waiting on them —
-// same idea as the Conveyance Bill Claim submit alert. Best-effort.
+// same idea as the Bill Claim submit alert. Best-effort.
 async function notifyLeaveFirstApprovers(leaveId: number) {
   try {
     const [appRows, requestRows] = await Promise.all([
@@ -2128,16 +2582,30 @@ async function seedAdminFromEnv() {
         "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'superadmin')",
         [adminName, adminEmail, password_hash]
       );
+      await setStartupMarker(dbPool, "env_admin_password", password_hash).catch(() => {});
+      await setStartupMarker(dbPool, "env_admin_name", adminName).catch(() => {});
       console.log(`✅ Superadmin account created from .env: ${adminEmail}`);
     } else {
-      // Keep the account in sync with .env (name + password). Role is only forced
-      // back to 'superadmin' the first time — if it somehow got changed we still
-      // guarantee at least one superadmin exists to administer the system.
-      await queryDB(
-        "UPDATE users SET name = ?, password_hash = ?, role = 'superadmin' WHERE email = ?",
-        [adminName, password_hash, adminEmail]
-      );
-      console.log(`✅ Superadmin account synced from .env: ${adminEmail}`);
+      // Role is always put back to 'superadmin', so there is always one.
+      // Name and password are applied from .env only when they CHANGED in
+      // .env since the last start (startupOnce.ts remembers the last applied
+      // ones) — editing .env and restarting still resets a forgotten
+      // password, but a password or name the Superadmin set in the app is
+      // no longer put back to the .env one on every restart.
+      await queryDB("UPDATE users SET role = 'superadmin' WHERE email = ?", [adminEmail]);
+      const lastPw = await getStartupMarker(dbPool, "env_admin_password").catch(() => null);
+      const pwChanged = !lastPw?.value || !(await bcrypt.compare(adminPassword, lastPw.value).catch(() => false));
+      if (pwChanged) {
+        await queryDB("UPDATE users SET password_hash = ? WHERE email = ?", [password_hash, adminEmail]);
+        await setStartupMarker(dbPool, "env_admin_password", password_hash);
+        console.log(`✅ Superadmin password set from .env: ${adminEmail}`);
+      }
+      const lastName = await getStartupMarker(dbPool, "env_admin_name").catch(() => null);
+      if (lastName?.value !== adminName) {
+        await queryDB("UPDATE users SET name = ? WHERE email = ?", [adminName, adminEmail]);
+        await setStartupMarker(dbPool, "env_admin_name", adminName);
+      }
+      console.log(`✅ Superadmin account checked against .env: ${adminEmail}`);
     }
     // Multi-company: the .env account is the system owner — in the original
     // (Credence) workspace and the one who manages every workspace.
@@ -2237,10 +2705,12 @@ const withDbTransaction = async (fn: (q: (sql: string, params?: any[]) => Promis
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
   if (isMySQLConnected && dbPool) {
     // Multi-company: keep each company's rows apart (companyScope.ts).
+    const original = sql;
     sql = scopeSql(sql);
     try {
       const [rows] = await dbPool.execute(sql, params);
-      return rows;
+      // Mobile app with narrower access than the website (AppAccess.ts).
+      return maskRowsForApp(original, params, rows);
     } catch (err) {
       console.error("MySQL query error:", err);
       throw err;
@@ -2284,8 +2754,61 @@ async function findOrCreateMpr(mprNo: string, userId: number): Promise<{ id: num
   }
 }
 
+// MySQL going away (Laragon/MySQL stopped or restarted, "Server shutdown in
+// progress", connection refused/reset). A request whose query failed this
+// way must not end the whole server — it comes back once MySQL is up again.
+const DB_DOWN_ERR = /ER_SERVER_SHUTDOWN|ECONNREFUSED|ECONNRESET|PROTOCOL_CONNECTION_LOST|ETIMEDOUT|EPIPE|ER_CON_COUNT_ERROR|Server shutdown in progress|Connection lost|connection is in closed state/i;
+const isDbDownError = (reason: any) => {
+  const inner = Array.isArray(reason?.errors) ? reason.errors.map((e: any) => `${e?.code || ""} ${e?.message || ""}`).join(" ") : "";
+  return !!reason?.fatal || DB_DOWN_ERR.test(`${reason?.name || ""} ${reason?.code || ""} ${reason?.message || reason} ${inner}`);
+};
+let dbDownLoggedAt = 0;
+const logDbDown = (reason: any) => {
+  if (Date.now() - dbDownLoggedAt < 60_000) return;
+  dbDownLoggedAt = Date.now();
+  console.error(`⚠️ MySQL is not answering (${reason?.code || reason?.message || reason}) — requests fail until it is back; the server keeps running.`);
+};
+
+// Wait for MySQL at start-up instead of dropping straight to the in-memory
+// preview store (which on a live server means an empty app and lost data).
+// DB_REQUIRED=true (live servers): wait for ever and never use the
+// in-memory store. Otherwise: try for about 30 s, then fall back as before.
+const DB_REQUIRED = /^(1|true|yes)$/i.test(String(process.env.DB_REQUIRED || ""));
+async function waitForMySQL() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const c = await mysql.createConnection({
+        host: process.env.DB_HOST || "localhost",
+        user: process.env.DB_USER || "root",
+        password: process.env.DB_PASSWORD || "",
+        port: Number(process.env.DB_PORT) || 3306,
+        connectTimeout: 5000
+      });
+      await c.end().catch(() => undefined);
+      return;
+    } catch (err: any) {
+      if (!DB_REQUIRED && attempt >= 6) return;
+      if (attempt === 1 || attempt % 12 === 0) {
+        console.warn(`⏳ Waiting for MySQL at ${process.env.DB_HOST || "localhost"}:${Number(process.env.DB_PORT) || 3306} (${err?.code || err?.message})${DB_REQUIRED ? " — DB_REQUIRED is on, the server starts once it answers" : ""}…`);
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
 async function startServer() {
+  if (!process.env.REDIS_URL) {
+    process.on("unhandledRejection", (reason: any) => {
+      if (isDbDownError(reason)) return logDbDown(reason);
+      throw reason;
+    });
+  }
+  await waitForMySQL();
   await initDB();
+  if (DB_REQUIRED && !isMySQLConnected) {
+    console.error("❌ DB_REQUIRED is on and MySQL setup failed — not starting on the in-memory store. Fix MySQL and start again.");
+    process.exit(1);
+  }
   await seedAdminFromEnv();
 
   const app = express();
@@ -2304,11 +2827,32 @@ async function startServer() {
   // quarter on the wire, which is the single biggest lever available for
   // "the login page takes a long time to load" on a mobile connection.
   app.use(compression());
+  // Opened in a browser by the server's IP (http://203.95.222.58:3000/…):
+  // send it to the domain (IP_REDIRECT_TO in .env, e.g.
+  // https://hr.credencegroupbd.com). Only browser pages — the API, the
+  // ZKTeco push (/iclock), Socket.IO, APK downloads and the Android app's
+  // own WebView (older APKs still load the IP) are left as they are.
+  const ipRedirectTo = String(process.env.IP_REDIRECT_TO || "").trim().replace(/\/+$/, "");
+  if (ipRedirectTo) {
+    app.use((req: any, res: any, next: any) => {
+      const host = String(req.headers.host || "").split(":")[0];
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("127.")) return next();
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
+      if (/^\/(api|iclock|socket\.io|downloads)(\/|$)/.test(String(req.path || ""))) return next();
+      if (/; wv\)/.test(String(req.headers["user-agent"] || ""))) return next();
+      if (!String(req.headers.accept || "").includes("text/html")) return next();
+      res.redirect(302, ipRedirectTo + req.originalUrl);
+    });
+  }
   // Raised from Express's 100kb default so a Budget Excel file (sent as base64 in the
   // import request) doesn't get rejected before it reaches the route handler.
   app.use(express.json({ limit: "25mb" }));
   // No database error text in API answers (ApiErrors.ts).
   maskDatabaseErrors(app);
+  // ZKTeco machines on the internet send their punches here (ADMS "Cloud
+  // server", /iclock/...) — only registered push machines are answered
+  // (zkMachines.ts).
+  registerZkPushRoutes(app, () => dbPool);
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -2383,7 +2927,18 @@ async function startServer() {
       ) {
         ctx = { ...ctx, wholeGroup: true };
       }
-      companyStore.run(ctx, () => next());
+      // The mobile app may have less than the website (AppAccess.ts):
+      // switched off entirely, or only the modules / switches ticked for it.
+      let appMask = null;
+      if (user?.cl === "app") {
+        const access = await appAccessFor(queryDB, Number(user.id), ctx.companyId).catch(() => ({ canUse: true, mask: null }));
+        if (!access.canUse) {
+          res.setHeader("X-Session-Ended", "app_off");
+          return res.status(401).json({ error: "The mobile app isn't turned on for your account.", code: "APP_ACCESS_OFF" });
+        }
+        appMask = access.mask;
+      }
+      companyStore.run(ctx, () => appMaskStore.run(appMask, () => next()));
     });
   };
 
@@ -2479,7 +3034,7 @@ async function startServer() {
 
   // Same as requireModule, but passes if the account has ANY of the given
   // modules — used where two separate Admin Panel tabs legitimately need to
-  // read the same underlying data (e.g. Conveyance Bill Claim and Conveyance
+  // read the same underlying data (e.g. Bill Claim and Conveyance
   // Disbursement both list conveyance_bills), without forcing an Admin who
   // only has one of the two to also be granted the other.
   const requireAnyModule = (moduleKeys: AdminModuleKey[]) => async (req: any, res: any, next: any) => {
@@ -2512,7 +3067,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "manage_drivers" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2527,9 +3082,15 @@ async function startServer() {
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
+          : moduleKey === "data_import"
+            ? []
+          : moduleKey === "attendance_reports"
+            ? ["read", "dept_summary", "custom_report"]
+          : moduleKey === "payroll"
+            ? ["read", "approval_sheet", "month_compare", "top_sheet"]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault"
+            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2555,9 +3116,15 @@ async function startServer() {
     const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
     if (granted.length > 0) return granted.includes(layer);
     const defaults: readonly string[] =
-      moduleKey === "tracking"
+      moduleKey === "data_import"
+        ? []
+      : moduleKey === "attendance_reports"
+        ? ["read", "dept_summary", "custom_report"]
+      : moduleKey === "payroll"
+        ? ["read", "approval_sheet", "month_compare", "top_sheet"]
+      : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault"
+        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2581,7 +3148,15 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
+  // Module Access -> Remote Attendance: the check-in Projects of an account,
+  // one or many with From/To dates (AttendanceProjects.ts). Registered
+  // before the Users routes so /api/users/attendance-projects/bulk is
+  // never read as a user id.
+  const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
+  // Admin Panel -> Users -> Module Access: Mobile App switch and App ticks
+  // (after the Users routes, so the access audit log records changes).
+  registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
@@ -2607,7 +3182,7 @@ async function startServer() {
     }
   };
 
-  // Movement Claim (GPS Check In/Out) self-service routes: a Superadmin always
+  // Check In/Out (GPS Check In/Out) self-service routes: a Superadmin always
   // passes; an Admin/User passes only once granted can_view_movement_claims (PUT
   // /api/users/:id/movement-claim-access). Enforced here so the routes are
   // actually blocked server-side, not just hidden on the User Panel — same
@@ -2620,25 +3195,25 @@ async function startServer() {
     try {
       const rows: any = await queryDB("SELECT can_view_movement_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_movement_claims)) return next();
-      return res.status(403).json({ error: "You don't have access to Movement Claim. Ask your Superadmin to grant it." });
+      return res.status(403).json({ error: "You don't have access to Check In/Out. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   };
 
-  // Conveyance Bill Claim self-service routes — same pattern as
-  // requireMovementClaimAccess above, gated by can_view_conveyance_claims.
-  // Anyone holding the Bill Claim ("conveyance") Admin module also passes, so
+  // Bill Claim self-service routes — same pattern as
+  // requireMovementClaimAccess above, gated by can_view_bill_claims.
+  // Anyone holding the Bill Claim ("bill_claim") Admin module also passes, so
   // they file / see their own claims from Self Service like everyone else.
-  const requireConveyanceClaimAccess = async (req: any, res: any, next: any) => {
+  const requireBillClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
-      const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
-      if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return next();
-      if ((await getAdminModules(req.user.id)).includes("conveyance")) return next();
-      return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
+      const rows: any = await queryDB("SELECT can_view_bill_claims FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && !!Number(rows[0].can_view_bill_claims)) return next();
+      if ((await getAdminModules(req.user.id)).includes("bill_claim")) return next();
+      return res.status(403).json({ error: "You don't have access to Bill Claim. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2659,6 +3234,26 @@ async function startServer() {
     try {
       const rows: any = await queryDB("SELECT can_view_budget_module FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_budget_module)) return next();
+      return res.status(403).json({ error: "You don't have access to Budget/Jobs. Ask your Superadmin to grant it." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  // Reading PEPM data (Budgets, their items, MPR Nos, Jobs): the same people
+  // the menu shows it to — the account's Budget switch, Job Edit, or an Admin
+  // holding a PEPM module that lists Budgets / MPR Nos (Imports, MPR Nos,
+  // Reports, Projects). Before this, any signed-in account could list them
+  // even with the Budget switch off.
+  const PEPM_READ_MODULES = ["imports", "mprs", "reports", "projects"];
+  const requireBudgetRead = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const rows: any = await queryDB("SELECT can_view_budget_module, can_job_edit FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && (!!Number(rows[0].can_view_budget_module) || !!Number(rows[0].can_job_edit))) return next();
+      if (req.user.role === "admin" && (await getAdminModules(req.user.id)).some((m) => PEPM_READ_MODULES.includes(m))) return next();
       return res.status(403).json({ error: "You don't have access to Budget/Jobs. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2729,7 +3324,7 @@ async function startServer() {
   // below via registerAttendanceRoutes(), right after the other split-out
   // modules. ZK biometric device routes (office_attendance) are unaffected
   // and still live further down in this file.
-  registerAttendanceRoutes(app, {
+  const { computeMonthlyReport } = registerAttendanceRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
@@ -2740,6 +3335,7 @@ async function startServer() {
     createTemplateApprovalRequest,
     finalizeAttendanceCorrection,
     rejectAttendanceCorrection,
+    notifyAttendanceCorrectionFirstApprovers,
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
@@ -2782,7 +3378,7 @@ async function startServer() {
   // push notification reaches phones/browsers where the app isn't open —
   // tapping it opens the app on the popup. "all" pings every open app (the
   // fetch decides who actually sees it) and pushes to this company's users.
-  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number) {
+  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number, opts: { push?: boolean } = {}) {
     try {
       if (liveIo) {
         if (audience === "all") liveIo.emit("notices:changed");
@@ -2790,7 +3386,7 @@ async function startServer() {
       }
       const ids =
         audience === "all" ? ((await queryDB("SELECT id FROM users", [])) || []).map((u: any) => Number(u.id)) : audience.map(Number);
-      if (ids.length === 0) return;
+      if (ids.length === 0 || opts.push === false) return;
       await sendPushToUserIds(
         queryDB,
         ids,
@@ -2809,7 +3405,7 @@ async function startServer() {
 
   // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
   registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
-  // Movement Claims routes live in MovementClaimRoutes.ts.
+  // Check In/Out routes live in MovementClaimRoutes.ts.
   registerMovementClaimRoutes(app, { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString });
 
   // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — full
@@ -2853,7 +3449,8 @@ async function startServer() {
     hasModuleLayer,
     getAdminModules,
     queryDB,
-    getAttendanceReportDeptScope
+    getAttendanceReportDeptScope,
+    computeMonthlyReport
   });
 
   // Asset Management (Employee Profile -> My Assets / New Requisition /
@@ -2897,6 +3494,8 @@ async function startServer() {
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
     finalizeVehicleRequisitionApproval,
+    requireModuleLayer,
+    hasModuleLayer,
     rideChanged: (userIds: number[]) => liveTracking.rideChanged(userIds)
   }));
 
@@ -2906,6 +3505,10 @@ async function startServer() {
     authenticateToken,
     queryDB
   });
+  // ...and the other way: 360 ERP -> CredenceHR (Erp360InboundSsoRoutes.ts).
+  registerErp360InboundSsoRoutes(app, { JWT_SECRET, authenticateToken, requireSuperAdmin, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
+  // Welcome slides shown once per account (WelcomeSlidesRoutes.ts).
+  registerWelcomeSlidesRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
   // — kept in its own file (EmployeeTransferRoutes.ts), same reasoning as
@@ -2925,7 +3528,7 @@ async function startServer() {
   // same reasoning as every registerXRoutes call above.
   registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, getAdminModules, createAlert });
   registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
-  registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
   registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
   // Targets: Self Service -> My Targets and Admin Panel -> Target Reports.
@@ -2939,6 +3542,8 @@ async function startServer() {
   // Engine (request_type 'loan'); Payroll creates the loan.
   registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  // Management Dashboard: the whole company for one month vs the month before.
+  registerManagementDashboardRoutes(app, { authenticateToken, requireModule, queryDB, todayInDhaka });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   // E-Signature: signers in order, signature images, signed PDF, public /verify (ESignRoutes.ts).
   registerESignRoutes(app, { authenticateToken, requireAdmin, requireModule, hasModuleLayer, getAdminModules, queryDB, createAlert });
@@ -2975,7 +3580,7 @@ async function startServer() {
         ? getAttendanceReportDeptScope(userId)
         : kind === "leave"
           ? getLeaveApplicationDeptScope(userId)
-          : getConveyanceClaimDeptScope(userId)
+          : getBillClaimDeptScope(userId)
   });
   // Information requests: ask employees for missing documents / nominee /
   // emergency contact; HR approves each submission before it is recorded.
@@ -2995,7 +3600,7 @@ async function startServer() {
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, getCurrentStepApprovers });
   // AI Assistant — floating chat helper for every account (AiAssistantRoutes.ts).
-  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, hasModuleLayer });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
@@ -3007,16 +3612,16 @@ async function startServer() {
     queryDB
   });
 
-  // Conveyance Bill Claim (Admin Panel -> Conveyance, Conveyance
+  // Bill Claim (Admin Panel -> Conveyance, Conveyance
   // Disbursement, and the User Panel's own self-service card) — kept in its
-  // own file (ConveyanceBillClaimRoutes.ts), same reasoning as
+  // own file (BillClaimRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts above.
-  registerConveyanceBillClaimRoutes(app, {
+  registerBillClaimRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
     requireAnyModule,
-    requireConveyanceClaimAccess,
+    requireBillClaimAccess,
     requireModuleLayer,
     hasModuleLayer,
     queryDB,
@@ -3025,16 +3630,16 @@ async function startServer() {
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     attachApprovalStatuses,
-    attachUserClaimApproval,
-    finalizeUserClaimApproval,
-    rejectUserClaimRecord,
+    attachBillClaimApproval,
+    finalizeBillClaimApproval,
+    rejectBillClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    getConveyanceClaimDeptScope
+    getBillClaimDeptScope
   });
 
   // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
-  registerBillClaimPolicyRoutes(app, { authenticateToken, requireConveyanceClaimAccess, queryDB, getAdminModules, todayInDhaka });
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template
@@ -3044,8 +3649,22 @@ async function startServer() {
   // Requests that had no approver move on once one is set (every 10 minutes
   // too, besides whenever an approvals list is opened).
   setInterval(() => void rehomeAwaitingApprovals().catch(() => {}), 10 * 60 * 1000);
+  // Pending requests follow Supervisor changes, blocked / inactive approvers
+  // and Template Layer changes (reconcilePendingApprovals): right after such
+  // a save (requestApprovalReconcile) and every 2 minutes.
+  setApprovalReconcileHandler(async () => {
+    await reconcilePendingApprovals();
+    await companyStore.exit(() => rehomeAwaitingApprovals());
+  });
+  // Tracked phones that went quiet get a silent wake-up push (TrackingWake.ts).
+  if (runsBackgroundJobs()) startTrackingWakeJob(queryDB);
+  if (runsBackgroundJobs()) {
+    setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);
+    setTimeout(() => requestApprovalReconcile(0), 20 * 1000);
+  }
   registerApprovalRoutes(app, {
     rehomeAwaitingApprovals,
+    reconcilePendingApprovals,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
@@ -3070,14 +3689,16 @@ async function startServer() {
   registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
   // Notices routes live in NoticeRoutes.ts.
-  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });
+  registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, runJobs: runsBackgroundJobs() });
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
-  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
+  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireBudgetRead, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
+  // Condition Set -> Material conditions (MaterialConditionsRoutes.ts).
+  registerMaterialConditionsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/
-  // ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts/LeaveRoutes.ts above.
+  // BillClaimRoutes.ts/AttendanceRoutes.ts/LeaveRoutes.ts above.
   registerEntriesRoutes(app, {
     authenticateToken,
     requireAdmin,
@@ -3086,6 +3707,7 @@ async function startServer() {
     getAdminModules,
     requireModuleLayer,
     requireBudgetModuleAccess,
+    requireBudgetRead,
     queryDB,
     todayInDhaka,
     parseQtyNumber,
@@ -3095,7 +3717,7 @@ async function startServer() {
 
   // Self Service -> Leave Balances & Leave Applications — kept in its own
   // file (LeaveRoutes.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
-  // Alerts.ts/UserManagement.ts/ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts
+  // Alerts.ts/UserManagement.ts/BillClaimRoutes.ts/AttendanceRoutes.ts
   // above.
   ({ ensureDefaultLeaveBalances } = registerLeaveRoutes(app, {
     authenticateToken,
@@ -3189,6 +3811,7 @@ async function startServer() {
         logRedisError("connection", reason);
         return;
       }
+      if (isDbDownError(reason)) return logDbDown(reason);
       throw reason;
     });
     try {
@@ -3242,6 +3865,8 @@ async function startServer() {
   // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
   registerCallRoutes(app, { authenticateToken, queryDB });
   setupCallSocket(io, { queryDB });
+  // Group audio / video calls from a Group / Community chat (same Calls access).
+  setupGroupCallSocket(io, { queryDB, callAccess: (userId: number) => callAccess(queryDB, userId) });
   // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
@@ -3266,7 +3891,19 @@ async function startServer() {
 
   apiNotFoundAndErrors(app);
 
-  if (process.env.NODE_ENV !== "production") {
+  // The Vite dev server (no bundling, nothing cached, hundreds of small
+  // requests per open, a full reload whenever the network comes back) is
+  // for working on the code only. The built server (npm start / pm2 ->
+  // dist/server.cjs) always serves the built app with its year-long asset
+  // cache — even if NODE_ENV was left unset — unless NODE_ENV=development is
+  // asked for explicitly. A phone app pointed at a dev server re-downloads the
+  // whole program on every open (the Dashboard skeleton every time).
+  const builtServer = /server\.cjs$/i.test(String(process.argv[1] || "")) || (typeof __filename !== "undefined" && /server\.cjs$/i.test(__filename));
+  const devServer = process.env.NODE_ENV === "development" || (process.env.NODE_ENV !== "production" && !builtServer);
+  if (devServer) {
+    console.warn(
+      "\n*** DEV MODE: the Vite dev server is answering the web app — slow, nothing is cached. On a live server run `npm run build` then `npm start` (or `npm run pm2:start`). ***\n"
+    );
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: { server: httpServer } },
       appType: "spa",

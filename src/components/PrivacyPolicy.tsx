@@ -40,7 +40,7 @@ const SECTIONS: { title: string; body: Block[] }[] = [
         'Attendance: check-in and check-out times, and the location of the phone at that moment.',
         'Electronic signatures: when you sign a document in the app, the signature you draw or upload, the name you type, the time and the network address (IP) of your device. They are printed on the signed document; anyone with its verification code can see who signed it and when, but never the document itself.',
         'Location in the background (Android app only, and only if your employer turned on Employee Tracking for your account and you agreed): the phone’s location every few minutes during your signed-in session — even when the app is closed or not in use — together with the location accuracy and the battery level. While someone you are allowed to be followed by has you open in Live Follow, or while you are on a Book a Ride trip, it is sent every few seconds.',
-        'Location for claims and rides: the places you pick or are at when you file a conveyance claim or book a ride.',
+        'Location for claims and rides: the places you pick or are at when you file a bill claim or book a ride.',
         'Photos, files and documents you upload (profile photo, claim receipts, documents, chat attachments).',
         'Chat messages, voice messages and calls: messages and voice notes are stored so the other person can read them; calls use the microphone (and the camera for video calls) only while a call is on and are not recorded.',
         'Device details: device ID and model, used to approve which phones can sign in to your account, and a notification token to send you push notifications.',

@@ -5,7 +5,7 @@
 
 // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — split
 // into its own file from day one (same reasoning as
-// ConveyanceBillClaimRoutes.ts, AttendanceRoutes.ts, LeaveRoutes.ts, etc. —
+// BillClaimRoutes.ts, AttendanceRoutes.ts, LeaveRoutes.ts, etc. —
 // keeps server.ts from growing further) and registered from inside
 // startServer() via registerPayrollRoutes(), reusing that request's
 // authenticateToken/requireAdmin/queryDB/requireModule rather than a second
@@ -59,7 +59,10 @@ interface PayrollRouteDeps {
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
   requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list" | "dept_summary" | "custom_report" | "hrd_review") => Promise<boolean>;
+  // The Monthly Attendance Report's per-person month (AttendanceRoutes.ts) —
+  // the Department Summary adds it up so both always agree.
+  computeMonthlyReport: (user: any, query: any) => Promise<any>;
   // Attendance Reports' Department-wise scope (null = every Department).
   getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
   // The account's granted Admin Panel modules — the Dashboard calendar lets
@@ -233,7 +236,7 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
     // *request* separately from the actual employee_advances row. Approving
     // one INSERTs into employee_advances (advance_id records which row) —
     // rejecting just closes the request out with a remark. Modeled on
-    // ConveyanceBillClaimRoutes.ts's user_claims pending -> decision shape.
+    // BillClaimRoutes.ts's bill_claims pending -> decision shape.
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS advance_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -377,6 +380,19 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
       await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_deduction_days INT NOT NULL DEFAULT 0`);
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_days column: " + err.message);
+    }
+    // A waived late day may carry a supporting file (approval mail, doctor's
+    // note…) — kept on the waiver row (base64 in, LONGBLOB stored).
+    for (const [name, def] of [
+      ["attachment_name", "VARCHAR(255) NULL"],
+      ["attachment_mime", "VARCHAR(100) NULL"],
+      ["attachment_data", "LONGBLOB NULL"]
+    ] as const) {
+      try {
+        await dbPool.query(`ALTER TABLE late_waivers ADD COLUMN ${name} ${def}`);
+      } catch (err: any) {
+        if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add late_waivers.${name}: ` + err.message);
+      }
     }
     // Salary Hold — a held run can't be Processed or marked Paid until it is
     // released (POST /api/payroll/:id/hold, /release; "salary_hold" layer).
@@ -592,10 +608,26 @@ export async function arrearForLateLeave(leaveId: number, actorId: number | null
 }
 export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
 
+// A day whose salary month is already closed for this account's Employee —
+// its payroll run is Processed or Paid (the same "closed" a late leave
+// uses above). Attendance on such a day is no longer changed: Timesheet
+// corrections (and off-site punches) for it are refused, and an approver
+// can't approve one. Returns that salary month ("YYYY-MM") or null when the
+// day is still open. Set inside registerPayrollRoutes.
+let closedPayMonthImpl: ((userId: number, dateStr: string) => Promise<string | null>) | null = null;
+export async function closedPayMonthFor(userId: number, dateStr: string): Promise<string | null> {
+  return closedPayMonthImpl ? closedPayMonthImpl(userId, dateStr) : null;
+}
+export function closedPayMonthMessage(monthYear: string): string {
+  const [y, m] = monthYear.split("-").map(Number);
+  const name = new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return `The salary for ${name} has already been processed, so attendance in that salary month can't be changed any more. Ask Payroll if it really must be corrected.`;
+}
+
 const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope, computeMonthlyReport } = deps;
 
   // Builds one employee's payroll disbursement split for a given Net Salary,
   // from that employee's active employee_payment_accounts rows (Admin Panel
@@ -1298,10 +1330,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (installment <= 0) return res.status(400).json({ error: "Monthly Installment must be a positive number." });
       if (installment > total) return res.status(400).json({ error: "Monthly Installment can't be more than the Total Amount." });
 
+      // Loan or Salary Advance (shown apart on the Top Sheet).
+      const kind = req.body?.kind === "loan" ? "loan" : "advance";
       const result = await queryDB(
-        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id]
+        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id, kind]
       );
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
@@ -1323,9 +1357,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const reason = req.body?.reason !== undefined ? String(req.body.reason).trim().slice(0, 255) : existing.reason;
       const status = req.body?.status === "completed" ? "completed" : req.body?.status === "active" ? "active" : existing.status;
 
+      const kind = req.body?.kind === "loan" || req.body?.kind === "advance" ? req.body.kind : existing.kind || "advance";
       await queryDB(
-        "UPDATE employee_advances SET monthly_installment = ?, reason = ?, status = ? WHERE id = ?",
-        [installment, reason, status, req.params.id]
+        "UPDATE employee_advances SET monthly_installment = ?, reason = ?, status = ?, kind = ? WHERE id = ?",
+        [installment, reason, status, kind, req.params.id]
       );
       res.json({ success: true });
     } catch (err: any) {
@@ -1777,6 +1812,18 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // Absent/LWP less what earlier late leaves already gave back, priced at
   // that run's own per-day gross. Settled in the first month after it that
   // has no Processed/Paid run yet, in one go.
+  closedPayMonthImpl = async (userId, dateStr) => {
+    const day = String(dateStr || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const emps: any[] = (await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [userId])) || [];
+    if (!emps.length) return null;
+    const m = await salaryMonthOf(day);
+    const ids = emps.map((e: any) => Number(e.id));
+    const runs: any[] =
+      (await queryDB(`SELECT payment_status FROM payrolls WHERE month_year = ? AND employee_id IN (${ids.map(() => "?").join(",")})`, [m, ...ids])) || [];
+    return runs.some((r: any) => r.payment_status === "processed" || r.payment_status === "paid") ? m : null;
+  };
+
   lateLeaveArrearImpl = async (leaveId, actorId) => {
     const rows: any[] = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
     const leave = rows.find((r: any) => Number(r.id) === leaveId);
@@ -2108,7 +2155,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // view can show every raw late day, including already-waived ones,
       // then mark which are currently waived separately.
       const allWaivers = await queryDB(
-        "SELECT id, waiver_date, reason FROM late_waivers WHERE employee_id = ? AND waiver_date BETWEEN ? AND ?",
+        "SELECT id, waiver_date, reason, attachment_name FROM late_waivers WHERE employee_id = ? AND waiver_date BETWEEN ? AND ?",
         [employeeId, monthStart, monthEnd]
       );
       const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
@@ -2124,14 +2171,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         extreme: false,
         waived: waiverByDate.has(d),
         waiver_id: waiverByDate.get(d)?.id || null,
-        reason: waiverByDate.get(d)?.reason || null
+        reason: waiverByDate.get(d)?.reason || null,
+        attachment_name: waiverByDate.get(d)?.attachment_name || null
       }));
       const extremeDays = rawExtremeLateDates.map((d) => ({
         date: d,
         extreme: true,
         waived: waiverByDate.has(d),
         waiver_id: waiverByDate.get(d)?.id || null,
-        reason: waiverByDate.get(d)?.reason || null
+        reason: waiverByDate.get(d)?.reason || null,
+        attachment_name: waiverByDate.get(d)?.attachment_name || null
       }));
       const countedLate = days.filter((d) => !d.waived).length;
       const countedExtremeLate = extremeDays.filter((d) => !d.waived).length;
@@ -2280,8 +2329,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // just uses the full figure. Local Y/M/D rather than toISOString(),
       // which is UTC and rolls back a day for timezones ahead of it (see the
       // same note on toDateOnly in server.ts).
-      const now = new Date();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      // Today in Dhaka (the server's own clock may be UTC). A working day
+      // with no check-in — today included — counts as Absent.
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
       let workingDaysSoFar = workingDays;
       if (today >= monthStart && today <= monthEnd) {
         let elapsed = 0;
@@ -2375,6 +2425,421 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // payroll uses. Needs the "Late list" layer of Attendance Reports
   // (explicit-only) and keeps to that account's Departments. Read by the
   // Credence Assistant ("aj ke ke late").
+  // Monthly Attendance Report -> Department Summary: per department, how many
+  // were Present / Absent / on Leave / Delay / Extreme Delay — on one day
+  // (?mode=day&date=) or added up over a month (?mode=month&year=&month=,
+  // person-days). Present / Absent / Leave come from the Monthly report
+  // itself (computeMonthlyReport: same holidays, roster, leave, joining date
+  // and Department scope); Delay / Extreme Delay from the late policy payroll
+  // uses (computeLateDatesByEmployee). Delay days are also Present days.
+  // ?departments=A,B narrows; active employees only. Needs the Attendance
+  // Reports layer "dept_summary". Returns the totals per department and one
+  // row per person (for "who is it" and the Excel export).
+  // ---- Attendance Report Builder (Monthly Attendance Report -> Custom Report)
+  // One row per person per day in [from, to] (at most 92 days) with every
+  // attendance fact — status, In / Out, hours, Delay / Extreme Delay and
+  // minutes late, early leave, overtime, missing Out, shift, source,
+  // project, leave type, holiday — filtered by any conditions on any of them
+  // ("In after 09:05", "Out before 18:00", "hours < 8", "status absent"),
+  // shown as detail rows or summarised by employee / department /
+  // designation / date with "only groups where late >= 3". Present / Absent /
+  // Leave come from the Monthly report (computeMonthlyReport: holidays,
+  // roster, leave, joining date, Department scope); Delay / Extreme Delay
+  // from payroll's late policy; shift start / end from the Duty Roster, else
+  // the late policy's start and the office end time given (default 18:00).
+  // Needs the Attendance Reports layer "custom_report".
+  const CR_FIELDS: Record<string, "time" | "number" | "enum" | "text" | "bool" | "date"> = {
+    date: "date", weekday: "enum", employee_name: "text", employee_code: "text", designation: "text", department: "text", status: "enum",
+    in_time: "time", out_time: "time", work_hours: "number", late: "enum", late_minutes: "number", early_leave_minutes: "number",
+    overtime_minutes: "number", missing_out: "bool", shift: "text", shift_start: "time", shift_end: "time", source: "enum", project: "text", leave_type: "text", holiday: "text"
+  };
+  const CR_GROUPS = ["none", "employee", "department", "designation", "date", "weekday", "status"];
+  const CR_METRICS = ["employees", "days", "present", "absent", "leave", "late", "delay", "extreme", "missing_out", "early_leave", "overtime_days", "avg_in", "avg_out", "avg_hours", "total_ot_hours", "attendance_pct"];
+  const minOf = (hm: string | null) => (hm && /^\d{1,2}:\d{2}/.test(hm) ? Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5)) : null);
+  const hmOf = (m: number | null) => (m == null || !Number.isFinite(m) ? null : `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(Math.round(m) % 60).padStart(2, "0")}`);
+  const timeOf = (v: any) => /(\d{2}:\d{2})/.exec(String(v || ""))?.[1] || null;
+
+  async function attendanceCustomRows(user: any, from: string, to: string, officeEnd: string) {
+    const months: string[] = [];
+    for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = shiftMonthYear(m, 1)) months.push(m);
+    const people = new Map<number, any>();
+    const days: { uid: number; d: any }[] = [];
+    for (const m of months) {
+      const rep = await computeMonthlyReport(user, { year: Number(m.slice(0, 4)), month: Number(m.slice(5, 7)), status: "active" });
+      for (const u of rep.users || []) {
+        people.set(Number(u.user_id), u);
+        for (const d of u.days || []) if (d.date >= from && d.date <= to && !d.future && !d.before_joining) days.push({ uid: Number(u.user_id), d });
+      }
+    }
+    const uids = [...people.keys()];
+    const emps: any[] = uids.length
+      ? ((await queryDB(
+          `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id FROM all_employees WHERE user_id IN (${uids.map(() => "?").join(",")})`,
+          uids
+        )) || []).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId())
+      : [];
+    const empByUser = new Map<number, any>(emps.map((e: any) => [Number(e.user_id), e]));
+    const roster = await loadRoster(queryDB, from, to, emps.map((e: any) => Number(e.id)));
+    // Delay / Extreme Delay and each salary month's late policy.
+    const late = new Map<string, "delay" | "extreme">();
+    const policyByDate = new Map<string, any>();
+    if (emps.length) {
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, from, to);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 6; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const a = period.start < from ? from : period.start;
+        const b = period.end > to ? to : period.end;
+        if (a <= b) {
+          const policy = await getLatePolicyForMonth(monthYear);
+          for (let d = a; d <= b; d = new Date(Date.parse(d + "T00:00:00Z") + 864e5).toISOString().slice(0, 10)) policyByDate.set(d, policy);
+          const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(emps, a, b, holidayMapsByGroup, branchTypeByUserId, policy);
+          for (const e of emps) {
+            for (const d of lateDatesByEmployee.get(Number(e.id)) || []) late.set(`${e.user_id}|${d}`, "delay");
+            for (const d of extremeLateDatesByEmployee.get(Number(e.id)) || []) late.set(`${e.user_id}|${d}`, "extreme");
+          }
+        }
+        monthYear = shiftMonthYear(monthYear, 1);
+      }
+    }
+    const WD = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const endDefault = minOf(officeEnd) ?? 18 * 60;
+    return days.map(({ uid, d }) => {
+      const u = people.get(uid);
+      const e = empByUser.get(uid) || {};
+      const rd = e.id ? roster.get(Number(e.id), d.date) : undefined;
+      const shift = rd && !rd.is_off ? rd.shift : null;
+      const policy = policyByDate.get(d.date);
+      const startMin = shift ? minOf(timeOf(shift.start_time)) : minOf(timeOf(policy?.shift_start_time) || "09:00");
+      const endMin = shift ? minOf(timeOf(shift.end_time)) : endDefault;
+      const inT = timeOf(d.check_in_at);
+      const outT = timeOf(d.check_out_at);
+      const outNext = !!(d.check_out_at && String(d.check_out_at).slice(0, 10) > d.date);
+      const inM = minOf(inT);
+      const outM = outT ? minOf(outT)! + (outNext ? 1440 : 0) : null;
+      const status = d.present ? "present" : d.day_type ? (d.day_type === "weekend" ? "weekend" : d.day_type === "off" ? "off" : "holiday") : d.leave_type ? "leave" : "absent";
+      const lateKind = d.present ? late.get(`${uid}|${d.date}`) || "none" : "none";
+      const endAdj = endMin != null && startMin != null && endMin < startMin ? endMin + 1440 : endMin;
+      // Worked on a rostered Off day / Weekend / Holiday: never late or
+      // early, and every minute worked is overtime (as payroll counts it).
+      const offDay = !!(rd?.is_off || (!shift && d.day_type));
+      const worked = inM != null && outM != null && outM > inM ? outM - inM : 0;
+      return {
+        date: d.date,
+        weekday: WD[new Date(d.date + "T00:00:00Z").getUTCDay()],
+        user_id: uid,
+        employee_name: e.name || u?.user_name || "",
+        employee_code: e.employee_code || "",
+        designation: e.designation || "",
+        department: u?.department || e.department || "No department",
+        status,
+        in_time: inT,
+        out_time: outT,
+        work_hours: inM != null && outM != null && outM > inM ? Math.round(((outM - inM) / 60) * 100) / 100 : null,
+        late: lateKind,
+        late_minutes: !offDay && inM != null && startMin != null && inM > startMin ? inM - startMin : 0,
+        early_leave_minutes: !offDay && outM != null && endAdj != null && outM < endAdj ? endAdj - outM : 0,
+        overtime_minutes: offDay ? worked : outM != null && endAdj != null && outM > endAdj ? outM - endAdj : 0,
+        missing_out: !!(d.present && inT && !outT),
+        shift: shift ? shift.name : rd?.is_off ? "Off" : "",
+        shift_start: hmOf(startMin),
+        shift_end: hmOf(endMin),
+        source: d.source || "",
+        project: d.project_name || "",
+        leave_type: d.leave_type || "",
+        holiday: d.holiday_title || ""
+      };
+    });
+  }
+
+  const crMatch = (row: any, c: { field: string; op: string; value?: any; value2?: any }) => {
+    const type = CR_FIELDS[c.field];
+    const v = row[c.field];
+    if (!type) return true;
+    if (c.op === "is_empty") return v === null || v === "" || v === undefined;
+    if (c.op === "not_empty") return !(v === null || v === "" || v === undefined);
+    if (type === "bool") return c.op === "is_false" ? !v : !!v;
+    if (type === "time") {
+      const m = minOf(v);
+      const a = minOf(String(c.value || ""));
+      const b = minOf(String(c.value2 || ""));
+      if (m == null || a == null) return false;
+      if (c.op === "after") return m > a;
+      if (c.op === "at_or_after") return m >= a;
+      if (c.op === "before") return m < a;
+      if (c.op === "at_or_before") return m <= a;
+      if (c.op === "between") return b != null && m >= a && m <= b;
+      return false;
+    }
+    if (type === "number") {
+      const n = Number(v);
+      const a = Number(c.value);
+      if (v === null || v === undefined || !Number.isFinite(n) || !Number.isFinite(a)) return false;
+      return c.op === "gt" ? n > a : c.op === "gte" ? n >= a : c.op === "lt" ? n < a : c.op === "lte" ? n <= a : c.op === "eq" ? n === a : c.op === "between" ? n >= a && n <= Number(c.value2) : false;
+    }
+    if (type === "date") {
+      const a = String(c.value || "");
+      return c.op === "after" ? v > a : c.op === "before" ? v < a : c.op === "eq" ? v === a : true;
+    }
+    const list = (Array.isArray(c.value) ? c.value : String(c.value ?? "").split(",")).map((x: any) => String(x).trim().toLowerCase()).filter(Boolean);
+    const sv = String(v ?? "").toLowerCase();
+    if (c.op === "in" || c.op === "eq") return list.includes(sv);
+    if (c.op === "not_in" || c.op === "neq") return !list.includes(sv);
+    if (c.op === "contains") return list.some((x: string) => sv.includes(x));
+    return true;
+  };
+
+  const crSummarise = (rows: any[], groupBy: string) => {
+    const keyOf = (r: any) => (groupBy === "employee" ? `${r.employee_name}${r.employee_code ? ` (${r.employee_code})` : ""}` : groupBy === "none" ? "All" : String(r[groupBy] ?? ""));
+    const groups = new Map<string, any[]>();
+    for (const r of rows) {
+      const k = keyOf(r);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    return [...groups.entries()].map(([key, rs]) => {
+      const present = rs.filter((r) => r.status === "present");
+      const working = rs.filter((r) => ["present", "absent", "leave"].includes(r.status));
+      const ins = present.map((r) => minOf(r.in_time)).filter((x): x is number => x != null);
+      const outs = present.map((r) => minOf(r.out_time)).filter((x): x is number => x != null);
+      const hours = present.map((r) => r.work_hours).filter((x) => x != null) as number[];
+      const first = rs[0];
+      return {
+        key,
+        department: groupBy === "employee" ? first.department : undefined,
+        designation: groupBy === "employee" ? first.designation : undefined,
+        employees: new Set(rs.map((r) => r.user_id)).size,
+        days: rs.length,
+        present: present.length,
+        absent: rs.filter((r) => r.status === "absent").length,
+        leave: rs.filter((r) => r.status === "leave").length,
+        late: rs.filter((r) => r.late !== "none").length,
+        delay: rs.filter((r) => r.late === "delay").length,
+        extreme: rs.filter((r) => r.late === "extreme").length,
+        missing_out: rs.filter((r) => r.missing_out).length,
+        early_leave: rs.filter((r) => r.early_leave_minutes > 0).length,
+        overtime_days: rs.filter((r) => r.overtime_minutes > 0).length,
+        avg_in: hmOf(avg(ins)),
+        avg_out: hmOf(avg(outs)),
+        avg_hours: avg(hours) == null ? null : Math.round(avg(hours)! * 100) / 100,
+        total_ot_hours: Math.round((rs.reduce((a, r) => a + (r.overtime_minutes || 0), 0) / 60) * 100) / 100,
+        attendance_pct: working.length ? Math.round(((present.filter((r) => true).length + rs.filter((r) => r.status === "leave").length) / working.length) * 1000) / 10 : null
+      };
+    });
+  };
+
+  const crGate = async (req: any, res: any) => {
+    if (await hasModuleLayer(req.user, "attendance_reports", "custom_report")) return true;
+    res.status(403).json({ error: "You don't have access to the Attendance Report Builder. Ask your Superadmin to grant it." });
+    return false;
+  };
+
+  app.post("/api/attendance/report/custom", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await crGate(req, res))) return;
+      const b = req.body || {};
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      let from = DATE_RE.test(String(b.from || "")) ? String(b.from) : today;
+      let to = DATE_RE.test(String(b.to || "")) ? String(b.to) : from;
+      if (to > today) to = today;
+      if (from > to) [from, to] = [to, from];
+      if ((Date.parse(to) - Date.parse(from)) / 864e5 + 1 > 92) return res.status(400).json({ error: "Pick at most 92 days (about 3 months)." });
+      const officeEnd = /^\d{2}:\d{2}$/.test(String(b.office_end || "")) ? String(b.office_end) : "18:00";
+      const conditions = (Array.isArray(b.conditions) ? b.conditions : []).filter((c: any) => c && CR_FIELDS[c.field]).slice(0, 12);
+      const match = b.match === "any" ? "any" : "all";
+      const groupBy = CR_GROUPS.includes(b.group_by) ? b.group_by : "none";
+      const view = b.view === "summary" ? "summary" : "detail";
+      const departments: string[] = Array.isArray(b.departments) ? b.departments.map(String) : [];
+      const employee = String(b.employee || "").trim().toLowerCase();
+      const employeeIds: number[] = Array.isArray(b.employee_ids) ? b.employee_ids.map(Number).filter(Boolean) : [];
+      let rows = await attendanceCustomRows(req.user, from, to, officeEnd);
+      if (departments.length) rows = rows.filter((r) => departments.includes(r.department));
+      if (employeeIds.length) rows = rows.filter((r) => employeeIds.includes(r.user_id));
+      if (employee) rows = rows.filter((r) => r.employee_name.toLowerCase().includes(employee) || r.employee_code.toLowerCase() === employee);
+      if (conditions.length) rows = rows.filter((r) => (match === "any" ? conditions.some((c: any) => crMatch(r, c)) : conditions.every((c: any) => crMatch(r, c))));
+      rows.sort((a, c) => a.date.localeCompare(c.date) || a.department.localeCompare(c.department) || a.employee_name.localeCompare(c.employee_name));
+      const totals = crSummarise(rows, "none")[0] || null;
+      if (view === "summary") {
+        let groups = crSummarise(rows, groupBy === "none" ? "department" : groupBy);
+        const h = b.having;
+        if (h && CR_METRICS.includes(h.metric) && Number.isFinite(Number(h.value))) {
+          const n = Number(h.value);
+          groups = groups.filter((g: any) => {
+            const v = Number(g[h.metric]);
+            return h.op === "lte" ? v <= n : h.op === "eq" ? v === n : h.op === "lt" ? v < n : h.op === "gt" ? v > n : v >= n;
+          });
+        }
+        const sortBy = CR_METRICS.includes(b.sort) ? b.sort : null;
+        groups.sort((a: any, c: any) => (sortBy ? Number(c[sortBy] ?? 0) - Number(a[sortBy] ?? 0) : 0) || String(a.key).localeCompare(String(c.key)));
+        return res.json({ from, to, view, group_by: groupBy === "none" ? "department" : groupBy, office_end: officeEnd, total_rows: rows.length, totals, groups });
+      }
+      res.json({ from, to, view, office_end: officeEnd, total_rows: rows.length, totals, rows: rows.slice(0, 20000) });
+    } catch (err: any) {
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to build the report." });
+    }
+  });
+
+  // The people the builder's Employee picker may offer (the same Department
+  // scope as the report) — Name · Employee ID · Designation · Department.
+  app.get("/api/attendance/report/custom/people", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await crGate(req, res))) return;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const rep = await computeMonthlyReport(req.user, { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)), status: "active", limit: 200, page: 1 });
+      const all: any[] = [];
+      const pages = Math.max(1, Math.ceil(Number(rep.total || 0) / 200));
+      for (let p = 1; p <= pages; p++) {
+        const r = p === 1 ? rep : await computeMonthlyReport(req.user, { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)), status: "active", limit: 200, page: p });
+        all.push(...(r.users || []));
+      }
+      const uids = all.map((u) => Number(u.user_id));
+      const emps: any[] = uids.length ? (await queryDB(`SELECT user_id, employee_id AS employee_code, designation FROM all_employees WHERE user_id IN (${uids.map(() => "?").join(",")})`, uids)) || [] : [];
+      const byUser = new Map<number, any>(emps.map((e: any) => [Number(e.user_id), e]));
+      res.json(all.map((u) => ({ user_id: Number(u.user_id), name: u.user_name, employee_code: byUser.get(Number(u.user_id))?.employee_code || "", designation: byUser.get(Number(u.user_id))?.designation || "", department: u.department || "" })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/attendance/report/department-summary", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "attendance_reports", "dept_summary"))) {
+        return res.status(403).json({ error: "You don't have access to the Department Summary. Ask your Superadmin to grant it." });
+      }
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const mode = req.query.mode === "month" ? "month" : "day";
+      let year: number, month: number, date: string | null = null;
+      if (mode === "day") {
+        date = String(req.query.date || "");
+        if (!DATE_RE.test(date)) return res.status(400).json({ error: "A valid date (YYYY-MM-DD) is required." });
+        year = Number(date.slice(0, 4));
+        month = Number(date.slice(5, 7));
+      } else {
+        year = Number(req.query.year);
+        month = Number(req.query.month);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+          return res.status(400).json({ error: "A valid year and month (1-12) are required." });
+        }
+      }
+      const wanted = String(req.query.departments || "")
+        .split(",")
+        .map((d) => d.trim())
+        .filter(Boolean);
+      const report = await computeMonthlyReport(req.user, {
+        year,
+        month,
+        status: "active",
+        ...(req.query.project_id ? { project_id: req.query.project_id } : {})
+      });
+      const users: any[] = (report.users || []).filter((u: any) => !wanted.length || wanted.includes(u.department || ""));
+      const prefix = `${year}-${String(month).padStart(2, "0")}`;
+      const monthStart = `${prefix}-01`;
+      const monthEnd = `${prefix}-${String(report.days_in_month).padStart(2, "0")}`;
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const from = mode === "day" ? date! : monthStart;
+      const to = mode === "day" ? date! : monthEnd < today ? monthEnd : today;
+
+      // Delay / Extreme Delay dates per login, salary month by salary month
+      // (the late policy can differ between them).
+      const delayByUser = new Map<number, Set<string>>();
+      const extremeByUser = new Map<number, Set<string>>();
+      const empRows: any[] = users.length
+        ? ((await queryDB(
+            `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id
+               FROM all_employees WHERE user_id IN (${users.map(() => "?").join(",")})`,
+            users.map((u: any) => Number(u.user_id))
+          )) || []).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId())
+        : [];
+      const empByUser = new Map<number, any>(empRows.map((e: any) => [Number(e.user_id), e]));
+      if (empRows.length && from <= to) {
+        const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, from, to);
+        const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+        let monthYear = await salaryMonthOf(from);
+        for (let i = 0; i < 3; i++) {
+          const period = await getSalaryPeriod(monthYear);
+          if (period.start > to) break;
+          const a = period.start < from ? from : period.start;
+          const b = period.end > to ? to : period.end;
+          if (a <= b) {
+            const policy = await getLatePolicyForMonth(monthYear);
+            const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(empRows, a, b, holidayMapsByGroup, branchTypeByUserId, policy);
+            for (const e of empRows) {
+              const uid = Number(e.user_id);
+              for (const d of lateDatesByEmployee.get(Number(e.id)) || []) {
+                if (!delayByUser.has(uid)) delayByUser.set(uid, new Set());
+                delayByUser.get(uid)!.add(d);
+              }
+              for (const d of extremeLateDatesByEmployee.get(Number(e.id)) || []) {
+                if (!extremeByUser.has(uid)) extremeByUser.set(uid, new Set());
+                extremeByUser.get(uid)!.add(d);
+              }
+            }
+          }
+          monthYear = shiftMonthYear(monthYear, 1);
+        }
+      }
+
+      const people = users.map((u: any) => {
+        const e = empByUser.get(Number(u.user_id)) || {};
+        const days: any[] = mode === "day" ? [u.days?.[Number(date!.slice(8, 10)) - 1]].filter(Boolean) : u.days || [];
+        let working = 0, present = 0, absent = 0, leave = 0, delay = 0, extreme = 0;
+        let checkIn: string | null = null, leaveType: string | null = null, off: string | null = null;
+        for (const d of days) {
+          if (d.future || d.before_joining) continue;
+          const isWorking = !d.day_type;
+          if (isWorking) working++;
+          if (d.present) {
+            if (isWorking) present++;
+            checkIn = d.check_in_at || checkIn;
+            const ext = extremeByUser.get(Number(u.user_id))?.has(d.date);
+            if (ext) extreme++;
+            else if (delayByUser.get(Number(u.user_id))?.has(d.date)) delay++;
+          } else if (!isWorking) off = d.holiday_title || d.day_type;
+          else if (d.leave_type) {
+            leave++;
+            leaveType = d.leave_type;
+          } else absent++;
+        }
+        return {
+          user_id: Number(u.user_id),
+          name: e.name || u.user_name,
+          employee_code: e.employee_code || "",
+          designation: e.designation || "",
+          department: u.department || "No department",
+          working,
+          present,
+          absent,
+          leave,
+          delay,
+          extreme,
+          check_in_at: mode === "day" ? checkIn : null,
+          leave_type: mode === "day" ? leaveType : null,
+          off: mode === "day" ? off : null
+        };
+      });
+
+      const byDept = new Map<string, any>();
+      for (const p of people) {
+        if (!byDept.has(p.department)) byDept.set(p.department, { department: p.department, employees: 0, working: 0, present: 0, absent: 0, leave: 0, delay: 0, extreme: 0 });
+        const t = byDept.get(p.department);
+        t.employees++;
+        for (const k of ["working", "present", "absent", "leave", "delay", "extreme"]) t[k] += p[k];
+      }
+      const pct = (t: any) => (t.working > 0 ? Math.round(((t.present + t.leave) / t.working) * 1000) / 10 : null);
+      const departments = [...byDept.values()].map((t) => ({ ...t, attendance_pct: pct(t) })).sort((a, b) => a.department.localeCompare(b.department));
+      const total: any = { employees: 0, working: 0, present: 0, absent: 0, leave: 0, delay: 0, extreme: 0 };
+      for (const t of departments) for (const k of Object.keys(total)) total[k] += t[k];
+      total.attendance_pct = pct(total);
+      res.json({ mode, date, year, month, from, to, departments, total, people });
+    } catch (err: any) {
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to load the Department Summary." });
+    }
+  });
+
   app.get("/api/attendance/report/late", authenticateToken, requireAdmin, async (req: any, res) => {
     try {
       if (!(await hasModuleLayer(req.user, "attendance_reports", "late_list"))) {
@@ -2552,17 +3017,51 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const employeeId = Number(req.body?.employee_id);
       const waiverDate = typeof req.body?.waiver_date === "string" ? req.body.waiver_date.trim() : "";
-      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : null;
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : "";
       if (!employeeId) return res.status(400).json({ error: "employee_id is required." });
       if (!/^\d{4}-\d{2}-\d{2}$/.test(waiverDate)) return res.status(400).json({ error: "waiver_date must be in YYYY-MM-DD format." });
+      // Every waiver says why (it takes a day's pay cut off); a supporting
+      // file is optional — image, PDF or Office document, at most 5 MB.
+      if (reason.length < 3) return res.status(400).json({ error: "Write why this late day is waived." });
+      let file: Buffer | null = null;
+      let fileName: string | null = null;
+      let fileMime: string | null = null;
+      if (typeof req.body?.file_base64 === "string" && req.body.file_base64) {
+        file = Buffer.from(req.body.file_base64, "base64");
+        if (!file.length) return res.status(400).json({ error: "The attachment is empty." });
+        if (file.length > 5 * 1024 * 1024) return res.status(400).json({ error: "Attachment must be 5MB or smaller." });
+        fileMime = String(req.body.file_mimetype || "application/octet-stream").slice(0, 100);
+        const okType =
+          /^image\/(png|jpe?g|gif|webp|heic|heif)$/.test(fileMime) ||
+          fileMime === "application/pdf" ||
+          /^application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|vnd\.ms-excel)$/.test(fileMime);
+        if (!okType) return res.status(400).json({ error: "Attach an image, PDF, Word or Excel file." });
+        fileName = String(req.body.file_name || "attachment").replace(/[\\/\r\n"]/g, "_").slice(0, 255);
+      }
 
       const result = await queryDB(
-        `INSERT IGNORE INTO late_waivers (employee_id, waiver_date, reason, waived_by) VALUES (?, ?, ?, ?)`,
-        [employeeId, waiverDate, reason, req.user.id]
+        `INSERT IGNORE INTO late_waivers (employee_id, waiver_date, reason, waived_by, attachment_name, attachment_mime, attachment_data) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [employeeId, waiverDate, reason, req.user.id, fileName, fileMime, file]
       );
       res.json({ success: true, id: result.insertId || null });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to waive late day." });
+    }
+  });
+
+  // The file attached to a waiver (Payroll module, same as the waiver itself).
+  app.get("/api/payroll/late-waivers/:id/attachment", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT attachment_name, attachment_mime, attachment_data FROM late_waivers WHERE id = ?", [Number(req.params.id)]);
+      const w = rows[0];
+      if (!w || !w.attachment_data) return res.status(404).json({ error: "No attachment on this waiver." });
+      const buf: Buffer = Buffer.isBuffer(w.attachment_data) ? w.attachment_data : Buffer.from(w.attachment_data);
+      res.setHeader("Content-Type", w.attachment_mime || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(w.attachment_name || "attachment")}"`);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the attachment." });
     }
   });
 
@@ -2950,12 +3449,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           [employeeId]
         );
         let advanceDeduction = 0;
+        // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+        let loanDeduction = 0;
         for (const adv of advances) {
           const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
           if (remaining <= 0) continue;
-          advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+          const inst = Math.min(Number(adv.monthly_installment), remaining);
+          advanceDeduction += inst;
+          if (adv.kind === "loan") loanDeduction += inst;
         }
         advanceDeduction = money(advanceDeduction);
+        loanDeduction = money(loanDeduction);
 
         // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
         const pay = await computePayLines(queryDB, employeeId, monthYear);
@@ -2985,6 +3489,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           tax_deduction: taxDeduction,
           pf_deduction: pfDeduction,
           advance_deduction: advanceDeduction,
+          loan_deduction: loanDeduction,
           other_deduction: otherDed,
           total_deduction: totalDeduction,
           net_salary: netSalary,
@@ -3090,12 +3595,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             [employeeId]
           );
           let advanceDeduction = 0;
+          // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+          let loanDeduction = 0;
           for (const adv of advances) {
             const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
             if (remaining <= 0) continue;
-            advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+            const inst = Math.min(Number(adv.monthly_installment), remaining);
+            advanceDeduction += inst;
+            if (adv.kind === "loan") loanDeduction += inst;
           }
           advanceDeduction = money(advanceDeduction);
+          loanDeduction = money(loanDeduction);
 
           // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
           const pay = await computePayLines(queryDB, employeeId, monthYear);
@@ -3130,6 +3640,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             ]
           );
           await savePayLines(queryDB, Number(result.insertId), employeeId, monthYear, pay.lines);
+          if (loanDeduction) await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(result.insertId)]);
           for (const split of paymentSplit) {
             await queryDB(
               `INSERT INTO payroll_payment_splits
@@ -3260,12 +3771,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [Number(employee_id)]
       );
       let advanceDeduction = 0;
+      // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+      let loanDeduction = 0;
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        advanceDeduction += inst;
+        if (adv.kind === "loan") loanDeduction += inst;
       }
       advanceDeduction = money(advanceDeduction);
+      loanDeduction = money(loanDeduction);
 
       // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
       const pay = await computePayLines(queryDB, Number(employee_id), String(month_year));
@@ -3291,6 +3807,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         ]
       );
       await savePayLines(queryDB, Number(result.insertId), Number(employee_id), String(month_year), pay.lines);
+      if (loanDeduction) await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(result.insertId)]);
       // Consume any staged bonus for this employee/month now that a real
       // run exists — prevents it from being offered/applied again.
       await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [Number(employee_id), month_year]);
@@ -3368,12 +3885,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [existing.employee_id]
       );
       let advanceDeduction = 0;
+      // The Loan part on its own (employee_advances.kind) for the Top Sheet.
+      let loanDeduction = 0;
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        advanceDeduction += Math.min(Number(adv.monthly_installment), remaining);
+        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        advanceDeduction += inst;
+        if (adv.kind === "loan") loanDeduction += inst;
       }
       advanceDeduction = money(advanceDeduction);
+      loanDeduction = money(loanDeduction);
 
       // Allowance & Adjustment lines, worked out again for this run (its own
       // earlier lines don't count against an adjustment's balance).
@@ -3398,6 +3920,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         ]
       );
       await savePayLines(queryDB, Number(existing.id), Number(existing.employee_id), String(existing.month_year), pay.lines);
+      await queryDB("UPDATE payrolls SET loan_deduction = ? WHERE id = ?", [loanDeduction, Number(existing.id)]);
       res.json({ success: true, net_salary: netSalary });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update payroll." });
@@ -3405,23 +3928,27 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // One employee's salary, outside the month's own approval (e.g. a salary
-  // released from hold after Audit approved the month): Audit processes it
-  // (Payroll layer "audit_approve"), Accounts pays it ("accounts_pay").
-  // The month's batch has to be with Audit already (PayrollApprovalRoutes.ts).
-  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res) => {
+  // released from hold after the month went to Accounts): the HR Director
+  // approves it (Payroll layer "hrd_review"; "audit_approve" still works for
+  // an account set up before the HR Director step), Accounts pays it.
+  // The month has to be past HR already (PayrollApprovalRoutes.ts).
+  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
+      if (!(await hasModuleLayer(req.user, "payroll", "hrd_review")) && !(await hasModuleLayer(req.user, "payroll", "audit_approve"))) {
+        return res.status(403).json({ error: "You don't have the HR Director review permission." });
+      }
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       if (rows[0].payment_status !== "unpaid") return res.status(400).json({ error: "Only an Unpaid payroll run can be marked Processed." });
       if (Number(rows[0].is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
       const b = await batchFor(queryDB, String(rows[0].month_year));
-      if (!b || !["submitted", "approved", "paid"].includes(b.status)) {
-        return res.status(400).json({ error: "Submit this month's salary for Audit first (Payroll → Approval)." });
+      if (!b || !["approved", "paid"].includes(b.status)) {
+        return res.status(400).json({ error: "This month's salary has to reach Accounts first (Payroll → Approval)." });
       }
       // Same duty split as approving the month (PayrollApprovalRoutes.ts).
       const me = Number(req.user.id);
       if (req.user.role !== "superadmin" && [rows[0].generated_by, rows[0].last_edited_by, b.submitted_by].some((u) => Number(u) === me)) {
-        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else from Audit has to approve it." });
+        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else has to approve it." });
       }
       const pr: any = await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ? AND payment_status = 'unpaid' AND COALESCE(is_held, 0) = 0", [req.params.id]);
       if (pr && pr.affectedRows === 0) return res.status(409).json({ error: "This payroll run was just changed by someone else — reload it." });

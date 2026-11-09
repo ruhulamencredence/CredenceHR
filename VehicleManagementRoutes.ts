@@ -45,6 +45,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { runsBackgroundJobs } from "./jobRunner";
+import { widenEnum } from "./enumWiden";
 
 interface VehicleManagementRouteDeps {
   authenticateToken: any;
@@ -55,6 +56,10 @@ interface VehicleManagementRouteDeps {
   requireModule: (moduleKey: "vehicle_management" | "vehicle_maintainer") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
+  // Inventory -> Drivers: adding / changing / removing a driver needs the
+  // explicit "manage_drivers" layer of vehicle_management.
+  requireModuleLayer: (moduleKey: any, layer: any) => any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   createAlert: (
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -63,8 +68,8 @@ interface VehicleManagementRouteDeps {
   // through request_type 'vehicle' the same way Asset Requisition does. See
   // the design note above registerVehicleManagementRoutes.
   createTemplateApprovalRequest: (
-    requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
-    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
+    requestType: "bill_claim" | "leave" | "timesheet" | "asset" | "vehicle",
+    sourceType: "bill_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
     sourceId: number,
     requestedBy: number,
     overrideSupervisorId?: number | null
@@ -82,6 +87,59 @@ interface VehicleManagementRouteDeps {
 
 export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> {
   if (!dbPool) return;
+  // Inventory -> Drivers: who may drive the company's vehicles. Always an
+  // Employee (all_employees.id) — name, mobile and department come from the
+  // Employee record; only the driving license and the usual vehicle are kept
+  // here. license_alerted_for = the expiry date already warned about, so the
+  // 30-day warning goes once per license.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_drivers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id INT NOT NULL,
+        license_no VARCHAR(60) NULL,
+        license_type VARCHAR(20) NULL,
+        license_expiry DATE NULL,
+        usual_vehicle_id INT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        note VARCHAR(255) NULL,
+        license_alerted_for DATE NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_driver_employee (employee_id),
+        FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure vehicle_drivers table exists: " + err.message);
+  }
+  // Book a Ride -> saved places (Home / Work / Other + a note for the
+  // driver), one account's own. users.can_save_ride_places, OFF by default.
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN can_save_ride_places TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add users.can_save_ride_places column: " + err.message);
+  }
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS ride_saved_places (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        kind VARCHAR(10) NOT NULL DEFAULT 'other',
+        name VARCHAR(120) NOT NULL,
+        address VARCHAR(255) NULL,
+        lat DECIMAL(10, 7) NOT NULL,
+        lng DECIMAL(10, 7) NOT NULL,
+        driver_note VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_rsp_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure ride_saved_places table exists: " + err.message);
+  }
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS vehicles (
@@ -135,17 +193,23 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_requisitions table exists: " + err.message);
   }
-  // Widen status for installs created before the Dynamic Approval Engine
-  // integration added the 'ongoing' status (workflow-approved but not yet
-  // vehicle+driver assigned is 'approved'; assigned and the ride actually
-  // underway is 'ongoing' — previously 'approved' meant what 'ongoing' means
-  // now, back when this file did its own direct approve+assign in one step).
+  // status: 'ongoing' (assigned and the ride underway — 'approved' means
+  // workflow-approved but no vehicle yet), 'expired' (start time plus grace
+  // passed while still waiting — expireOverdueRides), 'assigned' (vehicle and
+  // driver given, ride not started — Start Ride turns it 'ongoing').
+  // widenEnum only adds values; the old chain of narrower MODIFYs blanked
+  // 'assigned' / 'expired' rides on every restart under a non-strict sql_mode
+  // (see enumWiden.ts).
   try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending'`
+    await widenEnum(
+      dbPool,
+      "vehicle_requisitions",
+      "status",
+      ["pending", "approved", "assigned", "ongoing", "rejected", "cancelled", "completed", "expired"],
+      "NOT NULL DEFAULT 'pending'"
     );
   } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'ongoing': " + err.message);
+    console.warn("⚠️ Could not widen vehicle_requisitions.status: " + err.message);
   }
   // driver_user_id — added so the assigned driver can be an actual employee
   // account (Employee Tracking's location_pings, keyed by user_id) instead of
@@ -162,27 +226,6 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
     }
   }
-  // 'expired' — the ride's start time (plus the grace time below) passed
-  // while the request was still waiting on approval or a vehicle. See
-  // expireOverdueRides.
-  try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'expired': " + err.message);
-  }
-  // 'assigned' — a vehicle and driver are given but the ride hasn't started
-  // yet (a ride booked for later). It becomes 'ongoing' only when the driver,
-  // whoever assigned it, or Vehicle Management presses Start Ride
-  // (POST .../:id/start).
-  try {
-    await dbPool.query(
-      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','assigned','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
-    );
-  } catch (err: any) {
-    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'assigned': " + err.message);
-  }
   // When the "ride starts soon" reminder went out, and when the request expired.
   // assigned_at / started_at / start_reminded_at — the Start Ride step above.
   for (const col of ["deadline_reminded_at", "expired_at", "assigned_at", "started_at", "start_reminded_at"]) {
@@ -191,6 +234,16 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
     }
+  }
+  // Rides whose status the old ENUM chain blanked: only 'assigned' and
+  // 'expired' could be lost, and an expired ride carries expired_at.
+  try {
+    const [fixed]: any = await dbPool.query(
+      "UPDATE vehicle_requisitions SET status = IF(expired_at IS NOT NULL, 'expired', 'assigned') WHERE status = ''"
+    );
+    if (fixed?.affectedRows) console.log(`✔ ${fixed.affectedRows} vehicle requisition(s): blank status restored.`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not restore blank vehicle requisition statuses: " + err.message);
   }
   // Who gave the vehicle (may differ from decided_by, the final approver) and
   // who pressed Start Ride.
@@ -244,6 +297,8 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
     finalizeVehicleRequisitionApproval,
+    requireModuleLayer,
+    hasModuleLayer,
     rideChanged
   } = deps;
   const rideLive = (r: any) => {
@@ -251,6 +306,189 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     void rideChanged([Number(r.employee_user_id), Number(r.driver_user_id) || 0]).catch(() => undefined);
   };
   const adminGate = [authenticateToken, requireAdmin, requireModule("vehicle_management")];
+
+  // ---------- Inventory -> Drivers ----------
+  const dhakaToday = () => new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+  const ymd = (v: any) => (v ? (v instanceof Date ? new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : String(v).slice(0, 10)) : null);
+  const daysUntil = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${dhakaToday()}T00:00:00Z`)) / 864e5);
+  // Every driver with their Employee details, license state and what they are
+  // doing now ("on_ride" = a ride started, "assigned" = given one not started).
+  async function driverRoster() {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT d.*, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, e.is_active AS employee_active,
+                COALESCE(e.mobile, e.phone, e.telephone) AS mobile, v.vehicle_no AS usual_vehicle_no, v.model AS usual_vehicle_model
+           FROM vehicle_drivers d
+           JOIN all_employees e ON e.id = d.employee_id
+           LEFT JOIN vehicles v ON v.id = d.usual_vehicle_id
+          ORDER BY e.name ASC`
+      ).catch(() => [])) || [];
+    const busy: any[] =
+      (await queryDB("SELECT driver_user_id, status, expected_return_at FROM vehicle_requisitions WHERE driver_user_id IS NOT NULL AND status IN ('approved', 'assigned', 'ongoing')").catch(() => [])) ||
+      [];
+    const byUser = new Map<number, any>();
+    for (const b of busy) {
+      const cur = byUser.get(Number(b.driver_user_id));
+      if (!cur || b.status === "ongoing") byUser.set(Number(b.driver_user_id), b);
+    }
+    return rows.map((d) => {
+      const expiry = ymd(d.license_expiry);
+      const left = expiry ? daysUntil(expiry) : null;
+      const ride = d.user_id ? byUser.get(Number(d.user_id)) : null;
+      return {
+        id: Number(d.id),
+        employee_id: Number(d.employee_id),
+        user_id: d.user_id ? Number(d.user_id) : null,
+        name: d.name,
+        employee_code: d.employee_code || "",
+        designation: d.designation || "",
+        department: d.department || "",
+        mobile: d.mobile || "",
+        license_no: d.license_no || "",
+        license_type: d.license_type || "",
+        license_expiry: expiry,
+        license_days_left: left,
+        license_state: left == null ? "unknown" : left < 0 ? "expired" : left <= 30 ? "expiring" : "valid",
+        usual_vehicle_id: d.usual_vehicle_id ? Number(d.usual_vehicle_id) : null,
+        usual_vehicle: d.usual_vehicle_no ? `${d.usual_vehicle_no}${d.usual_vehicle_model ? ` — ${d.usual_vehicle_model}` : ""}` : null,
+        is_active: !!Number(d.is_active) && !!Number(d.employee_active ?? 1),
+        note: d.note || "",
+        now: ride ? (ride.status === "ongoing" ? "on_ride" : "assigned") : "free",
+        ride_until: ride?.expected_return_at || null
+      };
+    });
+  }
+  const driverManageGate = [authenticateToken, requireAdmin, requireModule("vehicle_management"), requireModuleLayer("vehicle_management", "manage_drivers")];
+  const LICENSE_TYPES = ["Light", "Medium", "Heavy", "Motorcycle", "Professional"];
+  const driverFields = async (body: any) => {
+    const licenseNo = String(body?.license_no ?? "").trim().slice(0, 60);
+    const licenseType = LICENSE_TYPES.includes(String(body?.license_type)) ? String(body.license_type) : null;
+    const expiry = String(body?.license_expiry ?? "").trim();
+    if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw Object.assign(new Error("License expiry must be a date."), { statusCode: 400 });
+    const usual = body?.usual_vehicle_id ? Number(body.usual_vehicle_id) : null;
+    if (usual) {
+      const v: any[] = (await queryDB("SELECT id FROM vehicles WHERE id = ?", [usual])) || [];
+      if (!v.length) throw Object.assign(new Error("That vehicle was not found."), { statusCode: 400 });
+    }
+    return {
+      licenseNo: licenseNo || null,
+      licenseType,
+      expiry: expiry || null,
+      usual,
+      active: body?.is_active === undefined ? 1 : body.is_active ? 1 : 0,
+      note: String(body?.note ?? "").trim().slice(0, 255) || null
+    };
+  };
+  const driverFail = (res: any, err: any) => res.status(err?.statusCode || 500).json({ error: err?.message || String(err) });
+
+  // The list (everyone with Vehicle Management), and whether this account may change it.
+  app.get("/api/vehicles/drivers", ...adminGate, async (req: any, res: any) => {
+    try {
+      res.json({ drivers: await driverRoster(), can_manage: await hasModuleLayer(req.user, "vehicle_management", "manage_drivers") });
+    } catch (err) {
+      driverFail(res, err);
+    }
+  });
+
+  // Employees who can be added: active, not a driver yet (Name · ID · Designation · Department).
+  app.get("/api/vehicles/drivers/employee-options", ...driverManageGate, async (_req: any, res: any) => {
+    try {
+      const rows: any[] =
+        (await queryDB(
+          `SELECT e.id, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, COALESCE(e.mobile, e.phone, e.telephone) AS mobile
+             FROM all_employees e
+            WHERE e.is_active = 1 AND NOT EXISTS (SELECT 1 FROM vehicle_drivers d WHERE d.employee_id = e.id)
+            ORDER BY e.name ASC`
+        )) || [];
+      res.json(rows.map((e) => ({ id: Number(e.id), name: e.name, employee_code: e.employee_code || "", designation: e.designation || "", department: e.department || "", mobile: e.mobile || "", has_login: !!e.user_id })));
+    } catch (err) {
+      driverFail(res, err);
+    }
+  });
+
+  app.post("/api/vehicles/drivers", ...driverManageGate, async (req: any, res: any) => {
+    try {
+      const employeeId = Number(req.body?.employee_id);
+      const emp: any[] = employeeId ? (await queryDB("SELECT id, user_id, is_active FROM all_employees WHERE id = ?", [employeeId])) || [] : [];
+      if (!emp.length) return res.status(400).json({ error: "Pick an employee." });
+      if (!emp[0].user_id) return res.status(400).json({ error: "This employee has no login, so their rides can't be tracked. Give them a login first (Employees)." });
+      const dup: any[] = (await queryDB("SELECT id FROM vehicle_drivers WHERE employee_id = ?", [employeeId])) || [];
+      if (dup.length) return res.status(409).json({ error: "This employee is already a driver." });
+      const f = await driverFields(req.body);
+      const r: any = await queryDB(
+        "INSERT INTO vehicle_drivers (employee_id, license_no, license_type, license_expiry, usual_vehicle_id, is_active, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [employeeId, f.licenseNo, f.licenseType, f.expiry, f.usual, f.active, f.note, req.user.id]
+      );
+      res.status(201).json({ success: true, id: Number(r.insertId) });
+    } catch (err) {
+      driverFail(res, err);
+    }
+  });
+
+  app.put("/api/vehicles/drivers/:id", ...driverManageGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const cur: any[] = (await queryDB("SELECT id, license_expiry FROM vehicle_drivers WHERE id = ?", [id])) || [];
+      if (!cur.length) return res.status(404).json({ error: "Driver not found." });
+      const f = await driverFields(req.body);
+      // A new expiry date gets its own 30-day warning.
+      const sameExpiry = ymd(cur[0].license_expiry) === f.expiry;
+      await queryDB(
+        `UPDATE vehicle_drivers SET license_no = ?, license_type = ?, license_expiry = ?, usual_vehicle_id = ?, is_active = ?, note = ?${sameExpiry ? "" : ", license_alerted_for = NULL"} WHERE id = ?`,
+        [f.licenseNo, f.licenseType, f.expiry, f.usual, f.active, f.note, id]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      driverFail(res, err);
+    }
+  });
+
+  // Rides already given keep their driver; they just can't be picked again.
+  app.delete("/api/vehicles/drivers/:id", ...driverManageGate, async (req: any, res: any) => {
+    try {
+      const r: any = await queryDB("DELETE FROM vehicle_drivers WHERE id = ?", [Number(req.params.id)]);
+      if (!Number(r?.affectedRows)) return res.status(404).json({ error: "Driver not found." });
+      res.json({ success: true });
+    } catch (err) {
+      driverFail(res, err);
+    }
+  });
+
+  // License ending within 30 days (or already ended): Vehicle Management
+  // holders and the Superadmin are told once per expiry date. Runs hourly.
+  async function warnExpiringLicenses() {
+    try {
+      const due = (await driverRoster()).filter((d) => d.is_active && d.license_expiry && d.license_days_left != null && d.license_days_left <= 30);
+      if (!due.length) return;
+      const marks: any[] = (await queryDB("SELECT id, license_alerted_for FROM vehicle_drivers")) || [];
+      const told = new Map<number, string | null>(marks.map((m) => [Number(m.id), ymd(m.license_alerted_for)]));
+      const keepers: any[] =
+        (await queryDB(
+          `SELECT DISTINCT u.id FROM users u
+            WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
+               OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'vehicle_management'))`
+        )) || [];
+      for (const d of due) {
+        if (told.get(d.id) === d.license_expiry) continue;
+        const when = d.license_days_left! < 0 ? `expired on ${d.license_expiry}` : d.license_days_left === 0 ? "expires today" : `expires on ${d.license_expiry} (${d.license_days_left} days)`;
+        for (const k of keepers) {
+          await createAlert(queryDB, {
+            userId: Number(k.id),
+            type: "vehicle_requisition" as AlertType,
+            title: "Driver's license expiring",
+            message: `${d.name}${d.employee_code ? ` (${d.employee_code})` : ""} — driving license ${d.license_no || ""} ${when}. Update it in Vehicle Management -> Inventory -> Drivers.`.replace(/\s+/g, " "),
+            relatedType: "vehicle_driver",
+            relatedId: d.id
+          }).catch(() => {});
+        }
+        await queryDB("UPDATE vehicle_drivers SET license_alerted_for = ? WHERE id = ?", [d.license_expiry, d.id]);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not check drivers' licenses: " + err.message);
+    }
+  }
+  setTimeout(() => void warnExpiringLicenses(), 30 * 1000);
+  setInterval(() => void warnExpiringLicenses(), 60 * 60 * 1000);
   // Vehicle Requisition Flowchart v3.0's bypass path: whoever actually keeps
   // the vehicles running day to day (Superadmin-granted 'vehicle_maintainer',
   // deliberately separate from 'vehicle_management' — see server.ts) can skip
@@ -429,11 +667,40 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         }
         // A ride with its vehicle given whose start time has come but nobody
         // pressed Start Ride: remind the driver and whoever assigned it, once.
+        // Once even its planned end (start + estimated hours) plus the grace
+        // time has passed without a start, it is closed as expired and the
+        // vehicle is freed — before, it kept the vehicle booked forever.
         const waiting: any[] = await queryDB("SELECT * FROM vehicle_requisitions WHERE status = ?", ["assigned"]);
         for (const r of waiting) {
-          if (r.start_reminded_at) continue;
           const start = rideStartAt(r.ride_date, r.start_time);
-          if (!start || now < start.getTime()) continue;
+          if (!start) continue;
+          const plannedEnd = start.getTime() + Math.max(0, Number(r.estimated_duration_hours) || 0) * 3600e3;
+          if (now > plannedEnd + grace_minutes * 60 * 1000) {
+            const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ?, expired_at = ? WHERE id = ? AND status = ?", [
+              "expired",
+              new Date(),
+              r.id,
+              "assigned"
+            ]);
+            if (Number(done?.affectedRows ?? 1) === 0) continue;
+            if (r.assigned_vehicle_id) await releaseVehicle(Number(r.assigned_vehicle_id));
+            const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+            const ids = new Set<number>([Number(r.employee_user_id) || 0, Number(r.driver_user_id) || 0, Number(r.assigned_by) || 0]);
+            ids.delete(0);
+            for (const uid of ids) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_requisition" as AlertType,
+                title: "Ride Closed — Never Started",
+                message: `Ride #${r.id} (${r.pickup_location} → ${r.destination}, ${when}) was never started, so it has been closed and the vehicle is free again.${uid === Number(r.employee_user_id) ? " Book again if you still need a ride." : ""}`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+            continue;
+          }
+          if (r.start_reminded_at) continue;
+          if (now < start.getTime()) continue;
           await queryDB("UPDATE vehicle_requisitions SET start_reminded_at = ? WHERE id = ?", [new Date(), r.id]);
           const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
           const ids = new Set<number>([Number(r.driver_user_id) || 0, Number(r.assigned_by) || 0]);
@@ -479,9 +746,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     if (!destination) throw new Error("Destination is required.");
     if (!rideDate) throw new Error("Ride date is required.");
     if (!startTime) throw new Error("Start time is required.");
+    // Picked as minutes, hours, a half day or a full day (DurationPicker.tsx),
+    // stored in hours: 5 minutes up to 10 days.
     if (!Number.isFinite(duration) || duration <= 0) {
-      throw new Error("Estimated duration must be greater than 0 hours.");
+      throw new Error("Estimated duration must be greater than 0.");
     }
+    if (duration < 5 / 60 - 0.005) throw new Error("Estimated duration must be at least 5 minutes.");
+    if (duration > 240) throw new Error("Estimated duration can be at most 240 hours (10 days).");
     const start = rideStartAt(rideDate, startTime);
     if (!start) throw new Error("Ride date or start time is not valid.");
     // A minute of slack for a form filled in right at the current time.
@@ -532,6 +803,15 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const driverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [driverUserId]);
     const driverUser = driverRows[0];
     if (!driverUser) throw new Error("That driver's account was not found.");
+    // Once Inventory -> Drivers has anyone in it, only an active driver from
+    // there may be given a ride, and not with an expired license. With the
+    // list still empty it works as before (any account).
+    const roster = await driverRoster();
+    if (roster.length > 0) {
+      const d = roster.find((x) => x.user_id === driverUserId);
+      if (!d || !d.is_active) throw new Error("Pick a driver from Vehicle Management -> Inventory -> Drivers.");
+      if (d.license_state === "expired") throw new Error(`${d.name}'s driving license has expired — update it in Inventory -> Drivers first.`);
+    }
     // all_employees.user_id is how EmployeeDirectoryRoutes.ts links a login
     // account to its contact number(s); mobile/phone/telephone are all
     // optional there, so fall back through them for a display number.
@@ -729,6 +1009,39 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // invisible there — that's exactly the "driver dropdown shows nobody" bug
   // this route exists to avoid. No module gate, same reasoning as GET
   // /api/vehicles/available just above.
+  // Who can be picked as the driver of a ride. With Inventory -> Drivers in
+  // use: its active drivers who have a login, with what they are doing now
+  // (expired licenses come back marked; the server refuses them). With the
+  // list still empty: every account, as before.
+  app.get("/api/vehicles/driver-picker", authenticateToken, async (req: any, res: any) => {
+    try {
+      const roster = await driverRoster();
+      if (roster.length > 0) {
+        return res.json(
+          roster
+            .filter((d) => d.is_active && d.user_id)
+            .map((d) => ({
+              id: d.user_id,
+              name: d.name,
+              employee_code: d.employee_code,
+              designation: d.designation,
+              department: d.department,
+              now: d.now,
+              license_state: d.license_state,
+              license_expiry: d.license_expiry,
+              usual_vehicle_id: d.usual_vehicle_id,
+              registered: true
+            }))
+        );
+      }
+      const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
+      const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
+      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/vehicles/driver-candidates", authenticateToken, async (req: any, res: any) => {
     try {
       const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
@@ -902,8 +1215,32 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         }
         return res.json({ success: true });
       }
+      // Approved but no vehicle given yet: the requester, or whoever would
+      // give the vehicle (Vehicle Management / Maintainer), can call it off;
+      // the people who would assign it are told so nobody books a car for it.
+      if (requisition.status === "approved") {
+        if (!isOwner && !(await canRunRide(requisition, req.user)) && !(await wasFinalApprover(id, req.user.id))) {
+          return res.status(403).json({ error: "Not authorized." });
+        }
+        const actors = await rideActors(requisition);
+        const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ? WHERE id = ? AND status = ?", ["cancelled", id, "approved"]);
+        if (Number(done?.affectedRows ?? 1) === 0) return res.status(409).json({ error: "This ride just changed — refresh and try again." });
+        const notify = new Set<number>([...actors, Number(requisition.employee_user_id)]);
+        notify.delete(Number(req.user.id));
+        for (const uid of notify) {
+          await createAlert(queryDB, {
+            userId: uid,
+            type: "vehicle_requisition" as AlertType,
+            title: "Ride Cancelled",
+            message: `${req.user.name || "Someone"} cancelled ride request #${id} (${requisition.pickup_location} → ${requisition.destination}) — no vehicle is needed for it.`,
+            relatedType: "vehicle_requisition",
+            relatedId: id
+          });
+        }
+        return res.json({ success: true });
+      }
       if (!isOwner) return res.status(403).json({ error: "Not authorized." });
-      if (requisition.status !== "pending") return res.status(400).json({ error: "Only a pending request can be cancelled." });
+      if (requisition.status !== "pending") return res.status(400).json({ error: "This ride can't be cancelled any more — it has already started or ended." });
 
       await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_at = ? WHERE id = ?", ["cancelled", new Date(), id]);
 
@@ -1619,6 +1956,136 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       res.json({ label: hit && !hit.error ? shortPlaceLabel(hit) : null });
     } catch {
       res.json({ label: null });
+    }
+  });
+
+  // ---------- Book a Ride -> saved places (users.can_save_ride_places) ----------
+  const canSavePlaces = async (user: any): Promise<boolean> => {
+    if (user?.role === "superadmin") return true;
+    const rows: any = await queryDB("SELECT can_save_ride_places, is_onboarding FROM users WHERE id = ?", [user.id]);
+    return !!rows[0] && Number(rows[0].can_save_ride_places) === 1 && !Number(rows[0].is_onboarding);
+  };
+  const requireSavePlaces = async (req: any, res: any, next: any) => {
+    try {
+      if (await canSavePlaces(req.user)) return next();
+      res.status(403).json({ error: "Saved places aren't turned on for your account." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+  const placeOut = (p: any) => ({
+    id: Number(p.id),
+    kind: p.kind,
+    name: p.name,
+    address: p.address,
+    lat: Number(p.lat),
+    lng: Number(p.lng),
+    driver_note: p.driver_note
+  });
+  const validLatLng = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+
+  app.get("/api/vehicles/places/saved", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM ride_saved_places WHERE user_id = ?", [req.user.id]);
+      const order: Record<string, number> = { home: 0, work: 1, other: 2 };
+      res.json(rows.sort((a: any, b: any) => (order[a.kind] ?? 3) - (order[b.kind] ?? 3) || Number(b.id) - Number(a.id)).map(placeOut));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/vehicles/places/saved", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const b = req.body || {};
+      const kind = ["home", "work", "other"].includes(b.kind) ? b.kind : "other";
+      const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
+      const address = typeof b.address === "string" ? b.address.trim().slice(0, 255) || null : null;
+      const note = typeof b.driver_note === "string" ? b.driver_note.trim().slice(0, 255) || null : null;
+      const lat = Number(b.lat);
+      const lng = Number(b.lng);
+      if (!name) return res.status(400).json({ error: "Give the place a name." });
+      if (!validLatLng(lat, lng)) return res.status(400).json({ error: "Invalid coordinates." });
+      const mine: any = await queryDB("SELECT id, kind FROM ride_saved_places WHERE user_id = ?", [req.user.id]);
+      if (mine.length >= 30) return res.status(400).json({ error: "You can keep up to 30 saved places. Remove one first." });
+      // One Home and one Work: saving a new one replaces the old.
+      if (kind !== "other") {
+        for (const old of mine.filter((m: any) => m.kind === kind)) await queryDB("DELETE FROM ride_saved_places WHERE id = ?", [Number(old.id)]);
+      }
+      const r: any = await queryDB(
+        "INSERT INTO ride_saved_places (user_id, kind, name, address, lat, lng, driver_note) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [req.user.id, kind, name, address, lat, lng, note]
+      );
+      const rows: any = await queryDB("SELECT * FROM ride_saved_places WHERE id = ?", [Number(r.insertId)]);
+      res.status(201).json(placeOut(rows[0]));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/vehicles/places/saved/:id", authenticateToken, requireSavePlaces, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT id, user_id FROM ride_saved_places WHERE id = ?", [id]);
+      if (!rows.length || Number(rows[0].user_id) !== Number(req.user.id)) return res.status(404).json({ error: "Saved place not found." });
+      await queryDB("DELETE FROM ride_saved_places WHERE id = ?", [id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Projects (offices / sites) that have a location set, each with its
+  // distance from a point when one is given — for the map picker.
+  const projectPlaces = async (lat: number | null, lng: number | null) => {
+    const rows: any = await queryDB("SELECT id, project_name, location_lat, location_lng, location_label FROM projects");
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dist = (aLat: number, aLng: number) => {
+      if (lat == null || lng == null) return null;
+      const dLat = toRad(aLat - lat);
+      const dLng = toRad(aLng - lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(aLat)) * Math.sin(dLng / 2) ** 2;
+      return Math.round(2 * 6371000 * Math.asin(Math.sqrt(h)));
+    };
+    return rows
+      .filter((p: any) => p.location_lat != null && p.location_lng != null && Number.isFinite(Number(p.location_lat)) && Number.isFinite(Number(p.location_lng)))
+      .map((p: any) => ({
+        id: Number(p.id),
+        label: p.project_name,
+        detail: p.location_label || null,
+        lat: Number(p.location_lat),
+        lng: Number(p.location_lng),
+        distance_m: dist(Number(p.location_lat), Number(p.location_lng))
+      }));
+  };
+
+  // The map picker's suggestions around the pin: the nearest offices /
+  // project sites (Projects with a location), within 5 km, nearest first.
+  app.get("/api/vehicles/places/nearby", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      if (!validLatLng(lat, lng)) return res.status(400).json({ error: "Invalid coordinates." });
+      const near = (await projectPlaces(lat, lng))
+        .filter((p: any) => p.distance_m <= 5000)
+        .sort((a: any, b: any) => a.distance_m - b.distance_m)
+        .slice(0, 3);
+      res.json({ offices: near, can_save: await canSavePlaces(req.user) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The map picker's "Projects" list: every Project with a location, nearest
+  // to the pin first (by name when no point is given).
+  app.get("/api/vehicles/places/projects", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
+      const lng = req.query.lng !== undefined ? Number(req.query.lng) : null;
+      const at = lat != null && lng != null && validLatLng(lat, lng);
+      const list = await projectPlaces(at ? lat : null, at ? lng : null);
+      res.json(list.sort((a: any, b: any) => (at ? a.distance_m - b.distance_m : String(a.label).localeCompare(String(b.label)))));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

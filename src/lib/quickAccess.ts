@@ -8,7 +8,7 @@
 // clears) when it mounts, so the sidebar/menu entry points stay unaffected.
 
 export type BookRideTarget = 'book' | 'status';
-export type MyAssetTarget = 'my-assets' | 'status' | 'new';
+export type MyAssetTarget = 'my-assets' | 'status' | 'new' | 'returns';
 
 const KEYS = { bookRide: 'credence.bookRideTab', myAsset: 'credence.myAssetTab' } as const;
 
