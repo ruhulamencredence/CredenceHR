@@ -53,7 +53,7 @@ interface Vehicle {
   vehicle_no: string;
   model: string;
   vehicle_type: string | null;
-  status: 'available' | 'on_ride' | 'maintenance';
+  status: 'available' | 'on_ride' | 'maintenance' | 'retired';
 }
 
 interface Requisition {
@@ -185,6 +185,47 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       setRideRulesMsg('Saved.');
     } catch (err: any) {
       setRideRulesMsg(err.message);
+    }
+  }
+
+  // Edit / delete a vehicle: only with the "Edit / delete vehicles" layer
+  // (the server checks it too — GET /api/vehicles/my-access).
+  const [canManageVehicles, setCanManageVehicles] = useState(false);
+  const [editVehicle, setEditVehicle] = useState<{ id: number; vehicle_no: string; model: string; vehicle_type: string; status: Vehicle['status'] } | null>(null);
+  const [savingVehicle, setSavingVehicle] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/my-access'), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanManageVehicles(!!d?.manage_vehicles))
+      .catch(() => undefined);
+  }, []);
+  async function saveVehicle() {
+    if (!editVehicle) return;
+    if (!editVehicle.vehicle_no.trim() || !editVehicle.model.trim()) return setError('Vehicle No. and Model are needed.');
+    setSavingVehicle(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/${editVehicle.id}`), { method: 'PUT', headers: authHeaders(), body: JSON.stringify(editVehicle) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save the vehicle.');
+      setEditVehicle(null);
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSavingVehicle(false);
+    }
+  }
+  async function deleteVehicle(v: Vehicle) {
+    if (!(await confirmDialog(`Delete vehicle ${v.vehicle_no} (${v.model})? This can't be undone.`, { tone: 'danger' }))) return;
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/${v.id}`), { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete the vehicle.');
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
     }
   }
 
@@ -970,17 +1011,69 @@ useLiveRefresh(() => loadRequisitions());
                 <th>Model</th>
                 <th>Type</th>
                 <th>Status</th>
+                {canManageVehicles && <th className="text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id} className="border-b last:border-0">
-                  <td className="py-2">{v.vehicle_no}</td>
-                  <td>{v.model}</td>
-                  <td>{v.vehicle_type || '—'}</td>
-                  <td>{v.status}</td>
-                </tr>
-              ))}
+              {vehicles.map((v) =>
+                editVehicle?.id === v.id ? (
+                  <tr key={v.id} className="border-b last:border-0 bg-blue-50/40">
+                    <td className="py-2 pr-2">
+                      <input value={editVehicle.vehicle_no} onChange={(e) => setEditVehicle({ ...editVehicle, vehicle_no: e.target.value })} maxLength={50} aria-label="Vehicle No." className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      <input value={editVehicle.model} onChange={(e) => setEditVehicle({ ...editVehicle, model: e.target.value })} maxLength={150} aria-label="Model" className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      <input value={editVehicle.vehicle_type} onChange={(e) => setEditVehicle({ ...editVehicle, vehicle_type: e.target.value })} maxLength={50} aria-label="Type" className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      {v.status === 'on_ride' ? (
+                        <span className="text-xs text-gray-500">on_ride (set by the ride)</span>
+                      ) : (
+                        <select value={editVehicle.status} onChange={(e) => setEditVehicle({ ...editVehicle, status: e.target.value as Vehicle['status'] })} aria-label="Status" className="border rounded px-2 py-1 text-sm bg-white">
+                          <option value="available">available</option>
+                          <option value="maintenance">maintenance</option>
+                          <option value="retired">retired (kept for history, never offered)</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="text-right whitespace-nowrap">
+                      <button onClick={() => void saveVehicle()} disabled={savingVehicle} className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white disabled:opacity-50">
+                        {savingVehicle ? 'Saving…' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditVehicle(null)} className="ml-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600">
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={v.id} className="border-b last:border-0">
+                    <td className="py-2">{v.vehicle_no}</td>
+                    <td>{v.model}</td>
+                    <td>{v.vehicle_type || '—'}</td>
+                    <td>{v.status}</td>
+                    {canManageVehicles && (
+                      <td className="text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setEditVehicle({ id: v.id, vehicle_no: v.vehicle_no, model: v.model, vehicle_type: v.vehicle_type || '', status: v.status })}
+                          className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          aria-label={`Edit ${v.vehicle_no}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => void deleteVehicle(v)}
+                          className="ml-1.5 px-2.5 py-1 text-xs font-medium rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                          aria-label={`Delete ${v.vehicle_no}`}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>

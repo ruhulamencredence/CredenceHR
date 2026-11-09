@@ -114,6 +114,37 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_drivers table exists: " + err.message);
   }
+  // A driver's usual vehicles — one driver may have several (and a vehicle
+  // several drivers). Replaces vehicle_drivers.usual_vehicle_id, which is
+  // copied in once and then kept as the first of them for older code.
+  // vehicle_driver_skips: employees taken off Drivers by hand, so the
+  // automatic "designation says Driver" list doesn't bring them back.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_driver_vehicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        driver_id INT NOT NULL,
+        vehicle_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_driver_vehicle (driver_id, vehicle_id),
+        KEY idx_dvv_vehicle (vehicle_id),
+        FOREIGN KEY (driver_id) REFERENCES vehicle_drivers(id) ON DELETE CASCADE,
+        FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(
+      "INSERT IGNORE INTO vehicle_driver_vehicles (driver_id, vehicle_id) SELECT d.id, d.usual_vehicle_id FROM vehicle_drivers d JOIN vehicles v ON v.id = d.usual_vehicle_id"
+    );
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_driver_skips (
+        employee_id INT PRIMARY KEY,
+        skipped_by INT NULL,
+        skipped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure driver vehicles / skips tables: " + err.message);
+  }
   // Book a Ride -> saved places (Home / Work / Other + a note for the
   // driver), one account's own. users.can_save_ride_places, OFF by default.
   try {
@@ -155,6 +186,13 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicles table exists: " + err.message);
+  }
+  // A vehicle no longer in use but kept for its ride history: "retired"
+  // (Inventory -> Vehicles -> Edit). Never offered for a ride.
+  try {
+    await dbPool.query("ALTER TABLE vehicles MODIFY COLUMN status ENUM('available','on_ride','maintenance','retired') NOT NULL DEFAULT 'available'");
+  } catch (err: any) {
+    console.warn("⚠️ Could not add the 'retired' vehicle status: " + err.message);
   }
   try {
     await dbPool.query(`
@@ -313,7 +351,21 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   const daysUntil = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${dhakaToday()}T00:00:00Z`)) / 864e5);
   // Every driver with their Employee details, license state and what they are
   // doing now ("on_ride" = a ride started, "assigned" = given one not started).
+  // Everyone whose designation says "Driver" is on the list by themselves
+  // (active employees, not taken off by hand — vehicle_driver_skips).
+  // Without a login they show up but can't be picked for a ride.
+  async function addDesignatedDrivers() {
+    await queryDB(
+      `INSERT IGNORE INTO vehicle_drivers (employee_id, is_active, note)
+       SELECT e.id, 1, 'Added automatically — designation is Driver'
+         FROM all_employees e
+        WHERE e.is_active = 1 AND LOWER(COALESCE(e.designation, '')) LIKE '%driver%'
+          AND NOT EXISTS (SELECT 1 FROM vehicle_drivers d WHERE d.employee_id = e.id)
+          AND NOT EXISTS (SELECT 1 FROM vehicle_driver_skips s WHERE s.employee_id = e.id)`
+    ).catch(() => undefined);
+  }
   async function driverRoster() {
+    await addDesignatedDrivers();
     const rows: any[] =
       (await queryDB(
         `SELECT d.*, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, e.is_active AS employee_active,
@@ -326,6 +378,17 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const busy: any[] =
       (await queryDB("SELECT driver_user_id, status, expected_return_at FROM vehicle_requisitions WHERE driver_user_id IS NOT NULL AND status IN ('approved', 'assigned', 'ongoing')").catch(() => [])) ||
       [];
+    // Usual vehicles, several per driver.
+    const links: any[] =
+      (await queryDB(
+        "SELECT l.driver_id, v.id, v.vehicle_no, v.model FROM vehicle_driver_vehicles l JOIN vehicles v ON v.id = l.vehicle_id ORDER BY v.vehicle_no"
+      ).catch(() => [])) || [];
+    const usualOf = new Map<number, { id: number; label: string }[]>();
+    for (const l of links) {
+      const list = usualOf.get(Number(l.driver_id)) || [];
+      list.push({ id: Number(l.id), label: `${l.vehicle_no}${l.model ? ` — ${l.model}` : ""}` });
+      usualOf.set(Number(l.driver_id), list);
+    }
     const byUser = new Map<number, any>();
     for (const b of busy) {
       const cur = byUser.get(Number(b.driver_user_id));
@@ -349,8 +412,12 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         license_expiry: expiry,
         license_days_left: left,
         license_state: left == null ? "unknown" : left < 0 ? "expired" : left <= 30 ? "expiring" : "valid",
-        usual_vehicle_id: d.usual_vehicle_id ? Number(d.usual_vehicle_id) : null,
-        usual_vehicle: d.usual_vehicle_no ? `${d.usual_vehicle_no}${d.usual_vehicle_model ? ` — ${d.usual_vehicle_model}` : ""}` : null,
+        usual_vehicle_ids: (usualOf.get(Number(d.id)) || []).map((v) => v.id),
+        usual_vehicles: (usualOf.get(Number(d.id)) || []).map((v) => v.label),
+        // The first of them, for older screens.
+        usual_vehicle_id: (usualOf.get(Number(d.id)) || [])[0]?.id ?? null,
+        usual_vehicle: (usualOf.get(Number(d.id)) || [])[0]?.label ?? null,
+        auto_added: !d.created_by && /automatically/i.test(String(d.note || "")),
         is_active: !!Number(d.is_active) && !!Number(d.employee_active ?? 1),
         note: d.note || "",
         now: ride ? (ride.status === "ongoing" ? "on_ride" : "assigned") : "free",
@@ -365,21 +432,32 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const licenseType = LICENSE_TYPES.includes(String(body?.license_type)) ? String(body.license_type) : null;
     const expiry = String(body?.license_expiry ?? "").trim();
     if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw Object.assign(new Error("License expiry must be a date."), { statusCode: 400 });
-    const usual = body?.usual_vehicle_id ? Number(body.usual_vehicle_id) : null;
-    if (usual) {
-      const v: any[] = (await queryDB("SELECT id FROM vehicles WHERE id = ?", [usual])) || [];
-      if (!v.length) throw Object.assign(new Error("That vehicle was not found."), { statusCode: 400 });
+    // Usual vehicles: a list (usual_vehicle_ids), or the older single one.
+    const wanted: number[] = Array.isArray(body?.usual_vehicle_ids)
+      ? Array.from(new Set(body.usual_vehicle_ids.map((x: any) => Number(x)).filter((x: number) => Number.isInteger(x) && x > 0)))
+      : body?.usual_vehicle_id
+        ? [Number(body.usual_vehicle_id)]
+        : [];
+    if (wanted.length > 50) throw Object.assign(new Error("Too many vehicles."), { statusCode: 400 });
+    if (wanted.length) {
+      const found: any[] = (await queryDB(`SELECT id FROM vehicles WHERE id IN (${wanted.map(() => "?").join(",")})`, wanted)) || [];
+      if (found.length !== wanted.length) throw Object.assign(new Error("One of those vehicles was not found."), { statusCode: 400 });
     }
     return {
       licenseNo: licenseNo || null,
       licenseType,
       expiry: expiry || null,
-      usual,
+      usual: wanted[0] ?? null,
+      usualIds: wanted,
       active: body?.is_active === undefined ? 1 : body.is_active ? 1 : 0,
       note: String(body?.note ?? "").trim().slice(0, 255) || null
     };
   };
   const driverFail = (res: any, err: any) => res.status(err?.statusCode || 500).json({ error: err?.message || String(err) });
+  const setUsualVehicles = async (driverId: number, ids: number[]) => {
+    await queryDB("DELETE FROM vehicle_driver_vehicles WHERE driver_id = ?", [driverId]);
+    for (const v of ids) await queryDB("INSERT IGNORE INTO vehicle_driver_vehicles (driver_id, vehicle_id) VALUES (?, ?)", [driverId, v]);
+  };
 
   // The list (everyone with Vehicle Management), and whether this account may change it.
   app.get("/api/vehicles/drivers", ...adminGate, async (req: any, res: any) => {
@@ -419,6 +497,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         "INSERT INTO vehicle_drivers (employee_id, license_no, license_type, license_expiry, usual_vehicle_id, is_active, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [employeeId, f.licenseNo, f.licenseType, f.expiry, f.usual, f.active, f.note, req.user.id]
       );
+      await setUsualVehicles(Number(r.insertId), f.usualIds);
+      // Added by hand again: the automatic list may keep them too.
+      await queryDB("DELETE FROM vehicle_driver_skips WHERE employee_id = ?", [employeeId]).catch(() => undefined);
       res.status(201).json({ success: true, id: Number(r.insertId) });
     } catch (err) {
       driverFail(res, err);
@@ -437,6 +518,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         `UPDATE vehicle_drivers SET license_no = ?, license_type = ?, license_expiry = ?, usual_vehicle_id = ?, is_active = ?, note = ?${sameExpiry ? "" : ", license_alerted_for = NULL"} WHERE id = ?`,
         [f.licenseNo, f.licenseType, f.expiry, f.usual, f.active, f.note, id]
       );
+      await setUsualVehicles(id, f.usualIds);
       res.json({ success: true });
     } catch (err) {
       driverFail(res, err);
@@ -446,8 +528,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // Rides already given keep their driver; they just can't be picked again.
   app.delete("/api/vehicles/drivers/:id", ...driverManageGate, async (req: any, res: any) => {
     try {
-      const r: any = await queryDB("DELETE FROM vehicle_drivers WHERE id = ?", [Number(req.params.id)]);
-      if (!Number(r?.affectedRows)) return res.status(404).json({ error: "Driver not found." });
+      const cur: any[] = (await queryDB("SELECT id, employee_id FROM vehicle_drivers WHERE id = ?", [Number(req.params.id)])) || [];
+      if (!cur.length) return res.status(404).json({ error: "Driver not found." });
+      await queryDB("DELETE FROM vehicle_driver_vehicles WHERE driver_id = ?", [Number(cur[0].id)]).catch(() => undefined);
+      await queryDB("DELETE FROM vehicle_drivers WHERE id = ?", [Number(cur[0].id)]);
+      // Taken off by hand: the automatic "designation says Driver" list
+      // doesn't bring them back (adding them by hand again does).
+      await queryDB("INSERT IGNORE INTO vehicle_driver_skips (employee_id, skipped_by) VALUES (?, ?)", [Number(cur[0].employee_id), req.user.id]).catch(() => undefined);
       res.json({ success: true });
     } catch (err) {
       driverFail(res, err);
@@ -1030,6 +1117,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
               license_state: d.license_state,
               license_expiry: d.license_expiry,
               usual_vehicle_id: d.usual_vehicle_id,
+              usual_vehicle_ids: d.usual_vehicle_ids,
               registered: true
             }))
         );
@@ -1439,17 +1527,65 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
-  app.put("/api/vehicles/:id", ...adminGate, async (req: any, res: any) => {
+  // Inventory -> Vehicles: edit / delete need the "Edit / delete vehicles"
+  // layer (manage_vehicles); adding one stays with the module as before.
+  const vehicleManageGate = [authenticateToken, requireAdmin, requireModule("vehicle_management"), requireModuleLayer("vehicle_management", "manage_vehicles")];
+  app.get("/api/vehicles/my-access", ...adminGate, async (req: any, res: any) => {
+    try {
+      res.json({
+        manage_vehicles: await hasModuleLayer(req.user, "vehicle_management", "manage_vehicles"),
+        manage_drivers: await hasModuleLayer(req.user, "vehicle_management", "manage_drivers")
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // A ride that holds this vehicle now (approved-and-given, or on the road).
+  const vehicleInUse = async (id: number) =>
+    (((await queryDB("SELECT id FROM vehicle_requisitions WHERE assigned_vehicle_id = ? AND status IN ('assigned', 'ongoing') LIMIT 1", [id])) || []) as any[]).length > 0;
+
+  app.put("/api/vehicles/:id", ...vehicleManageGate, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
       const existingRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [id]);
       const existing = existingRows[0];
       if (!existing) return res.status(404).json({ error: "Vehicle not found." });
       const body = req.body || {};
+      const vehicleNo = typeof body.vehicle_no === "string" && body.vehicle_no.trim() ? body.vehicle_no.trim().slice(0, 50) : existing.vehicle_no;
+      if (vehicleNo.toLowerCase() !== String(existing.vehicle_no).toLowerCase()) {
+        const all: any = await queryDB("SELECT id, vehicle_no FROM vehicles");
+        if (all.some((v: any) => Number(v.id) !== id && String(v.vehicle_no).toLowerCase() === vehicleNo.toLowerCase())) {
+          return res.status(400).json({ error: "That Vehicle No. already exists." });
+        }
+      }
       const model = typeof body.model === "string" && body.model.trim() ? body.model.trim().slice(0, 150) : existing.model;
       const vehicleType = body.vehicle_type !== undefined ? (String(body.vehicle_type || "").trim().slice(0, 50) || null) : existing.vehicle_type;
-      const status = ["available", "on_ride", "maintenance"].includes(body.status) ? body.status : existing.status;
-      await queryDB("UPDATE vehicles SET model = ?, vehicle_type = ?, status = ? WHERE id = ?", [model, vehicleType, status, id]);
+      // "On a ride" is set by rides themselves, never by hand.
+      let status = ["available", "maintenance", "retired"].includes(body.status) ? body.status : existing.status;
+      if (status !== existing.status && (existing.status === "on_ride" || (await vehicleInUse(id)))) {
+        return res.status(400).json({ error: "This vehicle is on a ride or given to one — change its status after the ride." });
+      }
+      await queryDB("UPDATE vehicles SET vehicle_no = ?, model = ?, vehicle_type = ?, status = ? WHERE id = ?", [vehicleNo, model, vehicleType, status, id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete: only a vehicle never used for a ride (its history would lose
+  // the vehicle) — otherwise set it to Retired.
+  app.delete("/api/vehicles/:id", ...vehicleManageGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const existingRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [id]);
+      if (!existingRows[0]) return res.status(404).json({ error: "Vehicle not found." });
+      const used: any[] = (await queryDB("SELECT id FROM vehicle_requisitions WHERE assigned_vehicle_id = ? LIMIT 1", [id])) || [];
+      if (used.length) {
+        return res.status(409).json({ error: "This vehicle has rides in its history, so it can't be deleted. Set its status to Retired instead — it won't be offered for rides." });
+      }
+      await queryDB("DELETE FROM vehicle_driver_vehicles WHERE vehicle_id = ?", [id]).catch(() => undefined);
+      await queryDB("UPDATE vehicle_drivers SET usual_vehicle_id = NULL WHERE usual_vehicle_id = ?", [id]).catch(() => undefined);
+      await queryDB("DELETE FROM vehicles WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

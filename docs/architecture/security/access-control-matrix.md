@@ -27,7 +27,7 @@
 | Holidays (Global Calendar) | `holidays` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Payroll | `payroll` | `read` Payroll<br>`payroll_view` View only (Audit / Accounts)<br>`approval_sheet` Approval — Salary sheet (view)<br>`month_compare` Approval — Month comparison (view)<br>`top_sheet` Approval — Top Sheet (view)<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`hrd_review` HR Director review<br>🔒`audit_approve` Audit (after payment)<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
 | Asset Management | `asset_management` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Vehicle Management | `vehicle_management` | `read` Vehicle Management<br>🔒`manage_drivers` Manage drivers |
+| Vehicle Management | `vehicle_management` | `read` Vehicle Management<br>🔒`manage_drivers` Manage drivers<br>🔒`manage_vehicles` Edit / delete vehicles |
 | Vehicle Maintainer (Ride Bypass) | `vehicle_maintainer` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Job Recycle | `recycle` | শুধু মডিউলের অনুমতি (layer নেই) |
 | MPR Edit Log | `editlog` | শুধু মডিউলের অনুমতি (layer নেই) |

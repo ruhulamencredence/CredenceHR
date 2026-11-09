@@ -3234,6 +3234,25 @@ Unique: `ucompany_asset_tag`(company_id,asset_tag)
 
 Unique: `unique_driver_employee`(employee_id)
 
+### `vehicle_driver_skips`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `employee_id` | int(11) | না | PK  | |
+| `skipped_by` | int(11) | হ্যাঁ |  | |
+| `skipped_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `vehicle_driver_vehicles`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `driver_id` | int(11) | না |  | FK → `vehicle_drivers.id` |
+| `vehicle_id` | int(11) | না |  | FK → `vehicles.id` |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uniq_driver_vehicle`(driver_id,vehicle_id)
+
 ### `vehicle_requisitions`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -3283,7 +3302,7 @@ Unique: `unique_driver_employee`(employee_id)
 | `vehicle_no` | varchar(50) | না | UNI  | |
 | `model` | varchar(150) | না |  | |
 | `vehicle_type` | varchar(50) | হ্যাঁ |  | |
-| `status` | enum('available','on_ride','maintenance') | না | default 'available' | |
+| `status` | enum('available','on_ride','maintenance','retired') | না | default 'available' | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |

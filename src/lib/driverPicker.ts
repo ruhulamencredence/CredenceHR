@@ -13,7 +13,12 @@ export interface DriverOption {
   license_state?: 'valid' | 'expiring' | 'expired' | 'unknown';
   license_expiry?: string | null;
   usual_vehicle_id?: number | null;
+  // Every vehicle this driver usually drives (one driver may have several).
+  usual_vehicle_ids?: number[];
 }
+
+const isUsual = (d: DriverOption, vehicleId?: string | number) =>
+  !!vehicleId && ((d.usual_vehicle_ids || []).includes(Number(vehicleId)) || Number(vehicleId) === Number(d.usual_vehicle_id));
 
 const NOW_LABEL: Record<string, string> = { free: 'Available', assigned: 'Has a ride booked', on_ride: 'On a ride' };
 
@@ -24,7 +29,7 @@ export function driverOptionLabel(d: DriverOption, vehicleId?: string | number):
   const state =
     d.license_state === 'expired'
       ? 'license expired — update it first'
-      : [NOW_LABEL[d.now || 'free'], d.license_state === 'expiring' ? `license ends ${d.license_expiry}` : '', vehicleId && Number(vehicleId) === Number(d.usual_vehicle_id) ? 'usual driver' : '']
+      : [NOW_LABEL[d.now || 'free'], d.license_state === 'expiring' ? `license ends ${d.license_expiry}` : '', isUsual(d, vehicleId) ? 'usual driver' : '']
           .filter(Boolean)
           .join(', ');
   return `${who} — ${state}`;
@@ -33,6 +38,6 @@ export function driverOptionLabel(d: DriverOption, vehicleId?: string | number):
 // Free drivers first, the vehicle's usual driver at the top, expired licenses last.
 export function sortDrivers(list: DriverOption[], vehicleId?: string | number): DriverOption[] {
   const rank = (d: DriverOption) =>
-    (d.license_state === 'expired' ? 100 : 0) + (d.now === 'on_ride' ? 20 : d.now === 'assigned' ? 10 : 0) - (vehicleId && Number(vehicleId) === Number(d.usual_vehicle_id) ? 5 : 0);
+    (d.license_state === 'expired' ? 100 : 0) + (d.now === 'on_ride' ? 20 : d.now === 'assigned' ? 10 : 0) - (isUsual(d, vehicleId) ? 5 : 0);
   return [...list].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
