@@ -552,8 +552,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="hdr-chip">{alertsBell}</div>
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
-              showing, same isProfilePageOpen/avatar pattern below. */}
-          {!isChatOpen && chatAllowed(user) && (
+              showing, same isProfilePageOpen/avatar pattern below. Website
+              only: on a phone (the app, or a phone-width browser) Chat is in
+              the bottom bar's More popup and the menu instead. */}
+          {!isChatOpen && chatAllowed(user) && !transparentHeader && (
             <div className="hdr-chip">
               <ChatBell token={token} onOpenChat={onOpenChat} />
             </div>
