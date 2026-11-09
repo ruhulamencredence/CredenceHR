@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪১টি টেবিল, ২৬৩১টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৩টি টেবিল, ২৬৩৮টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -3215,6 +3215,25 @@ Unique: `ucompany_uniq_leave_category_policy`(company_id,category_key)
 
 Unique: `ucompany_asset_tag`(company_id,asset_tag)
 
+### `vehicle_driver_skips`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `employee_id` | int(11) | না | PK  | logical → `all_employees` |
+| `skipped_by` | int(11) | হ্যাঁ |  | |
+| `skipped_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `vehicle_driver_vehicles`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `driver_id` | int(11) | না |  | FK → `vehicle_drivers.id` |
+| `vehicle_id` | int(11) | না |  | FK → `vehicles.id` |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uniq_driver_vehicle`(driver_id,vehicle_id)
+
 ### `vehicle_drivers`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -3233,25 +3252,6 @@ Unique: `ucompany_asset_tag`(company_id,asset_tag)
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 Unique: `unique_driver_employee`(employee_id)
-
-### `vehicle_driver_skips`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `employee_id` | int(11) | না | PK  | |
-| `skipped_by` | int(11) | হ্যাঁ |  | |
-| `skipped_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-### `vehicle_driver_vehicles`
-
-| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
-|---|---|---|---|---|
-| `id` | int(11) | না | PK auto_increment | |
-| `driver_id` | int(11) | না |  | FK → `vehicle_drivers.id` |
-| `vehicle_id` | int(11) | না |  | FK → `vehicles.id` |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-
-Unique: `uniq_driver_vehicle`(driver_id,vehicle_id)
 
 ### `vehicle_requisitions`
 

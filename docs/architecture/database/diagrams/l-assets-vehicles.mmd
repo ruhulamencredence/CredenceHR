@@ -57,6 +57,16 @@ erDiagram
     date purchase_date
     enum status
   }
+  vehicle_driver_skips {
+    int employee_id PK,FK
+    int skipped_by
+    timestamp skipped_at
+  }
+  vehicle_driver_vehicles {
+    int id PK
+    int driver_id FK
+    int vehicle_id FK
+  }
   vehicle_drivers {
     int id PK
     int employee_id FK
@@ -98,6 +108,9 @@ erDiagram
   assets ||--o{ asset_requisitions : "assigned_asset_id"
   users ||--o{ asset_requisitions : "employee_user_id"
   users ||--o{ asset_requisitions : "manager_id"
+  all_employees ||..o{ vehicle_driver_skips : "employee_id"
+  vehicle_drivers ||--o{ vehicle_driver_vehicles : "driver_id"
+  vehicles ||--o{ vehicle_driver_vehicles : "vehicle_id"
   all_employees ||--o{ vehicle_drivers : "employee_id"
   vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
   users ||--o{ vehicle_requisitions : "driver_user_id"

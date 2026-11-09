@@ -210,9 +210,9 @@
   "asset_requisitions",
   "asset_settings",
   "assets",
-  "vehicle_drivers",
   "vehicle_driver_skips",
   "vehicle_driver_vehicles",
+  "vehicle_drivers",
   "vehicle_requisitions",
   "vehicles"
  ],
