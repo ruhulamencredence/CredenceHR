@@ -8,7 +8,7 @@ import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
-import { Combobox } from './Combobox';
+import { Combobox, SearchSelect } from './Combobox';
 interface LeaveManageProps {
   token: string;
   user: User;
@@ -21,6 +21,17 @@ interface LeaveManageProps {
 // GlobalSidebar.tsx's canManageLeave gate on this menu item. An account's
 // own balance (view only) is on Self Service -> Leave Application
 // (LeaveReviewPage.tsx), so this page only ever manages everyone's.
+// Under each name: Employee ID · designation · department, and why the
+// balance reads 0 when it does (GET /api/leave-balances zero_reason).
+const WhoLine: React.FC<{ b: LeaveBalance }> = ({ b }) => (
+  <>
+    {(b.employee_code || b.designation || b.department) && (
+      <div className="text-[11px] font-normal text-slate-500 truncate">{[b.employee_code, b.designation, b.department].filter(Boolean).join(' · ')}</div>
+    )}
+    {b.zero_reason && <div className="text-[11px] font-normal text-amber-700 max-w-xs whitespace-normal">0 because: {b.zero_reason}</div>}
+  </>
+);
+
 export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack }) => {
   const canManageAll = user.role === 'superadmin' || !!user.can_manage_leave;
   // Leave Rules (accrual, carry-forward, who may apply) have their own layer, off until ticked.
@@ -37,6 +48,10 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   // The list is paged by the server (and searched there), so only one page of
   // accounts is ever loaded and drawn.
   const [appliedSearch, setAppliedSearch] = useState('');
+  // Filters on the list (the server applies them, like the search):
+  // department ("-" = none) and whether anything is left of Casual + Sick.
+  const [deptFilter, setDeptFilter] = useState('');
+  const [balanceFilter, setBalanceFilter] = useState<'' | 'zero' | 'has'>('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
@@ -586,7 +601,9 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     setLoading(true);
     setError('');
     try {
-      const qs = canManageAll ? `?page=${page}&limit=${pageSize}&q=${encodeURIComponent(appliedSearch)}` : '';
+      const qs = canManageAll
+        ? `?page=${page}&limit=${pageSize}&q=${encodeURIComponent(appliedSearch)}&dept=${encodeURIComponent(deptFilter)}&balance=${balanceFilter}`
+        : '';
       const res = await fetch(apiUrl(`/api/leave-balances${qs}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -622,7 +639,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   useEffect(() => {
     fetchBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, appliedSearch]);
+  }, [page, pageSize, appliedSearch, deptFilter, balanceFilter]);
 
   // Leave categories are columns of the list, so they come with it; the other
   // panels start collapsed and load their data only when opened.
@@ -790,15 +807,63 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
               </div>
             </div>
             {canManageAll && (
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name..."
-                  className="pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 w-56"
-                />
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:flex-none">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, Employee ID or designation…"
+                    aria-label="Search accounts"
+                    className="pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
+                  />
+                </div>
+                <SearchSelect
+                  value={deptFilter}
+                  onChange={(e) => {
+                    setDeptFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  aria-label="Department"
+                  className="px-2.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]"
+                >
+                  <option value="">All departments</option>
+                  {departmentOptions.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                  <option value="-">No department</option>
+                </SearchSelect>
+                <select
+                  value={balanceFilter}
+                  onChange={(e) => {
+                    setBalanceFilter(e.target.value as '' | 'zero' | 'has');
+                    setPage(1);
+                  }}
+                  aria-label="Balance"
+                  className="px-2.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Any balance</option>
+                  <option value="zero">Casual + Sick = 0</option>
+                  <option value="has">Has balance left</option>
+                </select>
+                {(search || deptFilter || balanceFilter) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setDeptFilter('');
+                      setBalanceFilter('');
+                      setPage(1);
+                    }}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-2"
+                  >
+                    Clear
+                  </button>
+                )}
+                <span className="text-[11px] text-slate-400">{total} account{total === 1 ? '' : 's'}</span>
               </div>
             )}
           </div>
@@ -1737,7 +1802,10 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   >
                     <div className="p-3.5">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{b.user_name}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">{b.user_name}</p>
+                          <WhoLine b={b} />
+                        </div>
                         <span
                           className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shrink-0 ${
                             b.user_role === 'admin'
@@ -1745,7 +1813,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                               : 'bg-blue-50 text-blue-800 border-blue-200'
                           }`}
                         >
-                          {b.user_role === 'admin' ? 'Admin' : 'User'}
+                          {b.user_role === 'admin' ? 'Admin' : b.user_role === 'superadmin' ? 'Superadmin' : 'User'}
                         </span>
                       </div>
 
@@ -1859,8 +1927,9 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                     const isSaving = savingId === b.user_id;
                     return (
                       <tr key={b.user_id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap font-medium text-slate-900 text-xs">
-                          {b.user_name}
+                        <td className="px-6 py-4 font-medium text-slate-900 text-xs">
+                          <div className="whitespace-nowrap">{b.user_name}</div>
+                          <WhoLine b={b} />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
@@ -1870,7 +1939,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                                 : 'bg-blue-50 text-blue-800 border-blue-200'
                             }`}
                           >
-                            {b.user_role === 'admin' ? 'Admin' : 'User'}
+                            {b.user_role === 'admin' ? 'Admin' : b.user_role === 'superadmin' ? 'Superadmin' : 'User'}
                           </span>
                         </td>
                         {(['casual_leave', 'sick_leave', 'leave_without_pay'] as const).map((field) => (

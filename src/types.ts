@@ -953,6 +953,10 @@ export interface LeaveBalance {
   // or that row has no Department set. Lets Leave Management's "Set Balance in
   // Bulk" panel group/filter accounts by Department without its own column.
   department?: string | null;
+  employee_code?: string | null;
+  designation?: string | null;
+  // Why Casual + Sick read 0 (Leave Manage list only), null otherwise.
+  zero_reason?: string | null;
   casual_leave: number;
   sick_leave: number;
   leave_without_pay: number;

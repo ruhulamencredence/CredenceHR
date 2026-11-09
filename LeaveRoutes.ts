@@ -206,6 +206,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // Leave Balance Workflow "Apply Now"/auto-rollover path
   // (applyAllActiveWorkflows below) so both ways of bulk-setting balances
   // can never drift out of sync.
+  // Who has leave balances: every Admin / User, and a Superadmin who is also
+  // an employee (has an Employee record) — the company's own Superadmin
+  // takes leave like anyone else. A system-owner Superadmin with no
+  // Employee record stays out, as before.
+  const LEAVE_PEOPLE = (a: string) =>
+    `(${a}.role IN ('admin', 'user') OR (${a}.role = 'superadmin' AND EXISTS (SELECT 1 FROM all_employees lpe WHERE lpe.user_id = ${a}.id)))`;
+
   async function applyBalancesToTargets(
     targetIds: number[],
     fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>>,
@@ -275,7 +282,15 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // year-end auto-rollover (checkAndRunLeaveYearRollover below). Returns how
   // many (workflow, account) balance writes actually happened, so callers can
   // tell "nothing to apply" apart from a real 0-account workflow.
-  async function applyAllActiveWorkflows(actingUserId: number | null, onlyWorkflowId?: number, onlyUserIds?: number[], carry?: LeaveCarry): Promise<number> {
+  async function applyAllActiveWorkflows(
+    actingUserId: number | null,
+    onlyWorkflowId?: number,
+    onlyUserIds?: number[],
+    carry?: LeaveCarry,
+    // Only Casual / Sick / LWP — for accounts that already have a custom
+    // category balance set by hand, which mustn't be overwritten.
+    fixedOnly = false
+  ): Promise<number> {
     const workflows: any = onlyWorkflowId
       ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
       : await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1");
@@ -285,7 +300,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     const [users, employees, items] = await Promise.all([
       // People still here only (see the bulk balance set below).
       queryDB(
-        "SELECT id FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+        `SELECT id FROM users u WHERE ${LEAVE_PEOPLE("u")} AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)`
       ),
       queryDB("SELECT * FROM all_employees WHERE user_id IS NOT NULL"),
       queryDB("SELECT * FROM leave_balance_workflow_items")
@@ -322,6 +337,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           customValues[it.category_key] = val;
         }
       }
+      if (fixedOnly) for (const k of Object.keys(customValues)) delete customValues[k];
       if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
 
       await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number, carry);
@@ -425,7 +441,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         `SELECT e.user_id, e.gender, e.joining_date FROM all_employees e
            JOIN users u ON u.id = e.user_id
           WHERE e.user_id IS NOT NULL AND COALESCE(e.is_active, 1) = 1 AND e.joining_date IS NOT NULL
-            AND u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0`
+            AND ${LEAVE_PEOPLE("u")} AND COALESCE(u.is_blocked, 0) = 0`
       )) || [];
     for (const r of rules) {
       const key = String(r.category_key);
@@ -546,18 +562,26 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     try {
       const ph = ids.map(() => "?").join(",");
       const [users, withFixed, withCustom] = await Promise.all([
-        queryDB(`SELECT id FROM users WHERE role IN ('admin', 'user') AND id IN (${ph})`, ids),
+        queryDB(`SELECT id FROM users u WHERE ${LEAVE_PEOPLE("u")} AND u.id IN (${ph})`, ids),
         queryDB(`SELECT user_id FROM leave_balances WHERE user_id IN (${ph})`, ids),
         queryDB(`SELECT user_id FROM leave_category_balances WHERE user_id IN (${ph})`, ids)
       ]);
-      const has = new Set<number>([...(withFixed || []), ...(withCustom || [])].map((r: any) => Number(r.user_id)));
-      const missing = (users || []).map((u: any) => Number(u.id)).filter((id: number) => !has.has(id));
-      if (!missing.length) return new Set();
+      // Casual / Sick / LWP are judged on their own row: an account that only
+      // had a custom category set by hand used to count as "has a balance"
+      // and never got its Casual / Sick defaults (shown as 0).
+      const hasFixed = new Set<number>((withFixed || []).map((r: any) => Number(r.user_id)));
+      const hasCustom = new Set<number>((withCustom || []).map((r: any) => Number(r.user_id)));
+      const all = (users || []).map((u: any) => Number(u.id)).filter((id: number) => !hasFixed.has(id));
+      if (!all.length) return new Set();
+      const missing = all.filter((id: number) => !hasCustom.has(id));
+      const fixedOnly = all.filter((id: number) => hasCustom.has(id));
       if (defaultTriedAt.size > 20000) defaultTriedAt.clear();
-      for (const id of missing) defaultTriedAt.set(id, now);
+      for (const id of all) defaultTriedAt.set(id, now);
       const sa: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) || [];
-      await applyAllActiveWorkflows(sa[0] ? Number(sa[0].id) : null, undefined, missing);
-      return new Set(missing);
+      const actor = sa[0] ? Number(sa[0].id) : null;
+      if (missing.length) await applyAllActiveWorkflows(actor, undefined, missing);
+      if (fixedOnly.length) await applyAllActiveWorkflows(actor, undefined, fixedOnly, undefined, true);
+      return new Set(all);
     } catch (err: any) {
       console.warn("⚠️ Could not set the default leave balance: " + err.message);
       return new Set();
@@ -619,15 +643,62 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         // balances ensured), so the screen no longer waits on every account at once.
         const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
         const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        // q: name / Employee ID / designation; dept: one department ("-" = none);
+        // balance: "zero" (nothing left of Casual + Sick) or "has".
         const q = String(req.query.q || "").trim().toLowerCase();
-        const [allUsers, empRows]: any[] = await Promise.all([
-          queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')"),
-          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        const deptFilter = String(req.query.dept || "").trim();
+        const balanceFilter = String(req.query.balance || "").trim();
+        const [allUsers, empRows, wfRows]: any[] = await Promise.all([
+          queryDB(`SELECT id, name, role, is_blocked FROM users u WHERE ${LEAVE_PEOPLE("u")}`),
+          queryDB("SELECT user_id, employee_id, designation, department, is_active FROM all_employees WHERE user_id IS NOT NULL"),
+          queryDB("SELECT scope_type, designation FROM leave_balance_workflows WHERE is_active = 1").catch(() => [])
         ]);
         const departmentByUserId = new Map<number, string>();
-        for (const e of empRows) if (e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        const empByUserId = new Map<number, any>();
+        for (const e of empRows) {
+          if (e.department) departmentByUserId.set(Number(e.user_id), e.department);
+          if (!empByUserId.has(Number(e.user_id))) empByUserId.set(Number(e.user_id), e);
+        }
         const departments = Array.from(new Set<string>(departmentByUserId.values())).sort((a, b) => a.localeCompare(b));
-        const matched = q ? allUsers.filter((u: any) => String(u.name || "").toLowerCase().includes(q)) : allUsers;
+        let matched = allUsers.filter((u: any) => {
+          const e = empByUserId.get(Number(u.id));
+          if (q && ![u.name, e?.employee_id, e?.designation].some((v) => String(v || "").toLowerCase().includes(q))) return false;
+          if (deptFilter) {
+            const d = departmentByUserId.get(Number(u.id)) || "";
+            if (deptFilter === "-" ? !!d : d !== deptFilter) return false;
+          }
+          return true;
+        });
+        if (balanceFilter === "zero" || balanceFilter === "has") {
+          const mids: number[] = matched.map((u: any) => Number(u.id));
+          await ensureDefaultLeaveBalances(mids);
+          // By user id (in chunks), the same way the page's own rows are read.
+          const all: any[] = [];
+          for (let i = 0; i < mids.length; i += 500) {
+            const chunk = mids.slice(i, i + 500);
+            if (chunk.length)
+              all.push(...(((await queryDB(`SELECT user_id, casual_leave, sick_leave FROM leave_balances WHERE user_id IN (${chunk.map(() => "?").join(",")})`, chunk)) || []) as any[]));
+          }
+          const left = new Map<number, number>(all.map((b: any) => [Number(b.user_id), Number(b.casual_leave || 0) + Number(b.sick_leave || 0)]));
+          matched = matched.filter((u: any) => ((left.get(Number(u.id)) || 0) > 0) === (balanceFilter === "has"));
+        }
+        // Why an account reads 0: no balance row at all means no active
+        // Leave Balance Workflow covers it (none General, none for its
+        // designation) — or it has no Employee record to take a designation from.
+        const hasGeneral = (wfRows || []).some((w: any) => w.scope_type === "general");
+        const wfDesignations = new Set<string>((wfRows || []).filter((w: any) => w.scope_type !== "general").map((w: any) => String(w.designation || "").trim().toLowerCase()));
+        const blockedIds = new Set<number>(allUsers.filter((u: any) => Number(u.is_blocked || 0)).map((u: any) => Number(u.id)));
+        const zeroReason = (uid: number, row: any): string | null => {
+          if (row && Number(row.casual_leave || 0) + Number(row.sick_leave || 0) > 0) return null;
+          if (row) return "Casual and Sick are 0 — set to 0, or used up this year";
+          const e = empByUserId.get(uid);
+          if (blockedIds.has(uid)) return "Login is blocked — workflows skip blocked accounts";
+          if (e && Number(e.is_active ?? 1) === 0) return "Employee record is inactive (left) — workflows skip it";
+          if (!hasGeneral && !e) return "No Employee record (no designation) and no General Leave Balance Workflow";
+          if (!hasGeneral && !wfDesignations.has(String(e.designation || "").trim().toLowerCase()))
+            return `No active Leave Balance Workflow for "${e.designation || "no designation"}" (and no General one)`;
+          return "Not set yet — open Leave Balance Workflows and Apply";
+        };
         const pageUsers = matched.slice((page - 1) * limit, page * limit);
         const ids: number[] = pageUsers.map((u: any) => Number(u.id));
         await ensureDefaultLeaveBalances(ids);
@@ -663,18 +734,21 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               user_name: u.name,
               user_role: u.role,
               department: departmentByUserId.get(Number(u.id)) || null,
+              employee_code: empByUserId.get(Number(u.id))?.employee_id || null,
+              designation: empByUserId.get(Number(u.id))?.designation || null,
               casual_leave: b ? Number(b.casual_leave) : 0,
               sick_leave: b ? Number(b.sick_leave) : 0,
               leave_without_pay: b ? Number(b.leave_without_pay) : 0,
               updated_at: b ? b.updated_at : null,
-              custom_leaves: customLeavesByUser.get(Number(u.id)) || []
+              custom_leaves: customLeavesByUser.get(Number(u.id)) || [],
+              zero_reason: zeroReason(Number(u.id), b)
             };
           })
         });
       }
 
       if (canManageAll) {
-        const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
+        const users: any = await queryDB(`SELECT id, name, role FROM users u WHERE ${LEAVE_PEOPLE("u")}`);
         await ensureDefaultLeaveBalances(users.map((u: any) => Number(u.id)));
         const [balances, employees, categories, categoryBalances] = await Promise.all([
           queryDB("SELECT * FROM leave_balances"),
@@ -1014,7 +1088,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
       // People still here only — blocked logins and inactive Employee records are left out.
       const users: any = await queryDB(
-        "SELECT id, name, role FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+        `SELECT id, name, role FROM users u WHERE ${LEAVE_PEOPLE("u")} AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)`
       );
 
       let targetIds: number[];
@@ -1070,10 +1144,11 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(400).json({ error: "Leave balances must be non-negative numbers." });
       }
 
-      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [userId]);
-      if (target.length === 0) return res.status(404).json({ error: "User not found" });
-      if (target[0].role === "superadmin") {
-        return res.status(400).json({ error: "Leave balances don't apply to the Superadmin account." });
+      const target: any = await queryDB(`SELECT id, role FROM users u WHERE u.id = ? AND ${LEAVE_PEOPLE("u")}`, [userId]);
+      if (target.length === 0) {
+        const any: any = await queryDB("SELECT id FROM users WHERE id = ?", [userId]);
+        if (!any.length) return res.status(404).json({ error: "User not found" });
+        return res.status(400).json({ error: "Leave balances apply to a Superadmin only when they have an Employee record." });
       }
 
       // Same already-spent-this-year adjustment as "Set Balance in Bulk"
