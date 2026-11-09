@@ -11,7 +11,7 @@ pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:
 img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
 details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="on" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="data-dictionary-credencehr">Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)</h1>
 <blockquote>
-<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৩৪টি টেবিল, ২৫৬৬টি কলাম)।
+<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৩৯টি টেবিল, ২৬১৩টি কলাম)।
 <code>PK</code> = প্রাইমারি কী, <code>FK</code> = ঘোষিত foreign key (→ কোন টেবিল), <code>logical</code> = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।</p>
 </blockquote>
 <h2 id="k-communication-notices-chat-mail-assistant-feedback">K. Communication: Notices, Chat, Mail, Assistant, Feedback</h2>
@@ -5332,6 +5332,20 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 <td></td>
 </tr>
+<tr>
+<td><code>check_in_place</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>check_out_place</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <p>Unique: <code>unique_user_project_date</code>(user_id,project_id,attendance_date)</p>
@@ -7426,6 +7440,182 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>unique_user_company_module</code>(user_id,company_id,module_key)</p>
+<h3 id="api_access_logs"><code>api_access_logs</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>client_id</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>app_id</code></td>
+<td>varchar(64)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>route</code></td>
+<td>varchar(100)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ip</code></td>
+<td>varchar(64)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="api_clients"><code>api_clients</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>varchar(100)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>app_id</code></td>
+<td>varchar(64)</td>
+<td>না</td>
+<td>UNI</td>
+<td></td>
+</tr>
+<tr>
+<td><code>secret_hash</code></td>
+<td>char(64)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>is_active</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 1</td>
+<td></td>
+</tr>
+<tr>
+<td><code>allowed_ips</code></td>
+<td>text</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>allowed_routes</code></td>
+<td>varchar(255)</td>
+<td>না</td>
+<td>default 'sso.initiate'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>rate_per_minute</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>default 60</td>
+<td></td>
+</tr>
+<tr>
+<td><code>token_ttl_seconds</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>default 120</td>
+<td></td>
+</tr>
+<tr>
+<td><code>secret_rotated_at</code></td>
+<td>datetime</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>last_used_at</code></td>
+<td>datetime</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Unique: <code>app_id</code>(app_id)</p>
 <h3 id="employee_template_assignments"><code>employee_template_assignments</code></h3>
 <table>
 <thead>
@@ -8169,6 +8359,154 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
+<h3 id="sso_login_logs"><code>sso_login_logs</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>request_id</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>client_id</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td>logical → <code>users</code></td>
+</tr>
+<tr>
+<td><code>ip</code></td>
+<td>varchar(64)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>platform</code></td>
+<td>varchar(10)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>success</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td>varchar(255)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="sso_login_requests"><code>sso_login_requests</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>client_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td>logical → <code>users</code></td>
+</tr>
+<tr>
+<td><code>token_hash</code></td>
+<td>char(64)</td>
+<td>না</td>
+<td>UNI</td>
+<td></td>
+</tr>
+<tr>
+<td><code>request_ip</code></td>
+<td>varchar(64)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>datetime</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>used_at</code></td>
+<td>datetime</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Unique: <code>token_hash</code>(token_hash)</p>
 <h3 id="startup_migrations"><code>startup_migrations</code></h3>
 <table>
 <thead>
@@ -9019,6 +9357,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td></td>
 </tr>
 <tr>
+<td><code>can_use_disappearing</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 0</td>
+<td></td>
+</tr>
+<tr>
 <td><code>can_use_calls</code></td>
 <td>tinyint(1)</td>
 <td>না</td>
@@ -9163,6 +9508,13 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>tinyint(1)</td>
 <td>না</td>
 <td>default 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>welcome_seen_at</code></td>
+<td>datetime</td>
+<td>হ্যাঁ</td>
+<td></td>
 <td></td>
 </tr>
 <tr>
@@ -9330,6 +9682,55 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>uniq_web_push_endpoint</code>(endpoint)</p>
+<h3 id="welcome_slides_settings"><code>welcome_slides_settings</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>tinyint(1)</td>
+<td>না</td>
+<td>default 1</td>
+<td></td>
+</tr>
+<tr>
+<td><code>reset_at</code></td>
+<td>datetime</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>updated_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp() on update current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <h2 id="m-pepm-mpr-jobs-budget-materials">M. PEPM: MPR, Jobs, Budget &amp; Materials</h2>
 <p>প্রকল্পের MPR নম্বর, job, entry (সারি), budget ও submission, dispatch/receive, উপকরণ ক্যাটাগরি, রেট লিস্ট।</p>
 <h3 id="budget_items"><code>budget_items</code></h3>

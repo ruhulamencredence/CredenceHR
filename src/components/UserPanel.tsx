@@ -10,7 +10,7 @@ import type { MoreItem } from './BottomNav';
 // bottom bar's More popup.
 const MAX_DASHBOARD_TILES = 9;
 type DashboardTile = MoreItem & { tileBg: string; badgeBg?: string };
-import { Navigation, Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
+import { Navigation, Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck, PlayCircle } from 'lucide-react';
 import { useSiteSupervisor } from '../lib/siteSupervisor';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
@@ -21,6 +21,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { JobEditPanel } from './JobEditPanel';
 import { AttendanceCard } from './AttendanceCard';
@@ -34,6 +35,7 @@ import { BookRideCard, useActiveRides } from './BookRideCard';
 import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
 import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
+import { TOUR_SECTION_EVENT, openTutorials, takeTourSection, useTutorialsState } from '../lib/tutorials';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 const LeaveReviewPage = React.lazy(() => import('./LeaveReviewPage').then((m) => ({ default: m.LeaveReviewPage })));
@@ -1104,6 +1106,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   useEffect(() => {
     return () => setHeaderPageTitle(null);
   }, []);
+  // Phone app: a few seconds after Home is up, fetch the bottom bar's pages'
+  // code (Check In/Out, Timesheet, Leave) in the background, so the first tap
+  // opens them without waiting for a download. Code only — no data is
+  // fetched and nothing is shown; each page still checks access when opened.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const t = setTimeout(() => {
+      void import('./Timesheet').catch(() => undefined);
+      void import('./LeaveReviewPage').catch(() => undefined);
+      void import('./MyClaimsCard').catch(() => undefined);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, []);
   // Switching mobile "pages" (tile taps, the bottom nav bar, etc.) only ever
   // toggles which section is display:block vs hidden — it never remounts or
   // scrolls anything on its own. Without this, jumping to a shorter page (e.g.
@@ -1130,6 +1145,26 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     window.scrollTo({ top: 0 });
     if (to) requestAnimationFrame(() => window.scrollTo({ top: to }));
   };
+  // A tutorial (GuidedTour.tsx) asks for its page: the Dashboard, Check
+  // In/Out, Leave or Timesheet. Also picked up when this panel only mounts
+  // now (the tour started from the Admin Panel). After App.tsx's own reset.
+  const goToSectionRef = useRef(goToMobileSection);
+  goToSectionRef.current = goToMobileSection;
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const take = () => {
+      const p = takeTourSection();
+      if (!p) return;
+      clearTimeout(t);
+      t = setTimeout(() => goToSectionRef.current(p.section as typeof mobileActiveSection), 120);
+    };
+    take();
+    window.addEventListener(TOUR_SECTION_EVENT, take);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener(TOUR_SECTION_EVENT, take);
+    };
+  }, []);
   // Whether one of the Claims sections (Check In/Out, My Claims, Conveyance
   // Bill Claim) is the active section — on desktop this now means "show that
   // section as its own page", same as mobile, instead of these three always
@@ -1196,11 +1231,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // My Asset, Team Attendance stay on the Dashboard). Same permission rules
   // as GlobalSidebar's Self Service list.
   const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
+  const tutorialsOn = useTutorialsState().enabled;
   const mobileMoreItems: MoreItem[] = [
     // Credence Assistant (AiAssistant.tsx) lives here on phones instead of a
     // floating button; same access rule as the Assistant itself.
     ...(!user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false)
       ? [{ key: 'assistant', label: 'Credence Assistant', icon: Sparkles, iconBg: 'from-violet-400 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.4)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-assistant')) }]
+      : []),
+    // Tutorials (TutorialsSheet.tsx) — only while a Superadmin has them on.
+    ...(tutorialsOn
+      ? [{ key: 'tutorials', label: 'Tutorials', icon: PlayCircle, iconBg: 'from-fuchsia-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.35)]', onClick: openTutorials }]
       : []),
     { key: 'noticeBoard', label: 'Notice Board', icon: Bell, iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
     ...(onOpenSelfService
@@ -3154,7 +3194,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
 
         {!!user.can_use_attendance && (
-          <div className="relative z-10 px-2 -mt-6 pb-7">
+          <div className="relative z-10 px-2 -mt-6 pb-7" data-tour="dash-attendance">
             <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
           </div>
         )}
@@ -3168,7 +3208,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             was px-4, which sat these cards noticeably further in from the
             edges than everything below it. */}
         {!!user.can_view_leave_summary && (
-          <div className={`relative z-10 px-2 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`}>
+          <div className={`relative z-10 px-2 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`} data-tour="dash-leave">
             <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
           </div>
         )}
@@ -3190,7 +3230,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           single banner used before this change. */}
       {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
       {isDesktop && (
-      <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+      <div data-tour="dash-greeting" className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         {/* Date, greeting, search (Ctrl K), Check in, quick actions and today's chips. */}
         <DashboardGreeting
           token={token}
@@ -3230,12 +3270,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         {!!user.can_use_attendance && (
-          <div id="dash-attendance" className="flex flex-col [&>*]:flex-1 rounded-[24px] transition-shadow">
+          <div id="dash-attendance" data-tour="dash-attendance" className="flex flex-col [&>*]:flex-1 rounded-[24px] transition-shadow">
             <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
           </div>
         )}
         {!!user.can_view_leave_summary && (
-          <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
+          <div data-tour="dash-leave" className="flex flex-col [&>*]:flex-1">
+            <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
+          </div>
         )}
 
         {/* Next non-working day + who's out on Leave right now — the two
@@ -3298,16 +3340,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           without access every page asked and got 403s). */}
       {canSeeMovementClaim && seen('claim') && (
       <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         {isDesktop ? (
         <div className="hidden md:block">
           {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Check In/Out']} onBack={() => goToMobileSection(null)} />}
-          <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
+          <div data-tour="claim-form">
+            <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
+          </div>
           {/* The claim history (Open / Completed) — on the web too, not only in the mobile app. */}
-          <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
+          <div data-tour="claim-list">
+            <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
+          </div>
         </div>
         ) : (
-        <div className="md:hidden">
+        <div className="md:hidden" data-tour="claim-list">
           <MyClaimsCard
             token={token}
             refreshKey={claimListRefreshKey}
@@ -3327,7 +3373,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           from this list too, without bouncing back to the Check In/Out page. */}
       {canSeeMovementClaim && seen('claims') && (
       <div className={mobileActiveSection === 'claims' ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <MyClaimsCard
           token={token}
           onBack={() => goToMobileSection(null)}
@@ -3344,7 +3390,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           (see claimsNavRequest above) — either way now its own dedicated page. */}
       {canSeeBillClaim && seen('billClaim') && (
       <div className={mobileActiveSection === 'billClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <BillClaimCard token={token} onBack={() => goToMobileSection(null)} />
         </React.Suspense>
       </div>
@@ -3362,7 +3408,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Application']} onBack={() => goToMobileSection(null)} />
           </div>
         )}
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape={isDesktop ? 'list' : 'leave'} className="px-3 pt-3" />}>
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} active={mobileActiveSection === 'leave'} />
         </React.Suspense>
       </div>
@@ -3375,7 +3421,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Home. */}
       {seen('employeeDirectory') && (
       <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <EmployeeDirectory
           token={token}
           user={user}
@@ -3391,7 +3437,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           ungated for every account, same as Employee Directory above. */}
       {seen('noticeBoard') && (
       <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+        <React.Suspense fallback={<SelfBodySkeleton shape="list" className="px-3 pt-3" />}>
         <NoticeBoard token={token} onBack={() => goToMobileSection(null)} />
         </React.Suspense>
       </div>
@@ -3407,7 +3453,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           (Timesheet's `active`), which keeps a Check In made meanwhile. */}
       {seen('timesheet') && (
         <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-          <React.Suspense fallback={<div className="flex justify-center py-16"><Spinner size={22} /></div>}>
+          <React.Suspense fallback={<SelfBodySkeleton shape={isDesktop ? 'list' : 'timesheet'} className="px-3 pt-3" />}>
           <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} active={mobileActiveSection === 'timesheet'} />
           </React.Suspense>
         </div>
@@ -3422,6 +3468,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {mobileActiveSection === 'claim' && (
         <button
           type="button"
+          data-tour="claim-add"
           onClick={() => setShowClaimFormSheet(true)}
           // Liquid glass pill — translucent gradient + blur + a thin white
           // border, with an inset top highlight (glossy) and a colored drop
@@ -3515,7 +3562,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           edge, soft drop shadow) holding the colored icon, with the name
           under the card instead of inside it. */}
       {mobileActiveSection === null && (
-        <div className="md:hidden grid grid-cols-3 gap-x-2 gap-y-4 pt-1 mobile-page-in">
+        <div className="md:hidden grid grid-cols-3 gap-x-2 gap-y-4 pt-1 mobile-page-in" data-tour="dash-tiles">
           {dashboardTiles.slice(0, MAX_DASHBOARD_TILES).map((t) => (
             <button
               key={t.key}

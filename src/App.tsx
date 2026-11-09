@@ -25,17 +25,37 @@ const AiAssistant = lazy(retryImport(() => import('./components/AiAssistant').th
 // so the Dashboard opens without its placeholder on a signed-in phone.
 const loadUserPanel = retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
 let userPanelLoad: ReturnType<typeof loadUserPanel> | null = null;
-const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().catch((err) => {
+// The Dashboard component itself once its code has run — drawn directly
+// (no Suspense placeholder for a frame) when it is ready before the app's
+// first render.
+let LoadedUserPanel: Awaited<ReturnType<typeof loadUserPanel>>['default'] | null = null;
+const preloadUserPanel = () => (userPanelLoad ||= loadUserPanel().then((m) => {
+  LoadedUserPanel = m.default;
+  return m;
+}).catch((err) => {
   userPanelLoad = null; // let the next try download it again
   throw err;
 }));
 const UserPanel = lazy(preloadUserPanel);
+// A signed-in open waits for the Dashboard's code (main.tsx) — at most
+// `maxMs` — while index.html's own "Loading…" screen is up, so the phone
+// goes from that straight to the Dashboard (with its saved data), not
+// through the skeleton placeholder for a split second.
+export function dashboardCodeReady(maxMs: number): Promise<void> {
+  if (!userPanelLoad) return Promise.resolve();
+  return Promise.race([userPanelLoad.then(() => undefined), new Promise<void>((r) => setTimeout(r, maxMs))]).catch(() => undefined);
+}
 try {
   if (localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
 } catch {
   // storage unavailable — it loads when first drawn instead
 }
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
+// Welcome slides, once per account (WelcomeSlides.tsx) — its own small chunk.
+const WelcomeSlides = lazy(retryImport(() => import('./components/WelcomeSlides')));
+// Tutorials: the list and one guided tour (src/lib/tutorials.ts) — loaded when used.
+const TutorialsSheet = lazy(retryImport(() => import('./components/TutorialsSheet')));
+const GuidedTour = lazy(retryImport(() => import('./components/GuidedTour')));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
@@ -81,6 +101,7 @@ import { preloadPdfCompany } from './lib/pdfStandard';
 import { setReportEmailAccess } from './lib/reportEmail';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
+import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
@@ -111,8 +132,11 @@ import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSi
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
+import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
 export default function App() {
+  // Fixed for this mount: switching component type later would remount the Dashboard.
+  const [DashboardPanel] = useState(() => LoadedUserPanel || UserPanel);
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('mpr_user');
@@ -432,6 +456,93 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Signed in: keep the login screen's animation on the device (downloaded
+  // once, in the background), so the login screen after a sign-out shows it
+  // straight away — website, phone browser, "Add to Home screen" and the app.
+  useEffect(() => {
+    if (!token) return;
+    const t = setTimeout(() => {
+      void import('./lib/authHeroAsset').then((m) => m.keepAuthHeroOnDevice()).catch(() => undefined);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [token]);
+
+  // First sign-in of an account: the welcome slides, once (WelcomeSlidesRoutes.ts
+  // decides — a Superadmin can switch them off or show them again to everyone).
+  const [showWelcome, setShowWelcome] = useState(false);
+  useEffect(() => {
+    setShowWelcome(false);
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(apiUrl('/api/welcome-slides/status'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && d?.show && setShowWelcome(true))
+        .catch(() => undefined);
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const finishWelcome = (showAround?: boolean) => {
+    setShowWelcome(false);
+    if (token) void fetch(apiUrl('/api/welcome-slides/seen'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+    if (showAround) startTour('dashboard');
+  };
+
+  // Tutorials (src/lib/tutorials.ts): switched on for this account, which
+  // ones it finished (WelcomeSlidesRoutes.ts). The list (Menu / More ->
+  // Tutorials) and the tours themselves only while switched on.
+  const tutorials = useTutorialsState().enabled;
+  useEffect(() => {
+    setTutorialsState({ enabled: false, done: [] });
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    fetch(apiUrl('/api/tutorials'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && d && setTutorialsState({ enabled: !!d.enabled, done: Array.isArray(d.done) ? d.done : [] }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const [tutorialsOpen, setTutorialsOpen] = useState(false);
+  const [activeTour, setActiveTour] = useState<Tour | null>(null);
+  useEffect(() => {
+    const onOpen = () => getTutorialsState().enabled && setTutorialsOpen(true);
+    const onStart = (e: Event) => {
+      const tour = toursFor(user).find((t) => t.id === (e as CustomEvent).detail);
+      if (!tour || !getTutorialsState().enabled) return;
+      window.dispatchEvent(new Event(TOUR_GO_EVENT));
+      setTutorialsOpen(false);
+      setActiveTour(tour);
+    };
+    window.addEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+    window.addEventListener(START_TOUR_EVENT, onStart);
+    return () => {
+      window.removeEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+      window.removeEventListener(START_TOUR_EVENT, onStart);
+    };
+  }, [user]);
+  useEffect(() => {
+    if (!tutorials) {
+      setTutorialsOpen(false);
+      setActiveTour(null);
+    }
+  }, [tutorials]);
+  const closeTour = (finished: boolean) => {
+    const t = activeTour;
+    setActiveTour(null);
+    if (!finished || !t || !token) return;
+    setTutorialsState({ done: Array.from(new Set([...getTutorialsState().done, t.id])) });
+    void fetch(apiUrl('/api/tutorials/done'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: t.id })
+    }).catch(() => undefined);
+  };
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     // Nothing saved from an earlier sign-in on this device is shown.
@@ -1015,6 +1126,19 @@ export default function App() {
     window.addEventListener('credence:open-self-service', onOpen);
     return () => window.removeEventListener('credence:open-self-service', onOpen);
   }, [user]);
+  // A tutorial starting: back to the user Dashboard (UserPanel.tsx then
+  // opens the tour's own section — TOUR_SECTION_EVENT).
+  useEffect(() => {
+    const onGo = () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('user');
+    };
+    window.addEventListener(TOUR_GO_EVENT, onGo);
+    return () => window.removeEventListener(TOUR_GO_EVENT, onGo);
+  }, []);
   // A task alert (TaskRoutes.ts): one about work given to this account opens
   // My Tasks; anything else (a request to HR, a task they gave) opens Task
   // Management for HR. The page then opens the task itself.
@@ -1529,7 +1653,8 @@ export default function App() {
             never a blank page: the User Dashboard its own layout
             (UserDashboardSkeleton), HR Operations its page skeleton, any
             other Admin Panel tab AdminPageSkeleton, Chat / Alerts a list
-            skeleton, every other page the generic loader. An error on a
+            skeleton, a Self Service page its own shape (SelfPageSkeleton),
+            every other page the generic loader. An error on a
             page (or its code failing to download after a deploy) shows a
             card instead of a white screen (AppErrorBoundary). */}
         <AppErrorBoundary resetKey={`${isAdminView}|${selfServiceView}|${showChat}|${showAlertsPage}|${showProfilePage}|${adminActiveTab}`}>
@@ -1543,6 +1668,9 @@ export default function App() {
               <AdminPageSkeleton />
             ) : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
+            ) : !showProfilePage && selfServiceView ? (
+              // A Self Service page: its own shape and phone-header name.
+              <SelfPageSkeleton view={selfServiceView} />
             ) : (
               <AppLoader />
             )
@@ -1713,7 +1841,7 @@ export default function App() {
           />
         ) : (
           <>
-            <UserPanel
+            <DashboardPanel
               token={token}
               user={user}
               claimsNavRequest={claimsNavRequest}
@@ -1817,6 +1945,24 @@ export default function App() {
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />
+
+      {/* An account's first sign-in: the welcome slides (WelcomeSlides.tsx). */}
+      {showWelcome && token && user && (
+        <Suspense fallback={null}>
+          <WelcomeSlides onDone={finishWelcome} canTour={tutorials} />
+        </Suspense>
+      )}
+      {/* Tutorials: the list, and the guided tour running (GuidedTour.tsx). */}
+      {tutorialsOpen && token && user && (
+        <Suspense fallback={null}>
+          <TutorialsSheet user={user} onClose={() => setTutorialsOpen(false)} />
+        </Suspense>
+      )}
+      {activeTour && token && user && (
+        <Suspense fallback={null}>
+          <GuidedTour key={activeTour.id} tour={activeTour} onClose={closeTour} />
+        </Suspense>
+      )}
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}

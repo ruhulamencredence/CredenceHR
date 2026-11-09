@@ -14,7 +14,7 @@ import { ModulePath } from './ModulePath';
 import { usePhoneHeaderTitle } from '../lib/headerPageTitle';
 import { useIsPhone } from '../lib/useScrolling';
 import { SelfCard } from './SelfCard';
-import { LoadingBlock } from './LoadingBlock';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 
@@ -127,7 +127,7 @@ export const MyBreak: React.FC<{ token: string; onBack?: () => void }> = ({ toke
 
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700 mb-3">{error}</div>}
         {!data && !error ? (
-          <LoadingBlock />
+          <SelfBodySkeleton shape="status" />
         ) : (
           data && (
             <div className="space-y-4">

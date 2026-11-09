@@ -20,12 +20,19 @@
 // (CallRoutes.ts keeps the call for RECONNECT_MS) and the caller restarts ICE
 // so the media finds the new network. Only after RECONNECT_GIVE_UP_MS
 // without media does it end as "Call dropped".
+//
+// Minimize (like WhatsApp): the call shrinks to a small floating window —
+// the other person's video (or their picture and the timer for an audio
+// call) — that can be dragged to either side while the rest of the app is
+// used; tapping it opens the call full again. Leaving the Android app during
+// a video call puts it in the phone's own picture-in-picture window
+// (MainActivity), where only the video is shown.
 
 import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera } from 'lucide-react';
-import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, cancelIncomingCallScreen } from '../lib/callAudio';
+import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera, Minimize2 } from 'lucide-react';
+import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, onCallHangup, onPictureInPicture, cancelIncomingCallScreen } from '../lib/callAudio';
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
@@ -133,6 +140,12 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
   const [switching, setSwitching] = useState(false);
   // Network dropped mid-call and it is coming back.
   const [reconnecting, setReconnecting] = useState(false);
+  // Minimized to the floating window; where it sits (null: top right).
+  const [mini, setMini] = useState(false);
+  const [miniPos, setMiniPos] = useState<{ x: number; y: number } | null>(null);
+  const miniDrag = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
+  // Android picture-in-picture (app left during a video call).
+  const [pip, setPip] = useState(false);
 
   const callIdRef = useRef<string | null>(null);
   const roleRef = useRef<'caller' | 'callee' | null>(null);
@@ -204,6 +217,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     setFacing('user');
     setSwitching(false);
     setReconnecting(false);
+    setMini(false);
     if (text) {
       setNotice(text);
       setPhase('idle');
@@ -558,6 +572,16 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     if (callIdRef.current) getChatSocket()?.emit('call:end', { callId: callIdRef.current });
     cleanup(phase === 'outgoing' ? 'Call cancelled' : 'Call ended');
   };
+  const hangUpRef = useRef(hangUp);
+  hangUpRef.current = hangUp;
+  // Hang up on the "Call in progress" notification (app left mid-call).
+  useEffect(
+    () =>
+      onCallHangup(() => {
+        if (callIdRef.current) hangUpRef.current();
+      }),
+    []
+  );
   const toggleMute = () => {
     const next = !muted;
     localRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));
@@ -625,6 +649,13 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
+  // Android picture-in-picture on / off (MainActivity via CallAudioPlugin).
+  useEffect(() => onPictureInPicture(setPip), []);
+  // A call that starts ringing here is always shown full.
+  useEffect(() => {
+    if (phase === 'incoming') setMini(false);
+  }, [phase]);
+
   // Leaving the page mid-call ends it cleanly.
   useEffect(() => {
     const bye = () => {
@@ -672,8 +703,60 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     </div>
   );
 
+  // ---- minimized: the floating window ------------------------------------
+  const videoShown = showVideo && phase === 'active' && remoteHasVideo;
+  const miniW = showVideo ? 120 : 216;
+  const miniH = showVideo ? 172 : 64;
+  const clampMini = (x: number, y: number) => {
+    const m = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    return { x: Math.min(Math.max(m, x), vw - miniW - m), y: Math.min(Math.max(m + 48, y), vh - miniH - 88) };
+  };
+  const pos = clampMini(miniPos?.x ?? window.innerWidth, miniPos?.y ?? 72);
+  const miniHandlers = mini
+    ? {
+        onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+          if ((e.target as Element).closest('button')) return;
+          miniDrag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, moved: false };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        },
+        onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+          const d = miniDrag.current;
+          if (!d) return;
+          const dx = e.clientX - d.sx;
+          const dy = e.clientY - d.sy;
+          if (!d.moved && Math.abs(dx) + Math.abs(dy) < 8) return;
+          d.moved = true;
+          setMiniPos(clampMini(d.ox + dx, d.oy + dy));
+        },
+        onPointerUp: () => {
+          const d = miniDrag.current;
+          miniDrag.current = null;
+          if (!d) return;
+          // A tap opens the call again; a drag settles on the nearer side.
+          if (!d.moved) return setMini(false);
+          setMiniPos((p) => {
+            const cur = p || pos;
+            return clampMini(cur.x + miniW / 2 < window.innerWidth / 2 ? 0 : window.innerWidth, cur.y);
+          });
+        },
+        onPointerCancel: () => {
+          miniDrag.current = null;
+        }
+      }
+    : {};
+
+  const rootClass = pip
+    ? 'fixed inset-0 z-[9999] bg-black text-white overflow-hidden'
+    : mini
+    ? 'fixed z-[9999] rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/25 bg-gradient-to-b from-violet-950 to-slate-900 text-white touch-none select-none cursor-pointer'
+    : 'fixed inset-0 z-[9999] bg-gradient-to-b from-violet-950 via-slate-900 to-slate-950 text-white flex flex-col';
+  const rootStyle: React.CSSProperties | undefined = mini && !pip ? { left: pos.x, top: pos.y, width: miniW, height: miniH } : undefined;
+  const compact = pip || mini;
+
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-gradient-to-b from-violet-950 via-slate-900 to-slate-950 text-white flex flex-col" role="dialog" aria-label="Call">
+    <div className={rootClass} style={rootStyle} role="dialog" aria-label={mini ? 'Call (minimized) — tap to open' : 'Call'} {...miniHandlers}>
       <audio ref={remoteAudio} autoPlay playsInline />
       {showVideo && (
         <>
@@ -681,22 +764,90 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
             ref={remoteVideo}
             autoPlay
             playsInline
-            className={`absolute inset-0 w-full h-full object-cover ${phase === 'active' && remoteHasVideo ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${videoShown ? 'opacity-100' : 'opacity-0'}`}
           />
           <video
             ref={localVideo}
             autoPlay
             playsInline
             muted
-            className={`absolute right-4 top-4 w-28 sm:w-40 aspect-[3/4] object-cover rounded-2xl border border-white/30 shadow-xl bg-black ${cameraOff ? 'opacity-30' : ''}`}
+            className={`absolute right-4 top-4 w-28 sm:w-40 aspect-[3/4] object-cover rounded-2xl border border-white/30 shadow-xl bg-black ${cameraOff ? 'opacity-30' : ''} ${compact ? 'hidden' : ''}`}
             // Mirror only the front camera, like the phone's own camera app.
             style={facing === 'user' ? { transform: 'scaleX(-1)' } : undefined}
           />
         </>
       )}
 
-      <div className={`relative flex-1 flex flex-col items-center justify-center gap-3 px-6 ${showVideo && phase === 'active' && remoteHasVideo ? 'justify-start pt-10' : ''}`}>
-        {!(showVideo && phase === 'active' && remoteHasVideo) && (
+      {compact ? (
+        showVideo ? (
+          <>
+            {!videoShown && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-2 pointer-events-none">
+                <UserAvatar
+                  userId={(peer as any)?.id ?? (peer as any)?.user_id}
+                  name={peer?.name || ''}
+                  fallback={initials(peer?.name || '')}
+                  className={`${pip ? 'w-16 h-16 text-xl' : 'w-12 h-12 text-base'} border border-white/20`}
+                  color="rgba(255,255,255,0.1)"
+                />
+                <div className="text-[11px] font-semibold text-center leading-tight line-clamp-2">{peer?.name}</div>
+              </div>
+            )}
+            <div className="absolute top-0 inset-x-0 pt-1.5 pb-3 text-center text-[10.5px] font-semibold bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
+              <span className={reconnecting ? 'text-amber-300' : ''}>{status}</span>
+            </div>
+            {mini && !pip && (
+              <button
+                type="button"
+                onClick={hangUp}
+                aria-label="End call"
+                className="absolute bottom-2 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full bg-rose-600 hover:bg-rose-500 flex items-center justify-center shadow-lg"
+              >
+                <PhoneOff className="w-4 h-4" />
+              </button>
+            )}
+          </>
+        ) : (
+          <div className="h-full flex items-center gap-2.5 pl-2.5 pr-2">
+            <UserAvatar
+              userId={(peer as any)?.id ?? (peer as any)?.user_id}
+              name={peer?.name || ''}
+              fallback={initials(peer?.name || '')}
+              className="w-10 h-10 text-sm border border-white/20 shrink-0"
+              color="rgba(255,255,255,0.1)"
+            />
+            <div className="flex-1 min-w-0 pointer-events-none">
+              <div className="text-[13px] font-semibold truncate">{peer?.name}</div>
+              <div className={`text-[11px] ${reconnecting ? 'text-amber-300' : 'text-white/70'}`}>{status}</div>
+            </div>
+            {!pip && (
+              <button
+                type="button"
+                onClick={hangUp}
+                aria-label="End call"
+                className="w-9 h-9 rounded-full bg-rose-600 hover:bg-rose-500 flex items-center justify-center shrink-0"
+              >
+                <PhoneOff className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )
+      ) : (
+        <>
+          {phase !== 'incoming' && (
+            <button
+              type="button"
+              onClick={() => setMini(true)}
+              aria-label="Minimize call"
+              title="Minimize"
+              className="absolute left-4 z-10 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur flex items-center justify-center"
+              style={{ top: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))' }}
+            >
+              <Minimize2 className="w-5 h-5" />
+            </button>
+          )}
+      <div className={`relative flex-1 flex flex-col items-center justify-center gap-3 px-6 ${videoShown ? 'justify-start pt-10' : ''}`}>
+        {!videoShown && (
           <UserAvatar
             userId={(peer as any)?.id ?? (peer as any)?.user_id}
             name={peer?.name || ''}
@@ -709,7 +860,6 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
         <div className={`text-sm drop-shadow ${reconnecting ? 'text-amber-300 animate-pulse' : 'text-white/70'}`}>{status}</div>
         {notice && <div className="text-xs text-white/80 bg-black/40 rounded-full px-3 py-1">{notice}</div>}
       </div>
-
       <div className="relative pt-4 px-2 flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-6" style={{ paddingBottom: 'max(3rem, calc(env(safe-area-inset-bottom) + 2rem))' }}>
         {phase === 'incoming' ? (
           <>
@@ -732,6 +882,8 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
           </>
         )}
       </div>
+        </>
+      )}
     </div>,
     document.body
   );

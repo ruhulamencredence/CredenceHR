@@ -21,7 +21,7 @@ import { ClaimBillLines } from './ClaimBillLines';
 import { formatDate } from '../lib/formatDate';
 import { ApprovalHistory } from './ApprovalHistory';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
-import { LoadingBlock } from './LoadingBlock';
+import { SelfBodySkeleton } from './SelfPageSkeleton';
 import { ApproverSignatureCard } from './ApproverSignatureCard';
 
 import { SearchSelect } from './Combobox';
@@ -516,7 +516,7 @@ useLiveRefresh(() => load(true));
           )}
 
           {loading ? (
-            <LoadingBlock />
+            <SelfBodySkeleton shape="requests" />
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
               <Inbox className="w-6 h-6 text-slate-300" />

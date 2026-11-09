@@ -316,6 +316,10 @@ export function UserAccessDrawer({
   const isTargetSuper = u.role === 'superadmin';
   // Same rule the old table used: a delegated Admin only ever edits role='user'.
   const canEdit = !isTargetSuper && (u.role !== 'admin' || isSuperAdmin);
+  // A Superadmin's own sign-in (Login ID, password) can be changed by a
+  // Superadmin — the server allows only that (UserManagement.ts). Role,
+  // switches, Block and Delete stay off for a Superadmin account.
+  const canEditLogin = canEdit || (isTargetSuper && isSuperAdmin);
   const canManageModules = canGrantModuleAccess && !isTargetSuper && (u.role === 'user' || (u.role === 'admin' && isSuperAdmin));
   const modules = u.module_permissions || [];
   const moduleLabels = modules.map((k) => ADMIN_MODULES.find((m) => m.key === k)?.label || k);
@@ -483,7 +487,16 @@ export function UserAccessDrawer({
                   </select>
                 </div>
               )}
-              {canEdit ? (
+              {isTargetSuper && (
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Role</div>
+                    <p className="text-xs text-slate-500">Every module and permission. A Superadmin can’t be changed to another role, blocked or deleted.</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${ROLE_BADGE.superadmin}`}>Superadmin</span>
+                </div>
+              )}
+              {canEditLogin ? (
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <button type="button" onClick={onChangeLoginId} className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
                     <Mail className="w-3.5 h-3.5" /> Change Login ID

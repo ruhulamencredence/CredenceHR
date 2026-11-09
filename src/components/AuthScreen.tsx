@@ -411,7 +411,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             {workspace || ownerMode ? 'Welcome back' : 'Welcome'}
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            {ownerMode ? 'System owner sign-in' : workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
+            {/* The workspace itself is named below ("Not …?") and by its logo. */}
+            {ownerMode ? 'System owner sign-in' : workspace ? 'Sign in to CredenceHR' : "Enter your company's workspace to continue"}
           </p>
           {workspace?.tagline && (
             <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>

@@ -10,8 +10,9 @@ import {
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
-  Coffee, MessageSquareHeart
+  Coffee, MessageSquareHeart, PlayCircle
 } from 'lucide-react';
+import { openTutorials, useTutorialsState } from '../lib/tutorials';
 import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
@@ -136,6 +137,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Minimized column: the group whose popup is showing beside its icon.
   const [flyout, setFlyout] = useState<{ key: string; top: number; bottom: number; left: number } | null>(null);
   const [editingFavs, setEditingFavs] = useState(false);
+  const tutorialsOn = useTutorialsState().enabled;
   const photoUrl = useProfilePhoto(token, photoVersion);
   // Site Attendance supervisor? (shows Self Service -> Team Attendance)
   const siteSupervisor = useSiteSupervisor(token);
@@ -341,6 +343,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
   // signed-in account, not gated behind any module grant.
   selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });
+  // Tutorials (TutorialsSheet.tsx) — short guided tours; only while a
+  // Superadmin has them switched on (WelcomeSlidesRoutes.ts).
+  if (tutorialsOn) selfServiceItems.push({ key: 'tutorials', label: 'Tutorials', icon: PlayCircle, onClick: openTutorials });
   // 360 ERP SSO hand-off (Erp360SsoRoutes.ts) — same visibility as Chat/
   // Alerts above: every signed-in account, no module grant needed. No page
   // of its own; clicking it opens a new tab (or shows an error banner if
@@ -729,7 +734,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { heading: 'HR Documents' }, 'myLetters'
       )
     },
-    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
   const managementDashboardItem = itemByKey.get('management_dashboard') || null;
@@ -1089,6 +1094,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           App.tsx — so it only needs a modest z-index, just enough to layer
           over page content it happens to sit beside.) */}
       <aside
+        data-tour={isPersistent ? 'sidebar' : undefined}
         className={
           isPersistent
             ? `gsidebar hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] ${

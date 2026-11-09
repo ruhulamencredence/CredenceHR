@@ -1,7 +1,8 @@
 import React from 'react';
 import { Lottie, useLottieJson } from './LazyLottie';
-// Fetched by itself when the login screen shows (not with the app's code).
-const loadAuthHero = () => import('../assets/office-illustration.json');
+// Fetched by itself when the login screen shows (not with the app's code),
+// and kept on the device after the first time (lib/authHeroAsset.ts).
+import { loadAuthHero } from '../lib/authHeroAsset';
 
 // Split out from AuthScreen.tsx and loaded via React.lazy() there so the
 // (fairly heavy) lottie-react library + this JSON animation are their own

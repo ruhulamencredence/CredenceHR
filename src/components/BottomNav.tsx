@@ -212,6 +212,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         <button
           type="button"
           onClick={() => setMoreOpen((v) => !v)}
+          data-tour="nav-more"
           aria-label="More"
           aria-expanded={moreOpen}
           // Steps aside while the page scrolls, so it doesn't sit on the
@@ -299,6 +300,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         </svg>
 
         <div
+          data-tour="nav-bar"
           className="absolute inset-0 flex items-end gap-1 pb-1"
           style={{ paddingLeft: EDGE_PAD_PCT, paddingRight: EDGE_PAD_PCT }}
         >

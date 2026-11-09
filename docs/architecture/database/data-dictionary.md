@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৪টি টেবিল, ২৫৬৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৯টি টেবিল, ২৬১৩টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -993,6 +993,8 @@ Unique: `uq_onb_doc`(application_id,doc_type)
 | `check_out_first_at` | timestamp | হ্যাঁ |  | |
 | `check_out_update_count` | int(11) | না | default 0 | |
 | `check_out_project_id` | int(11) | হ্যাঁ |  | |
+| `check_in_place` | varchar(255) | হ্যাঁ |  | |
+| `check_out_place` | varchar(255) | হ্যাঁ |  | |
 
 Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 
@@ -1411,6 +1413,39 @@ Unique: `unique_user_company_module_layer`(user_id,company_id,module_key,layer_k
 
 Unique: `unique_user_company_module`(user_id,company_id,module_key)
 
+### `api_access_logs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `client_id` | int(11) | হ্যাঁ |  | |
+| `app_id` | varchar(64) | হ্যাঁ |  | |
+| `route` | varchar(100) | না |  | |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `status` | int(11) | না |  | |
+| `message` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `api_clients`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `name` | varchar(100) | না |  | |
+| `app_id` | varchar(64) | না | UNI  | |
+| `secret_hash` | char(64) | না |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `allowed_ips` | text | হ্যাঁ |  | |
+| `allowed_routes` | varchar(255) | না | default 'sso.initiate' | |
+| `rate_per_minute` | int(11) | না | default 60 | |
+| `token_ttl_seconds` | int(11) | না | default 120 | |
+| `secret_rotated_at` | datetime | হ্যাঁ |  | |
+| `last_used_at` | datetime | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `app_id`(app_id)
+
 ### `employee_template_assignments`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1551,6 +1586,35 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `app_idle_days` | int(11) | না | default 3 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+### `sso_login_logs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `request_id` | int(11) | হ্যাঁ |  | |
+| `client_id` | int(11) | হ্যাঁ |  | |
+| `user_id` | int(11) | হ্যাঁ |  | logical → `users` |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `platform` | varchar(10) | হ্যাঁ |  | |
+| `success` | tinyint(1) | না |  | |
+| `reason` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `sso_login_requests`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `client_id` | int(11) | না |  | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `token_hash` | char(64) | না | UNI  | |
+| `request_ip` | varchar(64) | হ্যাঁ |  | |
+| `expires_at` | datetime | না |  | |
+| `used_at` | datetime | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `token_hash`(token_hash)
 
 ### `startup_migrations`
 
@@ -1710,6 +1774,7 @@ Unique: `uniq_session_key`(session_key)
 | `is_onboarding` | tinyint(1) | না | default 0 | |
 | `must_change_password` | tinyint(1) | না | default 0 | |
 | `onboarding_expires_at` | datetime | হ্যাঁ |  | |
+| `can_use_disappearing` | tinyint(1) | না | default 0 | |
 | `can_use_calls` | tinyint(1) | না | default 0 | |
 | `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_use_ai_assistant` | tinyint(1) | না | default 1 | |
@@ -1731,6 +1796,8 @@ Unique: `uniq_session_key`(session_key)
 | `can_take_break` | tinyint(1) | না | default 0 | |
 | `can_give_feedback` | tinyint(1) | না | default 0 | |
 | `can_use_fingerprint` | tinyint(1) | না | default 0 | |
+| `welcome_seen_at` | datetime | হ্যাঁ |  | |
+| `tutorials_done` | text | হ্যাঁ |  | |
 | `can_receive_material` | tinyint(1) | না | default 0 | |
 | `can_return_dispatch` | tinyint(1) | না | default 0 | |
 | `can_sign_documents` | tinyint(1) | না | default 0 | |
@@ -1764,6 +1831,17 @@ Unique: `email`(email), `username`(username)
 | `last_used_at` | timestamp | হ্যাঁ |  | |
 
 Unique: `uniq_web_push_endpoint`(endpoint)
+
+### `welcome_slides_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK  | |
+| `enabled` | tinyint(1) | না | default 1 | |
+| `reset_at` | datetime | হ্যাঁ |  | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `tutorials_enabled` | tinyint(1) | না | default 1 | |
 
 ## M. PEPM: MPR, Jobs, Budget & Materials
 

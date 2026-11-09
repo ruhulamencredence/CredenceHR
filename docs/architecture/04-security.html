@@ -342,7 +342,17 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <hr />
 <ul>
 <li><strong>ফোনের কল-পর্দা থেকে Decline:</strong> <code>POST /api/calls/push-decline</code> sign-in ছাড়া চলে, কিন্তু শুধু সেই কলের ৪৮-অক্ষরের এলোমেলো চাবি দিলে — চাবিটা শুধু callee-র নিজের ফোনের push-এ যায়, আর কাজ করে শুধু কল বাজতে থাকা অবস্থায়, শুধু Decline-এর জন্য (<code>CallRoutes.ts</code>)।</li>
-<li><strong>কল আবার জোড়া লাগা:</strong> নেট কাটার পর <code>call:rejoin</code> শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (<code>CallRoutes.ts</code>)।</li>
+<li><strong>কল চলাকালীন foreground service:</strong> নতুন Android অনুমতি <code>FOREGROUND_SERVICE_MICROPHONE</code> ও <code>FOREGROUND_SERVICE_CAMERA</code> (<code>CallService.java</code>)। service শুধু কল চলার সময় চলে, সবসময় দেখা যায় এমন "Call in progress" notification সহ। microphone/camera-র অনুমতি আগে থেকে দেওয়া না থাকলে সেই type নেওয়া হয় না, আর কল শেষ হলেই বন্ধ হয়। Hang up বোতাম app-এর ভেতরের receiver (<code>exported=false</code>), বাইরের কোনো app সেটা চালাতে পারে না।</li>
+<li><strong>Partner app থেকে SSO (360 ERP ও অন্যান্য, <code>Erp360InboundSsoRoutes.ts</code>, guide <code>docs/CredenceHR-SSO-API.md</code>):</strong> প্রতিটা application-এর নিজের App ID ও Secret, IP তালিকা, সীমা ও চালু/বন্ধ, একটা বন্ধ বা মুছলে বাকিগুলো চলে। service API শুধু HTTPS-এ, <code>X-App-Id</code> + <code>X-App-Secret</code> দিয়ে। secret ৬৪ অক্ষরের এলোমেলো, database-এ শুধু SHA-256, তুলনা timing-safe। client-ভিত্তিক IP তালিকা, প্রতি মিনিটের সীমা আর route-এর অনুমতি। প্রতিটা call <code>api_access_logs</code>-এ। মানুষ মেলে email আর Employee ID দুটো দিয়েই, কোনো account নতুন তৈরি হয় না। sign-in link-এর token ২৫৬-bit, একবারই চলে (এক <code>UPDATE</code>-এ ব্যবহৃত), মেয়াদ ৩০–৬০০ সেকেন্ড (ডিফল্ট ১২০), database-এ শুধু hash, পেজ খুলেই ঠিকানা থেকে মুছে যায়। consume-এ IP-প্রতি মিনিটে ৩০ চেষ্টার সীমা। sign-in-এর বাকি সব যাচাই password-এর একই <code>finishLogin()</code>। সব চেষ্টা <code>sso_login_logs</code>-এ। application শুধু Superadmin যোগ করতে, বদলাতে, বন্ধ করতে ও মুছতে পারেন।</li>
+<li>
+<p><strong>কল আবার জোড়া লাগা:</strong> নেট কাটার পর <code>call:rejoin</code> শুধু সেই কলের caller/callee account (socket-এর যাচাই করা user) করতে পারে; ৩০ সেকেন্ডে না ফিরলে কল শেষ (<code>CallRoutes.ts</code>)।</p>
+</li>
+<li>
+<p><strong>Disappearing messages:</strong> চালু করা আলাদা switch (<code>users.can_use_disappearing</code>, শুরুতে বন্ধ) ছাড়া হয় না — server নিজে যাচাই করে; কারণ সেই message চিরতরে মুছে যায়, কোম্পানি চাইলে কাউকেই না দিয়ে chat-এর রেকর্ড রাখতে পারে।</p>
+</li>
+<li>
+<p><strong>Live all (Employee Tracking):</strong> <code>watch-many</code> / <code>unwatch-many</code> একক Live Follow-এর মতোই <code>tracking</code> module + <code>live</code> layer চায়, প্রতিটা id-কে অ্যাকাউন্টের Tracking সীমায় যাচাই করে, একবারে সর্বোচ্চ ১০০ জন (<code>LiveTrackingRoutes.ts</code>)।</p>
+</li>
 </ul>
 <h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
 <p>(<code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>, <code>DocumentVaultRoutes.ts</code>)

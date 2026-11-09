@@ -26,6 +26,8 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
+import { selfViewToPath } from '../lib/selfUrl';
+import type { DashPage, DashPageLink } from './ManagementDashboard';
 import { LoadingBlock } from './LoadingBlock';
 import { retryImport } from '../lib/chunkReload';
 
@@ -785,7 +787,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
-    return users.filter((u) => {
+    // Your own account, then the Superadmin, at the top — not on whichever
+    // page the alphabetical order happens to put them.
+    const pin = (u: (typeof users)[number]) => (u.id === user.id ? 0 : u.role === 'superadmin' ? 1 : 2);
+    return [...users].sort((a, b) => pin(a) - pin(b)).filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
       if (accessFilter && !accessFilter.match(u)) return false;
       if (userDeptFilter) {
@@ -799,7 +804,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter, userDeptFilter, user.id]);
   // Only one page of the (filtered) accounts is drawn at a time.
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(50);
@@ -4919,7 +4924,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
-      {activeTab === 'management_dashboard' && canSee('management_dashboard') && <ManagementDashboard token={token} />}
+      {activeTab === 'management_dashboard' && canSee('management_dashboard') && (
+        <ManagementDashboard
+          token={token}
+          pageLink={(page: DashPage): DashPageLink => {
+            // Only pages this account may open (same checks as the menu).
+            if (page === 'payroll') {
+              if (!(isSuperAdmin || canSee('payroll')) || !adminUrlEnabled()) return null;
+              return { href: selfViewToPath('payroll'), go: () => undefined };
+            }
+            if (!ADMIN_TAB_KEYS.has(page) || !isTabVisible(page)) return null;
+            return { href: adminUrlEnabled() ? adminTabToPath(page) : null, go: () => setActiveTab(page as any) };
+          }}
+        />
+      )}
       {employeeOf && canSee('employees') && (
         <UserEmployeeModal
           token={token}
