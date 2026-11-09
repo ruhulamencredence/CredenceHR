@@ -282,8 +282,21 @@ export async function findOnboardingDuplicates(q: QueryDB, a: any, data: Onboard
   const phoneKey = (v: any) => digits(v).slice(-10);
   const lower = (v: any) => String(v || "").trim().toLowerCase();
   const nid = digits(data.personal.nid_ssn);
-  const phones = [data.personal.mobile, a.phone].map(phoneKey).filter((x) => x.length >= 8);
-  const emails = [data.personal.personal_email, a.email].map(lower).filter(Boolean);
+  // Each number / address carries where it came from, so HR can tell the
+  // joiner's own entry apart from the one saved on the onboarding record.
+  const recordSrc = a.candidate_id ? "on the onboarding record (from Recruitment)" : "on the onboarding record (entered by HR)";
+  const phoneSrcs: { key: string; shown: string; field: string }[] = [
+    { v: data.personal.mobile, field: "Mobile (filled in by the joiner)" },
+    { v: a.phone, field: `Phone ${recordSrc}` }
+  ]
+    .map((x) => ({ key: phoneKey(x.v), shown: String(x.v || "").trim(), field: x.field }))
+    .filter((x) => x.key.length >= 8);
+  const emailSrcs: { key: string; field: string }[] = [
+    { v: data.personal.personal_email, field: "Email (filled in by the joiner)" },
+    { v: a.email, field: `Email ${recordSrc}` }
+  ]
+    .map((x) => ({ key: lower(x.v), field: x.field }))
+    .filter((x) => !!x.key);
   const [emps, users]: any[][] = await Promise.all([
     q("/*unscoped*/ SELECT id, name, employee_id, user_id, nid_ssn, mobile, phone, email, personal_email FROM all_employees"),
     q("/*unscoped*/ SELECT id, name, email, username FROM users WHERE id <> ?", [Number(a.user_id)])
@@ -293,10 +306,10 @@ export async function findOnboardingDuplicates(q: QueryDB, a: any, data: Onboard
   // The joiner's own Employee record (once approved) is not a clash.
   for (const e of (emps || []).filter((e: any) => Number(e.user_id) !== Number(a.user_id))) {
     if (nid && nid.length >= 6 && digits(e.nid_ssn) === nid) out.push({ field: "NID", value: String(data.personal.nid_ssn), match: who(e) });
-    for (const p of phones) if ([e.mobile, e.phone].some((x) => phoneKey(x) === p)) out.push({ field: "Mobile", value: p, match: who(e) });
-    for (const m of emails) if ([e.email, e.personal_email].some((x) => lower(x) === m)) out.push({ field: "Email", value: m, match: who(e) });
+    for (const p of phoneSrcs) if ([e.mobile, e.phone].some((x) => phoneKey(x) === p.key)) out.push({ field: p.field, value: p.shown, match: who(e) });
+    for (const m of emailSrcs) if ([e.email, e.personal_email].some((x) => lower(x) === m.key)) out.push({ field: m.field, value: m.key, match: who(e) });
   }
-  for (const u of users || []) for (const m of emails) if (lower(u.email) === m) out.push({ field: "Email", value: m, match: `Login ${u.name}` });
+  for (const u of users || []) for (const m of emailSrcs) if (lower(u.email) === m.key) out.push({ field: m.field, value: m.key, match: `Login ${u.name}` });
   // One line per (field, value, match).
   return out.filter((x, i) => out.findIndex((y) => y.field === x.field && y.value === x.value && y.match === x.match) === i);
 }

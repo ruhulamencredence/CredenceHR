@@ -38,7 +38,7 @@ interface RecruitmentRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireModule: (moduleKey: "recruitment") => any;
-  requireModuleLayer: (moduleKey: "recruitment", layer: "email_candidates") => any;
+  requireModuleLayer: (moduleKey: "recruitment", layer: "email_candidates" | "edit_candidates") => any;
   hasModuleLayer: (user: any, moduleKey: "recruitment", layer: string) => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
 }
@@ -252,6 +252,7 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB } = deps;
   const gate = [authenticateToken, requireAdmin, requireModule("recruitment")];
   const emailGate = [authenticateToken, requireAdmin, requireModuleLayer("recruitment", "email_candidates")];
+  const editGate = [authenticateToken, requireAdmin, requireModuleLayer("recruitment", "edit_candidates")];
 
   const placeOf = (i: any): string | null => (i.mode || i.venue || i.meeting_link ? whereLine(i).slice(0, 600) : null);
 
@@ -296,7 +297,11 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
   // Who the page should offer: emailing, and whether the server can send mail.
   app.get("/api/recruitment/access", ...gate, async (req: any, res: any) => {
     try {
-      res.json({ email_candidates: await hasModuleLayer(req.user, "recruitment", "email_candidates"), mail_ready: isMailerConfigured() });
+      res.json({
+        email_candidates: await hasModuleLayer(req.user, "recruitment", "email_candidates"),
+        edit_candidates: await hasModuleLayer(req.user, "recruitment", "edit_candidates"),
+        mail_ready: isMailerConfigured()
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -461,6 +466,39 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
       await queryDB("UPDATE job_candidates SET status = ?, notes = ? WHERE id = ?", [status, notes, id]);
       const rows: any = await queryDB("SELECT * FROM job_candidates WHERE id = ?", [id]);
       res.json(rows[0]);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Correct a candidate's details (layer "edit_candidates", explicit-only).
+  // While their New Joiner Onboarding is still open, its copy (the name,
+  // email and phone HR's review and the duplicate check use) follows; once
+  // they have joined, the Employee record is changed in Employees instead.
+  app.put("/api/job-candidates/:id/details", ...editGate, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const body = req.body || {};
+      const rows: any[] = await queryDB("SELECT * FROM job_candidates WHERE id = ?", [id]);
+      const c = rows.find((r: any) => Number(r.id) === id);
+      if (!c) return res.status(404).json({ error: "Candidate not found." });
+      const text = (v: any, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+      const name = text(body.name, 255);
+      const email = text(body.email, 255);
+      const phone = text(body.phone, 50);
+      const source = text(body.source, 100);
+      if (!name) return res.status(400).json({ error: "Name is required." });
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "That email doesn't look right." });
+      if (phone && phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "That phone number looks too short." });
+      await queryDB("UPDATE job_candidates SET name = ?, email = ?, phone = ?, source = ? WHERE id = ?", [name, email || null, phone || null, source || null, id]);
+      const apps: any[] = (await queryDB("/*unscoped*/ SELECT id, user_id, status FROM onboarding_applications WHERE candidate_id = ?", [id]).catch(() => [])) || [];
+      const open = apps.filter((a: any) => ["draft", "submitted", "rejected"].includes(a.status));
+      for (const a of open) {
+        await queryDB("/*unscoped*/ UPDATE onboarding_applications SET name = ?, email = ?, phone = ? WHERE id = ?", [name, email || null, phone || null, Number(a.id)]);
+        await queryDB("/*unscoped*/ UPDATE users SET name = ? WHERE id = ? AND is_onboarding = 1", [name, Number(a.user_id)]);
+      }
+      const fresh: any[] = await queryDB("SELECT * FROM job_candidates WHERE id = ?", [id]);
+      res.json({ ...fresh[0], onboarding_updated: open.length > 0, joined: apps.some((a: any) => a.status === "approved") });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
