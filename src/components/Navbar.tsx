@@ -419,7 +419,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
             aria-label="Go to dashboard"
           >
-            <img src={credenceLogo} alt="Credence" className="h-8 sm:h-9 w-auto" />
+            <img src={credenceLogo} alt="Credence" className={`h-8 sm:h-9 w-auto ${purple ? 'hdr-logo-on-colour' : ''}`} />
           </button>
 
           {/* A mobile sub-page's own title (see headerPageTitle.ts), shown in

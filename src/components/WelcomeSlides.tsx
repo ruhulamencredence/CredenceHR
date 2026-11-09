@@ -91,13 +91,13 @@ const SlideArt: React.FC<{ slide: Slide; active: boolean }> = ({ slide, active }
       <div className="relative w-[72vmin] max-w-[270px] aspect-square grid place-items-center">
         <div
           className="absolute w-[84%] aspect-square opacity-70"
-          style={{ borderRadius: '44% 56% 52% 48%', background: 'radial-gradient(circle at 35% 30%, #efe2ff, #d8c6ff 55%, #c4b0ff)' }}
+          style={{ borderRadius: '44% 56% 52% 48%', background: 'var(--g-slides-blob, radial-gradient(circle at 35% 30%, #efe2ff, #d8c6ff 55%, #c4b0ff))' }}
         />
         {data ? <Lottie src={data} loop autoplay className="relative w-full h-full" /> : <div className="relative w-full h-full" />}
         {slide.chips.map((c) => (
           <div
             key={c.text}
-            className="absolute flex items-center gap-1.5 bg-white/95 rounded-[14px] px-3 py-1.5 text-[11.5px] font-bold text-slate-800 whitespace-nowrap shadow-[0_12px_26px_-12px_rgba(80,30,160,0.45)]"
+            className="absolute flex items-center gap-1.5 bg-white/95 rounded-[14px] px-3 py-1.5 text-[11.5px] font-bold text-slate-800 whitespace-nowrap shadow-[0_12px_26px_-12px_rgba(var(--g-accent-rgb),0.35)]"
             style={c.style}
           >
             <span className="text-[13px]">{c.icon}</span>
@@ -130,9 +130,9 @@ export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; c
   return (
     <div className="fixed inset-0 z-[95] liquid-glass-backdrop md:flex md:items-center md:justify-center md:p-6" role="dialog" aria-modal="true" aria-label="Welcome to CredenceHR">
       <div
-        className="relative w-full h-full md:w-[390px] md:h-[min(760px,92vh)] md:rounded-[36px] md:shadow-[0_40px_80px_-30px_rgba(60,20,120,0.6)] overflow-hidden flex flex-col px-6"
+        className="relative w-full h-full md:w-[390px] md:h-[min(760px,92vh)] md:rounded-[36px] md:shadow-[0_40px_80px_-30px_rgba(var(--g-accent-rgb),0.45)] overflow-hidden flex flex-col px-6"
         style={{
-          background: 'linear-gradient(175deg, #fff7fb 0%, #f6f0ff 55%, #efe7ff 100%)',
+          background: 'var(--g-slides-bg, linear-gradient(175deg, #fff7fb 0%, #f6f0ff 55%, #efe7ff 100%))',
           paddingTop: 'max(1.25rem, calc(env(safe-area-inset-top) + 0.75rem))',
           paddingBottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))'
         }}
@@ -152,7 +152,7 @@ export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; c
               type="button"
               onClick={() => setI(last)}
               className="rounded-full px-4 py-1.5 text-xs font-bold text-white"
-              style={{ background: 'linear-gradient(135deg, #2a0f5c, #5b21b6)' }}
+              style={{ background: 'linear-gradient(135deg, var(--g-cta-dark-1, #2a0f5c), var(--g-cta-dark-2, #5b21b6))' }}
             >
               Skip
             </button>
@@ -164,7 +164,7 @@ export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; c
               <span
                 key={j}
                 className="h-1 rounded-full transition-all duration-300"
-                style={{ width: j === i ? 28 : 12, background: j === i ? 'linear-gradient(90deg, #6d28d9, #c026d3)' : '#d6cdee' }}
+                style={{ width: j === i ? 28 : 12, background: j === i ? 'linear-gradient(90deg, var(--g-cta-1, #6d28d9), var(--g-cta-2, #c026d3))' : 'var(--g-cta-track, #d6cdee)' }}
               />
             ))}
           </div>
@@ -192,8 +192,8 @@ export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; c
               type="button"
               onClick={() => go(1)}
               aria-label="Next"
-              className="w-14 h-14 rounded-full text-white text-2xl flex items-center justify-center shadow-[0_14px_26px_-8px_rgba(124,58,237,0.6)] active:scale-95 transition-transform"
-              style={{ background: 'linear-gradient(135deg, #6d28d9, #c026d3)' }}
+              className="w-14 h-14 rounded-full text-white text-2xl flex items-center justify-center shadow-[0_14px_26px_-8px_rgba(var(--g-accent-rgb),0.6)] active:scale-95 transition-transform"
+              style={{ background: 'linear-gradient(135deg, var(--g-cta-1, #6d28d9), var(--g-cta-2, #c026d3))' }}
             >
               →
             </button>
@@ -203,8 +203,8 @@ export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; c
             <button
               type="button"
               onClick={() => onDone(canTour)}
-              className="w-full rounded-full py-3.5 text-[15px] font-extrabold text-white shadow-[0_14px_26px_-10px_rgba(124,58,237,0.6)] active:scale-[0.98] transition-transform"
-              style={{ background: 'linear-gradient(135deg, #6d28d9, #c026d3)' }}
+              className="w-full rounded-full py-3.5 text-[15px] font-extrabold text-white shadow-[0_14px_26px_-10px_rgba(var(--g-accent-rgb),0.6)] active:scale-[0.98] transition-transform"
+              style={{ background: 'linear-gradient(135deg, var(--g-cta-1, #6d28d9), var(--g-cta-2, #c026d3))' }}
             >
               {canTour ? 'Show me around' : 'Get started'}
             </button>

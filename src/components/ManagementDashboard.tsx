@@ -137,7 +137,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
       <div className="flex flex-wrap gap-2">
         {links.map(({ p, l }) => {
           const cls = `inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-[13px] font-semibold border ${
-            dark ? 'border-[#d9d2f5] text-[#6d28d9] bg-white hover:bg-violet-50' : 'border-[#e7e3f3] text-[#6d28d9] hover:bg-violet-50'
+            dark ? 'border-[#d9d2f5] text-[color:var(--g-cta-text,#6d28d9)] bg-white hover:bg-violet-50' : 'border-[#e7e3f3] text-[color:var(--g-cta-text,#6d28d9)] hover:bg-violet-50'
           }`;
           const label = (
             <>
@@ -358,7 +358,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               key={c.key}
               type="button"
               onClick={() => setOpen(c.key)}
-              className={`text-left rounded-[18px] px-[18px] py-4 flex flex-col gap-1.5 border transition-shadow ${open === c.key ? 'bg-[#f5f0ff] border-[#6d28d9] shadow-[0_0_0_3px_#ddd2fb]' : 'bg-white border-[#e7e3f3] hover:shadow-md'}`}
+              className={`text-left rounded-[18px] px-[18px] py-4 flex flex-col gap-1.5 border transition-shadow ${open === c.key ? 'bg-[color:var(--g-cta-soft,#f5f0ff)] border-[color:var(--g-cta-text,#6d28d9)] shadow-[0_0_0_3px_var(--g-cta-ring,#ddd2fb)]' : 'bg-white border-[#e7e3f3] hover:shadow-md'}`}
             >
               <span className="text-xs font-semibold text-[#5b5570]">{c.label}</span>
               <span className="text-[26px] font-extrabold tracking-tight">{c.value}</span>
@@ -436,7 +436,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   </button>
                 ))}
                 {data.attendance_by_department.length > 6 && (
-                  <button type="button" onClick={() => setOpen('attendance')} className="self-start text-xs font-semibold text-[#6d28d9] hover:underline">
+                  <button type="button" onClick={() => setOpen('attendance')} className="self-start text-xs font-semibold text-[color:var(--g-cta-text,#6d28d9)] hover:underline">
                     View all {data.attendance_by_department.length} departments →
                   </button>
                 )}
@@ -646,7 +646,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
           >
             <div className="px-6 pt-5 pb-4 border-b border-[#ece9f5] flex gap-3 items-start">
               <div className="flex-1 flex flex-col gap-1">
-                <span className="text-[11px] font-bold tracking-[0.06em] text-[#6d28d9]">{drawer.kicker}</span>
+                <span className="text-[11px] font-bold tracking-[0.06em] text-[color:var(--g-cta-text,#6d28d9)]">{drawer.kicker}</span>
                 <h2 className="text-xl font-extrabold">{drawer.title}</h2>
                 <span className="text-[13px] text-[#5b5570]">{drawer.sub}</span>
               </div>
@@ -683,7 +683,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               <div className="px-6 pt-4">{pageButtons(DRAWER_PAGES[open], true)}</div>
             )}
             <div className="px-6 py-4 border-t border-[#ece9f5] flex gap-2.5">
-              <button type="button" onClick={exportDrawer} disabled={drawer.rows.length === 0} className="flex-1 h-11 rounded-xl bg-[#6d28d9] text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+              <button type="button" onClick={exportDrawer} disabled={drawer.rows.length === 0} className="flex-1 h-11 rounded-xl bg-[color:var(--g-cta-1,#6d28d9)] text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
                 <Download className="w-4 h-4" /> Export Excel
               </button>
             </div>

@@ -624,7 +624,7 @@ const BackgroundThemePicker: React.FC<{
   padded?: boolean;
 }> = ({ selected, onPick, accent, onPickAccent, padded }) => (
   <div className={`${padded ? 'px-5' : 'px-4'} py-3.5`}>
-    <div className="flex items-center gap-3">
+    <div className="flex items-start gap-3 flex-wrap">
       {BACKGROUND_THEMES.map((theme) => {
         const isSelected = theme.id === selected;
         return (

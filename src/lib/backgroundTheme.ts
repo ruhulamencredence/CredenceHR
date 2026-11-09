@@ -17,7 +17,7 @@
 // index.css's body::before (a position: fixed, window-sized layer) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'default' | 'apple-glow' | 'mono';
+export type BackgroundThemeId = 'orange' | 'default' | 'apple-glow' | 'mono';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -28,7 +28,7 @@ export interface BackgroundTheme {
   gradient: string;
   // A theme that restyles the whole app, not just the background: sets
   // <html data-ui="..."> and index.css does the rest (colours, sidebar).
-  ui?: 'mono';
+  ui?: 'mono' | 'orange';
 }
 
 // Color-stop percentages pushed further out again (light stop's own share
@@ -36,9 +36,27 @@ export interface BackgroundTheme {
 // deep tone only showing right at the corners/edges.
 export const BACKGROUND_THEMES: BackgroundTheme[] = [
   {
+    // Orange — the default: CredenceHR's brand orange (the app icon and
+    // launch screen) across the whole app, on a warm, almost white page.
+    // Whole-app theme — see html[data-ui="orange"] in index.css. Accounts
+    // that never picked a theme are on this one; a theme picked before
+    // (Apple Glow, Classic, Minimal Mono) stays.
+    id: 'orange',
+    label: 'Orange (Default)',
+    swatch: '#F47920',
+    gradient: [
+      'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)',
+      'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(255,190,140,0.5) 0%, rgba(255,190,140,0) 65%)',
+      'radial-gradient(ellipse 55% 45% at 100% 8%, rgba(255,214,190,0.65) 0%, rgba(255,214,190,0) 65%)',
+      'radial-gradient(ellipse 70% 45% at 85% 100%, rgba(255,170,110,0.35) 0%, rgba(255,170,110,0) 70%)',
+      'linear-gradient(180deg, #fffcfa 0%, #fff6f0 55%, #fff0e6 100%)'
+    ].join(', '),
+    ui: 'orange'
+  },
+  {
     // The app's original background (index.css's own --g-bg-gradient
     // default, before this picker existed) — still selectable as "Classic".
-    // Accounts that never picked one now start on Apple Glow.
+    // (Apple Glow, the violet theme, was the default before Orange.)
     id: 'default',
     label: 'Classic',
     swatch: '#DBEEFF',
@@ -49,7 +67,7 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     // violet light pooling at the corners and a bright white bloom in the
     // middle, so cards read cleanly on top.
     id: 'apple-glow',
-    label: 'Apple Glow (Default)',
+    label: 'Apple Glow (Violet)',
     swatch: '#EFE7FF',
     gradient: [
       'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)',
@@ -79,7 +97,7 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
 // other value there was picked, and is kept.
 const STORAGE_KEY = 'mpr_bg_theme_v2';
 const OLD_STORAGE_KEY = 'mpr_bg_theme';
-const DEFAULT_THEME: BackgroundThemeId = 'apple-glow';
+const DEFAULT_THEME: BackgroundThemeId = 'orange';
 // A saved theme that no longer exists (Violet, Deep Violet, Sunset and
 // Frosted Glass were removed) falls back to the default.
 const isTheme = (v: string | null): v is BackgroundThemeId => BACKGROUND_THEMES.some((t) => t.id === v);
@@ -184,10 +202,10 @@ export function getSavedHeaderGlow(): HeaderGlowId | null {
   return null;
 }
 // The colour the header shows right now: the one picked, else the theme's
-// own (Classic -> sky blue, Apple Glow -> violet; Minimal Mono's grey has no
+// own (Classic -> sky blue, Apple Glow -> violet, Orange -> warm orange; Minimal Mono's grey has no
 // match here).
 export function effectiveHeaderGlow(theme: BackgroundThemeId): HeaderGlowId | null {
-  return getSavedHeaderGlow() ?? (theme === 'default' ? 'sky' : theme === 'apple-glow' ? 'violet' : null);
+  return getSavedHeaderGlow() ?? (theme === 'default' ? 'sky' : theme === 'apple-glow' ? 'violet' : theme === 'orange' ? 'orange' : null);
 }
 export function applyHeaderGlow(id: HeaderGlowId | null, remember = false): void {
   if (id) document.documentElement.dataset.glow = id;
