@@ -366,10 +366,12 @@ export function registerGrievanceRoutes(app: Express, deps: GrievanceRouteDeps) 
   app.get("/api/grievances/people", authenticateToken, async (req: any, res: any) => {
     try {
       const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
+      // A Superadmin who is also an employee can be named / assigned like anyone else.
+      const empUserIds = new Set<number>(((await queryDB("SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []).map((e: any) => Number(e.user_id)));
       res.json(
         await attachPersonInfo(
           queryDB,
-          rows.filter((u: any) => u.role !== "superadmin" && Number(u.id) !== Number(req.user.id)).map((u: any) => ({ id: Number(u.id), name: u.name }))
+          rows.filter((u: any) => (u.role !== "superadmin" || empUserIds.has(Number(u.id))) && Number(u.id) !== Number(req.user.id)).map((u: any) => ({ id: Number(u.id), name: u.name }))
         )
       );
     } catch (err: any) {

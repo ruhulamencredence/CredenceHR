@@ -162,7 +162,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load exit requests');
       setRequests(Array.isArray(reqData) ? reqData : []);
       const usersData = await usersRes.json();
-      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin' || !!u.employee_code) : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load exit requests');
     } finally {

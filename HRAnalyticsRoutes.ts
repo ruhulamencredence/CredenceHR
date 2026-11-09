@@ -66,7 +66,10 @@ export function registerHRAnalyticsRoutes(app: Express, deps: HRAnalyticsRouteDe
           `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`
         ])
       ]);
-      const users = allUsers.filter((u: any) => u.role === "admin" || u.role === "user");
+      // Headcount: Admins / Users, and a Superadmin who is also an employee
+      // (has an Employee record) — the company's own Superadmin is staff too.
+      const empUserIds = new Set<number>(((await queryDB("SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []).map((e: any) => Number(e.user_id)));
+      const users = allUsers.filter((u: any) => u.role === "admin" || u.role === "user" || (u.role === "superadmin" && empUserIds.has(Number(u.id))));
 
       const headcountTotal = users.length;
 

@@ -426,9 +426,12 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
   app.get("/api/notices/recipients", authenticateToken, requireAdmin, requireModule("notices"), async (_req, res) => {
     try {
       const rows = await queryDB("SELECT * FROM users");
+      // Everyone a notice can be for: Users, Admins, and a Superadmin who is
+      // also an employee (has an Employee record). Was plain Users only.
+      const empUserIds = new Set<number>(((await queryDB("SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []).map((e: any) => Number(e.user_id)));
       res.json(
         rows
-          .filter((u: any) => u.role === "user")
+          .filter((u: any) => u.role === "user" || u.role === "admin" || (u.role === "superadmin" && empUserIds.has(Number(u.id))))
           .map((u: any) => ({ id: u.id, name: u.name, email: u.email || null, username: u.username || null }))
           .sort((a: any, b: any) => a.name.localeCompare(b.name))
       );

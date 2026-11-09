@@ -106,7 +106,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
               className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
             >
               <option value="">All Users</option>
-              {users.filter((u) => u.role === 'user').map((u) => (
+              {users.filter((u) => u.role !== 'superadmin' || !!u.employee_code).map((u) => (
                 <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>

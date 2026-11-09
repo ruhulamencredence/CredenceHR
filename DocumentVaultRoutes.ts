@@ -149,7 +149,8 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
         await attachPersonInfo(
           queryDB,
           users
-            .filter((u: any) => u.role !== "superadmin")
+            // A Superadmin who is also an employee has documents like anyone else.
+            .filter((u: any) => u.role !== "superadmin" || codeByUser.has(Number(u.id)))
             .map((u: any) => ({ id: Number(u.id), name: u.name, employee_code: codeByUser.get(Number(u.id)) || null }))
             .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
         )

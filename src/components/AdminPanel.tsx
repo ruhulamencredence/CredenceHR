@@ -4071,7 +4071,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">All Users</option>
-                  {people.filter((u) => u.role === 'user').map((u) => (
+                  {people.filter((u) => u.role !== 'superadmin' || !!u.employee_code).map((u) => (
                     <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
@@ -4308,7 +4308,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 >
                   <option value="">All Employees</option>
                   {people
-                    .filter((u) => u.role === 'user' || u.role === 'admin')
+                    .filter((u) => u.role !== 'superadmin' || !!u.employee_code)
                     .slice()
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((u) => (

@@ -123,7 +123,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
       try {
         const [, usersRes] = await Promise.all([fetchCycles(), fetch(apiUrl('/api/users'), { headers: authHeaders })]);
         const usersData = await usersRes.json();
-        if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+        if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin' || !!u.employee_code) : []);
       } catch (err: any) {
         setError(err.message || 'Failed to load Performance Management');
       } finally {

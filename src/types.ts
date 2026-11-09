@@ -1809,7 +1809,7 @@ export interface BillClaimApproval extends ApprovalStatusSummary {
 }
 
 // A recipient option for the Notice "Specific Users" target picker — from
-// GET /api/notices/recipients (every plain 'user' account only).
+// GET /api/notices/recipients (Users, Admins, and a Superadmin with an Employee record).
 export interface NoticeRecipient {
   id: number;
   name: string;

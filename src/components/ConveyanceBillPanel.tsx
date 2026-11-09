@@ -59,7 +59,8 @@ const blankItemDraft = () => ({
 export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users, currentUserId }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
   const canEmailReports = useCanEmailReports();
-  const plainUsers = users.filter((u) => u.role === 'user');
+  // Everyone who can have a claim: Users, Admins and a Superadmin who is also an employee.
+  const plainUsers = users.filter((u) => u.role !== 'superadmin' || !!u.employee_code);
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
   const [billItems, setBillItems] = useState<Record<number, ConveyanceBillItem[]>>({});

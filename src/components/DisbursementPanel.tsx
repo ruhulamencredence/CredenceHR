@@ -105,7 +105,8 @@ const suggestVoucherNo = (billId: number) => {
 export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, users }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
   const canEmailReports = useCanEmailReports();
-  const plainUsers = users.filter((u) => u.role === 'user');
+  // Everyone who can have a claim: Users, Admins and a Superadmin who is also an employee.
+  const plainUsers = users.filter((u) => u.role !== 'superadmin' || !!u.employee_code);
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
   // Claims approved by every Layer and now at a "Conveyance Disburser (Pay
