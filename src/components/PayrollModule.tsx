@@ -681,7 +681,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const outstandingCount = (summary?.unpaid.count || 0) + (summary?.processed.count || 0);
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} onBack={onBack} />

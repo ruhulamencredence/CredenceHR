@@ -770,7 +770,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   };
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <ModulePath path={['Admin Panel', 'HRM', 'Leave', 'Leave Manage']} onBack={onBack} />
