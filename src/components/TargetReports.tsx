@@ -24,6 +24,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface Counts {
   targets: number;
   counted: number;
@@ -47,7 +48,7 @@ interface Report {
   by_employee: (Counts & { user_id: number; name: string; employee_code: string | null; designation: string | null; department: string | null })[];
   targets: Target[];
   departments: string[];
-  people: { user_id: number; name: string; employee_code: string | null; department: string | null }[];
+  people: { user_id: number; name: string; employee_code: string | null; designation?: string | null; department: string | null }[];
   can_export: boolean;
   can_cancel: boolean;
 }
@@ -268,10 +269,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
             {(data?.people || [])
               .filter((p) => !department || String(p.department || '').toLowerCase() === department.toLowerCase())
               .map((p) => (
-                <option key={p.user_id} value={p.user_id}>
-                  {p.name}
-                  {p.employee_code ? ` (${p.employee_code})` : ''}
-                </option>
+                <option key={p.user_id} value={p.user_id}>{personLabel(p)}</option>
               ))}
           </SearchSelect>
         </div>

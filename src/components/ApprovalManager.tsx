@@ -12,6 +12,7 @@ import { ClaimChangesNotice, ReclaimTick, ReturnButton } from './ClaimReviewBits
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface ApprovalManagerProps {
   token: string;
   user: User;
@@ -669,9 +670,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                   {eligibleApprovers
                     .filter((u) => !chainDraft.includes(u.id))
                     .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role})
-                      </option>
+                      <option key={u.id} value={u.id}>{personLabel(u)}</option>
                     ))}
                 </SearchSelect>
                 <button

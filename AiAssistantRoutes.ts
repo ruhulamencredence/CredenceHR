@@ -133,7 +133,7 @@ export interface LeaveDraft {
   purpose: string;
   today: string;
   types: { value: string; label: string; balance: number | null; reliever_required: boolean }[];
-  relievers: { id: number; name: string }[];
+  relievers: { id: number; name: string; employee_code?: string | null; designation?: string | null; department?: string | null }[];
 }
 
 // The full table behind a list answer, for the PDF / Excel buttons under it
@@ -1169,7 +1169,13 @@ const TOOLS: Tool[] = [
         purpose: String(args?.purpose || "").slice(0, 300),
         today: c.today,
         types,
-        relievers: (Array.isArray(rels.body) ? rels.body : []).filter((r: any) => Number(r.id) !== c.userId).map((r: any) => ({ id: Number(r.id), name: String(r.name) }))
+        relievers: (Array.isArray(rels.body) ? rels.body : []).filter((r: any) => Number(r.id) !== c.userId).map((r: any) => ({
+          id: Number(r.id),
+          name: String(r.name),
+          employee_code: r.employee_code || null,
+          designation: r.designation || null,
+          department: r.department || null
+        }))
       };
       const missing = [!start && "তারিখ", !draft.purpose && "কারণ"].filter(Boolean);
       const text = `ছুটির আবেদনের খসড়া তৈরি করেছি${start ? ` — ${bnDate(start)}${end !== start ? ` থেকে ${bnDate(end)}` : ""}` : ""}। ` +

@@ -33,6 +33,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 
 import { SearchSelect } from './Combobox';
+import { personLabel, personDetails } from '../lib/personLabel';
 type SectionKey = 'general' | 'pepm' | 'hr' | 'attendance' | 'claims' | 'employees' | 'hrops' | 'payroll' | 'mail' | 'mis' | 'other';
 
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
@@ -1093,9 +1094,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                 {users
                   .filter((u) => !ids.includes(u.id) && u.role !== 'superadmin')
                   .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role === 'admin' ? 'Admin' : 'User'})
-                    </option>
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
               </SearchSelect>
             </div>
@@ -1267,7 +1266,7 @@ function UserPicker({
   }, [open]);
   const needle = q.trim().toLowerCase();
   const list = users
-    .filter((u) => !needle || [u.name, u.email, u.username].some((t) => String(t || '').toLowerCase().includes(needle)))
+    .filter((u) => !needle || [u.name, u.email, u.username, u.employee_code, u.designation, u.department].some((t) => String(t || '').toLowerCase().includes(needle)))
     .slice(0, 60);
   return (
     <div ref={ref} className="relative">
@@ -1286,7 +1285,7 @@ function UserPicker({
               type="text"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search name, email or login ID…"
+              placeholder="Search name, ID, designation, department or email…"
               className="w-full px-3 py-2 text-sm bg-white/80 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600"
             />
             <div className="liquid-glass-inset rounded-[18px] mt-2 max-h-72 overflow-y-auto">
@@ -1303,6 +1302,7 @@ function UserPicker({
                       <Box state={on ? 'on' : 'off'} />
                       <span className="min-w-0">
                         <span className="block text-sm font-semibold text-slate-800 truncate">{u.name}</span>
+                        {personDetails(u) && <span className="block text-[11px] text-slate-600 truncate">{personDetails(u)}</span>}
                         <span className="block text-[11px] text-slate-500 truncate">
                           {u.email || u.username} · {u.role === 'admin' ? 'Admin' : 'User'}
                         </span>

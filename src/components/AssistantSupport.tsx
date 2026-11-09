@@ -18,6 +18,7 @@ import { getChatSocket } from '../lib/chatSocket';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 export interface SupportSession {
   id: number;
   user_id: number;
@@ -373,7 +374,7 @@ export const SupportInbox: React.FC<{
               <SearchSelect value={transferTo} onChange={(e) => setTransferTo(e.target.value)} className="w-full rounded-xl bg-white/70 border border-white/80 px-2.5 py-1.5 text-xs text-slate-900 outline-none">
                 <option value="">— কার কাছে পাঠাবেন —</option>
                 {(agents || []).map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
+                  <option key={a.id} value={a.id}>{personLabel(a)}</option>
                 ))}
               </SearchSelect>
               {agents && agents.length === 0 && <p className="text-[11px] text-slate-500">আর কেউ live support-এ নেই। Module Access থেকে কাউকে "Assistant live support" দিন।</p>}

@@ -29,6 +29,7 @@
 import type { Express } from "express";
 import { logDocEvent } from "./ESignRoutes";
 
+import { attachPersonInfo } from "./personInfo";
 interface DocumentVaultRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
@@ -145,10 +146,14 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
         employees.filter((e: any) => e.user_id != null).map((e: any): [number, string] => [Number(e.user_id), e.employee_id])
       );
       res.json(
-        users
-          .filter((u: any) => u.role !== "superadmin")
-          .map((u: any) => ({ id: Number(u.id), name: u.name, employee_code: codeByUser.get(Number(u.id)) || null }))
-          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
+        await attachPersonInfo(
+          queryDB,
+          users
+            // A Superadmin who is also an employee has documents like anyone else.
+            .filter((u: any) => u.role !== "superadmin" || codeByUser.has(Number(u.id)))
+            .map((u: any) => ({ id: Number(u.id), name: u.name, employee_code: codeByUser.get(Number(u.id)) || null }))
+            .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
+        )
       );
     } catch (err: any) {
       res.status(500).json({ error: err.message });

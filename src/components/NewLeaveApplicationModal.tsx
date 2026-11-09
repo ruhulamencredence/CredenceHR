@@ -14,6 +14,7 @@ import { LeaveDurationCalendar } from './LeaveDurationCalendar';
 import { Spinner } from './Spinner';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface NewLeaveApplicationModalProps {
   token: string;
   onClose: () => void;
@@ -439,9 +440,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               >
                 <option value="">Select Reliever</option>
                 {relievers.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
+                  <option key={r.id} value={r.id}>{personLabel(r)}</option>
                 ))}
               </SearchSelect>
               <p className="text-[11px] text-slate-400 mt-1">

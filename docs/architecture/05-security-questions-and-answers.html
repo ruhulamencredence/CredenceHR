@@ -397,6 +397,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>মানুষ বাছাইয়ের তালিকায় (approver, reliever, driver ইত্যাদি) কী দেখায়, বাড়তি কিছু ফাঁস হয় কি?</td>
+<td>প্রতিটা employee / user picker-এ "নাম · Employee ID · পদবি · বিভাগ" দেখায় আর এগুলো দিয়ে খোঁজা যায় (<code>src/lib/personLabel.ts</code>; server-এ <code>personInfo.ts</code> <code>attachPersonInfo</code>)। এগুলো Employee Directory-র মতোই সাধারণ পরিচয়ের তথ্য — বেতন, ফোন, NID, ঠিকানা কিছুই যোগ হয় না, আর তালিকায় শুধু সেই মানুষেরাই থাকেন যাঁরা আগেও ওই route-এ ছিলেন (প্রতিটা route-এর আগের অনুমতি একই থাকে)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Recruitment-এ candidate-এর নাম / email / ফোন কে বদলাতে পারে?</td>
 <td>শুধু Recruitment-এর <strong>Edit candidate details</strong> অনুমতি যাঁর আছে (<code>edit_candidates</code>, আলাদা টিক, কাউকে আপনাআপনি দেওয়া হয় না; Superadmin সবসময়) — Edit বোতাম লুকানো আর API-তে 403 (টেস্ট করা)। খোলা onboarding-এর কপিও বদলায়, কিন্তু যোগ দেওয়া কর্মীর Employee রেকর্ড নয়।</td>
 <td>✅</td>

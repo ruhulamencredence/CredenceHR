@@ -43,6 +43,7 @@ import {
   RideRoute,
   RideBanner
 } from './rideTheme';
+import { personLabel } from '../lib/personLabel';
 
 interface Requisition {
   id: number;
@@ -114,6 +115,8 @@ interface AvailableVehicle {
 interface DirectoryEmployee {
   id: number;
   name: string;
+  employee_id?: string | null;
+  department?: string | null;
   designation: string | null;
   user_id: number | null;
 }
@@ -1254,8 +1257,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   <option value="">Select an employee…</option>
                   {directoryEmployees.map((e) => (
                     <option key={e.user_id} value={e.user_id as number}>
-                      {e.name}
-                      {e.designation ? ` — ${e.designation}` : ''}
+                      {personLabel({ ...e, employee_code: e.employee_id })}
                     </option>
                   ))}
                 </SearchSelect>
@@ -1348,9 +1350,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   >
                     <option value="">Pick a driver…</option>
                     {driverCandidates.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
+                      <option key={d.id} value={d.id}>{personLabel(d)}</option>
                     ))}
                   </SearchSelect>
                   <p className="text-[11px] text-slate-400 mt-1">Must be a login account — needed for the Live Ride Map's location tracking.</p>

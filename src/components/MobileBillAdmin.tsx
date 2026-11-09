@@ -54,6 +54,7 @@ import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
 
@@ -908,11 +909,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
             <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
               <option value="">— Nobody (spare SIM) —</option>
               {empOptions.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                  {e.employee_code ? ` (${e.employee_code})` : ''}
-                  {e.department ? ` — ${e.department}` : ''}
-                </option>
+                <option key={e.id} value={e.id}>{personLabel(e)}</option>
               ))}
             </SearchSelect>
             {emp && (

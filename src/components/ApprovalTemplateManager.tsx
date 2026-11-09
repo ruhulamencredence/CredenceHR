@@ -10,6 +10,7 @@ import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
 import { MultiSelectFilter } from './MultiSelectFilter';
+import { personLabel, personDetails } from '../lib/personLabel';
 interface ApprovalTemplateManagerProps {
   token: string;
   user: User;
@@ -958,6 +959,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                                 className="inline-flex items-center gap-1 text-[11px] font-medium pl-2.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-slate-700"
                               >
                                 {userMap.get(uid)?.name || `User #${uid}`}
+                                {userMap.get(uid)?.employee_code ? <span className="text-slate-400">· {userMap.get(uid)?.employee_code}</span> : null}
                                 <button type="button" onClick={() => removeApproverFromStep(idx, uid)} className="p-0.5 hover:text-rose-600">
                                   <X className="w-3 h-3" />
                                 </button>
@@ -977,14 +979,14 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               onBlur={() => setTimeout(() => setOpenApproverDropdown((cur) => (cur === idx ? null : cur)), 150)}
                               placeholder={
                                 step.approver_type === 'admin'
-                                  ? 'Search an Admin/Superadmin by name to add as approver…'
+                                  ? 'Search an Admin/Superadmin by name or ID to add as approver…'
                                   : step.approver_type === 'vehicle_maintainer'
-                                    ? 'Search a Vehicle Maintainer by name to add as approver…'
+                                    ? 'Search a Vehicle Maintainer by name or ID to add as approver…'
                                     : step.approver_type === 'asset_fulfiller'
-                                      ? 'Search who hands over the assets (store/inventory) by name…'
+                                      ? 'Search who hands over the assets (store/inventory) by name or ID…'
                                     : step.approver_type === 'conveyance_disburser'
-                                      ? 'Search who pays out conveyance (accounts/cash) by name…'
-                                    : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
+                                      ? 'Search who pays out conveyance (accounts/cash) by name or ID…'
+                                    : 'Search an employee by name or ID to add as approver — one member per row, add the whole team to represent a Department…'
                               }
                               className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                             />
@@ -992,7 +994,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               const q = (approverSearch[idx] || '').trim().toLowerCase();
                               const matches = pickerUsers
                                 .filter((u) => !step.approver_user_ids.includes(u.id))
-                                .filter((u) => !q || u.name.toLowerCase().includes(q))
+                                .filter((u) => !q || personLabel(u).toLowerCase().includes(q) || String(u.email || '').toLowerCase().includes(q))
                                 .slice(0, 30);
                               return (
                                 <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
@@ -1009,8 +1011,11 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                                         onClick={() => addApproverToStep(idx, u.id)}
                                         className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 hover:bg-blue-50 text-slate-700"
                                       >
-                                        <span className="font-medium">{u.name}</span>
-                                        <span className="text-slate-400">{u.role}</span>
+                                        <span className="min-w-0">
+                                          <span className="font-medium">{u.name}</span>
+                                          {personDetails(u) && <span className="block text-[10px] text-slate-500 truncate">{personDetails(u)}</span>}
+                                        </span>
+                                        <span className="text-slate-400 shrink-0">{u.role}</span>
                                       </button>
                                     ))
                                   )}

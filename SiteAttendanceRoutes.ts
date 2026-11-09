@@ -40,6 +40,7 @@ import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId, type HolidayA
 import { loadRoster } from "./RosterRoutes";
 import { runsBackgroundJobs } from "./jobRunner";
 
+import { attachPersonInfo } from "./personInfo";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 interface SiteAttendanceRouteDeps {
@@ -713,7 +714,10 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
           .filter((e) => Number(e.is_active ?? 1) !== 0)
           .map((e) => ({ ...empLite(e), team_id: teamOf.get(Number(e.id)) || null, team_name: teamName.get(teamOf.get(Number(e.id)) || 0) || null }))
           .sort((a, b) => String(a.name).localeCompare(String(b.name))),
-        users: w.users.map((u) => ({ id: Number(u.id), name: u.name, email: u.email || u.username || null })).sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        users: await attachPersonInfo(
+          queryDB,
+          w.users.map((u) => ({ id: Number(u.id), name: u.name, email: u.email || u.username || null })).sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        ),
         projects: w.projects.map((p) => ({ id: Number(p.id), name: p.project_name, has_location: numOrNull(p.location_lat) !== null })).sort((a, b) => String(a.name).localeCompare(String(b.name)))
       });
     } catch (err) {

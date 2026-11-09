@@ -21,6 +21,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface EmployeeLite {
   id: number;
   employee_code: string | null;
@@ -741,11 +742,7 @@ const AdjustmentForm: React.FC<{
         <SearchSelect className={inputCls} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
           <option value="">— choose —</option>
           {employees.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.name}
-              {e.employee_code ? ` (${e.employee_code})` : ''}
-              {e.department ? ` — ${e.department}` : ''}
-            </option>
+            <option key={e.id} value={e.id}>{personLabel(e)}</option>
           ))}
         </SearchSelect>
       </div>

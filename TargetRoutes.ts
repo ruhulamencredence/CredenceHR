@@ -853,7 +853,7 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
         }))
         .sort((a, b) => String(a.name).localeCompare(String(b.name)));
       const depts = await rows("SELECT name FROM departments WHERE is_active = 1 ORDER BY name");
-      const people = await rows("SELECT user_id, name, employee_id, department FROM all_employees WHERE user_id IS NOT NULL AND is_active = 1 ORDER BY name");
+      const people = await rows("SELECT user_id, name, employee_id, designation, department FROM all_employees WHERE user_id IS NOT NULL AND is_active = 1 ORDER BY name");
       res.json({
         year,
         month,
@@ -863,7 +863,7 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
         by_employee: byEmp,
         targets: list.map(summary),
         departments: depts.map((d) => d.name),
-        people: people.map((p) => ({ user_id: Number(p.user_id), name: p.name, employee_code: p.employee_id || null, department: p.department || null })),
+        people: people.map((p) => ({ user_id: Number(p.user_id), name: p.name, employee_code: p.employee_id || null, designation: p.designation || null, department: p.department || null })),
         can_export: isSuper(req.user) || (await hasModuleLayer(req.user, "target_reports", "target_export")),
         can_cancel: isSuper(req.user) || (await canCancelAny(req.user))
       });

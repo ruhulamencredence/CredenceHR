@@ -45,6 +45,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface SalaryStructureSetupPanelProps {
   token: string;
 }
@@ -918,9 +919,7 @@ const AssignGradeModal: React.FC<{
                 >
                   <option value="">{loadingEmployees ? 'Loading employees…' : 'Select an employee'}</option>
                   {employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}{e.employee_code ? ` (${e.employee_code})` : ''}{e.department ? ` — ${e.department}` : ''}
-                    </option>
+                    <option key={e.id} value={e.id}>{personLabel(e)}</option>
                   ))}
                 </SearchSelect>
               </div>

@@ -10,6 +10,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface DocumentVaultPanelProps {
   token: string;
 }
@@ -212,10 +213,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
             <SearchSelect value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
               <option value="">Select…</option>
               {activePeople(users, uploadUserId).map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                  {u.employee_code ? ` (${u.employee_code})` : ''}
-                </option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>
           </div>

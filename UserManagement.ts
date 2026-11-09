@@ -438,10 +438,19 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       // Whether the linked Employee record is active (no record: counts as active),
       // so pickers can leave out people who have left.
-      const empRows: any[] = (await queryDB("SELECT user_id, is_active, department FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const empRows: any[] = (await queryDB("SELECT user_id, is_active, employee_id, designation, department, department_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const deptRows: any[] = (await queryDB("SELECT id, name FROM departments").catch(() => [])) || [];
+      const deptName = new Map(deptRows.map((d: any) => [Number(d.id), String(d.name)]));
       const inactiveUsers = new Set(empRows.filter((e: any) => Number(e.is_active) === 0).map((e: any) => Number(e.user_id)));
       const departmentByUser = new Map<number, string>();
-      for (const e of empRows) if (e.department && !departmentByUser.has(Number(e.user_id))) departmentByUser.set(Number(e.user_id), String(e.department));
+      // Who's who for every picker: "Name · Employee ID · Designation · Department".
+      const empByUser = new Map<number, { employee_code: string | null; designation: string | null }>();
+      for (const e of empRows) {
+        const uid = Number(e.user_id);
+        const dept = (e.department_id && deptName.get(Number(e.department_id))) || e.department;
+        if (dept && !departmentByUser.has(uid)) departmentByUser.set(uid, String(dept));
+        if (!empByUser.has(uid)) empByUser.set(uid, { employee_code: e.employee_id || null, designation: e.designation || null });
+      }
       // ?slim=1 : who's who only, for pickers and filters (no access switches).
       if (String(req.query.slim || "") === "1") {
         return res.json(
@@ -452,7 +461,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
             username: u.username,
             role: u.role,
             is_blocked: u.is_blocked,
-            employee_active: !inactiveUsers.has(Number(u.id))
+            employee_active: !inactiveUsers.has(Number(u.id)),
+            employee_code: empByUser.get(Number(u.id))?.employee_code || null,
+            designation: empByUser.get(Number(u.id))?.designation || null,
+            department: departmentByUser.get(Number(u.id)) || null
           }))
         );
       }
@@ -461,6 +473,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         employee_active: !inactiveUsers.has(Number(u.id)),
         // From the linked Employee record (Users page department filter).
         department: departmentByUser.get(Number(u.id)) || null,
+        employee_code: empByUser.get(Number(u.id))?.employee_code || null,
+        designation: empByUser.get(Number(u.id))?.designation || null,
         last_login_lat: canSeeLocation ? u.last_login_lat : undefined,
         last_login_lng: canSeeLocation ? u.last_login_lng : undefined,
         last_login_at: canSeeLocation ? u.last_login_at : undefined,

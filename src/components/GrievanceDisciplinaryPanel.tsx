@@ -7,6 +7,7 @@ import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../li
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface GrievanceDisciplinaryPanelProps {
   token: string;
   // Inside HR Operations' own tab: no second card / page title around it.
@@ -361,9 +362,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                   >
                     <option value="">Assign investigator…</option>
                     {activePeople(users, g.assigned_to).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
+                      <option key={u.id} value={u.id}>{personLabel(u)}</option>
                     ))}
                   </SearchSelect>
                 )}
@@ -418,9 +417,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
               <SearchSelect value={newActionUserId} onChange={(e) => setNewActionUserId(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                 <option value="">Select employee…</option>
                 {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
+                  <option key={u.id} value={u.id}>{personLabel(u)}</option>
                 ))}
               </SearchSelect>
               <select value={newActionType} onChange={(e) => setNewActionType(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">

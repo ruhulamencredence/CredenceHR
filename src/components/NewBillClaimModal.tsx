@@ -9,7 +9,7 @@ import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, S
 import { ClaimRecord, MyBillClaimPolicy, BillClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
-import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
+import { useKeyboardGap, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { readDraft, saveDraft, clearDraft } from '../lib/formDraft';
 
@@ -125,7 +125,10 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   const [selectedRefs, setSelectedRefs] = useState<Record<number, string>>({});
 
   useBackButtonClose(true, submitting ? () => {} : () => closeRef.current());
-  const keyboardInset = useKeyboardInset();
+  // What the on-screen keyboard covers that the page itself doesn't already
+  // avoid (the app's WebView shrinks on some phones and not on others; a
+  // phone browser shrinks its visual viewport) — the popup sits just above it.
+  const keyboard = useKeyboardGap();
 
   useEffect(() => {
     let cancelled = false;
@@ -440,8 +443,8 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-        paddingBottom: keyboardInset
-          ? `${keyboardInset + 8}px`
+        paddingBottom: keyboard.gap
+          ? `${keyboard.gap + 8}px`
           : 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
@@ -621,6 +624,8 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
                         <input
                           type="number"
+                          inputMode="decimal"
+                          autoComplete="off"
                           min="0.01"
                           step="0.01"
                           value={refsDriveBill(b) ? String(refsTotal || '') : b.amount}

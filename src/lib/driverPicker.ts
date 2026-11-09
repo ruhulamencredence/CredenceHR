@@ -1,4 +1,5 @@
 // Ride assignment -> the driver picker (GET /api/vehicles/driver-picker).
+import { personLabel } from './personLabel';
 // With Vehicle Management -> Inventory -> Drivers in use the list holds only
 // its active drivers, with what each is doing now; until then every account
 // (registered: false), as before.
@@ -24,7 +25,7 @@ const NOW_LABEL: Record<string, string> = { free: 'Available', assigned: 'Has a 
 
 // "Name · ID · Designation · Department — Available" (searchable by all of it).
 export function driverOptionLabel(d: DriverOption, vehicleId?: string | number): string {
-  if (!d.registered) return d.name;
+  if (!d.registered) return personLabel(d);
   const who = [d.name, d.employee_code, d.designation, d.department].filter(Boolean).join(' · ');
   const state =
     d.license_state === 'expired'

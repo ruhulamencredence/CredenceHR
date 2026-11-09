@@ -864,6 +864,10 @@ export interface User {
   employee_active?: boolean;
   // Department of the linked Employee record (Users page filter).
   department?: string | null;
+  // Employee ID and designation of the linked Employee record (every picker
+  // shows "Name · Employee ID · Designation · Department" — personLabel()).
+  employee_code?: string | null;
+  designation?: string | null;
   blocked_reason?: string | null;
   blocked_at?: string | null;
   // Admin Dashboard in the mother company shows every company of the group.
@@ -949,6 +953,10 @@ export interface LeaveBalance {
   // or that row has no Department set. Lets Leave Management's "Set Balance in
   // Bulk" panel group/filter accounts by Department without its own column.
   department?: string | null;
+  employee_code?: string | null;
+  designation?: string | null;
+  // Why Casual + Sick read 0 (Leave Manage list only), null otherwise.
+  zero_reason?: string | null;
   casual_leave: number;
   sick_leave: number;
   leave_without_pay: number;
@@ -1801,7 +1809,7 @@ export interface BillClaimApproval extends ApprovalStatusSummary {
 }
 
 // A recipient option for the Notice "Specific Users" target picker — from
-// GET /api/notices/recipients (every plain 'user' account only).
+// GET /api/notices/recipients (Users, Admins, and a Superadmin with an Employee record).
 export interface NoticeRecipient {
   id: number;
   name: string;
@@ -2169,6 +2177,7 @@ export interface ChatDirectoryUser {
   // From the employee record (blank for accounts with none).
   department?: string | null;
   designation?: string | null;
+  employee_code?: string | null;
 }
 
 export interface ChatRoom {
