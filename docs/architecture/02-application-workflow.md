@@ -722,6 +722,16 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 আগের "Movement Claim" এখন সব জায়গায় **Check In/Out** — ফোনের নিচের menu-র বোতাম (আগে "Claim"), পাতার শিরোনাম (আগে "My Claims"), তালিকা খালি থাকার লেখা, popup-এর শিরোনাম, server-এর ভুলের বার্তা ("You are already checked in — check out first…") আর Assistant-এর উত্তর। অনুমতি, API (`/api/claims/*`) আর ডাটাবেস আগের মতোই; শুধু দেখানো নাম বদলেছে। Bill Claim আলাদা জিনিস, তার নাম বদলায়নি।
 
+## Check In/Out: পুরো পর্দার map (Book a Ride-এর মতো)
+
+ফোনে Check In/Out পাতার **Add Check In/Out** বোতাম (আর তালিকায় খোলা claim-এর **Check Out**), আর website-এ Check In / Check Out বোতাম এখন পুরো পর্দার map খোলে (`src/components/CheckInOutMap.tsx`; ফোনে পুরো পর্দা, বড় পর্দায় বড় card — বাঁয়ে map, ডানে panel)। আগের ছোট form-এর popup আর ছোট map-এর popup (`ClaimMapConfirm.tsx`) নেই।
+
+- নিজেই বোঝে কোনটা: খোলা claim নেই → **Check In**, আছে → **Check Out** (`GET /api/claims/status`)।
+- map-এ নীল ফোঁটা = আপনি এখন; নিচের sheet-এ ঠিকানা (`/api/vehicles/places/reverse`), coordinate, "My location" বোতাম (GPS আবার পড়ে)।
+- Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো), কাছের project site-গুলো এক চাপে Purpose-এ বসানোর chip (`/api/vehicles/places/nearby`, ৫ km-এর মধ্যে), Remarks, **Check In here**।
+- Check Out: Check In-এর জায়গার pin, সেখান থেকে আপনার কাছে ড্যাশ লাইন আর কত দূর এসেছেন, Remarks, **Check Out here**।
+- একই API (`POST /api/claims/check-in`, `/api/claims/:id/check-out`), একই অনুমতি (`requireMovementClaimAccess`, Module Access → Check In/Out) আর একই approval। শেষে ফোনে উপরে ছোট বার্তা ("Checked in — have a safe trip!"), তালিকা নতুন হয়।
+
 ## Bill Claim: আগের "Conveyance Bill Claim" — নাম, API আর ডাটাবেস
 
 "Conveyance Bill Claim" এখন সব জায়গায় **Bill Claim** — Dashboard-এর tile, পাতার শিরোনাম ("My Bill Claims"), "New Bill Claim" popup, পাশের menu, Module Access, Approval-এর ধরন, alert-এর লেখা, server-এর বার্তা, আর ভেতরের নামও:
