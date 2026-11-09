@@ -38,6 +38,7 @@ import { VehicleDriversPanel } from './VehicleDriversPanel';
 import { confirmDialog } from '../lib/confirmDialog';
 import { DurationPicker } from './DurationPicker';
 import { formatDuration } from '../lib/rideDuration';
+import { personLabel } from '../lib/personLabel';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -855,9 +856,7 @@ useLiveRefresh(() => loadRequisitions());
                 >
                   <option value="">Select an employee…</option>
                   {people.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
               </div>
@@ -872,9 +871,7 @@ useLiveRefresh(() => loadRequisitions());
                 >
                   <option value="">Use their own Supervisor (default)</option>
                   {people.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
               </div>

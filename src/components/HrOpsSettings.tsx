@@ -16,6 +16,7 @@ import { useHrApi, Notice, Badge, inputCls, labelCls, btnPrimary, btnGhost, type
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 type Section = 'company' | 'approvals' | 'templates' | 'onboarding' | 'increments';
 
 // ---------------- Company ----------------
@@ -53,9 +54,7 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
             {meta.users
               .filter((u) => u.role !== 'superadmin' || String(u.id) === s.signatory_user_id)
               .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
           </SearchSelect>
           <p className="text-[11px] text-slate-500 mt-1">
@@ -294,9 +293,7 @@ const ApprovalChains: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, m
                   >
                     <option value="">+ Add approver</option>
                     {meta.users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role})
-                      </option>
+                      <option key={u.id} value={u.id}>{personLabel(u)}</option>
                     ))}
                   </SearchSelect>
                 </div>

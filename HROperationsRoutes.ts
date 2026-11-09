@@ -52,6 +52,7 @@ import { blockEmployeeLogin } from "./AccountBlock";
 import { isMailerConfigured, sendMail } from "./mailer";
 import { requestApprovalReconcile } from "./approvalReconcile";
 
+import { attachPersonInfo } from "./personInfo";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 interface HROperationsRouteDeps {
@@ -1534,7 +1535,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
         action_types: HR_ACTION_TYPES,
         letter_types: LETTER_TYPES,
         placeholders: PLACEHOLDER_HELP,
-        users: users.map((u: any) => ({ id: Number(u.id), name: u.name, role: u.role })),
+        users: await attachPersonInfo(queryDB, users.map((u: any) => ({ id: Number(u.id), name: u.name, role: u.role }))),
         departments: departments.filter((d: any) => Number(d.is_active ?? 1) !== 0).map((d: any) => ({ id: Number(d.id), name: d.name })),
         branches: branches.map((b: any) => ({ id: Number(b.id), name: b.branch_name })),
         projects: projects.map((p: any) => ({ id: Number(p.id), name: p.project_name }))

@@ -4,6 +4,7 @@ import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface PerformanceManagementPanelProps {
   token: string;
 }
@@ -122,7 +123,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
       try {
         const [, usersRes] = await Promise.all([fetchCycles(), fetch(apiUrl('/api/users'), { headers: authHeaders })]);
         const usersData = await usersRes.json();
-        if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+        if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin' || !!u.employee_code) : []);
       } catch (err: any) {
         setError(err.message || 'Failed to load Performance Management');
       } finally {
@@ -394,9 +395,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
                       <SearchSelect value={newGoalUserId} onChange={(e) => setNewGoalUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                         <option value="">Select employee…</option>
                         {users.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name}
-                          </option>
+                          <option key={u.id} value={u.id}>{personLabel(u)}</option>
                         ))}
                       </SearchSelect>
                       <input
@@ -463,9 +462,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
                       <SearchSelect value={newReviewUserId} onChange={(e) => setNewReviewUserId(e.target.value)} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg">
                         <option value="">Select employee…</option>
                         {users.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name}
-                          </option>
+                          <option key={u.id} value={u.id}>{personLabel(u)}</option>
                         ))}
                       </SearchSelect>
                       <button type="button" onClick={addReview} className="w-full py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg">

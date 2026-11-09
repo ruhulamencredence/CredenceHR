@@ -27,6 +27,7 @@ import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
+import { personLabel } from '../lib/personLabel';
 interface TeamMember {
   employee_id: number;
   name: string;
@@ -514,10 +515,7 @@ const TeamForm: React.FC<{ token: string; data: TeamsData; team: Team | null; on
             <SearchSelect className={inputCls} value={f.supervisor_user_id} onChange={(e) => set('supervisor_user_id', e.target.value)}>
               <option value="">— pick an account —</option>
               {data.users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                  {u.email ? ` — ${u.email}` : ''}
-                </option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>
           </div>
@@ -526,9 +524,7 @@ const TeamForm: React.FC<{ token: string; data: TeamsData; team: Team | null; on
             <SearchSelect className={inputCls} value={f.backup_user_id} onChange={(e) => set('backup_user_id', e.target.value)}>
               <option value="">— none —</option>
               {data.users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>
           </div>

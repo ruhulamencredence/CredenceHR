@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 
 // The on-screen keyboard's height in the mobile app (0 on the web and while
@@ -32,6 +32,38 @@ export function useKeyboardInset(): number {
     };
   }, []);
   return height;
+}
+
+// How much of the screen's bottom the on-screen keyboard covers that the page
+// (a popup or full-screen view) doesn't already avoid. The app: the keyboard's height,
+// minus whatever the WebView shrank by itself (some Android WebViews shrink,
+// some don't). A phone browser: what the visual viewport lost at the bottom.
+export function useKeyboardGap(): { gap: number; open: boolean } {
+  const kb = useKeyboardInset();
+  const [, redraw] = useState(0);
+  const base = useRef(typeof window !== 'undefined' ? window.innerHeight : 0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const on = () => redraw((n) => n + 1);
+    window.addEventListener('resize', on);
+    vv?.addEventListener('resize', on);
+    vv?.addEventListener('scroll', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      vv?.removeEventListener('resize', on);
+      vv?.removeEventListener('scroll', on);
+    };
+  }, []);
+  if (Capacitor.isNativePlatform()) {
+    if (!kb) {
+      base.current = window.innerHeight;
+      return { gap: 0, open: false };
+    }
+    return { gap: Math.max(0, kb - Math.max(0, base.current - window.innerHeight)), open: kb > 80 };
+  }
+  const vv = window.visualViewport;
+  const gap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+  return { gap, open: gap > 80 };
 }
 
 // Brings a just-focused field into the middle of its scroll area once the

@@ -2705,7 +2705,7 @@ const EmployeeSearchSelect: React.FC<{
   const q = query.trim().toLowerCase();
   const filtered = employees
     .filter((emp) => emp.id !== excludeId)
-    .filter((emp) => !q || emp.name.toLowerCase().includes(q) || (emp.employee_id || '').toLowerCase().includes(q));
+    .filter((emp) => !q || [emp.name, emp.employee_id, (emp as any).designation, (emp as any).department].some((v) => String(v || '').toLowerCase().includes(q)));
 
   return (
     <div className="relative" ref={wrapRef}>
@@ -2757,7 +2757,9 @@ const EmployeeSearchSelect: React.FC<{
                   }`}
                 >
                   {emp.name}
-                  {emp.employee_id ? <span className="text-slate-400 font-normal"> ({emp.employee_id})</span> : null}
+                  {[emp.employee_id, (emp as any).designation, (emp as any).department].some(Boolean) ? (
+                    <span className="text-slate-400 font-normal"> · {[emp.employee_id, (emp as any).designation, (emp as any).department].filter(Boolean).join(' · ')}</span>
+                  ) : null}
                 </button>
               ))
             )}

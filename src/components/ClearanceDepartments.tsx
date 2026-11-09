@@ -19,6 +19,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface Dept {
   id: number | null;
   department: string;
@@ -131,9 +132,7 @@ export const ClearanceDepartments: React.FC<{ token: string; users: { id: number
             <SearchSelect className={input} value={draft.approver_user_id} onChange={(e) => setDraft({ ...draft, approver_user_id: e.target.value })}>
               <option value="">Unassigned</option>
               {activePeople(users, draft.approver_user_id).map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
+                <option key={u.id} value={u.id}>{personLabel(u)}</option>
               ))}
             </SearchSelect>
           </div>
@@ -181,9 +180,7 @@ export const ClearanceDepartments: React.FC<{ token: string; users: { id: number
                 >
                   <option value="">Approver: unassigned</option>
                   {activePeople(users, d.approver_user_id).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
                 {canSetup && d.id !== null && (

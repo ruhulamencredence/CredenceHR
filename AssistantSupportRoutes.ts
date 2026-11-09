@@ -15,6 +15,7 @@ import type { Server as SocketIOServer } from "socket.io";
 import { activeCompanyId, activeGroupId } from "./companyContext";
 import { createAlert } from "./Alerts";
 
+import { attachPersonInfo } from "./personInfo";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 interface Deps {
@@ -304,7 +305,7 @@ export function registerAssistantSupportRoutes(app: Express, deps: Deps) {
   });
 
   app.get("/api/assistant/support/agents", authenticateToken, requireAgent, async (req: any, res: any) => {
-    res.json((await agents()).filter((a) => a.id !== req.agent.id));
+    res.json(await attachPersonInfo(queryDB, (await agents()).filter((a) => a.id !== req.agent.id)));
   });
 
   app.post("/api/assistant/support/sessions/:id/accept", authenticateToken, requireAgent, async (req: any, res: any) => {

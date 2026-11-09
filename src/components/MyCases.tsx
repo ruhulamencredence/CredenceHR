@@ -21,6 +21,7 @@ import { SelfCard, type CardTone } from './SelfCard';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface Feedback {
   id: number;
   user_name: string | null;
@@ -504,9 +505,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
               >
                 <option value="">— Nobody in particular —</option>
                 {people.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
+                  <option key={p.id} value={p.id}>{personLabel(p)}</option>
                 ))}
               </SearchSelect>
               <span className="text-[10px] text-slate-400">They'll be notified and asked for their feedback; they won't see who raised it.</span>

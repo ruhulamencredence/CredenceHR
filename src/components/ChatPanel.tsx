@@ -2215,7 +2215,7 @@ const MemberPickerModal: React.FC<{
   const filtered = directory.filter(
     (d) =>
       (!depts.length || depts.includes((d.department || '').trim())) &&
-      `${d.name} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
+      `${d.name} ${d.employee_code || ''} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
   );
   const allShownOn = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
   const toggleAllShown = () =>
@@ -2252,7 +2252,7 @@ const MemberPickerModal: React.FC<{
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or department..."
+              placeholder="Search name, ID, designation or department..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
@@ -2288,8 +2288,8 @@ const MemberPickerModal: React.FC<{
                 <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
                 <span className="flex-1 min-w-0 text-left">
                   <span className="block text-sm text-slate-900 truncate">{d.name}</span>
-                  {(d.designation || d.department) && (
-                    <span className="block text-[11px] text-slate-500 truncate">{[d.designation, d.department].filter(Boolean).join(' · ')}</span>
+                  {(d.employee_code || d.designation || d.department) && (
+                    <span className="block text-[11px] text-slate-500 truncate">{[d.employee_code, d.designation, d.department].filter(Boolean).join(' · ')}</span>
                   )}
                 </span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>

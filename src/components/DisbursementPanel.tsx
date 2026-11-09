@@ -15,6 +15,7 @@ import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 // ---- Voucher sections ----
 // The Payment Voucher groups a Bill's lines by category, each with the
 // columns it needs: travel categories (and Check In/Out / manual items,
@@ -104,7 +105,8 @@ const suggestVoucherNo = (billId: number) => {
 export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, users }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
   const canEmailReports = useCanEmailReports();
-  const plainUsers = users.filter((u) => u.role === 'user');
+  // Everyone who can have a claim: Users, Admins and a Superadmin who is also an employee.
+  const plainUsers = users.filter((u) => u.role !== 'superadmin' || !!u.employee_code);
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
   // Claims approved by every Layer and now at a "Conveyance Disburser (Pay
@@ -495,7 +497,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 >
                   <option value="">All Users</option>
                   {plainUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
               </div>

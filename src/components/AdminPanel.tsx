@@ -35,6 +35,7 @@ import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 
 // Each module's page is downloaded only when it is opened, not all at once
 // with the Admin Panel: an account with many modules (a Superadmin) used to
@@ -4070,8 +4071,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">All Users</option>
-                  {people.filter((u) => u.role === 'user').map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
+                  {people.filter((u) => u.role !== 'superadmin' || !!u.employee_code).map((u) => (
+                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
                   ))}
                 </SearchSelect>
               </div>
@@ -4307,11 +4308,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 >
                   <option value="">All Employees</option>
                   {people
-                    .filter((u) => u.role === 'user' || u.role === 'admin')
+                    .filter((u) => u.role !== 'superadmin' || !!u.employee_code)
                     .slice()
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((u) => (
-                      <option key={u.id} value={u.id}>{u.name}</option>
+                      <option key={u.id} value={u.id}>{personLabel(u)}</option>
                     ))}
                 </SearchSelect>
               </div>
@@ -6960,7 +6961,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   >
                     <option value="">— None —</option>
                     {activePeople(people, deptForm.supervisor_user_id).map((u) => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                      <option key={u.id} value={u.id}>{personLabel(u)}</option>
                     ))}
                   </SearchSelect>
                 </div>

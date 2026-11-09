@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Rational;
+import android.view.View;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebResourceError;
@@ -138,6 +139,14 @@ public class MainActivity extends BridgeActivity {
 
         webView = this.bridge.getWebView();
         appServerUrl = this.bridge.getServerUrl();
+
+        // Android's Autofill (saved passwords / "save data" suggestions)
+        // popped up on every letter typed in the sign-in fields and closed
+        // the keyboard each time. The app has its own fingerprint sign-in,
+        // so autofill is switched off for the whole WebView.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
 
         mediaPermissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(),

@@ -13,6 +13,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
 import { SearchSelect } from './Combobox';
+import { personLabel } from '../lib/personLabel';
 interface ExitOffboardingPanelProps {
   token: string;
 }
@@ -161,7 +162,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load exit requests');
       setRequests(Array.isArray(reqData) ? reqData : []);
       const usersData = await usersRes.json();
-      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin' || !!u.employee_code) : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load exit requests');
     } finally {
@@ -388,9 +389,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
               >
                 <option value="">Select…</option>
                 {activePeople(users, newUserId).map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
+                  <option key={u.id} value={u.id}>{personLabel(u)}</option>
                 ))}
               </SearchSelect>
             </div>

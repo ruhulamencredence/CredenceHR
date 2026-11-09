@@ -47,6 +47,7 @@ import type { AlertType } from "./Alerts";
 import { runsBackgroundJobs } from "./jobRunner";
 import { widenEnum } from "./enumWiden";
 
+import { attachPersonInfo } from "./personInfo";
 interface VehicleManagementRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
@@ -1125,7 +1126,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       }
       const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
       const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
-      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false })));
+      res.json(await attachPersonInfo(queryDB, visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false }))));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1137,7 +1138,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       // Same "plain account never sees the Superadmin account" rule GET
       // /api/employees/unlinked-users already applies.
       const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
-      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name })));
+      res.json(await attachPersonInfo(queryDB, visible.map((u: any) => ({ id: Number(u.id), name: u.name }))));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

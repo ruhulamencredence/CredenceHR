@@ -557,7 +557,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows = await queryDB(
         `SELECT u.id, u.name, u.email, u.username, u.role,
                 (SELECT e.department FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS department,
-                (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation
+                (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation,
+                (SELECT e.employee_id FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS employee_code
          FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} ORDER BY u.name ASC`,
         [req.user.id]
       );
