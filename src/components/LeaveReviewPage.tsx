@@ -157,8 +157,8 @@ useLiveRefresh(() => load(true));
     {isPhone ? (
       <div className="flex flex-col gap-3.5 px-1 pt-2 pb-8">
         {!balanceLoading && leaveTypes.length === 0 && (
-          <button type="button" onClick={() => setShowNewModal(true)} className="liquid-glass-button w-full min-h-[46px] rounded-full text-sm font-extrabold flex items-center justify-center gap-1.5">
-            <Plus className="w-4 h-4" /> Submit leave
+          <button type="button" onClick={() => setShowNewModal(true)} className="self-center inline-flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform" style={{ background: 'var(--g-accent, #7f00ff)', boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)' }}>
+            <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Apply Leave
           </button>
         )}
         {balanceLoading ? null : leaveTypes.length > 0 && (
@@ -196,7 +196,7 @@ useLiveRefresh(() => load(true));
         ) : phoneApps.filter((a) => a.status === tab).length === 0 ? (
           <div className="rounded-[24px] bg-white/80 p-6 text-center text-[13px] text-zinc-500">
             {tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved leave here.' : 'No rejected leave.'}
-            {tab === 'pending' && !typeFilter && <p className="mt-1 text-xs text-zinc-400">Ready for some time off? Tap "Submit leave".</p>}
+            {tab === 'pending' && !typeFilter && <p className="mt-1 text-xs text-zinc-400">Ready for some time off? Tap "Apply Leave".</p>}
           </div>
         ) : (
           phoneApps
