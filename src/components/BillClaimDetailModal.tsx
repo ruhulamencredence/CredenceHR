@@ -72,7 +72,14 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
   // AttendanceMapConfirm/CheckInOutMap).
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto">
+      {/* Bottom padding = the phone's own navigation bar (Android buttons /
+          iPhone home bar), so the last line or the Edit button is never
+          drawn under it. On the footer when there is one (it sticks to the
+          bottom), on the sheet otherwise. */}
+      <div
+        className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] overflow-y-auto"
+        style={claim.editable && onEdit ? undefined : { paddingBottom: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))' }}
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
           <div>
             <h3 className="text-sm font-bold text-slate-900">{claim.category} Claim</h3>
@@ -273,7 +280,7 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
           )}
         </div>
         {claim.editable && onEdit && (
-          <div className="sticky bottom-0 bg-white border-t border-slate-100 px-5 py-3">
+          <div className="sticky bottom-0 bg-white border-t border-slate-100 px-5 pt-3" style={{ paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.75rem)' }}>
             <button
               type="button"
               onClick={onEdit}

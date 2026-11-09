@@ -653,7 +653,75 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                         {policy?.values.one_claim_per_date ? 'This date is already in another claim — edit that claim.' : 'This date was already claimed on an earlier day.'}
                       </p>
                     )}
-                    {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = the referenced check-in/outs below ({money(refsTotal)}).</p>}
+                    {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = its check-in/outs below ({money(refsTotal)}).</p>}
+                    {transportBill && transportBill.key !== b.key && isTransportBill(b) && (
+                      <p className="text-[10px] text-slate-500">Check In/Out go with the first Transport bill (Bill {bills.findIndex((x) => x.key === transportBill.key) + 1}).</p>
+                    )}
+                    {transportBill?.key === b.key && (
+                      // This Transport bill's own check-in/outs — inside its card,
+                      // so a bill added after it can't come between them.
+                      <div className="mt-1 rounded-lg border border-blue-200 bg-white p-2">
+                        <div className="text-[11px] font-semibold text-blue-700 mb-1 flex items-center gap-1.5">
+                          <Route className="w-3.5 h-3.5" /> Check In/Out for Bill {i + 1} (optional)
+                        </div>
+                        {loadingClaims ? (
+                          <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
+                            <Spinner size={14} /> {'Loading your check-in/out history\u2026'}
+                          </div>
+                        ) : claimsInRange.length === 0 ? (
+                          <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
+                          </p>
+                        ) : (
+                          <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+                            {claimsInRange.map((c) => {
+                              const checked = c.id in selectedRefs;
+                              return (
+                                <div key={c.id} className="px-3 py-2.5">
+                                  <label className="flex items-start gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleRef(c.id)}
+                                      className="mt-0.5 w-3.5 h-3.5 accent-blue-600 shrink-0"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-medium text-slate-800 truncate">{c.purpose}</div>
+                                      <div className="text-[11px] text-slate-500 mt-0.5">
+                                        {formatDate(c.check_in_at)}
+                                        {c.check_out_at
+                                          ? ` \u00b7 ${new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} \u2192 ${new Date(
+                                              c.check_out_at
+                                            ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                          : ''}
+                                        {c.distance_km != null ? ` \u00b7 ${c.distance_km} km` : ''}
+                                      </div>
+                                    </div>
+                                  </label>
+                                  {checked && (
+                                    <div className="mt-2 pl-5 relative">
+                                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
+                                      <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        autoComplete="off"
+                                        min="0.01"
+                                        step="0.01"
+                                        value={selectedRefs[c.id]}
+                                        onChange={(e) => setRefAmount(c.id, e.target.value)}
+                                        placeholder="Amount for this check-in/out"
+                                        className="w-full text-xs pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
                       <p className="text-[10px] text-slate-400">
                         {[
@@ -677,68 +745,10 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             >
               <Plus className="w-3.5 h-3.5" /> Add another bill
             </button>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 mb-1 flex items-center gap-1.5">
-              <Route className="w-3.5 h-3.5 text-slate-400" /> Reference Check In/Out (optional, Transport only)
-            </label>
-            {!transportBill ? (
-              <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                Choose <span className="font-semibold">Transport</span> as a bill's category to reference your check-in/outs.
+            {!transportBill && (
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                Travel on office work? Choose <span className="font-semibold">Transport</span> as a bill's category to add your Check In/Out to that bill.
               </p>
-            ) : loadingClaims ? (
-              <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
-                <Spinner size={14} /> {'Loading your check-in/out history\u2026'}
-              </div>
-            ) : claimsInRange.length === 0 ? (
-              <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
-              </p>
-            ) : (
-              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-52 overflow-y-auto">
-                {claimsInRange.map((c) => {
-                  const checked = c.id in selectedRefs;
-                  return (
-                    <div key={c.id} className="px-3 py-2.5">
-                      <label className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleRef(c.id)}
-                          className="mt-0.5 w-3.5 h-3.5 accent-blue-600 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium text-slate-800 truncate">{c.purpose}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {formatDate(c.check_in_at)}
-                            {c.check_out_at
-                              ? ` \u00b7 ${new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} \u2192 ${new Date(
-                                  c.check_out_at
-                                ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                              : ''}
-                            {c.distance_km != null ? ` \u00b7 ${c.distance_km} km` : ''}
-                          </div>
-                        </div>
-                      </label>
-                      {checked && (
-                        <div className="mt-2 pl-5 relative">
-                          <span className="absolute left-8 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
-                          <input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            value={selectedRefs[c.id]}
-                            onChange={(e) => setRefAmount(c.id, e.target.value)}
-                            placeholder="Amount for this check-in/out"
-                            className="w-full text-xs pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
             )}
           </div>
 
