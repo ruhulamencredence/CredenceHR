@@ -134,8 +134,9 @@ export const LeaveGauge: React.FC<{
           );
         })}
       </div>
-      <button type="button" onClick={onSubmit} className="liquid-glass-button w-full min-h-[52px] rounded-full text-[15px] font-extrabold flex items-center justify-center gap-2">
-        <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Submit leave
+      {/* Same plain accent pill as Check In/Out's "+ Add Check In/Out". */}
+      <button type="button" onClick={onSubmit} className="self-center inline-flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform" style={{ background: 'var(--g-accent, #7f00ff)', boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)' }}>
+        <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Apply Leave
       </button>
     </div>
   );
