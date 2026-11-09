@@ -157,6 +157,8 @@ export const GROUP_TABLES = new Set([
   "rate_list",
   "material_categories",
   "delivery_date_conditions",
+  "delivery_material_conditions",
+  "delivery_material_condition_items",
   "chat_rooms",
   "server_profiles",
   // Records someone raises in a group's workspace — kept with that group even

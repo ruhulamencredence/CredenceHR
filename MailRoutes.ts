@@ -26,6 +26,7 @@
 // once. New mail is announced over Socket.IO ("mail:new" to user:<id>), which
 // works across PM2 workers with the Redis adapter.
 
+import { smtpAddress } from "./smtpAddress";
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
@@ -656,9 +657,13 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       releaseImap();
     }
   }
-  function smtpTransport(a: any, pass: string, insecure: boolean) {
+  // The SMTP host is looked up by the system resolver first (smtpAddress.ts)
+  // — nodemailer's own lookup timed out on some servers while IMAP worked.
+  async function smtpTransport(a: any, pass: string, insecure: boolean) {
+    const where = await smtpAddress(a.smtp_host);
     return nodemailer.createTransport({
-      host: a.smtp_host,
+      host: where.host,
+      ...(where.servername ? { servername: where.servername } : {}),
       port: Number(a.smtp_port) || 465,
       secure: !!Number(a.smtp_secure),
       auth: { user: a.username, pass },
@@ -672,10 +677,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (isInternalBox(a)) throw bad(`Only colleagues on Credence Mail can get mail from here (${envelope.to.join(", ")} can't). ${INTERNAL_ONLY.replace(/\.$/, "")}`, 409);
     const pass = decryptSecret(a.password_enc);
     try {
-      await smtpTransport(a, pass, !!Number(a.tls_insecure)).sendMail({ envelope, raw });
+      await (await smtpTransport(a, pass, !!Number(a.tls_insecure))).sendMail({ envelope, raw });
     } catch (e: any) {
       if (Number(a.tls_insecure) || !isCertError(e)) throw e;
-      await smtpTransport(a, pass, true).sendMail({ envelope, raw });
+      await (await smtpTransport(a, pass, true)).sendMail({ envelope, raw });
     }
   }
   const imapError = (e: any) =>
@@ -1955,12 +1960,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         throw bad(imapError(e), 400);
       }
       try {
-        const t = smtpTransport(a, password, !!a.tls_insecure);
+        const t = await smtpTransport(a, password, !!a.tls_insecure);
         try {
           await t.verify();
         } catch (e: any) {
           if (a.tls_insecure || !isCertError(e)) throw e;
-          await smtpTransport(a, password, true).verify();
+          await (await smtpTransport(a, password, true)).verify();
           a.tls_insecure = 1;
         }
       } catch (e: any) {

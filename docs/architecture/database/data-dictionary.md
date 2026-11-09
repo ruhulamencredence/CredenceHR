@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৩৯টি টেবিল, ২৬১৫টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪১টি টেবিল, ২৬৩১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1918,6 +1918,34 @@ Unique: `unique_budget_user`(budget_id,user_id)
 | `group_id` | int(11) | না | default 1 | |
 
 Unique: `ugroup_delivery_condition`(group_id,condition_type,scope,scope_id)
+
+### `delivery_material_condition_items`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `group_id` | int(11) | না | default 1 | |
+| `condition_id` | int(11) | না |  | FK → `delivery_material_conditions.id` |
+| `material` | varchar(500) | না |  | |
+| `material_key` | varchar(500) | না |  | |
+
+Unique: `uniq_dmci_material`(group_id,material_key)
+
+### `delivery_material_conditions`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `group_id` | int(11) | না | default 1 | |
+| `name` | varchar(120) | না |  | |
+| `min_lead_days` | int(11) | না | default 0 | |
+| `applies_entry` | tinyint(1) | না | default 1 | |
+| `applies_job_edit` | tinyint(1) | না | default 1 | |
+| `apply_to_admins` | tinyint(1) | না | default 0 | |
+| `enabled` | tinyint(1) | না | default 1 | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 ### `entries`
 

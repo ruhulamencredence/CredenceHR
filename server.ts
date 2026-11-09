@@ -107,6 +107,7 @@ import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./Docume
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
 import { ensureErp360InboundSsoSchema, registerErp360InboundSsoRoutes } from "./Erp360InboundSsoRoutes";
 import { ensureWelcomeSlidesSchema, registerWelcomeSlidesRoutes } from "./WelcomeSlidesRoutes";
+import { ensureMaterialConditionsSchema, registerMaterialConditionsRoutes } from "./MaterialConditionsRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
@@ -304,6 +305,7 @@ async function initDB() {
     await ensureErp360InboundSsoSchema(dbPool);
     // Welcome slides on an account's first sign-in (WelcomeSlidesRoutes.ts).
     await ensureWelcomeSlidesSchema(dbPool);
+    await ensureMaterialConditionsSchema(dbPool);
     // Approval requests with no approver yet (rehomeAwaitingApprovals).
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
@@ -3691,6 +3693,8 @@ async function startServer() {
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
   registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireBudgetRead, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
+  // Condition Set -> Material conditions (MaterialConditionsRoutes.ts).
+  registerMaterialConditionsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/

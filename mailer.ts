@@ -14,7 +14,10 @@
 // normally — every other route keeps working, only the email routes report
 // the missing dependency.
 
+import { smtpAddress } from "./smtpAddress";
+
 let cachedTransporter: any = null;
+let cachedAt = 0;
 let importFailed = false;
 
 function smtpConfigured(): boolean {
@@ -22,15 +25,20 @@ function smtpConfigured(): boolean {
 }
 
 async function getTransporter(): Promise<any> {
-  if (cachedTransporter) return cachedTransporter;
+  // Re-made every 30 minutes so a changed server address is picked up.
+  if (cachedTransporter && Date.now() - cachedAt < 30 * 60_000) return cachedTransporter;
   if (importFailed || !smtpConfigured()) return null;
   try {
     // @ts-ignore - optional dependency; add to package.json (already done)
     // and run `npm install` to enable actual sending.
     const nodemailer: any = await import("nodemailer");
     const factory = nodemailer.default || nodemailer;
+    // Looked up by the system resolver (smtpAddress.ts) — nodemailer's own
+    // lookup can time out on servers where only that one gets through.
+    const where = await smtpAddress(String(process.env.SMTP_HOST));
     cachedTransporter = factory.createTransport({
-      host: process.env.SMTP_HOST,
+      host: where.host,
+      ...(where.servername ? { servername: where.servername } : {}),
       port: Number(process.env.SMTP_PORT) || 587,
       // Port 465 is SSL from the first byte (Gmail, most hosts); with
       // SMTP_SECURE left unset it would hang and fail, so it is turned on.
@@ -40,6 +48,7 @@ async function getTransporter(): Promise<any> {
         pass: process.env.SMTP_PASS
       }
     });
+    cachedAt = Date.now();
     return cachedTransporter;
   } catch (err) {
     importFailed = true;

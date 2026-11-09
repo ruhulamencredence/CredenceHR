@@ -368,6 +368,16 @@ flowchart LR
 
 ---
 
+## PEPM: Delivery Date-এর নোটিশ — Material conditions
+
+Admin Panel → PEPM Manage → Data Import → **Condition Set**-এ দুটো tab: **New Job Entry & Job Edit rules** (আগের মতো Global / Project / Budget) আর নতুন **Material conditions** (`src/components/MaterialConditionsPanel.tsx`, `MaterialConditionsRoutes.ts`)। অনুমতি Condition Set-এর মতোই: Admin + `imports` module (UI ও API দুই জায়গাতেই)।
+
+- **New condition:** নাম (যেমন "Sand"), Budget import-এর **Description of Material** থেকে লিখে খুঁজে tick দিয়ে material বাছা (unit, কয়টা Budget-এ আছে, আগে কোনো condition-এ থাকলে সেটা দেখায়), minimum days' notice, কোথায় খাটবে (New Job Entry / Add MPR, Job Edit) আর Admins too। চালু/বন্ধ, Edit, Delete (`confirmDialog`)।
+- **এক material, এক condition:** অন্য condition-এ বাছলে সেখানে চলে যায়; material ফাঁকা হয়ে যাওয়া condition মুছে যায়। নাম মেলানো হয় ছোট-বড় হাতের অক্ষর ও ফাঁকা জায়গা বাদ দিয়ে (`material_key`)।
+- **Auto-group materials:** কোনো condition-এ নেই এমন material-এর নামের শব্দ দেখে দল প্রস্তাব করে (Tiles & stone finishing, Stone chips, Sand, Cement, MS Rod / steel, Bricks & blocks, Pipes & fittings, Sanitary, Electrical, Paint & chemicals, Glass & aluminium, Wood & board; বাকিগুলোর প্রথম শব্দ মিললে সেটাও এক দল)। নাম, material, দিন বদলে **Create** / **Create all**। নতুন Budget import-এর material কোনো condition-এর মতো দেখালে "N new material(s) look like Sand — Add to Sand" দেখায় — নিজে থেকে কিছু যোগ করে না।
+- **কোন নিয়ম খাটে:** একটা item-এর Delivery Date-এর জন্য Global / Project / Budget নিয়ম আর তার material-এর condition — যেটায় **বেশি দিন** লাগে সেটাই (`deliveryDateConditions.ts` `leadTimeProblem` / `materialRules`)। Server-এ যাচাই: New Job Entry, Add MPR, Job Edit (`EntriesRoutes.ts`), আর ফেরত নেওয়া entry-র নতুন Delivery Date (`MprDispatchRoutes.ts`)। Date picker-এ প্রতিটা item-এর জন্য আগের তারিখগুলো বন্ধ থাকে (`useDeliveryLeadTime` `earliestFor`, `GET /api/delivery-date-conditions/effective`-এর `materials`)। ভুল তারিখে বার্তা: "Kitchen Granite" needs at least 10 day(s) notice (Tiles & stone finishing) — the earliest allowed date is …।
+- টেবিল: `delivery_material_conditions`, `delivery_material_condition_items` (company group অনুযায়ী আলাদা, `companyScope.ts` GROUP_TABLES)।
+
 ## Dashboard-এর উপরের অংশ (কম্পিউটারে)
 
 "Welcome back!"-এর বদলে (`DashboardGreeting.tsx`): ক্যালেন্ডারের পাতায় আজকের তারিখ, সময় অনুযায়ী শুভেচ্ছা, একটাই সার্চ বক্স (Ctrl K) — Pages (sidebar-এর নিজের মেনু, তাই যার যে পেজ খোলার অনুমতি নেই তা আসে না; `src/lib/navRegistry.ts`), People (Employee Directory, যা সবাই আগে থেকেই দেখে) আর "Waiting for you" (নিজের Approve Application তালিকা)। পাশে Check in (My Attendance কার্ডে নিয়ে যায়, check-in থাকলে Check out), + মেনুতে দ্রুত কাজ (Apply leave, New MPR entry, Book a ride, Conveyance claim, Request to HR — যার যেটা আছে)। নিচে আজকের চিপ: check-in হয়েছে কিনা ও কখন (`GET /api/attendance/today-summary` — শুধু নিজের সময়), কয়টা অনুমোদন অপেক্ষায়, কয়টা কাজের শেষ দিন আজ বা পেরিয়েছে।

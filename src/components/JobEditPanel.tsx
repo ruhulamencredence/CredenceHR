@@ -440,8 +440,9 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   // Admin-set Delivery Date "minimum lead time" (Condition Set — see
   // deliveryDateConditions.ts). "entry" governs Add MPR below (a new row);
   // "job_edit" governs editing an EXISTING row's Delivery Date (just below).
-  const { earliestAllowedDate: addEarliestDate } = useDeliveryLeadTime(token, 'entry', job.project_id, job.budget_id);
-  const { earliestAllowedDate: editEarliestDate } = useDeliveryLeadTime(token, 'job_edit', job.project_id, job.budget_id);
+  // earliestFor(material) adds that material's Material condition (stricter wins).
+  const addLead = useDeliveryLeadTime(token, 'entry', job.project_id, job.budget_id);
+  const editLead = useDeliveryLeadTime(token, 'job_edit', job.project_id, job.budget_id);
 
   // Job Edit only ever lets an EXISTING MPR row's Delivery Date change — Qty (and
   // everything else) is locked once a row exists, same rule as everywhere else in
@@ -453,6 +454,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   // like the "New Job Entry" form's Delivery Date picker, falling back to a normal
   // date input otherwise. Shared between the table (web) and card (Android) layouts.
   const renderExistingDeliveryPicker = (e: Entry, className: string) => {
+    const editEarliestDate = editLead.earliestFor(e.item_name);
     const floor = latestDateStr(todayDateOnlyString(), job.delivery_date_from, e.entry_date);
     const to = job.delivery_date_to || undefined;
     if (floor && to) {
@@ -1365,7 +1367,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                         >
                           <option value="">Select a Delivery Date...</option>
                           {dateRangeOptions(addDeliveryFloor, addDeliveryTo).map((d) => {
-                            const blocked = isDateBlockedByLeadTime(d, addEarliestDate);
+                            const blocked = isDateBlockedByLeadTime(d, addLead.earliestFor(addItems.map((x) => x.name)));
                             return (
                               <option key={d} value={d} disabled={blocked}>
                                 {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
@@ -1377,7 +1379,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                         <input
                           type="date"
                           value={addDeliveryDate}
-                          min={addEarliestDate && (!addDeliveryFloor || addEarliestDate > addDeliveryFloor) ? addEarliestDate : addDeliveryFloor}
+                          min={addLead.earliestFor(addItems.map((x) => x.name)) && (!addDeliveryFloor || addLead.earliestFor(addItems.map((x) => x.name)) > addDeliveryFloor) ? addLead.earliestFor(addItems.map((x) => x.name)) : addDeliveryFloor}
                           max={addDeliveryTo}
                           onChange={(ev) => setAddDeliveryDate(ev.target.value)}
                           className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
@@ -1460,7 +1462,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     >
                       <option value="">Select a Delivery Date...</option>
                       {dateRangeOptions(addDeliveryFloor, addDeliveryTo).map((d) => {
-                        const blocked = isDateBlockedByLeadTime(d, addEarliestDate);
+                        const blocked = isDateBlockedByLeadTime(d, addLead.earliestFor(editOpt.name));
                         return (
                           <option key={d} value={d} disabled={blocked}>
                             {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
@@ -1472,7 +1474,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     <input
                       type="date"
                       value={addItemDeliveryDraft}
-                      min={addEarliestDate && (!addDeliveryFloor || addEarliestDate > addDeliveryFloor) ? addEarliestDate : addDeliveryFloor}
+                      min={addLead.earliestFor(editOpt.name) && (!addDeliveryFloor || addLead.earliestFor(editOpt.name) > addDeliveryFloor) ? addLead.earliestFor(editOpt.name) : addDeliveryFloor}
                       max={addDeliveryTo}
                       onChange={(ev) => setAddItemDeliveryDraft(ev.target.value)}
                       className="block w-full px-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
@@ -1815,9 +1817,10 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   // so its Delivery Date is governed by the "entry" condition, same as
   // POST /api/entries / Add MPR — not "job_edit" (that's only for changing an
   // already-existing entry's Delivery Date, see JobEditRow above).
-  const { earliestAllowedDate: newJobEarliestDate } = useDeliveryLeadTime(token, 'entry', selected?.project_id, selected?.budget_id);
+  const newJobLead = useDeliveryLeadTime(token, 'entry', selected?.project_id, selected?.budget_id);
 
   const renderDeliveryPicker = (row: NewJobItemRow, className: string = 'w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white') => {
+    const newJobEarliestDate = newJobLead.earliestFor(row.name);
     if (deliveryFloor && deliveryTo) {
       return (
         <select value={row.deliveryDate} onChange={(ev) => updateRowDelivery(row.uid, ev.target.value)} className={className}>

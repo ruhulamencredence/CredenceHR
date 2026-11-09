@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiUrl } from './api';
 
 interface EffectiveLeadTime {
@@ -14,7 +14,22 @@ interface EffectiveLeadTime {
   // window stays visible — see EmployeeDirectory... no, formatDate.ts's
   // isDateBlockedByLeadTime) but be disabled.
   earliestAllowedDate: string | null;
+  // The earliest date for these materials (Description of Material): the
+  // stricter of the rule above and each one's Material condition (Condition
+  // Set -> Material conditions). Same answer the server enforces.
+  earliestFor: (materials?: string | (string | null | undefined)[] | null) => string | null;
 }
+
+const matKey = (s: unknown) =>
+  String(s ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+const addDays = (dateStr: string, days: number) => {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 // Reads GET /api/delivery-date-conditions/effective for the given
 // condition_type ('entry' — New Job Entry/Add MPR, 'job_edit' — changing an
@@ -30,10 +45,12 @@ export function useDeliveryLeadTime(
   budgetId: number | null | undefined
 ): EffectiveLeadTime {
   const [earliestAllowedDate, setEarliestAllowedDate] = useState<string | null>(null);
+  const [rules, setRules] = useState<{ today: string; days: Map<string, number> } | null>(null);
 
   useEffect(() => {
     if (!projectId && !budgetId) {
       setEarliestAllowedDate(null);
+      setRules(null);
       return;
     }
     let cancelled = false;
@@ -47,7 +64,13 @@ export function useDeliveryLeadTime(
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setEarliestAllowedDate(data.earliest_date ?? null);
+        if (cancelled) return;
+        setEarliestAllowedDate(data.earliest_date ?? null);
+        setRules(
+          data.today && Array.isArray(data.materials) && data.materials.length
+            ? { today: String(data.today), days: new Map(data.materials.map((m: any) => [String(m.key), Number(m.days)])) }
+            : null
+        );
       } catch {
         // Best-effort — a network hiccup here just leaves dates unrestricted
         // client-side for this render; the server enforces the same rule
@@ -59,5 +82,20 @@ export function useDeliveryLeadTime(
     };
   }, [token, conditionType, projectId, budgetId]);
 
-  return { earliestAllowedDate };
+  const earliestFor = useCallback(
+    (materials?: string | (string | null | undefined)[] | null) => {
+      let best = earliestAllowedDate;
+      if (!rules) return best;
+      for (const m of Array.isArray(materials) ? materials : [materials]) {
+        const days = rules.days.get(matKey(m));
+        if (days === undefined) continue;
+        const d = addDays(rules.today, days);
+        if (!best || d > best) best = d;
+      }
+      return best;
+    },
+    [earliestAllowedDate, rules]
+  );
+
+  return { earliestAllowedDate, earliestFor };
 }
