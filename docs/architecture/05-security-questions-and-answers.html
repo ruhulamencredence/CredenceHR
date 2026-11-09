@@ -397,6 +397,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Recruitment-এ candidate-এর নাম / email / ফোন কে বদলাতে পারে?</td>
+<td>শুধু Recruitment-এর <strong>Edit candidate details</strong> অনুমতি যাঁর আছে (<code>edit_candidates</code>, আলাদা টিক, কাউকে আপনাআপনি দেওয়া হয় না; Superadmin সবসময়) — Edit বোতাম লুকানো আর API-তে 403 (টেস্ট করা)। খোলা onboarding-এর কপিও বদলায়, কিন্তু যোগ দেওয়া কর্মীর Employee রেকর্ড নয়।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Asset ফেরত কে গ্রহণ করতে পারে, হাতবদলের ইতিহাস কে দেখে?</td>
 <td>গ্রহণ করতে পারেন শুধু যে store keeper item-টা দিয়েছিলেন, অথবা Asset Management / Superadmin — server-এ যাচাই হয় (অন্যদের 403)। ইতিহাস দেখে Asset Management, item-এর কর্মী (নিজের অংশ) আর যিনি দিয়েছিলেন। প্রতিটা ধাপে কে, কখন, কার হাতে / কার মাধ্যমে — <code>asset_assignments</code>-এ থাকে (<code>AssetManagementRoutes.ts</code>)।</td>
 <td>✅</td>
