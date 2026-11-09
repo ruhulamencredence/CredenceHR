@@ -166,7 +166,11 @@ flowchart LR
 ```
 
 ফাইল: `RecruitmentRoutes.ts`, `OnboardingSelfServiceRoutes.ts`, `HROperationsRoutes.ts`, `ExitOffboardingRoutes.ts`, `EmployeeRecordsGuard.ts`।
+
+জমা দেওয়ার পর joiner-এর My Onboarding পাতা নিজে থেকে HR-এর সিদ্ধান্ত দেখে নেয় (২০ সেকেন্ড পরপর, আর অ্যাপ / ট্যাব সামনে এলে; `OnboardingShell.tsx`): ফেরত দিলে সাথে সাথে HR-এর কারণ আর খোলা ফর্ম দেখায়, approve বা cancel হলে লগইন পাতায় নিয়ে যায় — sign out করে আবার ঢুকতে হয় না।
 Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্ঘ্য, কীভাবে (সামনাসামনি venue / online link / ফোন), interviewer আর candidate-এর জন্য নোট দিয়ে interview ঠিক করেন। পরে সময় বা জায়গা বদলানো, interviewer বদলানো বা বাতিল করা যায় — প্রতিটি বদল কারণসহ `candidate_interview_events`-এ থাকে (আগের → নতুন), আর interviewer-কে bell alert ("Interview scheduled / moved / place changed / cancelled") যায়। Candidate-কে email পাঠানো আলাদা অনুমতি (Recruitment → **Email candidates**, কাউকে আপনাআপনি দেওয়া হয় না): বদলের পরেই খসড়া খোলে (বদলানো যায়), interview-এর email-এর সাথে calendar invite (`.ics`, বাতিল হলে CANCEL) যায়, প্রতিটি email (পাঠানো / ব্যর্থ) `candidate_emails`-এ থাকে। শেষ বদলের পরে email না গেলে তালিকায় "Candidate not emailed yet" দেখায়। Offer / Regret / অন্য বার্তাও একইভাবে পাঠানো যায়। SMTP চালু না থাকলে কিছু পাঠানো যায় না, বাকি সব চলে।
+
+Candidate-এর ভুল তথ্য (নাম, email, ফোন, source) Recruitment থেকেই ঠিক করা যায়: প্রতিটা candidate-এর পাশে **Edit** (আলাদা অনুমতি Recruitment → **Edit candidate details**, `edit_candidates`, কাউকে আপনাআপনি দেওয়া হয় না; `PUT /api/job-candidates/:id/details`)। Candidate-এর New Joiner Onboarding খোলা থাকলে (draft / submitted / sent back) onboarding রেকর্ডের নাম, email, ফোন আর অস্থায়ী login-এর নামও একসাথে ঠিক হয় — HR-এর review আর "Already on file" যাচাই সেগুলোই দেখে। Joined হয়ে গেলে Employee রেকর্ড বদলায় না (সেটা Employees থেকে)।
 
 গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি **কর্মী নন** (`all_employees`-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 `ONBOARDING_ONLY`)।
 
@@ -495,6 +499,10 @@ Chat-এর attachment (voice, ছবি, video, document) ডাটাবেস
 
 Inventory-তে দুটো ভাগ: Vehicles আর Drivers। Driver যোগ হয় শুধু Employees থেকে (নাম · Employee ID · পদ · বিভাগ লিখে খোঁজা); নাম, মোবাইল, বিভাগ Employee record থেকে আসে, এখানে রাখা হয় শুধু License নম্বর, ধরন, মেয়াদ, সাধারণ গাড়ি আর Active / Inactive (`vehicle_drivers`, `VehicleManagementRoutes.ts`)। Login নেই এমন কর্মীকে driver করা যায় না (live map-এ অবস্থান লাগে)। তালিকায় কেউ থাকলে ride-এ গাড়ি দেওয়ার সময় (Assign, Approve & Assign, Direct Book, Direct Assign) শুধু Active driver বাছা যায় — কে ফাঁকা, কার ride booked বা চলছে, কার License শেষ পাশে লেখা থাকে (`GET /api/vehicles/driver-picker`); License শেষ হলে server নেয় না। তালিকা খালি থাকলে আগের মতো যেকোনো অ্যাকাউন্ট। কেউ নিজে গাড়ি চালিয়ে নিতে চাইলে তাঁকে আগে Drivers-এ License সহ যোগ করতে হয় — তারপর তাঁর নিজের ride-এ তাঁকেই driver বাছা যায়; booking-এ আলাদা "নিজে চালাব" বিকল্প নেই। License শেষের ৩০ দিন আগে (বা শেষ হলে) Vehicle Management-এর লোকজন আর Superadmin একবার alert পান। তালিকা দেখা Vehicle Management module-এ; যোগ / বদল / বাদ "Manage drivers" layer-এ।
 
+**Vehicles: Edit / Delete (Module Access → Vehicle Management → "Edit / delete vehicles", `manage_vehicles`, শুরুতে বন্ধ):** তালিকার প্রতিটা গাড়িতে Edit (Vehicle No. — আলাদা থাকতে হয়, Model, Type, Status: available / maintenance / **retired**) আর Delete। Ride-এ থাকা বা ride দেওয়া গাড়ির status হাতে বদলানো যায় না। যে গাড়ির ride-এর ইতিহাস আছে সেটা মোছা যায় না — Retired করতে বলে (ইতিহাস থাকে, ride-এ আর দেখায় না); ইতিহাস না থাকলে মুছে যায়। API: `PUT` / `DELETE /api/vehicles/:id` (layer ছাড়া 403), `GET /api/vehicles/my-access`। গাড়ি যোগ করা আগের মতোই।
+
+**Drivers — নিজে থেকে আর একাধিক গাড়ি:** যে active কর্মীর পদে (designation) "Driver" আছে (Driver, Senior Driver…), তিনি নিজে থেকেই Drivers তালিকায় আসেন ("Auto — designation"); login না থাকলে "No login — can't be picked for a ride"। হাতে সরালে আর নিজে থেকে ফেরেন না (`vehicle_driver_skips`), হাতে আবার যোগ করলে ফেরেন। একজন driver-এর **একাধিক usual vehicle** (`vehicle_driver_vehicles`; পুরনো `usual_vehicle_id` একবার কপি হয়ে প্রথমটা হিসেবে থাকে) — ride-এ driver বাছার সময় সেই গাড়িগুলোর যেকোনোটায় তিনি "usual driver" হিসেবে উপরে আসেন।
+
 ## আরও কিছু notification
 
 - **নতুন ফোন (Device Access):** Superadmin approve করলে অ্যাকাউন্টটা "New phone approved" পায়, ফিরিয়ে দিলে "New phone not approved" (`DeviceRoutes.ts`)।
@@ -563,6 +571,10 @@ flowchart TD
 ## Server চালু হলে কী বদলায় না
 
 server চালু হওয়ার সময়ের এককালীন কাজগুলো এখন একবারই চলে; কোনটা হয়ে গেছে তা `startup_migrations`-এ লেখা থাকে (`startupOnce.ts`)। আগে প্রতি restart-এ: শুধু Head office-এর জন্য দেওয়া holiday / weekend Project site-এর calendar-এও কপি হয়ে যেত; কোনো Request Type-এর সব template মুছে দিলে পুরনো Approval Chain থেকে "Migrated Global Chain" template আবার তৈরি হতো; আর Superadmin-এর নিজে বদলানো password ও নাম `.env`-এরটায় ফিরে যেত। এখন Holiday-এর কপি একবারই হয় (Project site calendar খালি থাকলে), template migration একবারই (কোনো template না থাকলে), আর `.env`-এর `ADMIN_PASSWORD` / `ADMIN_NAME` বসে শুধু যখন `.env`-এ সেগুলো বদলানো হয়েছে — তাই password ভুলে গেলে `.env` বদলে restart করলে আগের মতোই নতুনটা বসে। Role সবসময় superadmin রাখা হয়।
+
+## Vehicle Management → Ride Requests: approver এখান থেকেই সিদ্ধান্ত দেন
+
+Admin Panel → Vehicle Management → **Ride Requests** board-এ যে request **এই account-এর approval-এর অপেক্ষায়** (তার নিজের queue, `GET /api/my-approvals`), তার card-এ "Waiting on you" অংশ: Remarks, **Approve**, **Reject** (Remarks লাগে, নিশ্চিত করতে বলে)। শেষ Layer হলে **Approve & assign vehicle** — vehicle আর driver বেছে **Approve & confirm ride** চাপলে approval শেষ আর ride confirm একসাথে (`PUT /api/vehicles/requisitions/:id/approve-and-assign`); শুধু approve করতে **Approve only** (তারপর আগের মতো Assign Vehicle & Driver)। শেষ Layer "Vehicle Maintainer" হলে শুধু Assign Vehicle & Driver (assign-ই approval)। অন্যের অপেক্ষায় থাকা request আগের মতো শুধু অবস্থা দেখায়। Server আগের মতোই যাচাই করে request সত্যিই এই account-এর অপেক্ষায় কিনা (`performApprovalAction`, approve-and-assign) — নতুন কোনো অনুমতি নেই (`VehicleManagementAdmin.tsx`)।
 
 ## Book a Ride: start না হওয়া ride বাতিল ও বন্ধ
 

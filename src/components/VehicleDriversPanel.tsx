@@ -32,6 +32,11 @@ interface Driver {
   license_state: 'valid' | 'expiring' | 'expired' | 'unknown';
   usual_vehicle_id: number | null;
   usual_vehicle: string | null;
+  // One driver may usually drive several vehicles.
+  usual_vehicle_ids?: number[];
+  usual_vehicles?: string[];
+  // On the list because their designation says Driver.
+  auto_added?: boolean;
   is_active: boolean;
   note: string;
   now: 'free' | 'assigned' | 'on_ride';
@@ -122,7 +127,13 @@ export const VehicleDriversPanel: React.FC<{ vehicles: VehicleLite[]; onChanged?
   }, [list, q, show]);
 
   const remove = async (d: Driver) => {
-    if (!(await confirmDialog(`Remove ${d.name} from Drivers? Rides already given keep them as the driver; they just can't be picked again.`, { tone: 'danger' }))) return;
+    if (
+      !(await confirmDialog(
+        `Remove ${d.name} from Drivers? Rides already given keep them as the driver; they just can't be picked again.${d.auto_added || /driver/i.test(d.designation || '') ? ' They won’t be added back automatically (add them again by hand if needed).' : ''}`,
+        { tone: 'danger' }
+      ))
+    )
+      return;
     const r = await fetch(apiUrl(`/api/vehicles/drivers/${d.id}`), { method: 'DELETE', headers: headers() });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return setError(data.error || 'Could not remove the driver.');
@@ -178,7 +189,7 @@ export const VehicleDriversPanel: React.FC<{ vehicles: VehicleLite[]; onChanged?
               <th className="px-4 py-2.5">Driver</th>
               <th className="px-4 py-2.5">Mobile</th>
               <th className="px-4 py-2.5">License</th>
-              <th className="px-4 py-2.5">Usual vehicle</th>
+              <th className="px-4 py-2.5">Usual vehicles</th>
               <th className="px-4 py-2.5">Now</th>
               {canManage && <th className="px-4 py-2.5 text-right">Actions</th>}
             </tr>
@@ -209,6 +220,12 @@ export const VehicleDriversPanel: React.FC<{ vehicles: VehicleLite[]; onChanged?
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-800 truncate">{d.name}</p>
                           <p className="text-[11px] text-slate-500 truncate">{[d.employee_code, d.designation, d.department].filter(Boolean).join(' · ')}</p>
+                          {(d.auto_added || !d.user_id) && (
+                            <p className="text-[10.5px] mt-0.5 flex flex-wrap gap-1">
+                              {d.auto_added && <span className="rounded-full bg-sky-50 text-sky-700 px-1.5">Auto — designation</span>}
+                              {!d.user_id && <span className="rounded-full bg-amber-50 text-amber-800 px-1.5">No login — can't be picked for a ride</span>}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -229,7 +246,14 @@ export const VehicleDriversPanel: React.FC<{ vehicles: VehicleLite[]; onChanged?
                           : 'no expiry date'}
                       </p>
                     </td>
-                    <td className="px-4 py-2.5">{d.usual_vehicle || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      {(d.usual_vehicles && d.usual_vehicles.length ? d.usual_vehicles : d.usual_vehicle ? [d.usual_vehicle] : []).map((v) => (
+                        <span key={v} className="inline-block whitespace-nowrap rounded-full bg-slate-100 text-slate-700 text-[11px] px-2 py-0.5 mr-1 mb-1">
+                          {v}
+                        </span>
+                      ))}
+                      {!(d.usual_vehicles?.length || d.usual_vehicle) && '—'}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className={`inline-block text-[11px] font-semibold rounded-full px-2.5 py-0.5 whitespace-nowrap ${pill.cls}`}>{pill.text}</span>
                     </td>
@@ -274,7 +298,7 @@ const DriverForm: React.FC<{ driver: Driver | null; vehicles: VehicleLite[]; onC
     license_no: driver?.license_no || '',
     license_type: driver?.license_type || '',
     license_expiry: driver?.license_expiry || '',
-    usual_vehicle_id: driver?.usual_vehicle_id ? String(driver.usual_vehicle_id) : '',
+    usual_vehicle_ids: (driver?.usual_vehicle_ids && driver.usual_vehicle_ids.length ? driver.usual_vehicle_ids : driver?.usual_vehicle_id ? [driver.usual_vehicle_id] : []).map(String),
     is_active: driver ? driver.is_active : true,
     note: driver?.note || ''
   });
@@ -296,7 +320,7 @@ const DriverForm: React.FC<{ driver: Driver | null; vehicles: VehicleLite[]; onC
     if (!driver && picked && !picked.has_login) return setError('This employee has no login, so their rides can’t be tracked. Give them a login first (Employees).');
     setBusy(true);
     try {
-      const body = { ...form, usual_vehicle_id: form.usual_vehicle_id ? Number(form.usual_vehicle_id) : null, ...(driver ? {} : { employee_id: Number(employeeId) }) };
+      const body = { ...form, usual_vehicle_ids: form.usual_vehicle_ids.map(Number), ...(driver ? {} : { employee_id: Number(employeeId) }) };
       const r = await fetch(apiUrl(driver ? `/api/vehicles/drivers/${driver.id}` : '/api/vehicles/drivers'), {
         method: driver ? 'PUT' : 'POST',
         headers: headers(),
@@ -373,17 +397,46 @@ const DriverForm: React.FC<{ driver: Driver | null; vehicles: VehicleLite[]; onC
               <label className="block text-xs font-semibold text-slate-600 mb-1">License valid till</label>
               <input type="date" value={form.license_expiry} onChange={(e) => setForm({ ...form, license_expiry: e.target.value })} className={input} />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Usual vehicle (optional)</label>
-              <SearchSelect value={form.usual_vehicle_id} onChange={(e) => setForm({ ...form, usual_vehicle_id: e.target.value })} className={input} aria-label="Usual vehicle">
-                <option value="">— None —</option>
-                {vehicles.map((v) => (
+          </div>
+          {/* Usual vehicles — one driver may have several; they come first
+              in the driver picker when one of these vehicles is given. */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Usual vehicles (optional — pick one or more)</label>
+            {form.usual_vehicle_ids.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {form.usual_vehicle_ids.map((id) => {
+                  const v = vehicles.find((x) => String(x.id) === id);
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 text-xs px-2.5 py-1">
+                      {v ? `${v.vehicle_no} — ${v.model}` : `#${id}`}
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, usual_vehicle_ids: form.usual_vehicle_ids.filter((x) => x !== id) })}
+                        className="text-slate-400 hover:text-slate-700"
+                        aria-label="Remove vehicle"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <SearchSelect
+              value=""
+              onChange={(e) => e.target.value && !form.usual_vehicle_ids.includes(e.target.value) && setForm({ ...form, usual_vehicle_ids: [...form.usual_vehicle_ids, e.target.value] })}
+              className={input}
+              aria-label="Add a usual vehicle"
+            >
+              <option value="">— Add a vehicle —</option>
+              {vehicles
+                .filter((v) => !form.usual_vehicle_ids.includes(String(v.id)))
+                .map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.vehicle_no} — {v.model}
                   </option>
                 ))}
-              </SearchSelect>
-            </div>
+            </SearchSelect>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Note (optional)</label>

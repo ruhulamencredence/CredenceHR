@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck, CalendarClock, Mail } from 'lucide-react';
+import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck, CalendarClock, Mail, Pencil } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { StartJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 import { LoadingBlock } from './LoadingBlock';
-import { InterviewModal, CandidateEmailModal, type RecruitmentAccess } from './RecruitmentInterview';
+import { InterviewModal, CandidateEmailModal, CandidateEditModal, type RecruitmentAccess } from './RecruitmentInterview';
 
 interface RecruitmentPanelProps {
   token: string;
@@ -127,6 +127,8 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
   // Emailing candidates is its own explicit permission (layer "email_candidates").
   const [access, setAccess] = useState<RecruitmentAccess | null>(null);
   const [interviewFor, setInterviewFor] = useState<{ postingId: number; c: Candidate } | null>(null);
+  // Correcting a candidate's details is its own explicit permission (layer "edit_candidates").
+  const [editFor, setEditFor] = useState<{ postingId: number; c: Candidate } | null>(null);
   const [emailFor, setEmailFor] = useState<{ postingId: number; c: Candidate; kind: 'offered' | 'rejected' | 'custom' } | null>(null);
   useEffect(() => {
     fetch(apiUrl('/api/recruitment/access'), { headers: authHeaders })
@@ -441,6 +443,16 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                             })()}
                           </div>
                           <div className="flex items-center gap-1.5">
+                          {access?.edit_candidates && (
+                            <button
+                              type="button"
+                              onClick={() => setEditFor({ postingId: p.id, c })}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"
+                              aria-label={`Edit ${c.name}`}
+                            >
+                              <Pencil className="w-3 h-3" /> Edit
+                            </button>
+                          )}
                           {(c.status === 'applied' || c.status === 'shortlisted') && (
                             <button type="button" onClick={() => setInterviewFor({ postingId: p.id, c })} className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1">
                               <CalendarClock className="w-3 h-3" /> Interview
@@ -491,6 +503,22 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       )}
       {emailFor && (
         <CandidateEmailModal token={token} candidate={emailFor.c} kind={emailFor.kind} interviewId={null} onClose={() => setEmailFor(null)} />
+      )}
+      {editFor && access?.edit_candidates && (
+        <CandidateEditModal
+          token={token}
+          candidate={editFor.c}
+          hasOnboarding={['draft', 'submitted', 'rejected'].includes(onbByCandidate[editFor.c.id]?.status || '')}
+          onClose={() => setEditFor(null)}
+          onSaved={(data) => {
+            const { postingId } = editFor;
+            setCandidatesByPosting((prev) => ({
+              ...prev,
+              [postingId]: (prev[postingId] || []).map((c) => (c.id === data.id ? { ...c, name: data.name, email: data.email, phone: data.phone, source: data.source } : c))
+            }));
+            setEditFor(null);
+          }}
+        />
       )}
       {startingFor !== null && <StartJoinerOnboarding token={token} candidateId={startingFor} onClose={() => setStartingFor(null)} onCreated={loadOnboarding} />}
     </div>

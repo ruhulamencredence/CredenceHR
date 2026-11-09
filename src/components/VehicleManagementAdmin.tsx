@@ -53,7 +53,7 @@ interface Vehicle {
   vehicle_no: string;
   model: string;
   vehicle_type: string | null;
-  status: 'available' | 'on_ride' | 'maintenance';
+  status: 'available' | 'on_ride' | 'maintenance' | 'retired';
 }
 
 interface Requisition {
@@ -86,6 +86,13 @@ interface Requisition {
   hr_notice_flag: boolean;
   hr_manual_note: string | null;
   created_at: string;
+}
+
+// One ride request in this account's own approval queue.
+interface MyRideApproval {
+  id: number; // approval_requests.id
+  final: boolean; // on the Template's last Layer — may approve and assign in one go
+  bypass: boolean; // that Layer is "Vehicle Maintainer": assigning IS the approval
 }
 
 function authHeaders(): HeadersInit {
@@ -181,6 +188,47 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
     }
   }
 
+  // Edit / delete a vehicle: only with the "Edit / delete vehicles" layer
+  // (the server checks it too — GET /api/vehicles/my-access).
+  const [canManageVehicles, setCanManageVehicles] = useState(false);
+  const [editVehicle, setEditVehicle] = useState<{ id: number; vehicle_no: string; model: string; vehicle_type: string; status: Vehicle['status'] } | null>(null);
+  const [savingVehicle, setSavingVehicle] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/my-access'), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanManageVehicles(!!d?.manage_vehicles))
+      .catch(() => undefined);
+  }, []);
+  async function saveVehicle() {
+    if (!editVehicle) return;
+    if (!editVehicle.vehicle_no.trim() || !editVehicle.model.trim()) return setError('Vehicle No. and Model are needed.');
+    setSavingVehicle(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/${editVehicle.id}`), { method: 'PUT', headers: authHeaders(), body: JSON.stringify(editVehicle) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save the vehicle.');
+      setEditVehicle(null);
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSavingVehicle(false);
+    }
+  }
+  async function deleteVehicle(v: Vehicle) {
+    if (!(await confirmDialog(`Delete vehicle ${v.vehicle_no} (${v.model})? This can't be undone.`, { tone: 'danger' }))) return;
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/${v.id}`), { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete the vehicle.');
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   async function loadVehicles() {
     try {
       const res = await fetch(apiUrl('/api/vehicles'), { headers: authHeaders() });
@@ -202,6 +250,84 @@ useLiveRefresh(() => loadRequisitions());
       setRequisitions(data);
     } catch (err: any) {
       setError(err.message);
+    }
+    void loadMyQueue();
+  }
+
+  // The ride requests waiting on THIS account's approval (its own queue,
+  // GET /api/my-approvals) — those cards get Approve / Reject here, and on
+  // the final Layer "Approve & assign vehicle" too. The server checks again
+  // that the request is waiting on this account (performApprovalAction,
+  // PUT .../approve-and-assign).
+  const [myQueue, setMyQueue] = useState<Map<number, MyRideApproval>>(new Map());
+  const [decideFor, setDecideFor] = useState<number | null>(null); // assign form open (Approve & assign)
+  const [decideRemarks, setDecideRemarks] = useState<Record<number, string>>({});
+  const [decideForm, setDecideForm] = useState({ vehicle_id: '', driver_user_id: '' });
+  const [actingId, setActingId] = useState<number | null>(null);
+  async function loadMyQueue() {
+    try {
+      const res = await fetch(apiUrl('/api/my-approvals'), { headers: authHeaders() });
+      const data = await res.json();
+      const list: any[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+      setMyQueue(
+        new Map(
+          list
+            .filter((i) => i.source_type === 'vehicle_requisition')
+            .map((i) => [Number(i.source_id), { id: Number(i.id), final: Number(i.current_step) >= Number(i.total_steps), bypass: !!i.vehicle_maintainer_bypass }])
+        )
+      );
+    } catch {
+      setMyQueue(new Map());
+    }
+  }
+  async function decide(r: Requisition, a: MyRideApproval, action: 'approved' | 'rejected') {
+    const remarks = (decideRemarks[r.id] || '').trim();
+    if (action === 'rejected') {
+      if (!remarks) return setError('Write why in Remarks before rejecting.');
+      if (!(await confirmDialog(`Reject ${r.employee_name}'s ride request (${r.pickup_location} → ${r.destination})?`, { tone: 'danger' }))) return;
+    }
+    setActingId(r.id);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/my-approvals/${a.id}/act`), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ action, remarks: remarks || undefined })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save your decision.');
+      setDecideRemarks((m) => ({ ...m, [r.id]: '' }));
+      await loadRequisitions();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setActingId(null);
+    }
+  }
+  async function approveAndAssign(r: Requisition) {
+    if (!decideForm.vehicle_id || !decideForm.driver_user_id) return setError('Pick a vehicle and a driver.');
+    setActingId(r.id);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${r.id}/approve-and-assign`), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          vehicle_id: Number(decideForm.vehicle_id),
+          driver_user_id: Number(decideForm.driver_user_id),
+          remarks: (decideRemarks[r.id] || '').trim() || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not approve and assign this ride.');
+      setDecideFor(null);
+      setDecideForm({ vehicle_id: '', driver_user_id: '' });
+      await loadRequisitions();
+      loadVehicles();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setActingId(null);
     }
   }
 
@@ -378,9 +504,9 @@ useLiveRefresh(() => loadRequisitions());
       {tab === 'requests' && (
         <div className="space-y-3">
           <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
-            Approve/Reject a ride request from Admin Panel → Approvals (or "My Approvals" if you're its Layer 1 approver) — this board
-            is read-only status + Assign Vehicle &amp; Driver once a request is Approved. Who approves the "HR/Admin Review" Layer is
-            set from Admin Panel → Approvals → Templates (request type "Vehicle Requisition").
+            A request waiting on <b>you</b> has Approve / Reject right on its card (on the last Layer also "Approve &amp; assign
+            vehicle", which confirms the ride at once); everyone else's are status only. Once a request is Approved, Assign Vehicle
+            &amp; Driver. Who approves each Layer is set in Admin Panel → Approvals → Templates (request type "Vehicle Requisition").
           </div>
           {rideRules && (
             <div className="border rounded-lg p-3 flex flex-wrap items-end gap-3 text-xs text-gray-600">
@@ -441,6 +567,93 @@ useLiveRefresh(() => loadRequisitions());
                   Waiting on: <span className="font-medium">{r.pending_with || 'no approver configured for this Layer'}</span>
                 </div>
               )}
+
+              {r.status === 'pending' && myQueue.get(r.id) && (() => {
+                const a = myQueue.get(r.id)!;
+                const busy = actingId === r.id;
+                return (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+                    <div className="text-xs font-semibold text-amber-900">Waiting on you{a.final ? ' — last approval' : ''}</div>
+                    <textarea
+                      value={decideRemarks[r.id] || ''}
+                      onChange={(e) => setDecideRemarks((m) => ({ ...m, [r.id]: e.target.value }))}
+                      rows={2}
+                      maxLength={1000}
+                      placeholder="Remarks (needed to reject)"
+                      className="w-full border rounded px-2 py-1.5 text-xs bg-white"
+                    />
+                    {decideFor === r.id ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SearchSelect
+                          value={decideForm.vehicle_id}
+                          onChange={(e) => setDecideForm({ ...decideForm, vehicle_id: e.target.value })}
+                          className="border rounded px-2 py-1 text-xs"
+                        >
+                          <option value="">Pick a vehicle…</option>
+                          {availableVehicles.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.model} ({v.vehicle_no})
+                            </option>
+                          ))}
+                        </SearchSelect>
+                        <SearchSelect
+                          value={decideForm.driver_user_id}
+                          onChange={(e) => setDecideForm({ ...decideForm, driver_user_id: e.target.value })}
+                          className="border rounded px-2 py-1 text-xs"
+                        >
+                          <option value="">Pick a driver…</option>
+                          {sortDrivers(driverOptions, decideForm.vehicle_id).map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {driverOptionLabel(d, decideForm.vehicle_id)}
+                            </option>
+                          ))}
+                        </SearchSelect>
+                        <button
+                          onClick={() => void approveAndAssign(r)}
+                          disabled={busy}
+                          className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          {busy ? 'Saving…' : a.bypass ? 'Assign & confirm ride' : 'Approve & confirm ride'}
+                        </button>
+                        <button onClick={() => setDecideFor(null)} className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 bg-white">
+                          Back
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {a.final && (
+                          <button
+                            onClick={() => {
+                              setDecideFor(r.id);
+                              setDecideForm({ vehicle_id: '', driver_user_id: '' });
+                            }}
+                            disabled={busy}
+                            className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                          >
+                            {a.bypass ? 'Assign Vehicle & Driver' : 'Approve & assign vehicle'}
+                          </button>
+                        )}
+                        {!a.bypass && (
+                          <button
+                            onClick={() => void decide(r, a, 'approved')}
+                            disabled={busy}
+                            className={`px-3 py-1.5 text-xs font-medium rounded disabled:opacity-50 ${a.final ? 'border border-green-600 text-green-700 bg-white hover:bg-green-50' : 'bg-green-600 text-white hover:bg-green-700'}`}
+                          >
+                            {busy ? 'Saving…' : a.final ? 'Approve only' : 'Approve'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => void decide(r, a, 'rejected')}
+                          disabled={busy}
+                          className="px-3 py-1.5 text-xs font-medium rounded border border-rose-300 text-rose-700 bg-white hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {(r.status === 'assigned' || r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
                 <div className="mt-2 rounded bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
@@ -798,17 +1011,69 @@ useLiveRefresh(() => loadRequisitions());
                 <th>Model</th>
                 <th>Type</th>
                 <th>Status</th>
+                {canManageVehicles && <th className="text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id} className="border-b last:border-0">
-                  <td className="py-2">{v.vehicle_no}</td>
-                  <td>{v.model}</td>
-                  <td>{v.vehicle_type || '—'}</td>
-                  <td>{v.status}</td>
-                </tr>
-              ))}
+              {vehicles.map((v) =>
+                editVehicle?.id === v.id ? (
+                  <tr key={v.id} className="border-b last:border-0 bg-blue-50/40">
+                    <td className="py-2 pr-2">
+                      <input value={editVehicle.vehicle_no} onChange={(e) => setEditVehicle({ ...editVehicle, vehicle_no: e.target.value })} maxLength={50} aria-label="Vehicle No." className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      <input value={editVehicle.model} onChange={(e) => setEditVehicle({ ...editVehicle, model: e.target.value })} maxLength={150} aria-label="Model" className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      <input value={editVehicle.vehicle_type} onChange={(e) => setEditVehicle({ ...editVehicle, vehicle_type: e.target.value })} maxLength={50} aria-label="Type" className="w-full border rounded px-2 py-1 text-sm" />
+                    </td>
+                    <td className="pr-2">
+                      {v.status === 'on_ride' ? (
+                        <span className="text-xs text-gray-500">on_ride (set by the ride)</span>
+                      ) : (
+                        <select value={editVehicle.status} onChange={(e) => setEditVehicle({ ...editVehicle, status: e.target.value as Vehicle['status'] })} aria-label="Status" className="border rounded px-2 py-1 text-sm bg-white">
+                          <option value="available">available</option>
+                          <option value="maintenance">maintenance</option>
+                          <option value="retired">retired (kept for history, never offered)</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="text-right whitespace-nowrap">
+                      <button onClick={() => void saveVehicle()} disabled={savingVehicle} className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white disabled:opacity-50">
+                        {savingVehicle ? 'Saving…' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditVehicle(null)} className="ml-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600">
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={v.id} className="border-b last:border-0">
+                    <td className="py-2">{v.vehicle_no}</td>
+                    <td>{v.model}</td>
+                    <td>{v.vehicle_type || '—'}</td>
+                    <td>{v.status}</td>
+                    {canManageVehicles && (
+                      <td className="text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setEditVehicle({ id: v.id, vehicle_no: v.vehicle_no, model: v.model, vehicle_type: v.vehicle_type || '', status: v.status })}
+                          className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          aria-label={`Edit ${v.vehicle_no}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => void deleteVehicle(v)}
+                          className="ml-1.5 px-2.5 py-1 text-xs font-medium rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                          aria-label={`Delete ${v.vehicle_no}`}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>
