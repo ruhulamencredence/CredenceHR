@@ -114,37 +114,6 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_drivers table exists: " + err.message);
   }
-  // A driver's usual vehicles — one driver may have several (and a vehicle
-  // several drivers). Replaces vehicle_drivers.usual_vehicle_id, which is
-  // copied in once and then kept as the first of them for older code.
-  // vehicle_driver_skips: employees taken off Drivers by hand, so the
-  // automatic "designation says Driver" list doesn't bring them back.
-  try {
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS vehicle_driver_vehicles (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        driver_id INT NOT NULL,
-        vehicle_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_driver_vehicle (driver_id, vehicle_id),
-        KEY idx_dvv_vehicle (vehicle_id),
-        FOREIGN KEY (driver_id) REFERENCES vehicle_drivers(id) ON DELETE CASCADE,
-        FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
-      )
-    `);
-    await dbPool.query(
-      "INSERT IGNORE INTO vehicle_driver_vehicles (driver_id, vehicle_id) SELECT d.id, d.usual_vehicle_id FROM vehicle_drivers d JOIN vehicles v ON v.id = d.usual_vehicle_id"
-    );
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS vehicle_driver_skips (
-        employee_id INT PRIMARY KEY,
-        skipped_by INT NULL,
-        skipped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (err: any) {
-    console.warn("⚠️ Could not ensure driver vehicles / skips tables: " + err.message);
-  }
   // Book a Ride -> saved places (Home / Work / Other + a note for the
   // driver), one account's own. users.can_save_ride_places, OFF by default.
   try {
@@ -193,6 +162,38 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
     await dbPool.query("ALTER TABLE vehicles MODIFY COLUMN status ENUM('available','on_ride','maintenance','retired') NOT NULL DEFAULT 'available'");
   } catch (err: any) {
     console.warn("⚠️ Could not add the 'retired' vehicle status: " + err.message);
+  }
+  // A driver's usual vehicles — one driver may have several (and a vehicle
+  // several drivers). Replaces vehicle_drivers.usual_vehicle_id, which is
+  // copied in once and then kept as the first of them for older code.
+  // (Created after `vehicles`, which its foreign key needs on a fresh database.)
+  // vehicle_driver_skips: employees taken off Drivers by hand, so the
+  // automatic "designation says Driver" list doesn't bring them back.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_driver_vehicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        driver_id INT NOT NULL,
+        vehicle_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_driver_vehicle (driver_id, vehicle_id),
+        KEY idx_dvv_vehicle (vehicle_id),
+        FOREIGN KEY (driver_id) REFERENCES vehicle_drivers(id) ON DELETE CASCADE,
+        FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(
+      "INSERT IGNORE INTO vehicle_driver_vehicles (driver_id, vehicle_id) SELECT d.id, d.usual_vehicle_id FROM vehicle_drivers d JOIN vehicles v ON v.id = d.usual_vehicle_id"
+    );
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_driver_skips (
+        employee_id INT PRIMARY KEY,
+        skipped_by INT NULL,
+        skipped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure driver vehicles / skips tables: " + err.message);
   }
   try {
     await dbPool.query(`
