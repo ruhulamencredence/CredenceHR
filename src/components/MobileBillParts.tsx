@@ -173,6 +173,7 @@ export const Modal: React.FC<{ title: string; onClose: () => void; children: Rea
     <div className="fixed inset-0 z-[90] bg-slate-900/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div
         className={`bg-white w-full ${wide ? 'sm:max-w-4xl' : 'sm:max-w-lg'} max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-xl`}
+        style={{ paddingBottom: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between z-10">
