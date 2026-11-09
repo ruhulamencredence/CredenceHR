@@ -316,12 +316,14 @@ const EntryRow = React.memo(function EntryRow({
   // Delivery Date (Condition Set's "job_edit" type — see
   // deliveryDateConditions.ts). Only looked up while this row is actually
   // being edited, so a long entries list doesn't fire one request per row.
-  const { earliestAllowedDate: editEarliestDate } = useDeliveryLeadTime(
+  const editLead = useDeliveryLeadTime(
     token,
     'job_edit',
     isEditing ? it.project_id : null,
     isEditing ? it.budget_id : null
   );
+  // The stricter of the general rule and this item's Material condition.
+  const editEarliestDate = editLead.earliestFor(editItemName || it.item_name);
   return (
     <tr className={`${split ? split.row : 'odd:bg-white even:bg-slate-50/70'} hover:bg-blue-50/50 transition-colors`}>
       <td className={`px-2 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums ${split ? split.edge : ''}`}>{idx + 1}.</td>
@@ -587,12 +589,14 @@ const EntryCard = React.memo(function EntryCard({
 }: EntryRowProps) {
   // Same Condition Set lookup as EntryRow above (desktop table vs this mobile
   // card are two separate components rendering the same data).
-  const { earliestAllowedDate: editEarliestDate } = useDeliveryLeadTime(
+  const editLead = useDeliveryLeadTime(
     token,
     'job_edit',
     isEditing ? it.project_id : null,
     isEditing ? it.budget_id : null
   );
+  // The stricter of the general rule and this item's Material condition.
+  const editEarliestDate = editLead.earliestFor(editItemName || it.item_name);
   const fieldLabel = "text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1";
   const inputCls = "w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none";
   // Compact "label ⋯ value" line used by the read-only (non-editing) layout — packs
@@ -1502,7 +1506,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // own rows below (Condition Set's "entry" type — see
   // deliveryDateConditions.ts). Re-resolves whenever the Project/Budget
   // picked above changes; null (unrestricted) until both are chosen.
-  const { earliestAllowedDate: newEntryEarliestDate } = useDeliveryLeadTime(
+  // earliestFor(material names) adds each item's Material condition (the
+  // stricter rule wins) — used per row / per item below.
+  const newEntryLead = useDeliveryLeadTime(
     token,
     'entry',
     projectId ? Number(projectId) : null,
@@ -4460,7 +4466,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                             >
                               <option value="">Select a Delivery Date...</option>
                               {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => {
-                                const blocked = isDateBlockedByLeadTime(d, newEntryEarliestDate);
+                                const blocked = isDateBlockedByLeadTime(d, newEntryLead.earliestFor(row.itemNames.map((x) => x.name)));
                                 return (
                                   <option key={d} value={d} disabled={blocked}>
                                     {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
@@ -4475,9 +4481,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               value={row.deliveryDate}
                               onChange={(e) => updateRow(row.rowId, { deliveryDate: e.target.value })}
                               min={
-                                newEntryEarliestDate &&
-                                (!selectedBudget?.delivery_date_from || newEntryEarliestDate > selectedBudget.delivery_date_from)
-                                  ? newEntryEarliestDate
+                                newEntryLead.earliestFor(row.itemNames.map((x) => x.name)) &&
+                                (!selectedBudget?.delivery_date_from || newEntryLead.earliestFor(row.itemNames.map((x) => x.name)) > selectedBudget.delivery_date_from)
+                                  ? newEntryLead.earliestFor(row.itemNames.map((x) => x.name))
                                   : selectedBudget?.delivery_date_from || undefined
                               }
                               max={selectedBudget?.delivery_date_to || undefined}
@@ -5486,7 +5492,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 >
                   <option value="">Select a Delivery Date...</option>
                   {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => {
-                    const blocked = isDateBlockedByLeadTime(d, newEntryEarliestDate);
+                    const blocked = isDateBlockedByLeadTime(d, newEntryLead.earliestFor(editOpt.name));
                     return (
                       <option key={d} value={d} disabled={blocked}>
                         {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
@@ -5500,9 +5506,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   value={itemDeliveryDraft}
                   onChange={(e) => setItemDeliveryDraft(e.target.value)}
                   min={
-                    newEntryEarliestDate &&
-                    (!selectedBudget?.delivery_date_from || newEntryEarliestDate > selectedBudget.delivery_date_from)
-                      ? newEntryEarliestDate
+                    newEntryLead.earliestFor(editOpt.name) &&
+                    (!selectedBudget?.delivery_date_from || newEntryLead.earliestFor(editOpt.name) > selectedBudget.delivery_date_from)
+                      ? newEntryLead.earliestFor(editOpt.name)
                       : selectedBudget?.delivery_date_from || undefined
                   }
                   max={selectedBudget?.delivery_date_to || undefined}

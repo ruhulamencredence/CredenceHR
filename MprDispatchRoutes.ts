@@ -31,7 +31,7 @@
 // (while not yet received), with a reason.
 
 import type { Express } from "express";
-import { resolveMinLeadDays, addDaysToDateStr } from "./deliveryDateConditions";
+import { resolveMinLeadDays, addDaysToDateStr, materialRules, materialKey } from "./deliveryDateConditions";
 import { poLinesFor } from "./PoImportRoutes";
 
 interface Deps {
@@ -719,7 +719,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       from = toDateOnlyString(b?.delivery_date_from);
       to = toDateOnlyString(b?.delivery_date_to);
     }
-    const lead = await resolveMinLeadDays(queryDB, "job_edit", { projectId: entry.project_id, budgetId: entry.budget_id, userRole: role });
+    // The stricter of the general rule and this material's condition.
+    const general = await resolveMinLeadDays(queryDB, "job_edit", { projectId: entry.project_id, budgetId: entry.budget_id, userRole: role });
+    const mat = (await materialRules(queryDB, "job_edit", role)).get(materialKey(entry.item_name));
+    const lead = mat && mat.days > (general ?? -1) ? mat.days : general;
     const earliest = lead !== null ? addDaysToDateStr(today, lead) : null;
     const min = [today, entryDate, from, earliest].filter(Boolean).sort().pop() as string;
     return { min, max: to, from, to, lead, earliest, floor: entryDate > today ? entryDate : today };

@@ -16,7 +16,7 @@
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
-import { resolveMinLeadDays, addDaysToDateStr } from "./deliveryDateConditions";
+import { leadTimeProblem } from "./deliveryDateConditions";
 
 interface EntriesRouteDeps {
   authenticateToken: any;
@@ -468,21 +468,16 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // for the "entry" condition_type, resolved for this Project/Budget. Enforced
       // here too, not just as a floor on the client's date picker, so it can't be
       // bypassed via a direct API call.
-      const entryMinLeadDays = await resolveMinLeadDays(queryDB, "entry", {
-        projectId: project_id,
-        budgetId: budget_id,
-        userRole: req.user.role
-      });
-      if (entryMinLeadDays !== null) {
-        const earliestAllowed = addDaysToDateStr(todayInDhaka(), entryMinLeadDays);
-        for (const it of items) {
-          const d = String(it.delivery_date).slice(0, 10);
-          if (d < earliestAllowed) {
-            return res.status(400).json({
-              error: `Delivery Date needs at least ${entryMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
-            });
-          }
-        }
+      // Material conditions too (the stricter rule wins — deliveryDateConditions.ts).
+      {
+        const problem = await leadTimeProblem(
+          queryDB,
+          "entry",
+          { projectId: project_id, budgetId: budget_id, userRole: req.user.role },
+          items.map((it: any) => ({ material: it.item_name, date: it.delivery_date })),
+          todayInDhaka()
+        );
+        if (problem) return res.status(400).json({ error: problem });
       }
 
       // An MPR No that carries several imported Excel rows (even ones that share the
@@ -799,22 +794,15 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // Admin-set "minimum lead time" for the "entry" condition_type — Add MPR to Job
       // is still a new-row entry, same as creating a Job (see POST /api/entries above).
       {
-        const entryMinLeadDays = await resolveMinLeadDays(queryDB, "entry", {
-          projectId: project_id,
-          budgetId: budget_id,
-          userRole: req.user.role
-        });
-        if (entryMinLeadDays !== null) {
-          const earliestAllowed = addDaysToDateStr(todayInDhaka(), entryMinLeadDays);
-          for (const it of items) {
-            const d = String(it.delivery_date).slice(0, 10);
-            if (d < earliestAllowed) {
-              return res.status(400).json({
-                error: `Delivery Date needs at least ${entryMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
-              });
-            }
-          }
-        }
+        // Material conditions too (the stricter rule wins).
+        const problem = await leadTimeProblem(
+          queryDB,
+          "entry",
+          { projectId: project_id, budgetId: budget_id, userRole: req.user.role },
+          items.map((it: any) => ({ material: it.item_name, date: it.delivery_date })),
+          todayInDhaka()
+        );
+        if (problem) return res.status(400).json({ error: problem });
       }
 
       // Same MPR ownership rule as creation: the Job owner may reuse their own MPR Nos.
@@ -1319,19 +1307,15 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // opposed to POST /api/entries / Add MPR above, which are new rows),
         // only checked here alongside the entry-date/today floor, i.e. only
         // when the Delivery Date is actually being changed.
-        const jobEditMinLeadDays = await resolveMinLeadDays(queryDB, "job_edit", {
-          projectId: entry.project_id,
-          budgetId: entry.budget_id,
-          userRole: req.user.role
-        });
-        if (jobEditMinLeadDays !== null) {
-          const earliestAllowed = addDaysToDateStr(todayInDhaka(), jobEditMinLeadDays);
-          if (newDeliveryDate < earliestAllowed) {
-            return res.status(400).json({
-              error: `Delivery Date needs at least ${jobEditMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
-            });
-          }
-        }
+        // Material conditions too (the stricter rule wins).
+        const problem = await leadTimeProblem(
+          queryDB,
+          "job_edit",
+          { projectId: entry.project_id, budgetId: entry.budget_id, userRole: req.user.role },
+          [{ material: item_name !== undefined && String(item_name).trim() ? String(item_name) : String(entry.item_name || ""), date: newDeliveryDate }],
+          todayInDhaka()
+        );
+        if (problem) return res.status(400).json({ error: problem });
       }
 
       // If the entry came from a Budget, the new Item must still be one of that

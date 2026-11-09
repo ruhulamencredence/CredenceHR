@@ -12,6 +12,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { MaterialConditionsPanel } from './MaterialConditionsPanel';
 interface DeliveryDateConditionsPanelProps {
   token: string;
 }
@@ -335,6 +336,8 @@ export const DeliveryDateConditionsPanel: React.FC<DeliveryDateConditionsPanelPr
   const [projects, setProjects] = useState<Project[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
+  // General rules (Entry, Job Edit) or the per-material conditions.
+  const [view, setView] = useState<'general' | 'materials'>('general');
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -371,9 +374,33 @@ export const DeliveryDateConditionsPanel: React.FC<DeliveryDateConditionsPanelPr
         <p className="text-xs text-slate-500 mt-1">
           Require a minimum number of days' notice before a Delivery Date can be picked or changed — prevents, for
           example, someone editing today with a delivery date set for tomorrow. Entry and Job Edit each have their own
-          independent setting.
+          independent setting. Material conditions add a separate notice for chosen materials — the stricter rule wins.
         </p>
       </div>
+      <div className="flex gap-2 flex-wrap" role="tablist">
+        {(
+          [
+            ['general', 'New Job Entry & Job Edit rules'],
+            ['materials', 'Material conditions']
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={view === k}
+            onClick={() => setView(k)}
+            className={`px-4 py-2 rounded-full text-xs font-semibold border transition-colors ${view === k ? 'text-white border-transparent' : 'bg-white border-slate-200 text-slate-700'}`}
+            style={view === k ? { background: 'var(--g-accent, #7F00FF)' } : undefined}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'materials' ? (
+        <MaterialConditionsPanel token={token} />
+      ) : (
+      <>
       <ConditionTypeSection
         token={token}
         conditionType="entry"
@@ -394,6 +421,8 @@ export const DeliveryDateConditionsPanel: React.FC<DeliveryDateConditionsPanelPr
         budgets={budgets}
         onChanged={fetchAll}
       />
+      </>
+      )}
     </div>
   );
 };

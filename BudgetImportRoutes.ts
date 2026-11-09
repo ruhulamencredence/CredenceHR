@@ -9,7 +9,7 @@
 import { activeGroupId } from "./companyContext";
 import { DeliveryConditionType } from "./deliveryDateConditions";
 import { addDaysToDateStr } from "./deliveryDateConditions";
-import { resolveMinLeadDays } from "./deliveryDateConditions";
+import { resolveMinLeadDays, materialRules } from "./deliveryDateConditions";
 import { memoryDb } from "./memoryDbFallback";
 import type { Express } from "express";
 import { draftBudgetNotice } from "./BudgetNoticeDraft";
@@ -1254,9 +1254,14 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         budgetId,
         userRole: req.user.role
       });
+      // Material conditions that apply to this account for this type — the
+      // picker takes the stricter of these and the rule above per material.
+      const materials = Array.from((await materialRules(queryDB, conditionType, req.user.role)).values());
       res.json({
         min_lead_days: minLeadDays,
-        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null
+        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null,
+        today: todayInDhaka(),
+        materials
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
