@@ -26,6 +26,16 @@ export function installKeyboardScrollFix(): () => void {
     const tag = target.tagName;
     if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return;
 
+    // Saved-data suggestions (the browser's / Android's autofill) popped up
+    // over amount, note and search boxes — on some phones closing the
+    // keyboard. A field that doesn't say what it wants (no autocomplete
+    // attribute) gets "off"; the ones that do (the website's sign-in,
+    // change password) keep theirs.
+    if ((tag === 'INPUT' || tag === 'TEXTAREA') && !target.hasAttribute('autocomplete')) {
+      const type = (target as HTMLInputElement).type;
+      if (tag === 'TEXTAREA' || !/^(checkbox|radio|file|range|color|button|submit|hidden)$/.test(type)) target.setAttribute('autocomplete', 'off');
+    }
+
     // 350ms comfortably covers the keyboard's slide-up animation on virtually
     // every Android device/version — scrolling any earlier fights the
     // still-resizing viewport and can under/over-shoot.

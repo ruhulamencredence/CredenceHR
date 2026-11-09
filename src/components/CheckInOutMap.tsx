@@ -28,7 +28,7 @@ import { apiUrl } from '../lib/api';
 import { getCurrentCoords } from '../lib/currentCoords';
 import { clearDraft, readDraft, saveDraft } from '../lib/formDraft';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-import { scrollFocusedFieldIntoView, useKeyboardInset } from '../lib/useKeyboardInset';
+import { scrollFocusedFieldIntoView, useKeyboardGap } from '../lib/useKeyboardInset';
 import { Capacitor } from '@capacitor/core';
 import { useMdUp } from '../lib/useMdUp';
 import { Spinner } from './Spinner';
@@ -68,38 +68,6 @@ function metres(a: Coords, b: Coords) {
   const x = Math.sin(r(b.latitude - a.latitude) / 2) ** 2 + Math.cos(r(a.latitude)) * Math.cos(r(b.latitude)) * Math.sin(r(b.longitude - a.longitude) / 2) ** 2;
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
-// How much of the screen's bottom the on-screen keyboard covers that this
-// full-screen page doesn't already avoid. The app: the keyboard's height,
-// minus whatever the WebView shrank by itself (some Android WebViews shrink,
-// some don't). A phone browser: what the visual viewport lost at the bottom.
-function useKeyboardGap(): { gap: number; open: boolean } {
-  const kb = useKeyboardInset();
-  const [, redraw] = useState(0);
-  const base = useRef(typeof window !== 'undefined' ? window.innerHeight : 0);
-  useEffect(() => {
-    const vv = window.visualViewport;
-    const on = () => redraw((n) => n + 1);
-    window.addEventListener('resize', on);
-    vv?.addEventListener('resize', on);
-    vv?.addEventListener('scroll', on);
-    return () => {
-      window.removeEventListener('resize', on);
-      vv?.removeEventListener('resize', on);
-      vv?.removeEventListener('scroll', on);
-    };
-  }, []);
-  if (Capacitor.isNativePlatform()) {
-    if (!kb) {
-      base.current = window.innerHeight;
-      return { gap: 0, open: false };
-    }
-    return { gap: Math.max(0, kb - Math.max(0, base.current - window.innerHeight)), open: kb > 80 };
-  }
-  const vv = window.visualViewport;
-  const gap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-  return { gap, open: gap > 80 };
-}
-
 const fmt = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
