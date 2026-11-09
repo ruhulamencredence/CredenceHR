@@ -1673,6 +1673,19 @@ Unique: `unique_user_company`(user_id,company_id)
 
 Unique: `uniq_user_device`(user_id,device_id)
 
+### `user_device_requests`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না | idx | logical → `users` |
+| `device_row_id` | int(11) | না | idx | logical → `user_devices` |
+| `device_name` | varchar(200) | হ্যাঁ |  | |
+| `requested_at` | timestamp | হ্যাঁ |  | |
+| `decision` | varchar(20) | হ্যাঁ |  | |
+| `decided_by` | int(11) | হ্যাঁ |  | |
+| `decided_at` | timestamp | হ্যাঁ |  | |
+
 ### `user_profile_details`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

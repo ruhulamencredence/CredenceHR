@@ -117,6 +117,7 @@
   "user_app_access",
   "user_company_access",
   "user_devices",
+  "user_device_requests",
   "user_profile_details",
   "user_project_permissions",
   "user_sessions",
