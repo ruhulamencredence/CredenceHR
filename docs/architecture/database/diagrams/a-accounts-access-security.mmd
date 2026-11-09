@@ -161,6 +161,15 @@ erDiagram
     int company_id
     tinyint is_default
   }
+  user_device_requests {
+    int id PK
+    int user_id FK
+    int device_row_id
+    varchar device_name
+    timestamp requested_at
+    varchar decision
+    timestamp decided_at
+  }
   user_devices {
     int id PK
     int user_id FK
@@ -248,6 +257,7 @@ erDiagram
   users ||..o{ sso_login_requests : "user_id"
   users ||..o{ user_app_access : "user_id"
   users ||--o{ user_company_access : "user_id"
+  users ||..o{ user_device_requests : "user_id"
   users ||..o{ user_devices : "user_id"
   users ||--o{ user_profile_details : "user_id"
   projects ||--o{ user_project_permissions : "project_id"

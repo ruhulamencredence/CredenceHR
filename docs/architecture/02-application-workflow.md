@@ -506,6 +506,7 @@ Inventory-তে দুটো ভাগ: Vehicles আর Drivers। Driver য�
 ## আরও কিছু notification
 
 - **নতুন ফোন (Device Access):** Superadmin approve করলে অ্যাকাউন্টটা "New phone approved" পায়, ফিরিয়ে দিলে "New phone not approved" (`DeviceRoutes.ts`)।
+- **Device Access-এর তালিকা:** ওপরে **Phone change requests** — অপেক্ষার অনুরোধ আগে (যেটা আগে এসেছে সেটা ওপরে, Move to this phone / Allow one more / Turn away), তার নিচে সিদ্ধান্ত হয়ে যাওয়াগুলো ক্রমিক নম্বরসহ, নতুনটা আগে (Moved / Allowed one more / Turned away / Allowed (limit raised), কখন আর কে)। প্রতিটা অনুরোধ আলাদা সারি (`user_device_requests`), তাই একই ফোন আবার চাইলে আগেরটা মুছে যায় না। প্রতিটা অ্যাকাউন্ট আর অনুরোধে Employee ID, **Dept** আর **Location** (কর্মীর branch / work station) দেখায়, খোঁজাও যায় এগুলো দিয়ে।
 - **Asset ফেরত চাওয়া:** নিচে "Asset: কার হাতে দেওয়া, ফেরত কীভাবে যায়" দেখুন।
 - **E-sign বাতিল:** HR সই নেওয়া বাতিল করলে যাঁর সইয়ের অপেক্ষায় ছিল তিনি "Signature no longer needed" পান (`ESignRoutes.ts`)।
 

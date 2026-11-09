@@ -26,11 +26,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>টেবিল</td>
-<td><strong>২৪৩</strong></td>
+<td><strong>২৪৪</strong></td>
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,৬৩৮</strong></td>
+<td><strong>২,৬৪৬</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
@@ -52,7 +52,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </table>
 <!-- /AUTO:stats -->
 
-<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৪৩<!--/n--> টেবিল)</h2>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৪৪<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 <a href="diagrams/full-application-er.svg">SVG (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a> · PNG/PDF: GitHub → Actions → সবশেষ <strong>Docs sync</strong> রান → Artifacts → <code>CredenceHR-documentation</code> (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)</p>
 <ul>
@@ -110,14 +110,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="a-accounts-access-security-31">A. Accounts, Access &amp; Security (31টি টেবিল)</h3>
+<h3 id="a-accounts-access-security-32">A. Accounts, Access &amp; Security (32টি টেবিল)</h3>
 <p>লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র <code>users</code> (১৫৮টি foreign key এখানে এসে মেলে)।</p>
 <p>মূল টেবিল: <code>users</code> (লগইন), <code>user_sessions</code>, <code>user_devices</code>, <code>admin_module_permissions</code>(+<code>_layers</code>), <code>login_attempts</code>, <code>password_reset_*</code></p>
 <p><img alt="A. Accounts, Access &amp; Security" src="diagrams/a-accounts-access-security.png" /></p>
 <p><a href="diagrams/a-accounts-access-security.svg">বড় SVG</a> · <a href="diagrams/a-accounts-access-security.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
+`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_device_requests`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
 
 </details>
 
@@ -232,7 +232,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td><code>data-dictionary.md</code></td>
-<td><!--n:tables-->২৪৩<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+<td><!--n:tables-->২৪৪<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
 </tr>
 <tr>
 <td><code>diagrams/*.mmd</code></td>
@@ -256,6 +256,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <p>নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর <strong>Docs sync</strong> কাজটি সার্ভার চালিয়ে <code>information_schema</code> পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে <code>npm run docs:db</code> (বিস্তারিত <code>../README.md</code>-এর "স্বয়ংক্রিয় আপডেট")।</p>
 <h2 id="drawio">draw.io ফাইল</h2>
 <p><code>credencehr-database.drawio</code> — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৪৩<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৪৪<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা <code>data-dictionary.md</code> তে।
 জেনারেটর: <code>../tools/db/drawio_*</code> (<code>npm run docs:db</code> নিজে চালায়)।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

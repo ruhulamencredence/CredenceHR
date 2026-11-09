@@ -49,6 +49,43 @@ export async function ensureDeviceSchema(queryDB: QueryDB) {
     "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'max_devices'"
   );
   if (!Number(has?.[0]?.n || 0)) await queryDB("ALTER TABLE users ADD COLUMN max_devices INT NOT NULL DEFAULT 1").catch(() => {});
+  // Every "new phone" request and what became of it, one row per ask (a
+  // phone that asks again gets a new row), so Device Access can list the
+  // waiting ones on top and the decided ones under them, newest first.
+  // decision: NULL = waiting; moved / added = approved; turned_away;
+  // allowed = signed in by itself after the phone limit was raised.
+  await queryDB(`CREATE TABLE IF NOT EXISTS user_device_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    device_row_id INT NOT NULL,
+    device_name VARCHAR(200) NULL,
+    requested_at TIMESTAMP NULL,
+    decision VARCHAR(20) NULL,
+    decided_by INT NULL,
+    decided_at TIMESTAMP NULL,
+    KEY idx_udr_user (user_id),
+    KEY idx_udr_device (device_row_id)
+  )`);
+  // Requests from before this table: one row per phone that ever asked.
+  await queryDB(
+    `INSERT INTO user_device_requests (user_id, device_row_id, device_name, requested_at, decision, decided_by, decided_at)
+     SELECT d.user_id, d.id, d.device_name, d.requested_at,
+            CASE WHEN d.status = 'pending' THEN NULL WHEN d.approved_at IS NOT NULL THEN 'moved' ELSE 'turned_away' END,
+            d.approved_by, d.approved_at
+       FROM user_devices d
+      WHERE d.requested_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM user_device_requests r WHERE r.device_row_id = d.id)`
+  ).catch(() => {});
+}
+
+// Close a phone's open request (if any) with what happened to it.
+async function closeRequest(queryDB: QueryDB, deviceRowId: number, decision: string, by: number | null) {
+  await queryDB("UPDATE user_device_requests SET decision = ?, decided_by = ?, decided_at = ? WHERE device_row_id = ? AND decision IS NULL", [
+    decision,
+    by,
+    new Date(),
+    deviceRowId
+  ]).catch(() => {});
 }
 
 const exempt = (u: any) => u?.role === "superadmin" || Number(u?.is_platform_admin || 0) === 1;
@@ -76,7 +113,11 @@ export async function checkAppDevice(queryDB: QueryDB, user: any, body: any): Pr
   const active = mine.filter((r) => r.status === "active").length;
   const limit = Math.max(1, Number(user.max_devices || 1));
   if (exempt(user) || active < limit) {
-    if (row) await queryDB("UPDATE user_devices SET status = 'active', last_seen_at = ?, device_name = COALESCE(?, device_name) WHERE id = ?", [now, name, row.id]);
+    if (row) {
+      await queryDB("UPDATE user_devices SET status = 'active', last_seen_at = ?, device_name = COALESCE(?, device_name) WHERE id = ?", [now, name, row.id]);
+      // It was waiting, and the limit has since been raised: done by itself.
+      if (row.status === "pending") await closeRequest(queryDB, Number(row.id), "allowed", null);
+    }
     else
       await queryDB("INSERT INTO user_devices (user_id, device_id, device_name, platform, status, last_seen_at) VALUES (?, ?, ?, ?, 'active', ?)", [
         userId,
@@ -102,6 +143,12 @@ export async function checkAppDevice(queryDB: QueryDB, user: any, body: any): Pr
       now
     ]);
   if (firstAsk) {
+    const asked: any[] = (await queryDB("SELECT id, user_id, device_id FROM user_devices WHERE user_id = ?", [userId])) || [];
+    const rowId = Number(asked.find((r) => Number(r.user_id) === userId && r.device_id === deviceId)?.id || 0);
+    if (rowId)
+      await queryDB("INSERT INTO user_device_requests (user_id, device_row_id, device_name, requested_at) VALUES (?, ?, ?, ?)", [userId, rowId, name || row?.device_name || null, now]).catch(
+        () => {}
+      );
     const groupId = Number(user.group_id ?? DEFAULT_GROUP_ID);
     const admins: any[] = (await queryDB("/*unscoped*/ SELECT id, role, group_id FROM users").catch(() => [])) || [];
     for (const a of admins)
@@ -161,6 +208,28 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
     try {
       const users = await groupUsers();
       const ids = new Set(users.map((u) => Number(u.id)));
+      // Department and work station (branch) — to tell people apart.
+      const [emps, depts, branches, reqs, deciders]: any[][] = await Promise.all([
+        queryDB("/*unscoped*/ SELECT user_id, employee_id, designation, department, department_id, branch, branch_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => []),
+        queryDB("/*unscoped*/ SELECT id, name FROM departments").catch(() => []),
+        queryDB("/*unscoped*/ SELECT id, branch_name FROM branches").catch(() => []),
+        queryDB("SELECT * FROM user_device_requests ORDER BY id DESC").catch(() => []),
+        queryDB("/*unscoped*/ SELECT id, name FROM users WHERE role IN ('superadmin', 'admin')").catch(() => [])
+      ]);
+      const deptName = new Map((depts || []).map((d: any) => [Number(d.id), d.name]));
+      const branchName = new Map((branches || []).map((b: any) => [Number(b.id), b.branch_name]));
+      const empOf = new Map<number, any>();
+      for (const e of emps || []) if (!empOf.has(Number(e.user_id))) empOf.set(Number(e.user_id), e);
+      const who = (userId: number) => {
+        const e = empOf.get(userId);
+        return {
+          employee_code: e?.employee_id || null,
+          designation: e?.designation || null,
+          department: (e?.department_id && deptName.get(Number(e.department_id))) || e?.department || null,
+          location: (e?.branch_id && branchName.get(Number(e.branch_id))) || e?.branch || null
+        };
+      };
+      const deciderName = new Map((deciders || []).map((u: any) => [Number(u.id), u.name]));
       const devices: any[] = ((await queryDB("SELECT * FROM user_devices")) || []).filter((d: any) => ids.has(Number(d.user_id)) && d.status !== "removed");
       const lite = (d: any) => ({
         id: Number(d.id),
@@ -182,13 +251,42 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
               name: u.name,
               email: u.email || u.username || null,
               role: u.role,
+              ...who(Number(u.id)),
               exempt: exempt(u),
               max_devices: Math.max(1, Number(u.max_devices || 1)),
               devices: mine.filter((d) => d.status === "active").map(lite),
               pending: mine.filter((d) => d.status === "pending").map(lite)
             };
           })
-          .sort((a, b) => b.pending.length - a.pending.length || String(a.name).localeCompare(String(b.name)))
+          .sort((a, b) => b.pending.length - a.pending.length || String(a.name).localeCompare(String(b.name))),
+        // Waiting first (oldest ask first), then decided ones, newest first.
+        requests: (reqs || [])
+          .filter((r: any) => ids.has(Number(r.user_id)))
+          .map((r: any) => {
+            const u = users.find((x) => Number(x.id) === Number(r.user_id));
+            const dev = devices.find((d: any) => Number(d.id) === Number(r.device_row_id));
+            return {
+              id: Number(r.id),
+              device_id: Number(r.device_row_id),
+              user_id: Number(r.user_id),
+              name: u?.name || "",
+              email: u?.email || u?.username || null,
+              ...who(Number(r.user_id)),
+              phone: r.device_name || dev?.device_name || "Unknown phone",
+              requested_at: r.requested_at,
+              // Still waiting only while the phone itself is (a request left
+              // open by an older path is shown as closed).
+              decision: r.decision || (dev?.status === "pending" ? null : "closed"),
+              decided_at: r.decided_at,
+              decided_by: r.decided_by ? deciderName.get(Number(r.decided_by)) || null : null
+            };
+          })
+          .sort((a: any, b: any) => {
+            if (!a.decision !== !b.decision) return a.decision ? 1 : -1;
+            const t = (v: any) => (v ? new Date(String(v).replace(" ", "T")).getTime() || 0 : 0);
+            if (!a.decision) return t(a.requested_at) - t(b.requested_at) || a.id - b.id;
+            return t(b.decided_at || b.requested_at) - t(a.decided_at || a.requested_at) || b.id - a.id;
+          })
       });
     } catch (err) {
       fail(res, err);
@@ -213,6 +311,7 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
       }
       await queryDB("UPDATE user_devices SET status = 'active', approved_by = ?, approved_at = ? WHERE id = ?", [req.user.id, new Date(), Number(d.id)]);
       forget([Number(d.id)]);
+      await closeRequest(queryDB, Number(d.id), mode === "add" ? "added" : "moved", Number(req.user.id));
       // The account hears it (its other phones get the push), so nobody keeps
       // waiting on a phone that can already sign in.
       await createAlert(queryDB, {
@@ -236,6 +335,7 @@ export function registerDeviceRoutes(app: Express, deps: DeviceRouteDeps) {
       await queryDB("UPDATE user_devices SET status = 'removed' WHERE id = ?", [Number(d.id)]);
       forget([Number(d.id)]);
       if (d.status === "pending") {
+        await closeRequest(queryDB, Number(d.id), "turned_away", Number(req.user.id));
         await createAlert(queryDB, {
           userId: Number(d.user_id),
           type: "device_request",
