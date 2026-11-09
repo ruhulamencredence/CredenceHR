@@ -326,6 +326,7 @@ flowchart TD
 **Conveyance Disburser (Pay Out) layer:** টেমপ্লেটের শেষ ধাপ এই ধরনের হলে, আগের সব layer approve করার পর claim-টা এখনও Bill হয়নি, কিন্তু Admin Panel → **Disbursement**-এ উপরে "Claims waiting to be paid out" অংশে **Pending** হিসেবে দেখায় (`GET /api/disbursement/awaiting-claims`, Disbursement module লাগে)। সেই layer-এর লোক (বা Superadmin) এখান থেকে বা Approve Application থেকে Voucher দিয়ে **Disburse** করেন — claim approved হয়, নিজের Bill পায় ও paid হয় (`POST /api/my-approvals/:id/act`)। Disbursement module-এর অন্যরা দেখেন কার অপেক্ষায় আছে, কিন্তু Disburse করতে পারেন না।
 
 **Check In/Out** আলাদা: কর্মী কোথাও গেলে GPS-সহ ক্লেইম, একই Approval engine (`MovementClaimRoutes.ts`)।
+**নতুন Bill Claim ফর্ম (ফোন ও web):** প্রতিটি bill-এর ক্যাটাগরি, তারিখ, পরিমাণ আর নোট। bill-এর তারিখ দিয়ে যাচাই হয়: claim-এর From–To-এর ভেতরে কিনা, Policy-র পেছনের সীমা (কত দিন আগের খরচ চাওয়া যায়), "এক তারিখ এক claim-এ" (চালু থাকলে, একই তারিখ আরেক claim-এ থাকলে আটকায়), আর ক্যাটাগরির মাসিক সীমা (bill-এর মাস ধরে); রিপোর্টেও খরচের দিন এটাই। প্রথম **Transport** bill-এর কার্ডের ভেতরেই "Check In/Out for Bill N" — সেখানে From–To-এর check-in/out টিক দিয়ে প্রতিটার টাকা লেখা হয়, যোগফলই ওই bill-এর পরিমাণ (bill-এর নিজের ঘর বন্ধ থাকে)। আগে এই তালিকা সব bill-এর নিচে আলাদা থাকত, তাই পরে যোগ করা Bill 2 তার আগে বসে যেত; এখন check-in/out তার bill-এর সাথেই থাকে। দ্বিতীয় কোনো Transport bill-এ লেখা থাকে তার check-in/out কোন bill-এ যায়।
 ফাইল: `BillClaimRoutes.ts`, `BillClaimPolicy.ts`।
 
 ---
