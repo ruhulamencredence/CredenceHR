@@ -668,7 +668,7 @@ useLiveRefresh(() => loadData());
               switcher uses. Extra top padding on mobile since the header row
               above is hidden there. */}
           {isPhone ? (
-            <div className="mx-3 mt-2 flex flex-col gap-3">
+            <div className="mx-3 mt-2 flex flex-col gap-3" data-tour="ts-period">
               <PeriodPill period={period} today={today} minYear={yearOptions[yearOptions.length - 1]} onOpen={() => setSheetOpen(true)} onChange={applyPeriod} />
               {(() => {
                 // Today's check-in, whatever period is on screen.
@@ -680,7 +680,7 @@ useLiveRefresh(() => loadData());
               })()}
             </div>
           ) : (
-          <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
+          <div data-tour="ts-period" className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
@@ -708,7 +708,7 @@ useLiveRefresh(() => loadData());
             // Phone: the gauge and day cards' shape (SelfPageSkeleton).
             isPhone ? <SelfBodySkeleton shape="timesheetDays" className="px-3 pt-3 pb-5" /> : <LoadingBlock />
           ) : (
-            <div className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
+            <div data-tour="ts-days" className={isPhone ? 'px-3 pt-3 pb-5' : 'px-3 sm:px-6 py-5'}>
               {/* Month Wise */}
               {tab === 'month' && isPhone && renderPhoneDays(monthDates, monthDatesDesc, "This month hasn't started yet.")}
               {tab === 'month' && !isPhone && (

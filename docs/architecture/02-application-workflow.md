@@ -773,3 +773,12 @@ CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 
 - এই সুবিধা আসার আগে থেকে থাকা account-গুলোও একবার দেখে (তারা কেউ আগে দেখেনি)।
 - Admin Panel → **Active Users → Welcome slides** (শুধু Superadmin, API-ও `requireSuperAdmin`): সবার জন্য চালু/বন্ধ, কতজন দেখেছেন, আর **Show again to everyone** (`welcome_slides_settings.reset_at`) — বড় update-এর পর সবাই আবার একবার দেখেন।
 
+## Tutorials (guided tour)
+
+আসল পর্দার উপরে ছোট ছোট guided tour (`src/lib/tutorials.ts`, আঁকে `src/components/GuidedTour.tsx`): বাকি সব অন্ধকার, একটা অংশ দাগ দিয়ে ঘেরা, পাশে ছোট liquid-glass card-এ ব্যাখ্যা — `1/6 · Back · Next`, Skip, Esc বা ফোনের Back = বন্ধ। চারটা tour: **Dashboard**, **Check In / Check Out**, **Apply for leave**, **Timesheet** — প্রত্যেকটা আগে নিজের পাতা খোলে (App.tsx Dashboard-এ ফেরায়, UserPanel.tsx section খোলে)।
+
+- কোথা থেকে: Welcome slides-এর শেষ slide-এ **Show me around** (= Dashboard tour; **Go to Dashboard** = শুধু বন্ধ), আর **Tutorials** তালিকা (`TutorialsSheet.tsx`) — ফোনে নিচের বারের **More**-এ, website-এর menu-তে **Others → Tutorials**।
+- Permission: যে পাতা account খুলতে পারে না তার tour তালিকায় নেই (Check In/Out = `can_view_movement_claims`, Leave = Leave-এর যেকোনো access, Timesheet = `can_view_timesheet`, Superadmin সব)। tour-এর যে ধাপের অংশ পর্দায় নেই (access নেই, শুধু ফোনের বোতাম ইত্যাদি) সেটা বাদ যায়।
+- শেষ পর্যন্ত (Got it) দেখলে ✓ Done — account-এ রাখা (`users.tutorials_done`, `GET /api/tutorials`, `POST /api/tutorials/done`; শুধু জানা tour id নেয়)। নতুন joiner-এর অস্থায়ী login পায় না।
+- Admin Panel → **Active Users → Welcome slides & Tutorials** (শুধু Superadmin, API-ও `requireSuperAdmin`): Tutorials চালু/বন্ধ (`welcome_slides_settings.tutorials_enabled` — বন্ধ থাকলে menu item, শেষ slide-এর বোতাম আর API তিনটাই বন্ধ), আর **Reset tutorials** (সবার ✓ Done মুছে যায়)।
+

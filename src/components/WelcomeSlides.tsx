@@ -7,7 +7,9 @@
 // website and in the app (WelcomeSlidesRoutes.ts decides; App.tsx asks).
 // Four slides: Welcome, Check in from anywhere, Leave in two taps, You're all
 // set. Skip (jumps to the last slide), Back, → or a swipe; "Get started"
-// (or closing it) marks it seen for this account on every device.
+// (or closing it) marks it seen for this account on every device. With the
+// Tutorials on, the last slide offers "Show me around" — the same, then the
+// Dashboard tour (GuidedTour.tsx).
 // Phone: full screen. Wider screens: a phone-sized card over the dimmed page.
 // Pictures are the app's own animations (the login illustration — already
 // kept on the device — GPS, beach, plan).
@@ -107,7 +109,7 @@ const SlideArt: React.FC<{ slide: Slide; active: boolean }> = ({ slide, active }
   );
 };
 
-export const WelcomeSlides: React.FC<{ onDone: () => void }> = ({ onDone }) => {
+export const WelcomeSlides: React.FC<{ onDone: (showAround?: boolean) => void; canTour?: boolean }> = ({ onDone, canTour = false }) => {
   const [i, setI] = useState(0);
   const last = SLIDES.length - 1;
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -117,7 +119,7 @@ export const WelcomeSlides: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') go(1);
       else if (e.key === 'ArrowLeft') go(-1);
-      else if (e.key === 'Escape') onDone();
+      else if (e.key === 'Escape') onDone(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -171,7 +173,10 @@ export const WelcomeSlides: React.FC<{ onDone: () => void }> = ({ onDone }) => {
         <div key={i} className="flex-1 min-h-0 flex flex-col animate-[welcomeIn_.35s_ease-out]">
           <SlideArt slide={s} active />
           <h2 className="text-[28px] leading-[1.15] font-extrabold tracking-tight text-[#1b1338]">{s.title}</h2>
-          <p className="text-[14px] leading-relaxed text-slate-500 mt-2">{s.text}</p>
+          <p className="text-[14px] leading-relaxed text-slate-500 mt-2">
+            {s.text}
+            {i === last && canTour ? ' Want a quick look around?' : ''}
+          </p>
         </div>
 
         {i < last ? (
@@ -194,14 +199,21 @@ export const WelcomeSlides: React.FC<{ onDone: () => void }> = ({ onDone }) => {
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={onDone}
-            className="mt-6 w-full rounded-full py-3.5 text-[15px] font-extrabold text-white shadow-[0_14px_26px_-10px_rgba(124,58,237,0.6)] active:scale-[0.98] transition-transform"
-            style={{ background: 'linear-gradient(135deg, #6d28d9, #c026d3)' }}
-          >
-            Get started
-          </button>
+          <div className="mt-6 flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => onDone(canTour)}
+              className="w-full rounded-full py-3.5 text-[15px] font-extrabold text-white shadow-[0_14px_26px_-10px_rgba(124,58,237,0.6)] active:scale-[0.98] transition-transform"
+              style={{ background: 'linear-gradient(135deg, #6d28d9, #c026d3)' }}
+            >
+              {canTour ? 'Show me around' : 'Get started'}
+            </button>
+            {canTour && (
+              <button type="button" onClick={() => onDone(false)} className="w-full py-2.5 text-sm font-bold text-slate-500">
+                Go to Dashboard
+              </button>
+            )}
+          </div>
         )}
       </div>
       <style>{'@keyframes welcomeIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}'}</style>

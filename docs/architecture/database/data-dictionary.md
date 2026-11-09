@@ -1797,6 +1797,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_give_feedback` | tinyint(1) | না | default 0 | |
 | `can_use_fingerprint` | tinyint(1) | না | default 0 | |
 | `welcome_seen_at` | datetime | হ্যাঁ |  | |
+| `tutorials_done` | text | হ্যাঁ |  | |
 | `can_receive_material` | tinyint(1) | না | default 0 | |
 | `can_return_dispatch` | tinyint(1) | না | default 0 | |
 | `can_sign_documents` | tinyint(1) | না | default 0 | |
@@ -1840,6 +1841,7 @@ Unique: `uniq_web_push_endpoint`(endpoint)
 | `reset_at` | datetime | হ্যাঁ |  | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `tutorials_enabled` | tinyint(1) | না | default 1 | |
 
 ## M. PEPM: MPR, Jobs, Budget & Materials
 

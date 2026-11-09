@@ -162,9 +162,11 @@ useLiveRefresh(() => load(true));
           </button>
         )}
         {balanceLoading ? null : leaveTypes.length > 0 && (
-          <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} onSubmit={() => setShowNewModal(true)} />
+          <div data-tour="leave-balance">
+            <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} onSubmit={() => setShowNewModal(true)} />
+          </div>
         )}
-        <div className="grid grid-cols-3 gap-1 p-[5px] rounded-full bg-white/75 border border-white/90 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]">
+        <div data-tour="leave-tabs" className="grid grid-cols-3 gap-1 p-[5px] rounded-full bg-white/75 border border-white/90 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]">
           {TABS.map((t) => {
             const on = tab === t.key;
             return (
@@ -243,7 +245,7 @@ useLiveRefresh(() => load(true));
           before "what have I already submitted". Read-only, no per-account
           table, no editing — same scope MyLeave.tsx always had. */}
       {!balanceLoading && balance && (
-        <div className="px-4 sm:px-6 pt-4 flex flex-wrap gap-2">
+        <div data-tour="leave-balance" className="px-4 sm:px-6 pt-4 flex flex-wrap gap-2">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
             Casual <span className="font-bold">{balance.casual_leave}</span>
           </div>
@@ -307,7 +309,7 @@ useLiveRefresh(() => load(true));
           redundant here since this page is always just the signed-in
           account's own applications). No tabs — the Status column already
           shows Review/Approved/Rejected per row. */}
-      <div className="hidden md:block">
+      <div className="hidden md:block" data-tour="leave-tabs">
         {loading ? (
           <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
         ) : applications.length === 0 ? (

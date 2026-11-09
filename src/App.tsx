@@ -53,6 +53,9 @@ try {
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
 // Welcome slides, once per account (WelcomeSlides.tsx) — its own small chunk.
 const WelcomeSlides = lazy(retryImport(() => import('./components/WelcomeSlides')));
+// Tutorials: the list and one guided tour (src/lib/tutorials.ts) — loaded when used.
+const TutorialsSheet = lazy(retryImport(() => import('./components/TutorialsSheet')));
+const GuidedTour = lazy(retryImport(() => import('./components/GuidedTour')));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
@@ -129,6 +132,7 @@ import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSi
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
+import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
 export default function App() {
   // Fixed for this mount: switching component type later would remount the Dashboard.
@@ -482,9 +486,62 @@ export default function App() {
       clearTimeout(t);
     };
   }, [token, user?.id, user?.is_onboarding]);
-  const finishWelcome = () => {
+  const finishWelcome = (showAround?: boolean) => {
     setShowWelcome(false);
     if (token) void fetch(apiUrl('/api/welcome-slides/seen'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+    if (showAround) startTour('dashboard');
+  };
+
+  // Tutorials (src/lib/tutorials.ts): switched on for this account, which
+  // ones it finished (WelcomeSlidesRoutes.ts). The list (Menu / More ->
+  // Tutorials) and the tours themselves only while switched on.
+  const tutorials = useTutorialsState().enabled;
+  useEffect(() => {
+    setTutorialsState({ enabled: false, done: [] });
+    if (!token || !user?.id || user.is_onboarding) return;
+    let alive = true;
+    fetch(apiUrl('/api/tutorials'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && d && setTutorialsState({ enabled: !!d.enabled, done: Array.isArray(d.done) ? d.done : [] }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [token, user?.id, user?.is_onboarding]);
+  const [tutorialsOpen, setTutorialsOpen] = useState(false);
+  const [activeTour, setActiveTour] = useState<Tour | null>(null);
+  useEffect(() => {
+    const onOpen = () => getTutorialsState().enabled && setTutorialsOpen(true);
+    const onStart = (e: Event) => {
+      const tour = toursFor(user).find((t) => t.id === (e as CustomEvent).detail);
+      if (!tour || !getTutorialsState().enabled) return;
+      window.dispatchEvent(new Event(TOUR_GO_EVENT));
+      setTutorialsOpen(false);
+      setActiveTour(tour);
+    };
+    window.addEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+    window.addEventListener(START_TOUR_EVENT, onStart);
+    return () => {
+      window.removeEventListener(OPEN_TUTORIALS_EVENT, onOpen);
+      window.removeEventListener(START_TOUR_EVENT, onStart);
+    };
+  }, [user]);
+  useEffect(() => {
+    if (!tutorials) {
+      setTutorialsOpen(false);
+      setActiveTour(null);
+    }
+  }, [tutorials]);
+  const closeTour = (finished: boolean) => {
+    const t = activeTour;
+    setActiveTour(null);
+    if (!finished || !t || !token) return;
+    setTutorialsState({ done: Array.from(new Set([...getTutorialsState().done, t.id])) });
+    void fetch(apiUrl('/api/tutorials/done'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: t.id })
+    }).catch(() => undefined);
   };
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
@@ -1069,6 +1126,19 @@ export default function App() {
     window.addEventListener('credence:open-self-service', onOpen);
     return () => window.removeEventListener('credence:open-self-service', onOpen);
   }, [user]);
+  // A tutorial starting: back to the user Dashboard (UserPanel.tsx then
+  // opens the tour's own section — TOUR_SECTION_EVENT).
+  useEffect(() => {
+    const onGo = () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('user');
+    };
+    window.addEventListener(TOUR_GO_EVENT, onGo);
+    return () => window.removeEventListener(TOUR_GO_EVENT, onGo);
+  }, []);
   // A task alert (TaskRoutes.ts): one about work given to this account opens
   // My Tasks; anything else (a request to HR, a task they gave) opens Task
   // Management for HR. The page then opens the task itself.
@@ -1879,7 +1949,18 @@ export default function App() {
       {/* An account's first sign-in: the welcome slides (WelcomeSlides.tsx). */}
       {showWelcome && token && user && (
         <Suspense fallback={null}>
-          <WelcomeSlides onDone={finishWelcome} />
+          <WelcomeSlides onDone={finishWelcome} canTour={tutorials} />
+        </Suspense>
+      )}
+      {/* Tutorials: the list, and the guided tour running (GuidedTour.tsx). */}
+      {tutorialsOpen && token && user && (
+        <Suspense fallback={null}>
+          <TutorialsSheet user={user} onClose={() => setTutorialsOpen(false)} />
+        </Suspense>
+      )}
+      {activeTour && token && user && (
+        <Suspense fallback={null}>
+          <GuidedTour key={activeTour.id} tour={activeTour} onClose={closeTour} />
         </Suspense>
       )}
 
