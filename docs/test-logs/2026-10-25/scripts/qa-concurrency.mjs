@@ -55,7 +55,9 @@ T('C3', dbl.filter(ok).length === 1 && acts === 2 && sql(`SELECT status FROM lea
 
 // C4 — the same payroll run generated 5 times at once.
 await api(SA, 'POST', '/api/payroll/salary-structures', { employee_id: E.emp, effective_date: '2026-01-01', basic_salary: 30000, house_rent: 15000, medical_allowance: 3000, conveyance_allowance: 2000 });
-await api(SA, 'POST', '/api/payroll/advances', { employee_id: E.emp, total_amount: 10000, monthly_installment: 2000, reason: 'race' });
+const adv = await api(SA, 'POST', '/api/payroll/advances', { employee_id: E.emp, total_amount: 10000, monthly_installment: 2000, reason: 'race' });
+// A new loan waits until Accounts pays it out (LoanPlan.ts); paid out in time for September.
+await api(SA, 'POST', `/api/payroll/advances/${adv.body.id}/disburse`, { date: '2026-09-01', method: 'cash', start_month: '2026-09' });
 const gens = await burst(5, () => api(SA, 'POST', '/api/payroll/generate', { employee_id: E.emp, month_year: '2026-09', total_working_days: 26, present_days: 26, leave_days: 0, absent_days: 0 }));
 const runs = Number(sql(`SELECT COUNT(*) FROM payrolls WHERE employee_id=${E.emp} AND month_year='2026-09'`));
 T('C4', runs === 1 && gens.every((g) => g.status < 500), 'Payroll run 5 times at once makes one salary (others refused, no server error)', `rows ${runs}; answers ${codes(gens)}`);

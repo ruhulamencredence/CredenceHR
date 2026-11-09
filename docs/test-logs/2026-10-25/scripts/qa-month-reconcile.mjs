@@ -78,7 +78,11 @@ for (const c of CASES) {
   sql(`INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (${c.uid}, 10, 14, 10)`);
   const house = c.basic / 2;
   await api(SA, 'POST', '/api/payroll/salary-structures', { employee_id: c.empId, effective_date: '2024-01-01', basic_salary: c.basic, house_rent: house, medical_allowance: 1500, conveyance_allowance: 1000, tax_deduction: c.tax || 0, pf_deduction: c.pf || 0 });
-  if (c.advance) await api(SA, 'POST', '/api/payroll/advances', { employee_id: c.empId, total_amount: c.advance.total, monthly_installment: c.advance.monthly, reason: 'reconciliation' });
+  if (c.advance) {
+    const adv = await api(SA, 'POST', '/api/payroll/advances', { employee_id: c.empId, total_amount: c.advance.total, monthly_installment: c.advance.monthly, reason: 'reconciliation' });
+    // A new loan waits until Accounts pays it out (LoanPlan.ts); paid out in time for MONTH.
+    await api(SA, 'POST', `/api/payroll/advances/${adv.body.id}/disburse`, { date: `${MONTH}-01`, method: 'cash', start_month: MONTH });
+  }
   const rows = Object.entries(c.times).map(([d, t]) => `(${c.uid}, ${projectId}, '${d}', '${d} ${t}:00', '${d} 18:00:00')`);
   if (rows.length) sql(`INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at) VALUES ${rows.join(',')}`);
   if (c.leave) {
