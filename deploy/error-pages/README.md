@@ -3,7 +3,7 @@
 While the Node app is restarting (a deploy, `pm2 restart`, a crash) nginx
 cannot reach it and shows its own plain **502 Bad Gateway**. With the block
 below it shows `credence-down.html` instead: the CredenceHR icon on the app's
-orange screen, English + Bangla text, and it **reloads by itself** as soon as
+orange screen, one line of text, and it **reloads by itself** as soon as
 the app answers again (it checks every 5 seconds; "Try again" checks at once).
 nginx serves the file from disk, so it works with the app fully down — the
 icon is inside the file, nothing else is loaded.

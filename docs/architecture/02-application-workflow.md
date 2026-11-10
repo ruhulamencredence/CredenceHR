@@ -753,7 +753,7 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 ## App restart-এর সময় "We'll be right back" পাতা
 
-Deploy বা `pm2 restart`-এর সময় Node app কয়েক সেকেন্ড উত্তর দেয় না; nginx তখন নিজের সাদা "502 Bad Gateway" দেখাত। এখন nginx-এর `error_page 502 503 504 @credence_down` (`deploy/error-pages/README.md`) সেই সময় `deploy/error-pages/credence-down.html` দেখায় — app-এর কমলা পর্দা, icon (ফাইলের ভেতরেই, app ছাড়াই চলে), ইংরেজি + বাংলা লেখা। পাতাটা প্রতি ৫ সেকেন্ডে (এক মিনিট পর ১০ সেকেন্ডে) একই ঠিকানায় `HEAD` পাঠিয়ে দেখে; app উত্তর দিলেই নিজে reload হয়ে আগের পাতায় ফেরে। `/api/...` ও `/socket.io/...`-এ পাতা নয়, ছোট JSON error যায়। Status code 502-ই থাকে।
+Deploy বা `pm2 restart`-এর সময় Node app কয়েক সেকেন্ড উত্তর দেয় না; nginx তখন নিজের সাদা "502 Bad Gateway" দেখাত। এখন nginx-এর `error_page 502 503 504 @credence_down` (`deploy/error-pages/README.md`) সেই সময় `deploy/error-pages/credence-down.html` দেখায় — app-এর কমলা পর্দা, icon (ফাইলের ভেতরেই, app ছাড়াই চলে) আর এক লাইন ইংরেজি লেখা। পাতাটা প্রতি ৫ সেকেন্ডে (এক মিনিট পর ১০ সেকেন্ডে) একই ঠিকানায় `HEAD` পাঠিয়ে দেখে; app উত্তর দিলেই নিজে reload হয়ে আগের পাতায় ফেরে। `/api/...` ও `/socket.io/...`-এ পাতা নয়, ছোট JSON error যায়। Status code 502-ই থাকে।
 
 ## Claim লেখার মাঝে পাতা নতুন করে শুরু না হওয়া
 
