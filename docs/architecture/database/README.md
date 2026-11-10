@@ -92,7 +92,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`attendance`, `attendance_corrections`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
+`attendance`, `attendance_corrections`, `attendance_mock_attempts`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
 
 </details>
 

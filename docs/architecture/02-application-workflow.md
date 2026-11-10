@@ -737,6 +737,8 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 
 **APK-এ (DutyTrackingService / LiveTrackingService, নতুন APK লাগে):** প্রতিটা fix-এ Android-এর `isMock()` দেখে `mock: true` পাঠায় (`MockLocation.java`); web watcher-ও (`backgroundTracking.ts`) plugin-এর `simulated` পাঠায়। পুরনো cached অবস্থান নতুন হিসেবে নেয় না (`setMaxUpdateAgeMillis`); চলার সময় প্রথম fix-এ একটু অপেক্ষা করে GPS-মানের fix নেয় (`setWaitForAccurateLocation`)। Battery বাঁচাতে বসে থাকার (idle) সময় আগের মতোই কম-শক্তির Balanced mode — আর সেখানে আগের অবস্থান থেকে নিজের ভুলের (±) সীমার মধ্যে থাকা rough fix-কে নড়াচড়া ধরে না (Wi-Fi drift): তাতে পুরো GPS অকারণে জাগে না, লাফও আঁকা হয় না।
 
+**Remote Attendance Check In / Out-এ Fake GPS (নতুন APK লাগে):** Android অ্যাপে Check In / Out চাপলে অবস্থান নেওয়া হয় APK-এর নিজের `LocationAccess.getCurrentFix` দিয়ে (`src/lib/attendanceFix.ts`), যা অবস্থানের সাথে বলে fix-টা mock-location app থেকে এসেছে কিনা। Fake হলে map-ই খোলে না, "Fake GPS is on…" বার্তা দেখায়; map খোলা অবস্থায় "Use current location" চাপলেও একই। সার্ভারও (`POST /api/attendance/check-in` / `check-out`, off-site সহ) `mock: true` পেলে কিছুই রেকর্ড করে না — approval-এর জন্যও না — 400 ফেরত দেয় আর চেষ্টাটা `attendance_mock_attempts`-এ রাখে (কে, In না Out, অবস্থান, accuracy, project)। Web browser আর পুরনো APK এটা জানাতে পারে না; সেখানে আগের মতোই চলে।
+
 ## Employee Tracking: অ্যাপ বন্ধ থাকলেও location যায়
 
 আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, `DutyTrackingService.java`:

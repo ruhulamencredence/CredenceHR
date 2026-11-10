@@ -1030,6 +1030,19 @@ Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 | `out_distance_m` | int(11) | হ্যাঁ |  | |
 | `out_place` | varchar(255) | হ্যাঁ |  | |
 
+### `attendance_mock_attempts`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `kind` | enum('in','out') | না |  | |
+| `lat` | decimal(10,7) | হ্যাঁ |  | |
+| `lng` | decimal(10,7) | হ্যাঁ |  | |
+| `accuracy_m` | int(11) | হ্যাঁ |  | |
+| `project_id` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `attendance_report_department_access`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |

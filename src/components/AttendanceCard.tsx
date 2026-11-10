@@ -7,6 +7,7 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
@@ -40,7 +41,7 @@ function formatTimeParts(iso: string): { time: string; meridiem: string } {
 // already use: Capacitor's plugin on the native Android app build (so it works
 // without a browser permission prompt inside the WebView), plain
 // navigator.geolocation on the web build.
-async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+async function getCurrentCoords(): Promise<AttendanceFix> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {
@@ -58,6 +59,9 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
     if (status !== 'granted') {
       throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
     }
+    // The APK's own fix says whether it is fake GPS (mock location).
+    const fix = await nativeAttendanceFix();
+    if (fix) return fix;
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
   }
@@ -173,7 +177,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // cancels there instead of confirming.
   // `offsite`: outside every one of the account's own Projects — it goes for
   // approval and counts once approved (AttendanceRoutes.ts offsitePunch).
-  const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number }; offsite?: boolean } | null>(null);
+  const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: AttendanceFix; offsite?: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Today's In / Out from every Project and the office device, each with the
@@ -244,6 +248,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     try {
       const coords = await getCurrentCoords();
+      if (coords.mock) throw new Error(MOCK_LOCATION_MESSAGE);
       const placed = projects
         .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
         .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
@@ -287,6 +292,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           latitude: coords.latitude,
           longitude: coords.longitude,
           remarks: remarks || undefined,
+          // From the APK's own fix (lib/attendanceFix.ts); the server refuses a mock one.
+          ...(coords.mock !== undefined ? { mock: coords.mock, accuracy_m: coords.accuracy ?? null } : {}),
           ...(pending.offsite ? { offsite: true } : {})
         })
       });

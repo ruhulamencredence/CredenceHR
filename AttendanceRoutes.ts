@@ -439,8 +439,31 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     return true;
   }
 
+  // The Android app (LocationAccessPlugin.getCurrentFix) says whether the
+  // position came from a mock-location ("fake GPS") app. Such a punch is
+  // never recorded — not even for approval; the attempt is kept in
+  // attendance_mock_attempts. (The web and older APKs can't tell: no flag.)
+  async function refuseMockFix(req: any, res: any, kind: "in" | "out"): Promise<boolean> {
+    if (req.body?.mock !== true) return false;
+    const num = (v: any) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+    try {
+      await queryDB(
+        "INSERT INTO attendance_mock_attempts (user_id, kind, lat, lng, accuracy_m, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [req.user.id, kind, num(req.body.latitude), num(req.body.longitude), num(req.body.accuracy_m) == null ? null : Math.round(Number(req.body.accuracy_m)), num(req.body.project_id)]
+      );
+    } catch (err: any) {
+      console.warn("Could not record a fake GPS attendance attempt: " + err.message);
+    }
+    res.status(400).json({
+      mock: true,
+      error: 'Fake GPS is on on this phone (a mock-location app). Turn it off — and in Developer options set "Select mock location app" to Nothing — then try again.'
+    });
+    return true;
+  }
+
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
+      if (await refuseMockFix(req, res, "in")) return;
       if (req.body?.offsite === true && (await offsitePunch(req, res, "in"))) return;
       const parsed = parseAttendanceCoords(req.body);
       if ("error" in parsed) return res.status(400).json({ error: parsed.error });
@@ -521,6 +544,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
   app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
+      if (await refuseMockFix(req, res, "out")) return;
       if (req.body?.offsite === true && (await offsitePunch(req, res, "out"))) return;
       {
         // No In on record yet but an off-site In waiting for approval: this Out joins it.
