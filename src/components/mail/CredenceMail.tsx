@@ -382,7 +382,7 @@ const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void
   const keyboardInset = useKeyboardInset();
   useBackButtonClose(true, onClose);
   return (
-    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
+    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
       <div className="w-full max-w-xl max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
           <div className="flex items-center justify-between gap-2 mb-4">
@@ -420,7 +420,7 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
     }
   };
   return (
-    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
+    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
       <div className="w-full max-w-md max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
           <div className="flex items-center justify-between gap-2 mb-4">

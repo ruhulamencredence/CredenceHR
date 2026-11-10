@@ -19,8 +19,29 @@ export const isStandalone = () =>
 
 const inSafari = () => typeof navigator !== 'undefined' && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//i.test(navigator.userAgent);
 
-export const AddToHomeScreenButton: React.FC = () => {
+export const AddToHomeScreenButton: React.FC<{ compact?: boolean }> = ({ compact }) => {
   const [open, setOpen] = useState(false);
+  // compact: the sign-in page's "Get the app" row (next to the Android one).
+  if (compact)
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex-1 min-w-0 flex items-center justify-center gap-2.5 h-12 px-3 rounded-[14px] text-white transition-opacity hover:opacity-90"
+          style={{ background: '#111318' }}
+        >
+          <img src={appStoreIcon} alt="" className="w-6 h-6 shrink-0" />
+          <span className="flex flex-col items-start leading-tight min-w-0">
+            <span className="text-[9px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
+              GET THE APP ON
+            </span>
+            <span className="text-[14.5px] font-semibold">iPhone</span>
+          </span>
+        </button>
+        {open && createPortal(<AddToHomeScreenSheet onClose={() => setOpen(false)} />, document.body)}
+      </>
+    );
   return (
     <>
       <button
