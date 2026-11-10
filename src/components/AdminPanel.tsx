@@ -19,6 +19,7 @@ import { apiUrl } from '../lib/api';
 import { Capacitor } from '@capacitor/core';
 import { ModulePath } from './ModulePath';
 import { ADMIN_TAB_PATH } from '../lib/modulePaths';
+import { useAdminPhonePage } from '../lib/adminPhone';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -605,6 +606,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     },
     []
   );
+
+  // On a phone: the module's name in the blended app header, the phone
+  // layout on (lib/adminPhone.ts). The name is the last breadcrumb segment.
+  const adminPhone = useAdminPhonePage(ADMIN_TAB_PATH[activeTab]?.slice(-1)[0] || 'Admin Panel');
 
   // Reports the live activeTab up to App.tsx (see onActiveTabChange above) so
   // GlobalSidebar can highlight whichever item actually matches this tab.
@@ -3519,7 +3524,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900">
       {/* Where this page sits in the menu — web only, same as every
           Self Service page's breadcrumb. */}
-      {!Capacitor.isNativePlatform() && ADMIN_TAB_PATH[activeTab] && (
+      {!Capacitor.isNativePlatform() && !adminPhone && ADMIN_TAB_PATH[activeTab] && (
         <div className="-mb-2">
           <ModulePath path={ADMIN_TAB_PATH[activeTab]} />
         </div>

@@ -914,3 +914,115 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
 .tracking-tiles {
   filter: grayscale(1) contrast(0.92) brightness(1.06);
 }
+
+/*
+  Admin Panel on a phone (≤ 767 px) — the Self Service look, without
+  touching desktop (docs/plans/admin-panel-mobile.md, lib/adminPhone.ts sets
+  <html data-admin-phone> only on a phone while an Admin page is open):
+    - the page's outer white boxes go flat: the content sits on the page
+      with a 12 px gutter, no border / shadow / double padding;
+    - a row of underline sub-tabs becomes a row of round chips that scrolls
+      sideways (lines up with Self Service's "Pending / History" chips);
+    - buttons, selects and inputs are at least 40 px tall, text ≥ 12 px.
+  Step 1 of the plan; tables → cards, filter / add sheets and sticky grids
+  come in the next steps per module.
+*/
+@media (max-width: 767px) {
+  /* The page column: Self Service's gutter. */
+  html[data-admin-phone] main > div > .w-full.px-4 { padding-left: 12px; padding-right: 12px; }
+
+  /* Outer boxes (the module's own card: bg-white + border + rounded) go flat. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl,
+  html[data-admin-phone] main .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-xl {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  /* …but the inner cards (lists, tiles, forms) stay cards. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl .bg-white.border.border-slate-200.rounded-2xl,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 .bg-white.rounded-2xl.shadow-sm.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.border.border-slate-200 .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-xl .bg-white.border.border-slate-200.rounded-xl {
+    background: rgba(255, 255, 255, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.9) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 6px 16px -10px rgba(60, 30, 10, 0.25) !important;
+  }
+  /* The box's head strip (title + buttons) loses its padding box and rule. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-6.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-6.border-b,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-5.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-5.border-b,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-4.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-4.border-b {
+    padding: 4px 4px 12px !important;
+    border-bottom-color: transparent !important;
+  }
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-6:not(.border-b),
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-6:not(.border-b) { padding: 4px !important; }
+
+  /* Underline sub-tabs → round chips in one scrolling row. */
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200,
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto,
+  html[data-admin-phone] main [role="tablist"].border-b {
+    border-bottom: none !important;
+    gap: 8px !important;
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none;
+    padding: 2px 2px 6px;
+    margin-bottom: 8px !important;
+  }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200::-webkit-scrollbar,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200::-webkit-scrollbar,
+  html[data-admin-phone] main [role="tablist"].border-b::-webkit-scrollbar { display: none; }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button,
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto > button,
+  html[data-admin-phone] main [role="tablist"].border-b > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    border: none !important;
+    border-radius: 9999px !important;
+    margin-bottom: 0 !important;
+    padding: 9px 16px !important;
+    min-height: 40px;
+    font-size: 13px !important;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--g-text, #44403c) !important;
+    box-shadow: 0 2px 6px rgba(60, 30, 10, 0.08);
+  }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button[class*="border-blue-600"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button[class*="border-blue-600"],
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto > button[class*="border-blue-600"],
+  html[data-admin-phone] main [role="tablist"].border-b > button[aria-selected="true"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button[class*="text-blue-600"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button[class*="text-blue-600"] {
+    background: var(--g-accent, #f47920) !important;
+    color: #ffffff !important;
+    font-weight: 700;
+  }
+  /* The pill-group tabs (inline-flex rounded-xl bg-slate-100 p-1) scroll sideways too. */
+  html[data-admin-phone] main .inline-flex.rounded-xl.bg-slate-100.p-1 {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  html[data-admin-phone] main .inline-flex.rounded-xl.bg-slate-100.p-1 > button { flex: 0 0 auto; white-space: nowrap; min-height: 36px; }
+
+  /* Thumb-sized controls. */
+  html[data-admin-phone] main button:not([aria-label]):not(.hdr-round):not(.liquid-glass-chip):not([class*="w-7"]):not([class*="w-8"]):not([class*="w-9"]):not([class*="h-7"]):not([class*="h-8"]),
+  html[data-admin-phone] main select,
+  html[data-admin-phone] main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+    min-height: 40px;
+  }
+  html[data-admin-phone] main .text-\[10px\],
+  html[data-admin-phone] main .text-\[11px\] { font-size: 12px !important; }
+}
