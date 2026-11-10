@@ -890,6 +890,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
             only as tall as what is left below the status bar, so the message
             box never goes under the keyboard (useKeyboardInset). */}
         <div
+          data-kb-self=""
           className={`fixed inset-0 z-[81] pointer-events-none flex ${keyboardInset ? 'items-end' : 'items-end sm:items-center md:items-end'} justify-center md:justify-end p-2 sm:p-4 md:p-6`}
           style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
         >

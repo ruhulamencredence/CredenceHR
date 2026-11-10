@@ -1152,3 +1152,20 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
     padding: 6px 10px; font-size: 12px; font-weight: 600; color: #78716c;
   }
 }
+
+
+/*
+  The on-screen keyboard is up (lib/keyboardInsetVar.ts sets html.kb-open and
+  --kb = its height): every full-screen popup / bottom sheet ends above it,
+  so the fields in its lower part aren't hidden behind the keyboard; its card
+  may be at most as tall as the space left (it scrolls inside). Popups that
+  already keep themselves above the keyboard are marked data-kb-self and
+  left as they are.
+*/
+html.kb-open .fixed.inset-0:not([data-kb-self]),
+html.kb-open .fixed.bottom-0:not([data-kb-self]):has(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  bottom: var(--kb, 0px) !important;
+}
+html.kb-open .fixed.inset-0:not([data-kb-self]) > * {
+  max-height: 100% !important;
+}

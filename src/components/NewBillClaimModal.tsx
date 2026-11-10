@@ -440,6 +440,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   // Escaping to document.body via a portal sidesteps that ancestor entirely.
   return createPortal(
     <div
+      data-kb-self=""
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',

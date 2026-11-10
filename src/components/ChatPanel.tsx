@@ -2230,6 +2230,7 @@ const MemberPickerModal: React.FC<{
 
   return (
     <div
+      data-kb-self=""
       className="fixed inset-0 liquid-glass-backdrop z-30 flex items-end md:items-center justify-center p-2 md:p-4"
       style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined}
       onClick={onClose}

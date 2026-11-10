@@ -117,6 +117,7 @@ import { useBackButtonClose } from './lib/useBackButtonClose';
 import { useWideWeb } from './lib/useWideWeb';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
 import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
+import { installKeyboardInsetVar } from './lib/keyboardInsetVar';
 import { clearScreenCache } from './lib/screenCache';
 import { clearAllDrafts } from './lib/formDraft';
 import { usePullToRefresh } from './lib/usePullToRefresh';
@@ -368,6 +369,8 @@ export default function App() {
   // keyboardScrollFix.ts for why this is needed on top of the native resize
   // config in capacitor.config.ts). Attached once for the whole app.
   useEffect(() => installKeyboardScrollFix(), []);
+  // Popups and sheets stop above the on-screen keyboard (keyboardInsetVar.ts).
+  useEffect(() => installKeyboardInsetVar(), []);
 
 
   // Android hardware back button: closes whichever modal/drill-down is

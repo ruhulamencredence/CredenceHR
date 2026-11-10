@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { ArrowUp, MapPin, Building2, Fingerprint } from 'lucide-react';
+import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import googlePlayIcon from '../assets/google-play-icon.png';
@@ -352,45 +352,66 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  // Field look shared by Workspace, Login ID and Password: a soft well with
+  // an icon on the left; an accent ring while focused.
+  const fieldCls = 'block w-full pl-11 pr-4 py-3.5 rounded-2xl text-[15px] placeholder-slate-400 focus:outline-none transition-shadow';
+  const fieldStyle: React.CSSProperties = { background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' };
+  const ring = {
+    onFocus: (e: React.FocusEvent<HTMLInputElement>) => {
+      e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+    },
+    onBlur: (e: React.FocusEvent<HTMLInputElement>) => {
+      e.currentTarget.style.boxShadow = 'none';
+    }
+  };
+  const iconCls = 'w-[18px] h-[18px] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none';
+  const mainBtnCls =
+    'w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-white font-semibold text-[15px] transition-opacity disabled:opacity-50 hover:opacity-95';
+  const mainBtnStyle: React.CSSProperties = {
+    background: 'linear-gradient(90deg, var(--g-banner-1, var(--g-accent)) 0%, var(--g-banner-3, var(--g-accent)) 100%)',
+    boxShadow: '0 12px 24px -12px rgba(var(--g-accent-rgb, 244, 121, 32), 0.75)'
+  };
+  // "Get the app": on a computer both (iPhone Home Screen + Android APK); on
+  // a phone only the one for that phone; never inside the app itself or
+  // once opened from the Home Screen.
+  const showStores = !isNativeApp && !ownerMode && !isStandalone();
+  const iosHere = isIOSDevice();
+  const storeIphone = showStores && (!touchPhone || iosHere);
+  const storeAndroid = showStores && (!touchPhone || !iosHere);
+  const workspaceName = workspace?.short_name || workspace?.name || '';
+
   return (
     <div
-      // Was overflow-hidden — harmless on desktop, but on a phone it also
-      // blocked the page from scrolling at all, so when the on-screen
-      // keyboard opened while typing (Email/Project Name, then Password,
-      // which sits lower), the browser had nowhere to scroll the focused
-      // field into view and it stayed hidden behind the keyboard.
-      // overflow-y-auto lets that happen normally; nothing here actually
-      // needed the clipping (the decorative glow below is sized to this
-      // div's own bounds, inset-0, so it was never overflowing it anyway).
-      className={`min-h-dvh flex flex-col items-center px-5 py-6 sm:py-12 relative overflow-y-auto ${compact ? 'justify-start' : 'justify-center'}`}
+      // Scrolls (never overflow-hidden), so a focused field can always be
+      // brought above the on-screen keyboard.
+      className="min-h-dvh flex flex-col relative overflow-y-auto"
       onFocusCapture={(e) => {
         if ((e.target as HTMLElement).matches('input, textarea')) setFieldFocused(true);
       }}
       onBlurCapture={() => window.setTimeout(() => setFieldFocused(!!document.activeElement?.matches?.('input, textarea')), 0)}
       style={{
         background: 'var(--g-bg-gradient)',
-        paddingTop: `calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + ${compact ? '1rem' : '1.5rem'})`,
         ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
       }}
     >
-      {/* Soft centered glow, sky blue fading into the violet brand accent —
-          matches the Gemini app's home screen composition rather than
-          corner-anchored blobs. */}
       <div
         className="auth-glow pointer-events-none absolute inset-0"
         style={{
           background:
-            'radial-gradient(ellipse 900px 650px at 50% 55%, rgba(139, 195, 255, 0.50) 0%, rgba(180, 160, 255, 0.28) 40%, rgba(255, 255, 255, 0) 72%)',
+            'radial-gradient(ellipse 900px 650px at 50% 35%, rgba(139, 195, 255, 0.50) 0%, rgba(180, 160, 255, 0.28) 40%, rgba(255, 255, 255, 0) 72%)'
         }}
       />
 
-      <div className="w-full max-w-md lg:max-w-4xl relative z-10 lg:flex lg:items-center lg:gap-16">
-        {/* Left side (desktop only): logo + hero animation, large and vertically
-            centered next to the form. On mobile these stack above the form
-            instead — see the lg:hidden duplicate block below. */}
-        <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <BrandLogo workspace={ownerMode ? null : workspace} className="h-14 w-auto mb-4" />
-          <div className="hero-art relative isolate w-80 h-80 pointer-events-none">
+      <div className="relative z-10 flex-1 flex flex-col lg:flex-row lg:items-center lg:justify-center lg:gap-16 w-full lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-12">
+        {/* Logo + the office illustration. Phone: on top, the card below it
+            slides up from the bottom; while typing (compact) they step aside
+            so the card is above the keyboard. Desktop: on the left. */}
+        <div
+          className={`${compact ? 'hidden' : 'flex'} lg:flex flex-1 lg:flex-none lg:w-1/2 flex-col items-center justify-center text-center px-5 pb-4 lg:p-0`}
+          style={{ paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.25rem)' }}
+        >
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 lg:h-14 w-auto" />
+          <div className="hero-art relative isolate w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 pointer-events-none mt-2">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
@@ -398,247 +419,222 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           </div>
         </div>
 
-        {/* Mobile: logo + a smaller Lottie hero animation above the form
-            (hidden on desktop, where the block above takes over on the left
-            side instead, at full size). Pulled up a bit (-mt-2) so the
-            bigger animation below doesn't push the card as far down the
-            screen — less blank space above the logo instead. */}
-        {/* The company's logo sits under the illustration. While typing on a
-            phone both step aside (compact) so the card is above the keyboard. */}
-        <div className={`${compact ? 'hidden' : 'flex'} lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2`}>
-          <div className="hero-art relative isolate w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
-            <Suspense fallback={<div className="w-full h-full" />}>
-              <AuthHeroLottie className="w-full h-full" />
-            </Suspense>
-            <HeroSpotlight />
-          </div>
-          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mt-1 sm:mt-2" />
-        </div>
+        {/* The card: a sheet from the bottom on a phone, a card on the right on a computer. */}
+        <div className="w-full lg:w-1/2 lg:max-w-md" style={compact ? { paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.75rem)' } : undefined}>
+          <div
+            className={`px-6 pt-5 lg:p-8 ${compact ? 'rounded-[28px] mx-3' : 'rounded-t-[32px]'} lg:rounded-[28px] lg:mx-0`}
+            style={{
+              background: 'var(--g-surface, #fff)',
+              boxShadow: '0 -14px 40px -18px rgba(120, 50, 10, 0.35)',
+              paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)'
+            }}
+          >
+            <div className="lg:hidden mx-auto mb-4 h-1 w-10 rounded-full" style={{ background: 'var(--g-border, #e7e5e4)' }} />
 
-        {/* Right side (desktop) / below (mobile): greeting + the sign-in form,
-            so "Welcome back" always sits directly above the fields it belongs to. */}
-        <div className="lg:w-1/2">
-        <div className="text-center lg:text-left mb-3">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
-            {workspace || ownerMode ? 'Welcome back' : 'Welcome'}
-          </h1>
-          <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            {/* The workspace itself is named below ("Not …?") and by its logo. */}
-            {ownerMode ? 'System owner sign-in' : workspace ? 'Sign in to CredenceHR' : "Enter your company's workspace to continue"}
-          </p>
-          {workspace?.tagline && (
-            <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
-              {workspace.tagline}
-            </p>
-          )}
-        </div>
-        <div className="gemini-card px-6 py-6 sm:px-8 sm:py-8">
-          {error && (
-            <div
-              className="mb-5 text-sm p-3.5 rounded-2xl flex items-center gap-2"
-              style={{ background: '#fce8e6', color: '#c5221f' }}
-            >
-              <span>{error}</span>
-            </div>
-          )}
-
-          {!workspace && !ownerMode ? (
-            <form className="space-y-4" onSubmit={handleWorkspace}>
-              <div>
-                <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
-                  Workspace
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    autoFocus={!detecting}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    value={workspaceInput}
-                    onChange={(e) => setWorkspaceInput(e.target.value.replace(/\s+/g, '').toLowerCase())}
-                    aria-label="Workspace code"
-                    placeholder="e.g. credence"
-                    className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
-                    style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                    }}
-                    onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
-                  />
-                  <Building2 className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
-                </div>
-                <p className="mt-2 ml-1 text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
-                  Your company's short name in this app — ask HR if you don't know it.
+            <div className="mb-5">
+              <h1 className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--g-text)' }}>
+                {ownerMode ? 'System owner sign-in' : workspace ? 'Welcome back 👋' : 'Welcome 👋'}
+              </h1>
+              <p className="text-sm mt-1" style={{ color: 'var(--g-text-muted)' }}>
+                {ownerMode ? (
+                  'Sign in to manage CredenceHR'
+                ) : workspace ? (
+                  <>
+                    Sign in to <b style={{ color: 'var(--g-text)' }}>{workspaceName}</b> ·{' '}
+                    <button type="button" onClick={changeWorkspace} className="font-semibold" style={{ color: 'var(--g-accent)' }}>
+                      Change
+                    </button>
+                  </>
+                ) : (
+                  "Enter your company's workspace to continue"
+                )}
+              </p>
+              {workspace?.tagline && (
+                <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
+                  {workspace.tagline}
                 </p>
-              </div>
-              <button
-                type="submit"
-                disabled={loading || detecting || !workspaceInput.trim()}
-                className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 rounded-full text-white font-medium text-[15px] transition-all disabled:opacity-50"
-                style={{ background: 'var(--g-accent)' }}
-              >
-                <span>{loading ? 'Checking…' : 'Next'}</span>
-                {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
-              </button>
-            </form>
-          ) : (
-          <>
-          <form className="space-y-4" onSubmit={handleSubmit} autoComplete={isNativeApp ? 'off' : undefined}>
-            <div>
-              <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
-                Login ID
-              </label>
-              <input
-                type="text"
-                required
-                // On the app, Android's Autofill (saved passwords) jumped in on
-                // every letter and closed the keyboard — so the app's fields
-                // don't ask for it (the native WebView has autofill off too,
-                // MainActivity.java). The website keeps the browser's own.
-                name={isNativeApp ? 'chr-login-id' : 'username'}
-                autoComplete={isNativeApp ? 'off' : 'username'}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                enterKeyHint="next"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="Employee ID, email or Project Name"
-                className="block w-full px-5 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
-                style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                onFocus={(e) => {
-                  e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                }}
-                onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
-                Password
-              </label>
-              <div>
-                <PasswordInput
-                  required
-                  iconColor="var(--g-text-muted)"
-                  name={isNativeApp ? 'chr-login-key' : 'password'}
-                  autoComplete={isNativeApp ? 'off' : 'current-password'}
-                  enterKeyHint="go"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
-                  style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
-                  }}
-                  onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
-                />
-              </div>
-              {!ownerMode && (
-                <div className="flex justify-end mt-1.5 mr-1">
-                  <button type="button" onClick={() => setForgotOpen(true)} className="text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
-                    Forgot password?
-                  </button>
-                </div>
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 rounded-full text-white font-medium text-[15px] transition-all disabled:opacity-50"
-              style={{ background: 'var(--g-accent)' }}
-              onMouseEnter={(e) => !loading && (e.currentTarget.style.background = 'var(--g-accent-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--g-accent)')}
-            >
-              <span>{locating ? 'Getting location…' : loading ? 'Signing in…' : 'Sign in'}</span>
-              {!loading && <ArrowUp className="w-4 h-4 rotate-45" />}
-            </button>
-          </form>
+            {error && (
+              <div className="mb-4 text-sm p-3.5 rounded-2xl flex items-center gap-2" style={{ background: '#fce8e6', color: '#c5221f' }}>
+                <span>{error}</span>
+              </div>
+            )}
 
-          {fpHere && fp && (
-            <button
-              type="button"
-              onClick={() => void handleFingerprint()}
-              disabled={loading}
-              className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full font-medium text-[15px] transition-opacity disabled:opacity-50 hover:opacity-80"
-              style={{ border: '1.5px solid var(--g-accent)', color: 'var(--g-accent)', background: 'transparent' }}
-            >
-              <Fingerprint className="w-5 h-5" />
-              <span className="truncate">Sign in with fingerprint · {fp.name.split(' ')[0]}</span>
-            </button>
-          )}
+            {!workspace && !ownerMode ? (
+              <form className="space-y-4" onSubmit={handleWorkspace}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
+                    Workspace
+                  </label>
+                  <div className="relative">
+                    <Building2 className={iconCls} style={{ color: 'var(--g-text-muted)' }} />
+                    <input
+                      type="text"
+                      required
+                      autoFocus={!detecting && !touchPhone}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      enterKeyHint="next"
+                      value={workspaceInput}
+                      onChange={(e) => setWorkspaceInput(e.target.value.replace(/\s+/g, '').toLowerCase())}
+                      aria-label="Workspace code"
+                      placeholder="e.g. credence"
+                      className={fieldCls}
+                      style={fieldStyle}
+                      {...ring}
+                    />
+                  </div>
+                  <p className="mt-2 ml-1 text-[11.5px]" style={{ color: 'var(--g-text-muted)' }}>
+                    Your company's short name in this app — ask HR if you don't know it.
+                  </p>
+                </div>
+                <button type="submit" disabled={loading || detecting || !workspaceInput.trim()} className={mainBtnCls} style={mainBtnStyle}>
+                  <span>{loading ? 'Checking…' : 'Next'}</span>
+                  {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
+                </button>
+              </form>
+            ) : (
+              <>
+                <form className="space-y-3.5" onSubmit={handleSubmit} autoComplete={isNativeApp ? 'off' : undefined}>
+                  <div className="relative">
+                    <UserRound className={iconCls} style={{ color: 'var(--g-text-muted)' }} />
+                    <input
+                      type="text"
+                      required
+                      // On the app, Android's Autofill (saved passwords) jumped in on
+                      // every letter and closed the keyboard — so the app's fields
+                      // don't ask for it (the native WebView has autofill off too,
+                      // MainActivity.java). The website keeps the browser's own.
+                      name={isNativeApp ? 'chr-login-id' : 'username'}
+                      autoComplete={isNativeApp ? 'off' : 'username'}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      enterKeyHint="next"
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      aria-label="Login ID"
+                      placeholder="Employee ID, email or Project Name"
+                      className={fieldCls}
+                      style={fieldStyle}
+                      {...ring}
+                    />
+                  </div>
 
-          {forgotOpen && (
-            <ForgotPasswordPopup
-              options={forgotOptions}
-              initialIdentifier={identifier}
-              onClose={() => setForgotOpen(false)}
-              onReset={(id) => {
-                setForgotOpen(false);
-                setIdentifier(id);
-                setPassword('');
-              }}
-            />
-          )}
+                  <div>
+                    <div className="relative">
+                      <Lock className={`${iconCls} z-10`} style={{ color: 'var(--g-text-muted)' }} />
+                      <PasswordInput
+                        required
+                        iconColor="var(--g-text-muted)"
+                        name={isNativeApp ? 'chr-login-key' : 'password'}
+                        autoComplete={isNativeApp ? 'off' : 'current-password'}
+                        enterKeyHint="go"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        aria-label="Password"
+                        placeholder="Password"
+                        className={fieldCls}
+                        style={fieldStyle}
+                        {...ring}
+                      />
+                    </div>
+                    {!ownerMode && (
+                      <div className="flex justify-end mt-2 mr-1">
+                        <button type="button" onClick={() => setForgotOpen(true)} className="text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
+                          Forgot password?
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-          {isNativeApp && (
-            <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
-              <MapPin className="w-3 h-3 shrink-0" />
-              Signing in requires sharing your device location.
-            </p>
-          )}
+                  <button type="submit" disabled={loading} className={`${mainBtnCls} !mt-4`} style={mainBtnStyle}>
+                    <span>{locating ? 'Getting location…' : loading ? 'Signing in…' : 'Sign in'}</span>
+                  </button>
+                </form>
 
-          {!ownerMode && (
-            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-              Don't have an account? Contact your Admin to get one created.
-            </p>
-          )}
-          {!ownerMode && (
-            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-              Not {workspace?.short_name || workspace?.name}?{' '}
-              <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
-                Change workspace
+                {fpHere && fp && (
+                  <button
+                    type="button"
+                    onClick={() => void handleFingerprint()}
+                    disabled={loading}
+                    className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-2xl font-medium text-[15px] transition-opacity disabled:opacity-50 hover:opacity-80"
+                    style={{ border: '1.5px solid var(--g-accent)', color: 'var(--g-accent)', background: 'transparent' }}
+                  >
+                    <Fingerprint className="w-5 h-5" />
+                    <span className="truncate">Sign in with fingerprint · {fp.name.split(' ')[0]}</span>
+                  </button>
+                )}
+
+                {forgotOpen && (
+                  <ForgotPasswordPopup
+                    options={forgotOptions}
+                    initialIdentifier={identifier}
+                    onClose={() => setForgotOpen(false)}
+                    onReset={(id) => {
+                      setForgotOpen(false);
+                      setIdentifier(id);
+                      setPassword('');
+                    }}
+                  />
+                )}
+
+                {isNativeApp && (
+                  <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+                    <MapPin className="w-3 h-3 shrink-0" />
+                    Signing in requires sharing your device location.
+                  </p>
+                )}
+                {!ownerMode && (
+                  <p className="mt-3 text-center text-[11.5px]" style={{ color: 'var(--g-text-muted)' }}>
+                    No login yet? Ask your Admin / HR to create one.
+                  </p>
+                )}
+              </>
+            )}
+
+            {(storeIphone || storeAndroid) && (
+              <>
+                <div className="flex items-center gap-2.5 mt-5 mb-3">
+                  <span className="flex-1 h-px" style={{ background: 'var(--g-border, #e7e5e4)' }} />
+                  <span className="text-[11.5px]" style={{ color: 'var(--g-text-muted)' }}>
+                    Get the app
+                  </span>
+                  <span className="flex-1 h-px" style={{ background: 'var(--g-border, #e7e5e4)' }} />
+                </div>
+                <div className="flex gap-2.5">
+                  {storeIphone && <AddToHomeScreenButton compact />}
+                  {storeAndroid && (
+                    <a
+                      href="/downloads/CredenceHR.apk"
+                      download="CredenceHR.apk"
+                      type="application/vnd.android.package-archive"
+                      className="flex-1 min-w-0 flex items-center justify-center gap-2.5 h-12 px-3 rounded-[14px] text-white transition-opacity hover:opacity-90"
+                      style={{ background: '#111318' }}
+                    >
+                      <img src={googlePlayIcon} alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
+                      <span className="flex flex-col items-start leading-tight min-w-0">
+                        <span className="text-[9px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                          GET IT ON
+                        </span>
+                        <span className="text-[14.5px] font-semibold">Android</span>
+                      </span>
+                    </a>
+                  )}
+                </div>
+              </>
+            )}
+
+            <p className="mt-4 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+              <button type="button" onClick={() => setShowPrivacy(true)} className="underline">
+                Privacy Policy
               </button>
             </p>
-          )}
-          </>
-          )}
-
-          {/* APK download — WEB build only. Someone already inside the native
-              Android app has no use for this, so it's hidden there the same
-              way the location notice above is shown only for isNativeApp. */}
-          {/* iPhone / iPad get "Add to Home Screen" instead (AddToHomeScreen.tsx);
-              opened from the Home Screen already, neither is shown. */}
-          {!isNativeApp && !ownerMode && !isStandalone() && isIOSDevice() && <AddToHomeScreenButton />}
-          {!isNativeApp && !ownerMode && !isStandalone() && !isIOSDevice() && (
-            <a
-              href="/downloads/CredenceHR.apk"
-              download="CredenceHR.apk"
-              type="application/vnd.android.package-archive"
-              className="mt-5 flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
-              style={{ background: '#111318' }}
-            >
-              <img src={googlePlayIcon} alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
-              <span className="flex flex-col items-start leading-tight">
-                <span className="text-[10px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                  GET IT ON
-                </span>
-                <span className="text-[15px] font-medium">Android (APK)</span>
-              </span>
-            </a>
-          )}
-
-          <p className="mt-4 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
-            <button type="button" onClick={() => setShowPrivacy(true)} className="font-semibold underline">
-              Privacy Policy
-            </button>
-          </p>
-          {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
-        </div>
+            {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
+          </div>
         </div>
       </div>
     </div>
