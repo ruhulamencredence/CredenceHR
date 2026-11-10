@@ -751,6 +751,10 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 `.env`-এ `IP_REDIRECT_TO=https://hr.credencegroupbd.com` থাকলে, কেউ browser-এ server-এর IP দিয়ে অ্যাপ খুললে (যেমন `http://203.95.222.58:3000/login` বা `http://192.168.66.4:3000/...`) একই পাতা domain-এ খোলে (302 redirect, পথ আর `?…` একই থাকে)। যা redirect হয় না: `/api`, `/iclock` (ZKTeco push), `/socket.io`, `/downloads`, GET ছাড়া অন্য request, আর Android অ্যাপের WebView (পুরনো APK এখনো IP থেকে চলে)। `127.0.0.1` / `localhost` (nginx-এর proxy) কখনো redirect হয় না। খালি থাকলে কিছুই হয় না। IP দিয়ে port 80/443 (360 ERP) nginx নিজে `https://360.credencegroupbd.com`-এ পাঠায়।
 
+## App restart-এর সময় "We'll be right back" পাতা
+
+Deploy বা `pm2 restart`-এর সময় Node app কয়েক সেকেন্ড উত্তর দেয় না; nginx তখন নিজের সাদা "502 Bad Gateway" দেখাত। এখন nginx-এর `error_page 502 503 504 @credence_down` (`deploy/error-pages/README.md`) সেই সময় `deploy/error-pages/credence-down.html` দেখায় — app-এর কমলা পর্দা, icon (ফাইলের ভেতরেই, app ছাড়াই চলে), ইংরেজি + বাংলা লেখা। পাতাটা প্রতি ৫ সেকেন্ডে (এক মিনিট পর ১০ সেকেন্ডে) একই ঠিকানায় `HEAD` পাঠিয়ে দেখে; app উত্তর দিলেই নিজে reload হয়ে আগের পাতায় ফেরে। `/api/...` ও `/socket.io/...`-এ পাতা নয়, ছোট JSON error যায়। Status code 502-ই থাকে।
+
 ## Claim লেখার মাঝে পাতা নতুন করে শুরু না হওয়া
 
 - **নিচে টেনে refresh (pull-to-refresh):** শুধু পাতার একদম উপরে, পাতার নিজের অংশে টানলে reload হয়। Popup / form-এর ভেতরে, input বা textarea-তে, আলাদা scroll হওয়া বাক্সে, বা `.liquid-glass-backdrop` / `[role=dialog]` / fixed অংশে টানলে কিছুই হয় না (`src/lib/usePullToRefresh.ts`) — আগে Claim form-এর ভেতরে উপরে scroll করতে গেলে পুরো অ্যাপ reload হয়ে লেখা হারাত।
