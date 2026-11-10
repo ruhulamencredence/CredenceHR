@@ -40,6 +40,8 @@ export interface P360Overview {
     branch: string | null;
     grade: string | null;
     supervisor: string | null;
+    // Nobody set for them: it is their Department's Supervisor.
+    supervisor_from_department?: boolean;
     project: string | null;
     joining_date: string | null;
     job_base: string | null;
