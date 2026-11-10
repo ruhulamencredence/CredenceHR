@@ -93,6 +93,7 @@ const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendanc
 const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
+import bootIconUrl from './assets/boot/app-icon-336.webp';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
@@ -1002,11 +1003,17 @@ export default function App() {
   // reload fires, so the manual-reload gesture ends the same smooth way
   // every other loading state in the app does.
   const pullToRefreshFullscreenLoader = triggering && (
+    // The same orange screen with the app icon that the app opens on
+    // (index.html's #mpr-boot-spinner), so the reload runs straight into
+    // the normal start-up instead of flashing a grey placeholder page.
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-white"
-      style={{ animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
+      className="fixed inset-0 z-[110]"
+      role="progressbar"
+      aria-label="Reloading CredenceHR"
+      style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
     >
-      <AppLoader label="Reloading…" size={72} minHeight={0} />
+      <img src={bootIconUrl} alt="" width={112} height={112} className="absolute left-1/2 top-1/2 -ml-14 -mt-14 w-28 h-28" />
+      <div className="absolute left-1/2 -ml-[60px] w-[120px] h-[3px] rounded-sm bg-white/25" style={{ bottom: 124 }} />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
