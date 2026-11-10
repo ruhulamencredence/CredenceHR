@@ -394,7 +394,7 @@ export const Employee360: React.FC<{
                   <Field label="Joined" value={fmtDate(e.joining_date)} />
                   <Field label="Service" value={serviceLength(s.service_months)} />
                   <Field label="Total experience" value={serviceLength(s.total_experience_months)} />
-                  <Field label="Supervisor" value={e.supervisor} />
+                  <Field label="Supervisor" value={e.supervisor ? `${e.supervisor}${e.supervisor_from_department ? ' (Department)' : ''}` : null} />
                   <Field label="Branch / Project" value={[e.branch, e.project].filter(Boolean).join(' / ')} />
                   <Field label="Education" value={s.highest_education} />
                 </div>

@@ -376,7 +376,7 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
       division: e.division || null,
       unit: e.unit || null,
       grade: cur.grade,
-      supervisor: cur.supervisor,
+      supervisor: snap.supervisor?.name || null,
       job_base: e.job_base || null,
       employment_category: e.employment_category || null,
       job_status: e.job_status || null,
