@@ -614,6 +614,8 @@ export const CredenceMail: React.FC<{
   const [accountFilter, setAccountFilter] = useState<number | 0>(0);
   const [folder, setFolder] = useState<string>('Inbox');
   const [category, setCategory] = useState('');
+  // "Unread" filter on the list (any folder).
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [q, setQ] = useState('');
   const [qInput, setQInput] = useState('');
   const [list, setList] = useState<MailList | null>(null);
@@ -635,6 +637,11 @@ export const CredenceMail: React.FC<{
   const [templates, setTemplates] = useState<MailTemplate[]>([]);
   const [ruleLabels, setRuleLabels] = useState<string[]>([]);
   const listReq = useRef(0);
+  // Read / unread changes on their way to the server: a list or count that
+  // arrives meanwhile is not allowed to put them back (see setRead).
+  const pendingRead = useRef(new Map<string, boolean>());
+  const withPending = (items: MailMessage[]) =>
+    pendingRead.current.size ? items.map((x) => (pendingRead.current.has(x.id) ? { ...x, isRead: pendingRead.current.get(x.id)! } : x)) : items;
   const accounts = status?.accounts || [];
   const ownEmails = useMemo(() => new Set(accounts.map((a) => a.emailAddress.toLowerCase())), [accounts]);
   // Pictures show without asking in one's own mail, mail from our own
@@ -690,10 +697,11 @@ export const CredenceMail: React.FC<{
       const p = new URLSearchParams({ label: folder, page: String(page), limit: String(PAGE) });
       if (accountFilter) p.set('accountId', String(accountFilter));
       if (folder === 'Inbox' && category) p.set('category', category);
+      if (unreadOnly) p.set('unread', '1');
       if (q) p.set('q', q);
       return `/messages?${p.toString()}`;
     },
-    [folder, accountFilter, category, q]
+    [folder, accountFilter, category, unreadOnly, q]
   );
 
   const loadList = useCallback(
@@ -708,7 +716,7 @@ export const CredenceMail: React.FC<{
         const first = await mailFetch<MailList>(token, listPath(1));
         let items = first.items;
         for (let pg = 2; pg <= pages; pg++) items = items.concat((await mailFetch<MailList>(token, listPath(pg))).items);
-        if (req === listReq.current) setList({ ...first, items });
+        if (req === listReq.current) setList({ ...first, items: withPending(items) });
       } catch (e: any) {
         if (req === listReq.current) setListError(e.message);
       }
@@ -719,7 +727,9 @@ export const CredenceMail: React.FC<{
   const loadCounts = useCallback(async () => {
     if (!status?.enabled || !accounts.length) return;
     try {
-      setCounts(await mailFetch<MailCounts>(token, `/counts${accountFilter ? `?accountId=${accountFilter}` : ''}`));
+      const c = await mailFetch<MailCounts>(token, `/counts${accountFilter ? `?accountId=${accountFilter}` : ''}`);
+      // A read still on its way would show the old number; the count comes again once it lands.
+      if (!pendingRead.current.size) setCounts(c);
     } catch {
       // Counts are a nicety.
     }
@@ -842,22 +852,23 @@ export const CredenceMail: React.FC<{
     let cancelled = false;
     setThread(null);
     setThreadError('');
+    // Read the moment it is opened — the list and the counts at once, the
+    // server behind them — not after the conversation has loaded.
+    // Reading someone else's mailbox leaves it as it was.
+    const here = list.items.find((x) => x.id === selectedId);
+    if (here && !ro) void setRead([here], true);
     (async () => {
       try {
         // A mail from a task / event link may not be in this list.
-        const m = list.items.find((x) => x.id === selectedId) || (await mailFetch<MailMessage>(token, `/messages/${selectedId}`));
+        const m = here || (await mailFetch<MailMessage>(token, `/messages/${selectedId}`));
         const t = await mailFetch<MailMessage[]>(token, `/threads/${encodeURIComponent(m.threadId)}`);
         // Trash / Spam / Drafts open just the one mail.
         const shown = folder === 'Trash' || folder === 'Spam' || folder === 'Drafts' || folder === 'Scheduled' || !t.some((x) => x.id === m.id) ? [await mailFetch<MailMessage>(token, `/messages/${m.id}`)] : t;
         if (cancelled) return;
-        setThread(shown);
-        // Reading someone else's mailbox leaves it as it was.
-        const unread = ro ? [] : shown.filter((x) => !x.isRead).map((x) => x.id);
-        if (unread.length) {
-          await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids: unread, patch: { isRead: true } } });
-          setList((prev) => (prev ? { ...prev, items: prev.items.map((x) => (unread.includes(x.id) ? { ...x, isRead: true } : x)) } : prev));
-          void loadCounts();
-        }
+        const fresh = withPending(shown);
+        // The rest of the conversation that is still unread.
+        if (!ro) void setRead(fresh.filter((x) => !x.isRead), true);
+        setThread(ro ? fresh : fresh.map((x) => (x.isRead ? x : { ...x, isRead: true })));
       } catch (e: any) {
         if (!cancelled) setThreadError(e.message);
       }
@@ -869,6 +880,39 @@ export const CredenceMail: React.FC<{
     // mail opened from an alert).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, token, !!list]);
+
+  // Read / unread: the list and the folder counts change at once; the server
+  // (which saves it straight away and tells the mail server behind it)
+  // follows, and the counts are fetched again once it has.
+  const setRead = async (msgs: MailMessage[], read: boolean) => {
+    const changing = msgs.filter((m) => m.isRead !== read && !(pendingRead.current.get(m.id) === read));
+    if (!changing.length) return;
+    const ids = changing.map((m) => m.id);
+    for (const id of ids) pendingRead.current.set(id, read);
+    patchLocal(ids, { isRead: read });
+    setCounts((c) => {
+      if (!c) return c;
+      let inbox = 0;
+      let spam = 0;
+      for (const m of changing) {
+        if (m.labels.includes('Trash')) continue;
+        if (m.labels.includes('Spam')) spam++;
+        else if (m.labels.includes('Inbox')) inbox++;
+      }
+      const d = read ? -1 : 1;
+      return { ...c, inboxUnread: Math.max(0, c.inboxUnread + d * inbox), spamUnread: Math.max(0, c.spamUnread + d * spam) };
+    });
+    try {
+      await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, patch: { isRead: read } } });
+    } catch (e: any) {
+      say(e.message, 'error');
+      for (const id of ids) pendingRead.current.delete(id);
+      refreshRef.current();
+      return;
+    }
+    for (const id of ids) if (pendingRead.current.get(id) === read) pendingRead.current.delete(id);
+    void loadCounts();
+  };
 
   const sync = async () => {
     setSyncing(true);
@@ -887,6 +931,7 @@ export const CredenceMail: React.FC<{
   const openFolder = (f: string) => {
     setFolder(f);
     setCategory('');
+    setUnreadOnly(false);
     setSelectedId(null);
     setDrawer(false);
   };
@@ -957,11 +1002,9 @@ export const CredenceMail: React.FC<{
         return;
       }
       if (action === 'unread') {
-        await mailFetch(token, `/messages/${m.id}`, { method: 'PATCH', body: { isRead: !m.isRead } });
-        patchLocal([m.id], { isRead: !m.isRead });
         if (m.isRead) setSelectedId(null);
         else setThread((t) => t && t.map((x) => (x.id === m.id ? { ...x, isRead: true } : x)));
-        void loadCounts();
+        await setRead([m], !m.isRead);
         return;
       }
       if (action === 'task' || action === 'event') {
@@ -1033,17 +1076,18 @@ export const CredenceMail: React.FC<{
     // The list changes at once; the mail server catches up behind it (one
     // request for the whole selection — see /messages/batch).
     const reading = kind === 'read' || kind === 'unread';
-    if (reading) patchLocal(ids, { isRead: kind === 'read' });
-    else {
-      patchLocal(ids, {}, true);
-      if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    if (reading) {
+      setChecked(new Set());
+      await setRead(checkedItems, kind === 'read');
+      return;
     }
+    patchLocal(ids, {}, true);
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
     setChecked(new Set());
     try {
-      if (reading) await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, patch: { isRead: kind === 'read' } } });
-      else if (kind === 'trash') await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+      if (kind === 'trash') await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
       else await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'move', to: kind === 'spam' ? 'Spam' : kind === 'archive' ? 'Archive' : 'Inbox' } });
-      if (!reading) say(kind === 'trash' ? (forGood ? `Deleted ${ids.length}.` : `Moved ${ids.length} to Trash.`) : kind === 'spam' ? 'Moved to Spam.' : kind === 'archive' ? 'Archived.' : 'Moved to Inbox.');
+      say(kind === 'trash' ? (forGood ? `Deleted ${ids.length}.` : `Moved ${ids.length} to Trash.`) : kind === 'spam' ? 'Moved to Spam.' : kind === 'archive' ? 'Archived.' : 'Moved to Inbox.');
     } catch (e: any) {
       say(e.message, 'error');
       refreshRef.current();
@@ -1056,7 +1100,7 @@ export const CredenceMail: React.FC<{
     setLoadingMore(true);
     try {
       const next = await mailFetch<MailList>(token, listPath(Math.floor(list.items.length / PAGE) + 1));
-      setList((prev) => (prev ? { ...prev, items: [...prev.items, ...next.items.filter((n) => !prev.items.some((p) => p.id === n.id))] } : prev));
+      setList((prev) => (prev ? { ...prev, items: [...prev.items, ...withPending(next.items.filter((n) => !prev.items.some((p) => p.id === n.id)))] } : prev));
     } catch (e: any) {
       say(e.message, 'error');
     } finally {
@@ -1083,6 +1127,24 @@ export const CredenceMail: React.FC<{
       )}
     </div>
   ) : null;
+  // Unread filter (not where everything is your own or not yet sent).
+  const unreadChip = ['Sent', 'Drafts', 'Scheduled'].includes(folder) ? null : (
+    <button
+      type="button"
+      aria-pressed={unreadOnly}
+      onClick={() => {
+        setUnreadOnly((v) => !v);
+        setSelectedId(null);
+      }}
+      className={`shrink-0 inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full border ${
+        unreadOnly ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+      }`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${unreadOnly ? 'bg-white' : 'bg-sky-500'}`} />
+      Unread
+      {folder === 'Inbox' && !accountFilter && counts?.inboxUnread ? <span className="font-semibold">{counts.inboxUnread}</span> : null}
+    </button>
+  );
   const header = (
     <div className="flex items-center justify-between gap-3 mb-3 mt-2 flex-wrap">
       {/* Phone (own mailbox): the title and Back are in the header. */}
@@ -1292,6 +1354,7 @@ export const CredenceMail: React.FC<{
           </div>
         ) : folder === 'Inbox' && !q ? (
           <div className="flex gap-1 overflow-x-auto -mx-1 px-1">
+            {unreadChip}
             {MAIL_CATEGORIES.map((c) => (
               <button
                 key={c.key}
@@ -1304,9 +1367,12 @@ export const CredenceMail: React.FC<{
             ))}
           </div>
         ) : (
-          <div className="text-xs text-slate-500 px-1">
+          <div className="text-xs text-slate-500 px-1 flex items-center gap-2 flex-wrap">
+            {unreadChip}
+            <span>
             {q ? `Results for “${q}” in ${folderTitle}` : folderTitle}
             {list ? ` · ${list.total}` : ''}
+            </span>
             {q && serverSearch === 'busy' && (
               <span className="inline-flex items-center gap-1 ml-2 text-slate-400"><Loader2 className="w-3 h-3 animate-spin" /> looking for older mail on the server…</span>
             )}
@@ -1321,7 +1387,7 @@ export const CredenceMail: React.FC<{
         ) : !items.length ? (
           <div className="py-16 flex flex-col items-center text-center px-6">
             <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center"><Inbox className="w-6 h-6 text-slate-300" /></div>
-            <p className="mt-3 text-sm text-slate-500">{q ? 'No mail matches your search.' : `Nothing in ${folderTitle}.`}</p>
+            <p className="mt-3 text-sm text-slate-500">{q ? 'No mail matches your search.' : unreadOnly ? `No unread mail in ${folderTitle}.` : `Nothing in ${folderTitle}.`}</p>
           </div>
         ) : (
           <>

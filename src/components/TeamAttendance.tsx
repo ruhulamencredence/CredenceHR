@@ -29,6 +29,7 @@ import {
   MessageSquare,
   Search,
   Send,
+  Smartphone,
   Users,
   XCircle
 } from 'lucide-react';
@@ -90,7 +91,20 @@ interface SheetRow {
   // Duty Roster shift for the day, if one is rostered.
   shift?: { name: string; code: string; start: string; end: string } | null;
   marked_by_other_team: string | null;
+  // The person's own check-in that day (app GPS and / or office device),
+  // when HR's "Use members' own check-in" setting is on.
+  own_check_in?: OwnCheckIn | null;
+  // The saved arrival time came from that check-in.
+  from_app?: boolean;
 }
+export interface OwnCheckIn {
+  in: string;
+  out: string | null;
+  source: 'app' | 'device' | 'both';
+  suggest: 'present' | 'late';
+}
+export const ownCheckInLabel = (o: OwnCheckIn) =>
+  `${o.source === 'device' ? 'Device punch' : 'App check-in'} ${o.in}${o.out ? `–${o.out}` : ''}`;
 interface SheetData {
   team: SiteTeam;
   date: string;
@@ -99,7 +113,7 @@ interface SheetData {
   editable: boolean;
   locked_reason: string | null;
   min_date: string | null;
-  settings: { require_approval: boolean; require_photo: boolean; require_location: boolean; backdate_days: number };
+  settings: { require_approval: boolean; require_photo: boolean; require_location: boolean; backdate_days: number; use_app_checkin?: boolean };
   sheet: SiteSheet | null;
   rows: SheetRow[];
 }
@@ -250,6 +264,18 @@ export const SheetEditor: React.FC<{
       const fromServer: Record<number, Mark> = {};
       for (const r of d.rows)
         fromServer[r.employee_id] = { status: r.status, in_time: r.in_time || '', out_time: r.out_time || '', remarks: r.remarks || '' };
+      // A new sheet starts with everyone who checked in themselves (app /
+      // office device) marked from that check-in — Present, or Late past
+      // the grace — for the supervisor to confirm.
+      let prefilled = 0;
+      if (d.editable && !d.sheet && !hrMode) {
+        for (const r of d.rows) {
+          const o = r.own_check_in;
+          if (!o || r.marked_by_other_team || fromServer[r.employee_id]?.status) continue;
+          fromServer[r.employee_id] = { status: o.suggest, in_time: o.in, out_time: o.out || '', remarks: '' };
+          prefilled++;
+        }
+      }
       // An unsent draft on this phone wins over what the server has.
       const draft = d.editable ? readJson<Record<number, Mark> | null>(draftKey(teamId, date), null) : null;
       setMarks(draft ? { ...fromServer, ...draft } : fromServer);
@@ -258,6 +284,11 @@ export const SheetEditor: React.FC<{
       setNote(d.sheet?.note || '');
       setPhoto(null);
       if (draft) setMsg({ type: 'success', text: 'Restored your unsent marks from this phone.' });
+      else if (prefilled)
+        setMsg({
+          type: 'success',
+          text: `${prefilled} ${prefilled === 1 ? 'person has' : 'people have'} checked in on the app or office device — already marked from that. Check and submit.`
+        });
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
     } finally {
@@ -282,7 +313,11 @@ export const SheetEditor: React.FC<{
       const next = { ...m };
       for (const r of data.rows) {
         if (r.marked_by_other_team || next[r.employee_id]?.status) continue;
-        next[r.employee_id] = { status: r.app_leave ? 'leave' : status, in_time: '', out_time: '', remarks: '' };
+        const o = r.own_check_in;
+        // Someone who checked in themselves is marked from that, not in bulk.
+        next[r.employee_id] = o
+          ? { status: o.suggest, in_time: o.in, out_time: o.out || '', remarks: '' }
+          : { status: r.app_leave ? 'leave' : status, in_time: '', out_time: '', remarks: '' };
       }
       writeJson(draftKey(teamId, date), next);
       return next;
@@ -518,6 +553,30 @@ export const SheetEditor: React.FC<{
                   {!r.shift && r.holiday?.title === 'Off day (roster)' && <div className="text-[10px] font-semibold text-slate-600">Off day (roster)</div>}
                   {r.app_leave && <div className="text-[10px] font-semibold text-sky-700">On approved leave ({r.app_leave})</div>}
                   {r.marked_by_other_team && <div className="text-[10px] font-semibold text-slate-600">Already marked by {r.marked_by_other_team}</div>}
+                  {r.own_check_in && (() => {
+                    const o = r.own_check_in;
+                    const off = m.status === 'absent' || m.status === 'leave';
+                    const same = worked && m.in_time === o.in;
+                    return (
+                      <div className={`mt-0.5 flex items-start gap-1 text-[10px] font-semibold ${off ? 'text-rose-700' : 'text-emerald-700'}`}>
+                        <Smartphone className="w-3 h-3 shrink-0 mt-px" />
+                        <span className="min-w-0">
+                          {ownCheckInLabel(o)}
+                          {o.suggest === 'late' ? ' (late)' : ''}
+                          {off ? ` — but marked ${SITE_STATUS_META[m.status as SiteStatus].label}` : ''}
+                        {canEdit && !r.marked_by_other_team && !same && (
+                          <button
+                            type="button"
+                            onClick={() => update(r.employee_id, { status: o.suggest, in_time: o.in, out_time: o.out || m.out_time })}
+                            className="ml-1.5 px-1.5 py-0.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          >
+                            Use it
+                          </button>
+                        )}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   {ORDER.map((s) => (

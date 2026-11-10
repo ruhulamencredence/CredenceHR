@@ -763,6 +763,22 @@ export default function App() {
     if (token) connectChatSocket(token);
   }, [token]);
 
+  // "Chat" on a person's card (Employee Directory): open Chat straight to
+  // that direct conversation, the same way a tapped chat notification does.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const roomId = Number((e as CustomEvent).detail?.roomId);
+      if (!roomId || !chatOn) return;
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowAlertsPage(false);
+      setPendingChatRoomId(roomId);
+      setShowChat(true);
+    };
+    window.addEventListener('credence:open-chat-room', onOpen);
+    return () => window.removeEventListener('credence:open-chat-room', onOpen);
+  }, [chatOn]);
+
   // Push notifications — registers this device's FCM token (no-op on web /
   // without Firebase configured, see pushNotifications.ts). Tapping a Chat
   // push while the app was backgrounded/closed jumps straight into that

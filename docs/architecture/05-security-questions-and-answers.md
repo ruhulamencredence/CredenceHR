@@ -45,6 +45,7 @@
 | Remote check-in-এ কেউ কি অন্য project-এ বা মেয়াদ শেষের পর check-in করতে পারে? | না। Module Access-এ দেওয়া project-এর তালিকা আর প্রতিটার From / To তারিখ server যাচাই করে — check-in, Correct Attendance ও Data Import-এ; অন্য project বা তারিখের বাইরে হলে 403। তালিকা বদলাতে Users module-এর `edit_add` layer লাগে, বদল `user_access_audit`-এ (`AttendanceProjects.ts`)। | ✅ |
 | দূরের সাইটের ZKTeco মেশিন internet-এ punch পাঠায় — কেউ ভুয়া punch পাঠাতে পারে? | ADMS protocol-এ password নেই, তাই শুধু register করা চালু মেশিনের Serial number মানা হয়, আর সাইটের IP দিলে শুধু সেখান থেকে; অচেনা SN-এর কিছু লেখা হয় না, শুধু punch নেওয়া হয়, মেশিনে কোনো command যায় না। SN জেনে IP-সীমা ছাড়া মেশিন নকল করা সম্ভব — তাই fixed IP থাকলে দেওয়ার পরামর্শ (`zkMachines.ts`, 04 §১০ নং ১৩)। | ⚠️ |
 | এক মেশিনের PIN অন্য মেশিনের কারও হাজিরায় চলে যায় না? | "Its own numbers" ধরনের মেশিনে প্রতিটা PIN আলাদা করে link হয় (`zk_device_pins`); link না হলে punch কারও হাজিরায় যায় না। link / unlink শুধু Office Attendance-এর "Link Device PINs" layer-এর (API 403, UI লুকানো)। | ✅ |
+| Site supervisor কি team-এর লোকদের নিজের check-in দেখতে পান? কতটুকু? | শুধু নিজের team-এর member-দের, শুধু যে তারিখের শিট খোলা সেদিনের In / Out সময় (কোথা থেকে, অর্থাৎ location নয়)। HR Site Attendance → Settings-এ "Use members' own check-in" বন্ধ করলে supervisor কিছুই পান না; setting শুধু Office Attendance মডিউলের HR বদলাতে পারেন। | ✅ |
 
 ## গ. ডাটা সুরক্ষা
 

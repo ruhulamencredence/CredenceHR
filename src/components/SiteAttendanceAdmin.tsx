@@ -17,7 +17,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { CalendarDays, CheckCircle2, ClipboardCheck, Download, Fingerprint, MapPin, Pencil, Plus, Settings, Trash2, Users } from 'lucide-react';
+import { CalendarDays, CheckCircle2, ClipboardCheck, Download, Fingerprint, MapPin, Pencil, Plus, Settings, Smartphone, Trash2, Users } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { SheetEditor, SheetStatusChip, SiteSheet, Counts } from './TeamAttendance';
@@ -64,6 +64,7 @@ interface SettingsData {
   require_location: boolean;
   backdate_days: number;
   reminder_time: string;
+  use_app_checkin: boolean;
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
 
@@ -119,14 +120,15 @@ const TodayView: React.FC<{ token: string }> = ({ token }) => {
         {data.pending_review > 0 && <span className="text-xs font-semibold text-amber-700">{data.pending_review} sheet(s) waiting for review</span>}
       </div>
       {t && (
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        <div className={`grid grid-cols-3 gap-2 ${data.settings?.use_app_checkin ? 'sm:grid-cols-7' : 'sm:grid-cols-6'}`}>
           {[
             ['Teams submitted', `${t.submitted}/${t.teams}`, 'text-slate-800'],
             ['Present', t.present, 'text-emerald-700'],
             ['Late', t.late, 'text-amber-700'],
             ['Absent', t.absent, 'text-rose-700'],
             ['Leave', t.leave, 'text-sky-700'],
-            ['Not marked', t.unmarked, 'text-slate-500']
+            ['Not marked', t.unmarked, 'text-slate-500'],
+            ...(data.settings?.use_app_checkin ? [['Checked in themselves', t.app_checked_in ?? 0, 'text-teal-700']] : [])
           ].map(([label, v, cls]) => (
             <div key={label as string} className="rounded-xl border border-slate-200 bg-white p-3">
               <div className="text-[10px] font-semibold text-slate-500">{label}</div>
@@ -165,7 +167,17 @@ const TodayView: React.FC<{ token: string }> = ({ token }) => {
                 <td className="px-3 py-2">
                   <SheetStatusChip sheet={tm.sheet} />
                 </td>
-                <td className="px-3 py-2">{tm.sheet ? <CountsLine c={tm.counts} /> : <span className="text-slate-400">—</span>}</td>
+                <td className="px-3 py-2">
+                  {tm.sheet ? <CountsLine c={tm.counts} /> : <span className="text-slate-400">—</span>}
+                  {tm.app_checked_in > 0 && (
+                    <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-teal-700">
+                      <Smartphone className="w-3 h-3" /> {tm.app_checked_in} checked in on the app / device
+                    </div>
+                  )}
+                  {tm.app_mismatch?.length > 0 && (
+                    <div className="text-[10px] font-semibold text-rose-700">Checked in, but marked Absent / Leave: {tm.app_mismatch.join(', ')}</div>
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   {tm.sheet?.distance_m != null ? (
                     <span className={tm.sheet.outside_site ? 'text-rose-600 font-semibold' : 'text-slate-600'}>
@@ -318,7 +330,8 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
         r.employee_code || '',
         r.name,
         r.designation || '',
-        ...days.map((d) => r.cells[d]?.code || ''),
+        // "P*" = the time is the person's own check-in.
+        ...days.map((d) => (r.cells[d] ? `${r.cells[d].code}${r.cells[d].app ? '*' : ''}` : '')),
         r.totals.present,
         r.totals.late,
         r.totals.absent,
@@ -346,7 +359,7 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
           <Download className="w-3.5 h-3.5" /> Excel
         </button>
         <span className="text-[11px] text-slate-500">
-          P present · L late · A absent · LV leave · W weekend · H holiday · O roster Off day · faded = not yet approved
+          P present · L late · A absent · LV leave · W weekend · H holiday · O roster Off day · faded = not yet approved · green dot = time from the person's own app / device check-in
         </span>
       </div>
       {!data ? (
@@ -388,10 +401,15 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
                     return (
                       <td
                         key={d}
-                        title={c ? [c.in && `In ${c.in}`, c.out && `Out ${c.out}`, !c.confirmed && 'Waiting for approval'].filter(Boolean).join(' · ') : ''}
-                        className={`text-center font-bold ${c ? CELL_CLS[c.code] : ''} ${c && !c.confirmed ? 'opacity-40' : ''}`}
+                        title={
+                          c
+                            ? [c.in && `In ${c.in}`, c.out && `Out ${c.out}`, c.app && 'From their own check-in', !c.confirmed && 'Waiting for approval'].filter(Boolean).join(' · ')
+                            : ''
+                        }
+                        className={`relative text-center font-bold ${c ? CELL_CLS[c.code] : ''} ${c && !c.confirmed ? 'opacity-40' : ''}`}
                       >
                         {c?.code || ''}
+                        {c?.app && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-teal-500" aria-label="from own check-in" />}
                       </td>
                     );
                   })}
@@ -714,6 +732,11 @@ const SettingsView: React.FC<{ token: string; settings: SettingsData; onSaved: (
       <Toggle k="require_approval" title="HR approves each sheet" hint="On: a sheet counts only after HR approves it (Review tab). Off: it counts as soon as the supervisor saves it." />
       <Toggle k="require_photo" title="Team photo required" hint="The supervisor must attach a photo of the team with each sheet." />
       <Toggle k="require_location" title="Location required" hint="A sheet can't be submitted with the phone's location turned off." />
+      <Toggle
+        k="use_app_checkin"
+        title="Use members' own check-in"
+        hint="A member who checks in on the app (or on the office device) shows that time on the supervisor's sheet and is already marked from it: Present, or Late past the grace. The supervisor only confirms."
+      />
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelCls}>Supervisors can fill in up to … days back</label>
