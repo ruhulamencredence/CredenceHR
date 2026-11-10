@@ -449,7 +449,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       prepare: async (ctx) => {
         const departments: any[] = (await queryDB("SELECT id, name FROM departments").catch(() => [])) || [];
         const branches: any[] = (await queryDB("SELECT id, branch_name FROM branches").catch(() => [])) || [];
-        const pins: any[] = (await queryDB("SELECT id, name, zk_device_pin FROM all_employees WHERE zk_device_pin IS NOT NULL").catch(() => [])) || [];
+        const pins: any[] = (await queryDB("SELECT id, name, employee_id, zk_device_pin FROM all_employees WHERE zk_device_pin IS NOT NULL").catch(() => [])) || [];
         // Every existing login — emails and usernames are unique system-wide.
         const logins: any[] = (await queryDB("/*unscoped*/ SELECT email, username FROM users").catch(() => [])) || [];
         const takenLogins = new Set<string>();
@@ -538,9 +538,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         if (str(v.zk_device_pin)) {
           const pin = str(v.zk_device_pin).slice(0, 20);
           const owner = prep.pinOwner.get(pin);
-          if (owner && (!existing || Number(owner.id) !== Number(existing.id))) fail(`Device PIN ${pin} already belongs to ${owner.name}.`);
+          if (owner && (!existing || Number(owner.id) !== Number(existing.id))) {
+            // Say which record has it — often the same person entered twice.
+            const sameName = String(owner.name || "").trim().toLowerCase() === String(set.name || "").trim().toLowerCase();
+            fail(
+              `Device PIN ${pin} already belongs to ${owner.name} (Employee ID ${owner.employee_id || "none"})` +
+                (sameName ? " — the same name, so this person is probably in Employees twice. Keep one record (or clear the PIN on the other) and import again." : ".")
+            );
+          }
           set.zk_device_pin = pin;
-          prep.pinOwner.set(pin, { id: existing ? existing.id : -1, name: set.name });
+          prep.pinOwner.set(pin, { id: existing ? existing.id : -1, name: set.name, employee_id: code });
         }
 
         // Login ID + Password -> the employee's own login (role User), same as
@@ -675,7 +682,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           if (owner) notes.push(`Device PIN left empty — ${code} is already ${owner.name}'s`);
           else {
             set.zk_device_pin = code;
-            prep.pinOwner.set(code, { id: -1, name: set.name });
+            prep.pinOwner.set(code, { id: -1, name: set.name, employee_id: code });
             notes.push(`Device PIN ${code} (the Employee ID)`);
           }
         }
