@@ -667,6 +667,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const what = [changed.length ? `Changes: ${changed.join(", ")}` : null, login ? "New login" : null, pay ? "Payment account added" : null].filter(Boolean) as string[];
           return { status: "update", message: [...what, ...notes].join(". "), employee: `${set.name} (${code})` };
         }
+        // New employee with no Device PIN: the Employee ID is the PIN (the
+        // one they're enrolled under on the ZKT machine) — unless someone
+        // already has it, then it's left empty and the row says so.
+        if (!set.zk_device_pin && code && code.length <= 20) {
+          const owner = prep.pinOwner.get(code);
+          if (owner) notes.push(`Device PIN left empty — ${code} is already ${owner.name}'s`);
+          else {
+            set.zk_device_pin = code;
+            prep.pinOwner.set(code, { id: -1, name: set.name });
+            notes.push(`Device PIN ${code} (the Employee ID)`);
+          }
+        }
         if (!ctx.dryRun) {
           const cols = ["employee_id", ...Object.keys(set)];
           if (!("is_active" in set)) cols.push("is_active");

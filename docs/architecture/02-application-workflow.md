@@ -631,6 +631,7 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 - **PIN numbers:** *Same as the office* = punch যায় Employee-এর Device PIN-এর মালিকের কাছে (আগের মতো)। *Its own numbers* = এই মেশিনের PIN 15 অন্য কেউ হতে পারে; প্রতিটা PIN Unlinked PINs-এ আলাদা করে link করতে হয় (`zk_device_pins`)। link না হওয়া পর্যন্ত punch `M<machine>-<pin>` নামে জমা থাকে, link করলেই সেই কর্মীর হাজিরায় চলে যায়; মেশিন-ভিত্তিক PIN তালিকা আর unlink Machines popup-এ।
 - **Offline alert:** সকাল ৭টা–রাত ৯টার মধ্যে কোনো চালু মেশিন এক ঘণ্টা কিছু না পাঠালে Superadmin ও Office Attendance module-এর লোকেরা একবার alert পান; মেশিন আবার শোনা গেলে alert আবার চালু হয়। Alert-এ চাপলে Admin Panel → Office Attendance খোলে, Machines popup খোলা অবস্থায় (alert type `zk_machine`; আগে Team Attendance-এ নিয়ে যেত)।
 - মেশিন যোগ / বদল / মোছা Office Attendance module-এর (আগের মতো); PIN link / unlink "Link Device PINs" layer-এর।
+- **নতুন Employee-র Device PIN = Employee ID:** Employees ফর্মে, HR Data Import-এ (নতুন সারি) বা Onboarding approve-এ নতুন Employee তৈরির সময় Device PIN ফাঁকা থাকলে Employee ID-ই PIN হয় — ZKT মেশিনে কর্মীকে এই ID দিয়েই enroll করা হয়। ওই PIN আগে থেকে অন্য কারও হলে: ফর্ম save আটকায় ও কার PIN বলে; Import সারি PIN ফাঁকা রেখে কারণ লেখে; Onboarding approve PIN ফাঁকা রাখে। App মেশিনে কোনো user পাঠায় না — মেশিনে enroll আলাদা।
 
 
 ## App খুললে কী লোড হয়
