@@ -415,7 +415,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
-            <HeroSpotlight />
           </div>
         </div>
 
@@ -433,7 +432,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
             <div className="mb-5">
               <h1 className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--g-text)' }}>
-                {ownerMode ? 'System owner sign-in' : workspace ? 'Welcome back 👋' : 'Welcome 👋'}
+                {ownerMode ? 'System owner sign-in' : workspace ? 'Welcome back' : 'Welcome'}
               </h1>
               <p className="text-sm mt-1" style={{ color: 'var(--g-text-muted)' }}>
                 {ownerMode ? (
@@ -640,19 +639,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     </div>
   );
 };
-
-// A spotlight shining down onto the people in the hero illustration: a small
-// bright source, a widening beam and a pool of light where it lands on the
-// table (styles: .hero-spot-* in index.css). Sits over the illustration, sized
-// and placed in % of it — the beam starts just above the group and ends at the
-// table, so it frames the people instead of the whole picture.
-const HeroSpotlight: React.FC = () => (
-  <>
-    <div className="hero-spot hero-spot-beam" style={{ top: '29%', width: '42%', height: '30%', zIndex: -1 }} />
-    <div className="hero-spot hero-spot-pool" style={{ top: '54%', width: '46%', height: '9%', zIndex: -1 }} />
-    <div className="hero-spot hero-spot-source" style={{ top: '27.5%' }} />
-  </>
-);
 
 // The workspace's own logo on its sign-in page; the app's logo before a
 // workspace is chosen (and for the original workspace until it uploads one).

@@ -4,12 +4,15 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import {
   Contact, Search, X, Users2, Building2, LayoutGrid, List,
-  Mail, Phone, PhoneCall, Briefcase, MapPin, ChevronLeft, ChevronRight, ChevronDown
+  Mail, Phone, PhoneCall, Briefcase, MapPin, ChevronLeft, ChevronRight, ChevronDown,
+  Copy, MessageCircle, Smartphone, UserRound
 } from 'lucide-react';
-import { User, Department, EmployeeDirectoryEntry } from '../types';
+import { User, Department, EmployeeDirectoryEntry, chatAllowed } from '../types';
+import { phonesOf, formatPhone, telHref } from '../lib/phoneNumbers';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { fetchPhoto } from './UserAvatar';
@@ -79,6 +82,9 @@ function cardTintClass(name: string): string {
 // all_employees has to a physical "sitting place" (Status tab); Division/
 // Unit are appended when on file, since a department alone doesn't say
 // where someone actually sits.
+// The first of the person's numbers (cells can hold several).
+const firstPhoneOf = (emp: EmployeeDirectoryEntry) => phonesOf(emp.mobile, emp.phone)[0]?.number || '';
+
 function officeLocationOf(emp: EmployeeDirectoryEntry): string | null {
   const parts = [emp.branch, emp.division, emp.unit].filter((p) => p && p.trim());
   return parts.length ? parts.join(' · ') : null;
@@ -149,7 +155,251 @@ const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
   </span>
 );
 
-export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack, isActive }) => {
+// The person's card (Directory -> tap a person): liquid-glass, a sheet from
+// the bottom on a phone and a two-column card on a computer. Each phone
+// number on its own line (several typed into one cell are split apart — see
+// lib/phoneNumbers.ts) with Call and Copy; Chat opens a direct conversation
+// when both accounts have Chat.
+const EmployeeContactCard: React.FC<{
+  emp: EmployeeDirectoryEntry;
+  token: string;
+  canChat: boolean;
+  showCompany: boolean;
+  onClose: () => void;
+}> = ({ emp, token, canChat, showCompany, onClose }) => {
+  const phones = phonesOf(emp.mobile, emp.phone);
+  const office = officeLocationOf(emp);
+  const [note, setNote] = useState<string | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(null), 1800);
+    return () => clearTimeout(t);
+  }, [note]);
+
+  const copy = async (text: string, what: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+      } catch {
+        // nothing more to try
+      }
+      ta.remove();
+    }
+    setNote(`${what} copied`);
+  };
+  const openChat = async () => {
+    if (!emp.user_id) return;
+    setChatBusy(true);
+    try {
+      const res = await fetch(apiUrl('/api/chat/rooms'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: 'direct', title: '', memberIds: [emp.user_id] })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.id) throw new Error(d.error || 'Could not open the chat.');
+      onClose();
+      // App.tsx opens Chat straight to that conversation.
+      window.dispatchEvent(new CustomEvent('credence:open-chat-room', { detail: { roomId: Number(d.id) } }));
+    } catch (e: any) {
+      setNote(e.message);
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const first = phones[0];
+  const actionCount = (first ? 1 : 0) + (emp.email ? 1 : 0) + (canChat ? 1 : 0);
+  const tileCls = 'rounded-2xl sm:rounded-full py-2.5 sm:py-2 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 text-xs font-semibold';
+  const lbl = 'text-[10px] font-semibold uppercase tracking-wider text-slate-500';
+  const row = 'flex items-center gap-3 px-3.5 py-2.5 min-w-0';
+  const iconBtn = 'w-8 h-8 shrink-0 rounded-full flex items-center justify-center transition-colors';
+
+  // On document.body, so the phone's bottom bar and floating buttons stay
+  // behind it (the page itself is its own stacking context).
+  return createPortal(
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={emp.name}
+        onClick={(e) => e.stopPropagation()}
+        className="liquid-glass liquid-glass-in w-full sm:max-w-[720px] rounded-t-[32px] sm:rounded-[32px] max-h-[92vh] overflow-y-auto overscroll-contain"
+        style={{ paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 1.25rem)' }}
+      >
+        <div className="sm:hidden mx-auto mt-2 w-10 h-1.5 rounded-full bg-slate-400/50" />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="liquid-glass-chip absolute top-3 right-3 sm:top-4 sm:right-4 z-10 w-9 h-9 rounded-full flex items-center justify-center text-slate-600"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="px-5 pt-3 sm:p-6 sm:flex sm:gap-6">
+          {/* Who */}
+          <div className="sm:w-56 shrink-0 flex flex-col items-center text-center">
+            <div className="relative">
+              <EmployeePhoto userId={emp.user_id} token={token} name={emp.name} sizeClass="w-24 h-24 sm:w-28 sm:h-28 text-3xl ring-4 ring-white/80 shadow-lg" />
+              <span
+                className={`absolute bottom-1 right-1 w-5 h-5 rounded-full ring-4 ring-white ${emp.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`}
+                title={emp.is_active ? 'Active' : 'Inactive'}
+              />
+            </div>
+            <h2 className="mt-3 text-xl font-bold text-slate-900 leading-tight break-words">{emp.name}</h2>
+            {emp.designation && <p className="text-sm text-slate-600 leading-snug break-words">{emp.designation}</p>}
+            <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+              {emp.employee_id && (
+                <button
+                  type="button"
+                  onClick={() => void copy(emp.employee_id!, 'ID')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/70 border border-white text-slate-700 hover:bg-white"
+                  title="Copy ID"
+                >
+                  ID {emp.employee_id} <Copy className="w-3 h-3 text-slate-400" />
+                </button>
+              )}
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  emp.is_active ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${emp.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} /> {emp.is_active ? 'Active' : 'Inactive'}
+              </span>
+              {showCompany && emp.company_name && (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/70 border border-white text-slate-600">{emp.company_name}</span>
+              )}
+            </div>
+
+            {actionCount > 0 && (
+              <div className={`mt-4 w-full grid gap-2 ${actionCount === 3 ? 'grid-cols-3' : actionCount === 2 ? 'grid-cols-2' : 'grid-cols-1'} sm:grid-cols-2`}>
+                {first && (
+                  <a href={telHref(first.number)} className={`liquid-glass-button ${tileCls} sm:col-span-2`}>
+                    <Phone className="w-5 h-5 sm:w-4 sm:h-4" />
+                    <span className="sm:hidden">Call</span>
+                    <span className="hidden sm:inline tabular-nums">Call {formatPhone(first.number)}</span>
+                  </a>
+                )}
+                {emp.email && (
+                  <a href={`mailto:${emp.email}`} className={`liquid-glass-inset ${tileCls} text-slate-700 hover:bg-white/70 ${!canChat ? 'sm:col-span-2' : ''}`}>
+                    <Mail className="w-5 h-5 sm:w-4 sm:h-4" /> Email
+                  </a>
+                )}
+                {canChat && (
+                  <button
+                    type="button"
+                    disabled={chatBusy}
+                    onClick={() => void openChat()}
+                    className={`liquid-glass-inset ${tileCls} text-slate-700 hover:bg-white/70 disabled:opacity-60 ${!emp.email ? 'sm:col-span-2' : ''}`}
+                  >
+                    {chatBusy ? <Spinner /> : <MessageCircle className="w-5 h-5 sm:w-4 sm:h-4" />} Chat
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Work and contact */}
+          <div className="flex-1 min-w-0 mt-4 sm:mt-0 space-y-3">
+            <p className={`hidden sm:block ${lbl} pt-1`}>Work</p>
+            <div className="liquid-glass-inset rounded-2xl divide-y divide-white/70">
+              <div className="flex gap-3 px-3.5 py-2.5 min-w-0">
+                <Briefcase className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className={lbl}>Department</p>
+                  <p className={`text-sm font-medium break-words ${emp.department ? 'text-slate-800' : 'text-slate-400'}`}>{emp.department || 'Not set'}</p>
+                </div>
+              </div>
+              <div className="flex gap-3 px-3.5 py-2.5 min-w-0">
+                <UserRound className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className={lbl}>Reports to</p>
+                  <p className={`text-sm font-medium break-words ${emp.supervisor_name ? 'text-slate-800' : 'text-slate-400'}`}>{emp.supervisor_name || 'Not set'}</p>
+                </div>
+              </div>
+              {office && (
+                <div className="flex gap-3 px-3.5 py-2.5 min-w-0">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className={lbl}>Office</p>
+                    <p className="text-sm font-medium text-slate-800 break-words">{office}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <p className={`hidden sm:block ${lbl} pt-1`}>Contact</p>
+            <div className="liquid-glass-inset rounded-2xl divide-y divide-white/70">
+              {emp.email && (
+                <div className={row}>
+                  <Mail className="w-4 h-4 text-slate-400 shrink-0" />
+                  {/* A long address wraps after the @, not mid-word. */}
+                  <a href={`mailto:${emp.email}`} className="min-w-0 flex-1 text-sm text-slate-800 break-words hover:underline">
+                    {emp.email.includes('@') ? (
+                      <>
+                        {emp.email.slice(0, emp.email.indexOf('@') + 1)}
+                        <wbr />
+                        {emp.email.slice(emp.email.indexOf('@') + 1)}
+                      </>
+                    ) : (
+                      emp.email
+                    )}
+                  </a>
+                  <button type="button" onClick={() => void copy(emp.email!, 'Email')} className={`${iconBtn} text-slate-400 hover:bg-white/70`} aria-label="Copy email">
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              {phones.map((p) => (
+                <div key={p.number} className={row}>
+                  <Smartphone className="w-4 h-4 text-slate-400 shrink-0" />
+                  <a href={telHref(p.number)} className="min-w-0 flex-1 text-sm text-slate-800 tabular-nums hover:underline">
+                    {formatPhone(p.number)} <span className="text-[10px] text-slate-400 ml-1">{p.label}</span>
+                  </a>
+                  <button type="button" onClick={() => void copy(p.number.replace(/[^\d+]/g, ''), 'Number')} className={`${iconBtn} text-slate-400 hover:bg-white/70`} aria-label="Copy number">
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  <a href={telHref(p.number)} className={`${iconBtn} bg-emerald-50 text-emerald-600 hover:bg-emerald-100`} aria-label={`Call ${formatPhone(p.number)}`}>
+                    <Phone className="w-4 h-4" />
+                  </a>
+                </div>
+              ))}
+              {emp.telephone && (
+                <div className={row}>
+                  <PhoneCall className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="text-sm text-slate-800">Ext: {emp.telephone}</span>
+                </div>
+              )}
+              {!emp.email && !phones.length && !emp.telephone && <p className="px-3.5 py-3 text-xs text-slate-400">No contact info on file.</p>}
+            </div>
+          </div>
+        </div>
+
+        {note && (
+          <div className="pointer-events-none sticky bottom-3 flex justify-center px-4">
+            <span className="rounded-full bg-slate-900/85 text-white text-xs font-semibold px-3 py-1.5 shadow-lg">{note}</span>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, user, onBack, isActive }) => {
   usePhoneHeaderTitle('Employee Directory', !!isActive);
   const isNativeApp = Capacitor.isNativePlatform();
 
@@ -694,10 +944,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                         )}
                         {(emp.mobile || emp.phone) && (
                           <a
-                            href={`tel:${emp.mobile || emp.phone}`}
+                            href={telHref(firstPhoneOf(emp))}
                             onClick={(e) => e.stopPropagation()}
                             className="w-8 h-8 rounded-full bg-white/75 border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-emerald-600 transition-colors"
-                            title={emp.mobile || emp.phone}
+                            title={formatPhone(firstPhoneOf(emp))}
                           >
                             <Phone className="w-3.5 h-3.5" />
                           </a>
@@ -717,11 +967,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                       )}
                       {(emp.mobile || emp.phone) && (
                         <a
-                          href={`tel:${emp.mobile || emp.phone}`}
+                          href={telHref(firstPhoneOf(emp))}
                           onClick={(e) => e.stopPropagation()}
                           className="flex items-center gap-1.5 hover:text-blue-600"
                         >
-                          <Phone className="w-3 h-3 text-slate-400 shrink-0" /> {emp.mobile || emp.phone}
+                          <Phone className="w-3 h-3 text-slate-400 shrink-0" /> {formatPhone(firstPhoneOf(emp))}
                         </a>
                       )}
                       {!emp.email && !emp.mobile && !emp.phone && <p className="text-slate-400">No contact info on file</p>}
@@ -767,7 +1017,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           {emp.email ? <a href={`mailto:${emp.email}`} className="hover:text-blue-600">{emp.email}</a> : '—'}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">
-                          {emp.mobile ? <a href={`tel:${emp.mobile}`} className="hover:text-blue-600">{emp.mobile}</a> : '—'}
+                          {emp.mobile || emp.phone ? <a href={telHref(firstPhoneOf(emp))} className="hover:text-blue-600">{formatPhone(firstPhoneOf(emp))}</a> : '—'}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">{emp.telephone || '—'}</td>
                         <td className="px-3 py-2.5 text-right">
@@ -840,125 +1090,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
         </div>
       </div>
 
-      {/* Employee Details Modal */}
       {selectedEmployee && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`rounded-[32px] max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto border border-white/60 backdrop-blur-2xl bg-gradient-to-br ${cardTintClass(selectedEmployee.name)}`}>
-            {/* Hero */}
-            <div className="relative h-44 sm:h-48 bg-gradient-to-br from-violet-500 via-indigo-500 to-blue-500 flex items-center justify-center shrink-0">
-              <button
-                onClick={() => setSelectedEmployee(null)}
-                className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
-
-              <div className="absolute top-4 right-4 flex items-center gap-2">
-                {(selectedEmployee.mobile || selectedEmployee.phone) && (
-                  <a
-                    href={`tel:${selectedEmployee.mobile || selectedEmployee.phone}`}
-                    className="w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
-                  >
-                    <Phone className="w-4 h-4" />
-                  </a>
-                )}
-                {selectedEmployee.email && (
-                  <a
-                    href={`mailto:${selectedEmployee.email}`}
-                    className="w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
-                  >
-                    <Mail className="w-4 h-4" />
-                  </a>
-                )}
-              </div>
-
-              <EmployeePhoto
-                userId={selectedEmployee.user_id}
-                token={token}
-                name={selectedEmployee.name}
-                sizeClass="w-24 h-24 text-2xl"
-                glass
-              />
-
-              <span
-                className={`absolute bottom-4 right-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold backdrop-blur ${
-                  selectedEmployee.is_active ? 'bg-emerald-400/90 text-white' : 'bg-slate-400/80 text-white'
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-white" /> {selectedEmployee.is_active ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-
-            {/* Overlapping card */}
-            <div className="relative -mt-6 rounded-t-[32px] bg-white/50 backdrop-blur-2xl border-t border-white/60 px-5 pt-5 pb-6 space-y-4">
-              {/* The full name and designation, however long — they wrap
-                  rather than being cut off; the ID sits under them. */}
-              <div className="min-w-0">
-                <h2 className="text-xl font-bold text-slate-900 leading-snug break-words">{selectedEmployee.name}</h2>
-                <p className="text-sm text-slate-500 mt-0.5 leading-snug break-words">
-                  {selectedEmployee.designation || '—'}
-                  {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
-                  {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
-                </p>
-                {selectedEmployee.employee_id && (
-                  <span className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
-                    ID: {selectedEmployee.employee_id}
-                  </span>
-                )}
-              </div>
-
-              {/* Quick stat pills */}
-              <div className="grid grid-cols-3 divide-x divide-white/50 bg-white/40 backdrop-blur rounded-2xl border border-white/60 overflow-hidden">
-                <div className="px-2 py-3 text-center min-w-0">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Department</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.department || '—'}</p>
-                </div>
-                <div className="px-2 py-3 text-center min-w-0">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Status</p>
-                  <p className={`text-xs font-semibold mt-1 ${selectedEmployee.is_active ? 'text-emerald-600' : 'text-slate-500'}`}>
-                    {selectedEmployee.is_active ? 'Active' : 'Inactive'}
-                  </p>
-                </div>
-                <div className="px-2 py-3 text-center min-w-0">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Reports To</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 leading-snug break-words">{selectedEmployee.supervisor_name || '—'}</p>
-                </div>
-              </div>
-
-              <div className="space-y-2.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact Information</p>
-                {selectedEmployee.email && (
-                  <a href={`mailto:${selectedEmployee.email}`} className="flex items-start gap-2 text-sm text-slate-700 hover:text-blue-600 min-w-0">
-                    <Mail className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-all">{selectedEmployee.email}</span>
-                  </a>
-                )}
-                {selectedEmployee.mobile && (
-                  <a href={`tel:${selectedEmployee.mobile}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <Phone className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.mobile}
-                  </a>
-                )}
-                {selectedEmployee.phone && selectedEmployee.phone !== selectedEmployee.mobile && (
-                  <a href={`tel:${selectedEmployee.phone}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
-                    <PhoneCall className="w-4 h-4 text-slate-400 shrink-0" /> {selectedEmployee.phone}
-                  </a>
-                )}
-                {selectedEmployee.telephone && (
-                  <p className="flex items-center gap-2 text-sm text-slate-700">
-                    <Briefcase className="w-4 h-4 text-slate-400" /> Ext: {selectedEmployee.telephone}
-                  </p>
-                )}
-                {officeLocationOf(selectedEmployee) && (
-                  <p className="flex items-start gap-2 text-sm text-slate-700">
-                    <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /> <span className="min-w-0 break-words">{officeLocationOf(selectedEmployee)}</span>
-                  </p>
-                )}
-                {!selectedEmployee.email && !selectedEmployee.mobile && !selectedEmployee.phone && !selectedEmployee.telephone && (
-                  <p className="text-xs text-slate-400">No contact info on file.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <EmployeeContactCard
+          emp={selectedEmployee}
+          token={token}
+          canChat={chatAllowed(user) && !!selectedEmployee.user_id && selectedEmployee.user_id !== user.id}
+          showCompany={multiCompany}
+          onClose={() => setSelectedEmployee(null)}
+        />
       )}
     </div>
   );

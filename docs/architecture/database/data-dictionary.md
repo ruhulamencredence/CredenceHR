@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৫টি টেবিল, ২৬৬৮টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৫টি টেবিল, ২৬৭১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -383,6 +383,7 @@ Unique: `uq_mail_group_email`(email)
 | `send_error` | varchar(500) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `via_internal` | tinyint(1) | না | default 0 | |
+| `flags_changed_at` | datetime | হ্যাঁ |  | |
 
 Unique: `uq_mail_uid`(account_id,folder_role,uid)
 
@@ -1172,6 +1173,7 @@ Unique: `unique_employee_waiver_date`(employee_id,waiver_date)
 | `out_time` | varchar(5) | হ্যাঁ |  | |
 | `remarks` | varchar(255) | হ্যাঁ |  | |
 | `confirmed` | tinyint(1) | না | default 0 | |
+| `from_app` | tinyint(1) | না | default 0 | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `unique_site_entry`(employee_id,attendance_date)
@@ -1197,6 +1199,7 @@ Unique: `unique_site_member`(employee_id)
 | `require_location` | tinyint(1) | না | default 0 | |
 | `backdate_days` | int(11) | না | default 2 | |
 | `reminder_time` | varchar(5) | না | default '11:00' | |
+| `use_app_checkin` | tinyint(1) | না | default 1 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
