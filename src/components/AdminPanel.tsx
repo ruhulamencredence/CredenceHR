@@ -20,6 +20,7 @@ import { Capacitor } from '@capacitor/core';
 import { ModulePath } from './ModulePath';
 import { ADMIN_TAB_PATH } from '../lib/modulePaths';
 import { useAdminPhonePage } from '../lib/adminPhone';
+import { PhoneSheet } from './PhoneSheet';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -3606,6 +3607,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
         <div className="space-y-6">
           {/* Filters Bar */}
+          <PhoneSheet label="Filters" kind="filter" title="Filter Entries Report" closeOnApply activeCount={[filterJobNo, filterProjectId, filterBudgetId, filterStartDate, filterEndDate].filter(Boolean).length}>
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
               <Filter className="w-4 h-4 text-blue-600" /> Filter Entries Report
@@ -3682,6 +3684,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             )}
           </div>
+          </PhoneSheet>
 
           {/* Entries Report Table */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -4054,6 +4057,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </p>
               </div>
             </div>
+            <PhoneSheet label="Filters" kind="filter" title="Filter check-ins" closeOnApply activeCount={[attendanceProjectFilter, attendanceUserFilter, attendanceFromFilter, attendanceToFilter].filter(Boolean).length}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
@@ -4121,6 +4125,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               )}
             </div>
+            </PhoneSheet>
           </div>
 
           {loadingAttendance ? (
@@ -5447,6 +5452,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'projects' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
+            <PhoneSheet label="Add Project" title={editingProject ? 'Edit Project' : 'Add New Project'} editing={editingProject !== null} onCancelEdit={() => { setEditingProject(null); setNewProjectName(''); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={projects.length}>
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 {editingProject ? 'Edit Project' : 'Add New Project'}
@@ -5526,6 +5532,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
               </form>
             </div>
+            </PhoneSheet>
           </div>
 
           <div className="lg:col-span-2">
@@ -5647,6 +5654,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'branches' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
+            <PhoneSheet label="Add Branch" title={editingBranch ? 'Edit Branch' : 'Add New Branch'} editing={editingBranch !== null} onCancelEdit={() => { setEditingBranch(null); setNewBranchName(''); setNewBranchType('head_office'); setBranchProjectLink('auto'); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={branches.length}>
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 {editingBranch ? 'Edit Branch' : 'Add New Branch'}
@@ -5801,6 +5809,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
               </form>
             </div>
+            </PhoneSheet>
           </div>
 
           <div className="lg:col-span-2">
@@ -6253,6 +6262,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         <div className="space-y-8">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
+            <PhoneSheet label="Add MPR No" title={editingMpr ? 'Edit MPR No' : 'Add New MPR No'} editing={editingMpr !== null} onCancelEdit={() => { setEditingMpr(null); setNewMprNo(''); }} doneKey={mprNumbers.length}>
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 {editingMpr ? 'Edit MPR No' : 'Add New MPR No'}
@@ -6290,6 +6300,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
               </form>
             </div>
+            </PhoneSheet>
           </div>
 
           <div className="lg:col-span-2">
@@ -6373,6 +6384,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         {(managingModulesFor || managingUserId != null) && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
         <div className="space-y-6">
           {/* Add New User Form */}
+          <PhoneSheet label="Add New User" doneKey={users.length}>
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
             <h3 className="text-lg font-bold text-slate-900 mb-1">Add New User</h3>
             <p className="text-xs text-slate-500 mb-4">
@@ -6445,6 +6457,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             </form>
           </div>
+          </PhoneSheet>
 
           {/* Bulk Add Users — SL, Project Name, Password only. These accounts log in
               with Project Name (spaces ignored) + Password instead of email. */}
@@ -6935,6 +6948,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           comment in server.ts for the full design. */}
       {activeTab === 'departments' && (
         <div className="space-y-4">
+          <PhoneSheet label="Add Department" title={editingDepartment ? 'Edit Department' : 'Add Department'} editing={!!editingDepartment} onCancelEdit={openCreateDepartment} doneKey={departments.length}>
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-1">
               <Users2 className="w-4 h-4 text-blue-600" /> {editingDepartment ? 'Edit Department' : 'Add Department'}
@@ -7027,6 +7041,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             </form>
           </div>
+          </PhoneSheet>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between">

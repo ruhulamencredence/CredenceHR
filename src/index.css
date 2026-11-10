@@ -1079,3 +1079,44 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
   /* The scroll box a table sat in no longer needs to scroll. */
   html[data-admin-phone] .overflow-x-auto:has(> table[data-phone-card]) { overflow: visible !important; }
 }
+
+/*
+  Admin Panel on a phone, step 3: the sheet a form or a filter row moves
+  into (components/PhoneSheet.tsx). The block's own white box is dropped —
+  the sheet is the card — and its fields go full width, one per line.
+*/
+.phone-sheet-body > .bg-white,
+.phone-sheet-body > div > .bg-white.border {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.phone-sheet-body > .bg-white > h3:first-child { display: none; }
+.phone-sheet-body .flex.flex-wrap.items-end { flex-direction: column; align-items: stretch; }
+.phone-sheet-body .flex.flex-wrap.items-end > * { width: 100%; }
+.phone-sheet-body input:not([type="checkbox"]):not([type="radio"]),
+.phone-sheet-body select,
+.phone-sheet-body button[type="submit"] { min-height: 44px; width: 100%; font-size: 14px !important; }
+.phone-sheet-body label { font-size: 12px !important; }
+/* Admin Panel on a phone: long explanations folded to two lines + "More" (lib/adminPhone.ts). */
+@media (max-width: 767px) {
+  html[data-admin-phone] main p[data-phone-fold]:not([data-open]) {
+    position: relative;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    padding-right: 52px;
+    cursor: pointer;
+  }
+  html[data-admin-phone] main p[data-phone-fold]:not([data-open])::after {
+    content: "More";
+    position: absolute; right: 0; bottom: 0;
+    padding: 0 2px 0 10px;
+    font-weight: 700;
+    color: var(--g-accent, #f47920);
+    background: linear-gradient(90deg, transparent, var(--page-flat, #fbf7f4) 30%);
+  }
+  html[data-admin-phone] main p[data-phone-fold][data-open] { cursor: pointer; }
+}

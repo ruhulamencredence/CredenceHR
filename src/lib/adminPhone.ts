@@ -112,7 +112,24 @@ export function usePhoneTableCards(active: boolean) {
     const run = () => {
       queued = false;
       root.querySelectorAll('table').forEach((t) => stackTable(t as HTMLTableElement));
+      // Long explanations (a grey paragraph of more than ~160 characters)
+      // show two lines and "More"; a tap opens the rest. The text is not touched.
+      root.querySelectorAll('p').forEach((el) => {
+        const p = el as HTMLElement;
+        if (p.hasAttribute('data-phone-fold') || p.closest('table, form, [role="dialog"], .fixed, label, button')) return;
+        const cls = p.className || '';
+        if (!/text-(slate|gray|stone)-(4|5|6)00/.test(cls) && !/text-\[1[01]px\]|text-xs/.test(cls)) return;
+        if ((p.textContent || '').trim().length < 160) return;
+        p.setAttribute('data-phone-fold', '');
+      });
     };
+    const onTap = (e: Event) => {
+      const p = (e.target as HTMLElement).closest('[data-phone-fold]');
+      if (!p || (e.target as HTMLElement).closest('a, button, input, select')) return;
+      if (p.hasAttribute('data-open')) p.removeAttribute('data-open');
+      else p.setAttribute('data-open', '');
+    };
+    root.addEventListener('click', onTap);
     run();
     const mo = new MutationObserver(() => {
       if (queued) return;
@@ -122,7 +139,12 @@ export function usePhoneTableCards(active: boolean) {
     mo.observe(root, { childList: true, subtree: true });
     return () => {
       mo.disconnect();
+      root.removeEventListener('click', onTap);
       unstackAll(root);
+      root.querySelectorAll('[data-phone-fold]').forEach((p) => {
+        p.removeAttribute('data-phone-fold');
+        p.removeAttribute('data-open');
+      });
     };
   }, [active]);
 }
