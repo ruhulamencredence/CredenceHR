@@ -317,7 +317,8 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
   const canEditShifts = [...canManage, shiftEditGuard];
 
   async function companyEmployees(): Promise<any[]> {
-    const rows: any[] = (await queryDB("SELECT * FROM all_employees")) || [];
+    // Only what the roster uses — not every column (addresses…) of every Employee.
+    const rows: any[] = (await queryDB("SELECT id, name, employee_id, designation, department, branch_id, is_active, company_id FROM all_employees")) || [];
     return rows.filter((e) => Number(e.company_id ?? 1) === activeCompanyId());
   }
 

@@ -37,6 +37,8 @@
 // Superadmin always has access, anyone else needs it explicitly granted
 // (Admin Panel -> Users -> Module Access), exactly like every other module.
 
+import { installmentFor, isMonth, logLoanEvent } from "./LoanPlan";
+import { tellAccounts } from "./LoanRequestRoutes";
 import type { Express } from "express";
 import { createAlert } from "./Alerts";
 import { finalizeAdvanceRequest, rejectAdvanceRequest } from "./LoanRequestRoutes";
@@ -1332,11 +1334,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
       // Loan or Salary Advance (shown apart on the Top Sheet).
       const kind = req.body?.kind === "loan" ? "loan" : "advance";
+      // Optional first salary month to take installments (LoanPlan.ts); it
+      // waits for Accounts to pay it out before anything is taken.
+      const start = req.body?.repay_start_month ? String(req.body.repay_start_month) : null;
+      if (start && !isMonth(start)) return res.status(400).json({ error: "Pick the month installments start." });
       const result = await queryDB(
-        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id, kind]
+        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind, disbursement_status, repay_start_month)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [Number(employee_id), total, installment, typeof reason === "string" ? reason.trim().slice(0, 255) : null, req.user.id, kind, start]
       );
+      await logLoanEvent(queryDB, { advanceId: Number(result.insertId), event: "created", amount: total, by: req.user.id });
+      await tellAccounts(queryDB, createAlert, Number(result.insertId));
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to save advance." });
@@ -1377,6 +1385,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (rows.length === 0) return res.status(404).json({ error: "Advance not found." });
       if (Number(rows[0].paid_amount) > 0) {
         return res.status(400).json({ error: "This advance already has payments recovered against it and can't be deleted — mark it Completed instead." });
+      }
+      if (rows[0].disbursed_at) {
+        return res.status(400).json({ error: "This one has been paid out to the employee and can't be deleted — mark it Completed instead." });
       }
       await queryDB("DELETE FROM employee_advances WHERE id = ?", [req.params.id]);
       res.json({ success: true });
@@ -3454,7 +3465,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         for (const adv of advances) {
           const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
           if (remaining <= 0) continue;
-          const inst = Math.min(Number(adv.monthly_installment), remaining);
+          // The loan's own plan (LoanPlan.ts): start month, skips, schedule.
+          const inst = installmentFor(adv, monthYear);
+          if (inst <= 0) continue;
           advanceDeduction += inst;
           if (adv.kind === "loan") loanDeduction += inst;
         }
@@ -3600,7 +3613,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           for (const adv of advances) {
             const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
             if (remaining <= 0) continue;
-            const inst = Math.min(Number(adv.monthly_installment), remaining);
+            // The loan's own plan (LoanPlan.ts): start month, skips, schedule.
+          const inst = installmentFor(adv, monthYear);
+          if (inst <= 0) continue;
             advanceDeduction += inst;
             if (adv.kind === "loan") loanDeduction += inst;
           }
@@ -3776,7 +3791,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        // The loan's own plan (LoanPlan.ts): start month, skips, schedule.
+          const inst = installmentFor(adv, month_year);
+          if (inst <= 0) continue;
         advanceDeduction += inst;
         if (adv.kind === "loan") loanDeduction += inst;
       }
@@ -3890,7 +3907,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       for (const adv of advances) {
         const remaining = Number(adv.total_amount) - Number(adv.paid_amount);
         if (remaining <= 0) continue;
-        const inst = Math.min(Number(adv.monthly_installment), remaining);
+        // The loan's own plan (LoanPlan.ts): start month, skips, schedule.
+          const inst = installmentFor(adv, existing.month_year);
+          if (inst <= 0) continue;
         advanceDeduction += inst;
         if (adv.kind === "loan") loanDeduction += inst;
       }

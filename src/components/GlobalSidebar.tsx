@@ -5,7 +5,7 @@ import {
   PackageCheck,
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
-  BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
+  BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, Megaphone, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
@@ -80,7 +80,7 @@ interface GlobalSidebarProps {
   // The User Panel's OWN Check In/Out / Bill Claim section
   // (submitting a claim) — gated separately from the Admin Panel's review
   // tabs below by can_view_movement_claims / can_view_bill_claims.
-  onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => void;
+  onGoToBillClaims: (target: 'movementClaims' | 'billClaim' | 'noticeBoard') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
   onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
@@ -343,6 +343,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
   // signed-in account, not gated behind any module grant.
   selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });
+  // Notice Board — every notice posted to this account, to read again after
+  // the popup is gone. Every signed-in account, like the phone's More menu.
+  selfServiceItems.push({ key: 'noticeBoard', label: 'Notice Board', icon: Megaphone, onClick: () => onGoToBillClaims('noticeBoard') });
   // Tutorials (TutorialsSheet.tsx) — short guided tours; only while a
   // Superadmin has them switched on (WelcomeSlidesRoutes.ts).
   if (tutorialsOn) selfServiceItems.push({ key: 'tutorials', label: 'Tutorials', icon: PlayCircle, onClick: openTutorials });
@@ -734,7 +737,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { heading: 'HR Documents' }, 'myLetters'
       )
     },
-    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
   const managementDashboardItem = itemByKey.get('management_dashboard') || null;

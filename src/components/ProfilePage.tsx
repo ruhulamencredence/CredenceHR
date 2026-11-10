@@ -82,13 +82,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   // to show — the tab stays hidden instead of a "contact HR" error.
   const canServiceBook = user.role === 'superadmin' ? user.has_employee !== false : !!user.can_view_service_book;
   // Desktop: the left menu picks what the right side shows (My Service Book
-  // first). Phone: two tabs, Service Book and Settings.
+  // first). Phone: two tabs, Settings first (and open), then Service Book.
   const wide = useMdUp();
   // Phone: Back (the header's or the phone's) closes My Asset, not the whole Profile.
   useBackButtonClose(showAssetManagement && !wide, () => setShowAssetManagement(false));
   const defaultPanel: Panel = canServiceBook ? 'book' : 'contact';
   const [panel, setPanel] = useState<Panel>(defaultPanel);
-  const [mobileTab, setMobileTab] = useState<'book' | 'settings'>(canServiceBook ? 'book' : 'settings');
+  const [mobileTab, setMobileTab] = useState<'book' | 'settings'>('settings');
   // The link check arrives with the /api/auth/me refresh, after this page may
   // already be on the Service Book — move over to Settings then.
   useEffect(() => {
@@ -255,7 +255,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
         <div className="px-4 -mt-8 relative space-y-4 pb-8">
           {canServiceBook && (
             <div className="gemini-card p-1 flex" role="tablist">
-              {(['book', 'settings'] as const).map((t) => (
+              {(['settings', 'book'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"

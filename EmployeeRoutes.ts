@@ -271,6 +271,20 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (fieldBad) return res.status(400).json({ error: fieldBad });
       const zkPin = await checkZkDevicePin(req.body, null);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
+      // Device PIN left blank: the Employee ID is the PIN (it's what HR
+      // enrols them under on the ZKT machine). Taken by someone else -> say
+      // so, so HR types the right one instead of the punches going to them.
+      if (!zkPin.pin) {
+        const code = employee_id != null ? String(employee_id).trim() : "";
+        if (code && code.length <= 20) {
+          const taken = await queryDB("SELECT id, name FROM all_employees WHERE zk_device_pin = ?", [code]);
+          if (taken.length) {
+            return res.status(400).json({ error: `Attendance Device PIN ${code} (the Employee ID, used when the PIN is left blank) is already used by ${taken[0].name}. Type this employee's Device PIN.` });
+          }
+          zkPin.set = true;
+          zkPin.pin = code;
+        }
+      }
       // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice.
       const idClash = await employeeIdConflict(queryDB, employee_id);
       if (idClash) return res.status(409).json({ error: idClash });

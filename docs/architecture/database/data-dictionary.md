@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৪টি টেবিল, ২৬৪৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৫টি টেবিল, ২৬৬৭টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2644,6 +2644,16 @@ Unique: `unique_company_name`(company_id,name)
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `kind` | varchar(10) | না | default 'advance' | |
+| `disbursement_status` | varchar(12) | না | default 'paid' | |
+| `disbursed_at` | date | হ্যাঁ |  | |
+| `disbursed_by` | int(11) | হ্যাঁ |  | |
+| `disbursement_method` | varchar(12) | হ্যাঁ |  | |
+| `disbursement_reference` | varchar(100) | হ্যাঁ |  | |
+| `repay_start_month` | char(7) | হ্যাঁ |  | |
+| `repay_mode` | varchar(8) | না | default 'equal' | |
+| `repay_schedule` | text | হ্যাঁ |  | |
+| `skip_months` | text | হ্যাঁ |  | |
+| `settle_month` | char(7) | হ্যাঁ |  | |
 
 ### `employee_change_log`
 
@@ -2905,6 +2915,21 @@ Unique: `ucompany_unique_holiday_entry_date_group`(company_id,entry_date,applies
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 Unique: `employee_id`(employee_id)
+
+### `loan_events`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `advance_id` | int(11) | না |  | |
+| `event` | varchar(20) | না |  | |
+| `amount` | decimal(12,2) | হ্যাঁ |  | |
+| `event_date` | date | হ্যাঁ |  | |
+| `method` | varchar(12) | হ্যাঁ |  | |
+| `reference` | varchar(100) | হ্যাঁ |  | |
+| `note` | varchar(500) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `projects`
 
@@ -3440,6 +3465,7 @@ Unique: `uniq_esign_settings_company`(company_id)
 | `chain_status` | varchar(20) | হ্যাঁ |  | |
 | `request_kind` | varchar(10) | না | default 'loan' | |
 | `installments` | int(11) | হ্যাঁ |  | |
+| `preferred_start_month` | char(7) | হ্যাঁ |  | |
 
 ### `final_settlements`
 

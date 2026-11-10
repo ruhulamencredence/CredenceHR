@@ -89,6 +89,7 @@ import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
 import { registerTargetRoutes } from "./TargetRoutes";
 import { registerTrackingStayReportRoutes, wallMinutes } from "./TrackingStayReport";
 import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
+import { registerLoanPlanRoutes } from "./LoanPlan";
 import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
@@ -3543,6 +3544,8 @@ async function startServer() {
   // Self Service loan / salary advance requests — ride the Dynamic Approval
   // Engine (request_type 'loan'); Payroll creates the loan.
   registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
+  // Loans: Accounts pays them out; each loan's own repayment plan (LoanPlan.ts).
+  registerLoanPlanRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, createAlert });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   // Management Dashboard: the whole company for one month vs the month before.
   registerManagementDashboardRoutes(app, { authenticateToken, requireModule, queryDB, todayInDhaka });

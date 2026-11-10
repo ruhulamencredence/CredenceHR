@@ -45,6 +45,17 @@ const Timesheet = React.lazy(() => import('./Timesheet').then((m) => ({ default:
 const ClaimCard = React.lazy(() => import('./ClaimCard').then((m) => ({ default: m.ClaimCard })));
 // Check In/Out on the full-screen map (phone) — loaded when it opens.
 const CheckInOutMap = React.lazy(() => import('./CheckInOutMap'));
+// Fetched ahead, once the phone is idle after Home shows, so the first
+// Check In/Out opens without waiting for the map code (and Leaflet).
+let checkInOutMapPrefetched = false;
+const prefetchCheckInOutMap = () => {
+  if (checkInOutMapPrefetched) return;
+  checkInOutMapPrefetched = true;
+  const go = () => void import('./CheckInOutMap').catch(() => (checkInOutMapPrefetched = false));
+  const w = window as any;
+  if (typeof w.requestIdleCallback === 'function') w.requestIdleCallback(go, { timeout: 8000 });
+  else window.setTimeout(go, 3000);
+};
 const MyClaimsCard = React.lazy(() => import('./MyClaimsCard').then((m) => ({ default: m.MyClaimsCard })));
 const BillClaimCard = React.lazy(() => import('./BillClaimCard').then((m) => ({ default: m.BillClaimCard })));
 import { BottomNav } from './BottomNav';
@@ -1204,6 +1215,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
   // from opening at all (e.g. a stale nav request) without the grant.
   const canSeeMovementClaim = user.role === 'superadmin' || !!user.can_view_movement_claims;
+  useEffect(() => {
+    // Phone / app only (that's where the full-screen Check In/Out map is).
+    if (canSeeMovementClaim && window.innerWidth < 768) prefetchCheckInOutMap();
+  }, [canSeeMovementClaim]);
   // Holding the Bill Claim ("bill_claim") Admin module counts too — that's
   // where those accounts see their own claims.
   const canSeeBillClaim =
@@ -1367,6 +1382,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   useEffect(() => {
     if (!claimsNavRequest || !isLatestNav(claimsNavRequest)) return;
+    if (claimsNavRequest.target === 'noticeBoard') {
+      setMobileActiveSection('noticeBoard');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const wantsMovement = claimsNavRequest.target === 'movementClaims';
     if (wantsMovement ? !canSeeMovementClaim : !canSeeBillClaim) return;
     setMobileActiveSection(wantsMovement ? 'claim' : 'billClaim');

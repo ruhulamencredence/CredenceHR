@@ -34,6 +34,7 @@
 // (payroll_access_log). Actions are logged on the server for every write to
 // /api/payroll/*; the page reports the pages / tabs it opens.
 
+import { installmentFor, logLoanEvent } from "./LoanPlan";
 import express, { type Express } from "express";
 import fs from "fs";
 import type { AlertType } from "./Alerts";
@@ -238,18 +239,34 @@ export async function settlePaidPayroll(
     [userId, payment?.date || null, payment?.reference || null, payment?.method || null, payroll.id]
   );
   if (done && done.affectedRows === 0) return false;
-  let remainingToRecover = Number(payroll.advance_deduction) || 0;
+  let remainingToRecover = money(Number(payroll.advance_deduction) || 0);
   if (remainingToRecover > 0) {
     const advances: any[] = await queryDB("SELECT * FROM employee_advances WHERE employee_id = ? AND status = 'active' ORDER BY created_at ASC", [payroll.employee_id]);
+    // What was taken from this salary is credited in full: first to each
+    // loan by its plan for this month (LoanPlan.ts installmentFor — what the
+    // salary was worked out with), then anything left over (the plan was
+    // changed after the salary was made) to the oldest loans still owing.
+    const credit = new Map<number, number>();
+    const owing = (adv: any) => money(Number(adv.total_amount) - Number(adv.paid_amount) - (credit.get(Number(adv.id)) || 0));
+    for (const pass of [1, 2]) {
+      for (const adv of advances) {
+        if (remainingToRecover <= 0) break;
+        if ((adv.disbursement_status || "paid") !== "paid") continue;
+        const outstanding = owing(adv);
+        if (outstanding <= 0) continue;
+        const want = pass === 1 ? installmentFor(adv, String(payroll.month_year || "")) : outstanding;
+        const recover = money(Math.min(want, outstanding, remainingToRecover));
+        if (recover <= 0) continue;
+        credit.set(Number(adv.id), money((credit.get(Number(adv.id)) || 0) + recover));
+        remainingToRecover = money(remainingToRecover - recover);
+      }
+    }
     for (const adv of advances) {
-      if (remainingToRecover <= 0) break;
-      const outstanding = Number(adv.total_amount) - Number(adv.paid_amount);
-      if (outstanding <= 0) continue;
-      const recover = money(Math.min(Number(adv.monthly_installment), outstanding, remainingToRecover));
+      const recover = credit.get(Number(adv.id)) || 0;
       if (recover <= 0) continue;
       const newPaid = money(Number(adv.paid_amount) + recover);
-      await queryDB("UPDATE employee_advances SET paid_amount = ?, status = ? WHERE id = ?", [newPaid, newPaid >= Number(adv.total_amount) ? "completed" : "active", adv.id]);
-      remainingToRecover = money(remainingToRecover - recover);
+      await queryDB("UPDATE employee_advances SET paid_amount = ?, status = ? WHERE id = ?", [newPaid, newPaid >= Number(adv.total_amount) - 0.005 ? "completed" : "active", adv.id]);
+      await logLoanEvent(queryDB, { advanceId: Number(adv.id), event: "salary", amount: recover, note: `Taken from the ${payroll.month_year || ""} salary`.replace("  ", " "), by: userId });
     }
   }
   return true;
