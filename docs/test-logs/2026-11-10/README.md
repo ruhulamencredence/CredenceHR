@@ -11,6 +11,6 @@
 | Grid (`scripts/phone-grid-check.mjs`) | ৮/৮ — নাম স্থির, ≤ ১২০ px, দিন পাশে সরে, পাতা সরে না, Duty Roster-এ দিন চাপলে রং বসে |
 | Desktop: প্রতিটা module-এর পুরো পাতার ছবি, কাজের আগে বনাম পরে (pixel) | layout একই; পার্থক্য শুধু header-এর তারিখ/আবহাওয়া, live ডাটা (Active Users-এর session, Dashboard সংখ্যা, Tracking মানচিত্র), test-এ যোগ করা Department আর রং-করা roster ঘর, আর অক্ষরের কিনারার কয়েক pixel |
 | Typecheck, build, docs:check | পাস |
-| QA suite | প্রতি ধাপে e2e-forms ১৩/১৩, pickers ৮/৮; পুরো suite — নিচে |
+| QA suite | প্রতি ধাপে e2e-forms ১৩/১৩, pickers ৮/৮; শেষে পুরো suite **১৩/১৩ পাস** (unit, Bangla Excel / e-sign / PDF, concurrency ৯, companies ১৮, Group HR ২১, dates ১৫, month-reconcile ৩০, supervisor chain ৩৬, e2e-forms ১৩, pickers ৮, bigdata ১৫) |
 
 চালানো: script-গুলো ফোনের ঠিকানা `http://localhost:3200` আর Superadmin `admin@credence.test` / `ProbePass123` ধরে লেখা (ডাটাবেসের কপিতে বসানো); Playwright-এর path ফাইলের প্রথম লাইনে।
