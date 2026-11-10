@@ -487,6 +487,16 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
         if (f && !map.some((m) => m.field.key === f.key)) map.push({ col, header: h, field: f });
         else extra.push(h);
       });
+      // A sheet whose first row has none of this import's columns (a report,
+      // or the wrong file) — say so, instead of "no filled rows".
+      if (!map.length) {
+        throw new Error(
+          `None of the columns in the first sheet match ${kind.title}. The first row must be the column names, e.g. ${kind.fields
+            .filter((f) => f.required)
+            .map((f) => f.label)
+            .join(', ') || kind.fields.slice(0, 3).map((f) => f.label).join(', ')}. Use this import's template, or the sheet made for it.`
+        );
+      }
       const out: Record<string, string>[] = [];
       for (let i = 1; i < grid.length; i++) {
         const line = grid[i] || [];
