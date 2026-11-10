@@ -1120,3 +1120,33 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
   }
   html[data-admin-phone] main p[data-phone-fold][data-open] { cursor: pointer; }
 }
+
+/*
+  Admin Panel on a phone, step 4: real grids (Duty Roster, Monthly
+  Attendance Report…; lib/adminPhone.ts flags them data-phone-grid). The
+  name column stays put and gets narrower so more days fit; the days scroll
+  sideways under it, with a one-line hint above the grid.
+*/
+@media (max-width: 767px) {
+  html[data-admin-phone] table[data-phone-grid] tr > :first-child {
+    position: sticky; left: 0; z-index: 10;
+    min-width: 104px !important; width: 118px !important; max-width: 118px !important;
+    padding-left: 8px !important; padding-right: 6px !important;
+    box-shadow: 6px 0 8px -6px rgba(60, 30, 10, 0.18);
+  }
+  html[data-admin-phone] table[data-phone-grid] thead tr > :first-child { z-index: 30; }
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child,
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child * {
+    white-space: normal !important; overflow-wrap: break-word; word-break: normal; font-size: 12px !important; line-height: 1.25;
+  }
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child { background: #ffffff; }
+  html[data-admin-phone] :has(> table[data-phone-grid]) {
+    overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%;
+    border-radius: 18px;
+  }
+  html[data-admin-phone] :has(> table[data-phone-grid])::before {
+    content: "Swipe sideways to see every day  ←  →";
+    display: block; position: sticky; left: 0;
+    padding: 6px 10px; font-size: 12px; font-weight: 600; color: #78716c;
+  }
+}

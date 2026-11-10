@@ -84,7 +84,12 @@ function headsOf(table: HTMLTableElement): string[] {
 function stackTable(table: HTMLTableElement) {
   if (table.closest('[role="dialog"], .fixed')) return;
   const heads = headsOf(table);
-  if (!heads.length || isGrid(table, heads)) return;
+  if (!heads.length) return;
+  if (isGrid(table, heads)) {
+    // Step 4: a real grid keeps its name column in place, narrower.
+    if (!table.hasAttribute('data-phone-grid')) table.setAttribute('data-phone-grid', '');
+    return;
+  }
   table.setAttribute('data-phone-card', '');
   for (const body of Array.from(table.tBodies)) {
     for (const tr of Array.from(body.rows)) {
@@ -100,6 +105,7 @@ function stackTable(table: HTMLTableElement) {
 }
 function unstackAll(root: ParentNode) {
   root.querySelectorAll('table[data-phone-card]').forEach((t) => t.removeAttribute('data-phone-card'));
+  root.querySelectorAll('table[data-phone-grid]').forEach((t) => t.removeAttribute('data-phone-grid'));
   root.querySelectorAll('td[data-label], th[data-label]').forEach((c) => c.removeAttribute('data-label'));
 }
 
