@@ -52,6 +52,8 @@ import { runsBackgroundJobs } from "./jobRunner";
 import * as XLSX from "xlsx";
 import { isMailerConfigured, sendMail } from "./mailer";
 import { canEmailReports, reportEmailHtml } from "./ReportEmailRoutes";
+import { fallbackServiceStatus } from "./hrServiceStatus";
+
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -380,7 +382,7 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
       job_status: e.job_status || null,
       service_status:
         snap.service?.service_status ||
-        (Number(e.is_active ?? 1) === 0 ? "separated" : e.job_base === "Permanent" ? "confirmed" : e.job_base === "Contractual" ? "contract" : "probation"),
+        fallbackServiceStatus(e),
       active: Number(e.is_active ?? 1) !== 0,
       has_login: !!e.user_id,
       joining_date: joining,
