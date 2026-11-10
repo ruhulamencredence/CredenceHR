@@ -106,6 +106,20 @@ export async function ensurePasswordResetSchema(dbPool: any): Promise<void> {
       INDEX idx_prl (kind, created_at)
     )`
   );
+  // Whether people may change their own Login ID (Profile -> Change
+  // Username). Off unless a Superadmin turns it on.
+  try {
+    await dbPool.query("ALTER TABLE password_reset_settings ADD COLUMN username_change_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Forgot password (username_change_enabled): ${err.message}`);
+  }
+}
+
+// Profile -> Change Username allowed for everyone? Off by default (and when
+// nothing is saved yet); a Superadmin may always change their own.
+export async function usernameChangeEnabled(queryDB: QueryDB): Promise<boolean> {
+  const rows: any[] = (await queryDB("/*unscoped*/ SELECT username_change_enabled FROM password_reset_settings WHERE id = 1").catch(() => [])) || [];
+  return !!Number(rows[0]?.username_change_enabled || 0);
 }
 
 const WINDOW_MIN = 15;
@@ -332,7 +346,12 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
             ORDER BY r.created_at ${view === "pending" ? "ASC" : "DESC"} LIMIT 200`,
           [req.user.id]
         )) || [];
-      res.json({ view, rows, can_settings: req.user.role === "superadmin", settings: req.user.role === "superadmin" ? { ...(await settings()), mailer: isMailerConfigured(), last_mail: lastMail } : null });
+      res.json({
+        view,
+        rows,
+        can_settings: req.user.role === "superadmin",
+        settings: req.user.role === "superadmin" ? { ...(await settings()), username_change_enabled: await usernameChangeEnabled(queryDB), mailer: isMailerConfigured(), last_mail: lastMail } : null
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -408,12 +427,14 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
     try {
       const email = req.body?.email_code_enabled ? 1 : 0;
       const hr = req.body?.hr_request_enabled ? 1 : 0;
+      // Left as it is when the request doesn't say.
+      const uname = req.body && "username_change_enabled" in req.body ? (req.body.username_change_enabled ? 1 : 0) : (await usernameChangeEnabled(queryDB)) ? 1 : 0;
       await queryDB(
-        `/*unscoped*/ INSERT INTO password_reset_settings (id, email_code_enabled, hr_request_enabled, updated_by) VALUES (1, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE email_code_enabled = VALUES(email_code_enabled), hr_request_enabled = VALUES(hr_request_enabled), updated_by = VALUES(updated_by)`,
-        [email, hr, req.user.id]
+        `/*unscoped*/ INSERT INTO password_reset_settings (id, email_code_enabled, hr_request_enabled, username_change_enabled, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE email_code_enabled = VALUES(email_code_enabled), hr_request_enabled = VALUES(hr_request_enabled), username_change_enabled = VALUES(username_change_enabled), updated_by = VALUES(updated_by)`,
+        [email, hr, uname, req.user.id]
       );
-      res.json({ ...(await settings()), mailer: isMailerConfigured(), last_mail: lastMail });
+      res.json({ ...(await settings()), username_change_enabled: await usernameChangeEnabled(queryDB), mailer: isMailerConfigured(), last_mail: lastMail });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

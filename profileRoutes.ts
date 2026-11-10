@@ -27,6 +27,8 @@ import { endAllSessions, sessionKeyOf } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { createAlert } from "./Alerts";
+import { usernameChangeEnabled } from "./PasswordResetRoutes";
+
 
 interface ProfileRouteDeps {
   authenticateToken: any;
@@ -407,8 +409,21 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
   // changes the credential used to log in. Login ID format matches how
   // usernames are generated on Bulk Add Users (POST /api/users/bulk,
   // UserManagement.ts): spaces stripped, lowercased.
+  // Whether this account sees Profile -> Change Username (switch in Admin
+  // Panel -> Users -> Password requests; a Superadmin always may).
+  app.get("/api/profile/username-change", authenticateToken, async (req: any, res) => {
+    try {
+      res.json({ allowed: isSuper(req) || (await usernameChangeEnabled(queryDB)) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put("/api/profile/username", authenticateToken, async (req: any, res) => {
     try {
+      if (!isSuper(req) && !(await usernameChangeEnabled(queryDB))) {
+        return res.status(403).json({ error: "Changing your username is turned off. Ask HR if it needs to change." });
+      }
       const userId = req.user.id;
       const currentPassword = String(req.body?.current_password || "");
       const rawUsername = String(req.body?.new_username || "").trim();

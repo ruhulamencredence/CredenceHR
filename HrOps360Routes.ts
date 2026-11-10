@@ -41,6 +41,8 @@ import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeB
 import { loadRoster, lateThresholds, nightShiftCheckIn, type RosterIndex } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { buildServiceBook, loadEmployeeWorld, loadSettings, snapshotOf, currentValues, toDate, num, monthsBetween } from "./HROperationsRoutes";
+import { fallbackServiceStatus } from "./hrServiceStatus";
+
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -1100,7 +1102,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
           user_id: e.user_id ? Number(e.user_id) : null,
           service_status:
             snap.service?.service_status ||
-            (Number(e.is_active ?? 1) === 0 ? "separated" : e.job_base === "Permanent" ? "confirmed" : e.job_base === "Contractual" ? "contract" : "probation"),
+            fallbackServiceStatus(e),
           contract_end_date: toDate(snap.service?.contract_end_date),
           probation_months: snap.service?.probation_months ?? null,
           supervisor_code: supervisorEmp?.employee_id || null

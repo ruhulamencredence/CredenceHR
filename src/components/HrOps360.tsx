@@ -382,9 +382,11 @@ export const Employee360: React.FC<{
               <div className="flex-1 min-w-[200px]">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-bold text-slate-900">{e.name}</h2>
-                  <Badge tone={e.service_status === 'separated' ? 'rejected' : e.service_status === 'confirmed' ? 'approved' : 'pending'}>
-                    {SERVICE_STATUS_LABEL[e.service_status] || e.service_status}
-                  </Badge>
+                  {e.service_status && (
+                    <Badge tone={e.service_status === 'separated' ? 'rejected' : e.service_status === 'confirmed' ? 'approved' : 'pending'}>
+                      {SERVICE_STATUS_LABEL[e.service_status] || e.service_status}
+                    </Badge>
+                  )}
                   {e.grade && <Badge tone="na">Grade {e.grade}</Badge>}
                 </div>
                 <div className="text-xs text-slate-600 mt-0.5">{[e.employee_code, e.designation, e.department].filter(Boolean).join(' · ')}</div>
