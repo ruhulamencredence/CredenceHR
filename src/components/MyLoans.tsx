@@ -21,6 +21,7 @@ import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { LoadingBlock } from './LoadingBlock';
+import { LoanHistory, PlanPreview, methodLabel, monthName, shiftMonth, type LoanDetail } from './LoanPayoutPlan';
 
 interface MyLoanRequest {
   id: number;
@@ -46,6 +47,17 @@ interface MyLoan {
   reason: string | null;
   status: 'active' | 'completed';
   created_at: string;
+  kind?: 'loan' | 'advance';
+  // Paid out yet, how it's paid back, the months to come, history (LoanPlan.ts).
+  disbursement_status?: LoanDetail['disbursement_status'];
+  disbursed_at?: string | null;
+  disbursement_method?: string | null;
+  repay_start_month?: string | null;
+  repay_mode?: LoanDetail['repay_mode'];
+  skip_months?: string[];
+  settle_month?: string | null;
+  plan?: LoanDetail['plan'];
+  events?: LoanDetail['events'];
 }
 interface MyLoansData {
   linked: boolean;
@@ -174,7 +186,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                           title={tk(l.total_amount)}
                           sub={`${day(l.created_at)}${l.reason ? ` · ${l.reason}` : ''}`}
                           chips={[
-                            { label: repaid ? 'Repaid' : 'Repaying', tone: repaid ? 'green' : 'amber' },
+                            { label: repaid ? 'Repaid' : l.disbursement_status === 'pending' ? 'Waiting for payment' : 'Repaying', tone: repaid ? 'green' : 'amber' },
                             { label: `${tk(l.monthly_installment)}/month`, mono: true },
                             ...(l.remaining > 0 ? [{ label: `${left} left` }] : [])
                           ]}
@@ -186,6 +198,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                             <span>Repaid {tk(l.paid_amount)}</span>
                             <span>Left {tk(l.remaining)}</span>
                           </div>
+                          <LoanExtra l={l} />
                         </SelfCard>
                       );
                     return (
@@ -199,7 +212,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                             </div>
                           </div>
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${l.status === 'completed' || l.remaining <= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}`}>
-                            {l.status === 'completed' || l.remaining <= 0 ? 'Repaid' : 'Repaying'}
+                            {l.status === 'completed' || l.remaining <= 0 ? 'Repaid' : l.disbursement_status === 'pending' ? 'Waiting for payment' : 'Repaying'}
                           </span>
                         </div>
                         <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
@@ -222,6 +235,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
                             </div>
                           </div>
                         </div>
+                        <LoanExtra l={l} />
                       </div>
                     );
                   })}
@@ -317,6 +331,42 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   );
 };
 
+// Under each loan: paid out or still waiting, how it's paid back, the
+// months to come, and (tap) its history.
+const LoanExtra: React.FC<{ l: MyLoan }> = ({ l }) => {
+  const [showHistory, setShowHistory] = useState(false);
+  if (l.status === 'completed' || l.remaining <= 0) return null;
+  const pending = l.disbursement_status === 'pending';
+  const how = l.repay_mode === 'lump' ? 'All at once' : l.repay_mode === 'custom' ? 'Month by month' : `${tk(l.monthly_installment)} a month`;
+  return (
+    <div className="mt-2 space-y-1.5 text-[11px] text-slate-600">
+      {pending ? (
+        <p className="px-2.5 py-1.5 rounded-xl bg-amber-50 text-amber-800">Approved — Accounts will pay it to you. Nothing is taken from your salary until then.</p>
+      ) : (
+        <p>
+          Paid to you {l.disbursed_at ? String(l.disbursed_at).slice(0, 10) : ''}
+          {l.disbursement_method ? ` · ${methodLabel(l.disbursement_method)}` : ''}
+        </p>
+      )}
+      <p>
+        Repayment: {how}
+        {l.repay_start_month ? ` · from ${monthName(l.repay_start_month)}` : pending ? ' · from the month after you are paid' : ''}
+        {l.skip_months && l.skip_months.length ? ` · skipping ${l.skip_months.map(monthName).join(', ')}` : ''}
+        {l.settle_month ? ` · rest in ${monthName(l.settle_month)}` : ''}
+      </p>
+      {l.plan && !pending && <PlanPreview plan={l.plan} />}
+      {l.events && l.events.length > 0 && (
+        <>
+          <button type="button" onClick={() => setShowHistory((v) => !v)} className="text-[11px] font-semibold text-emerald-700">
+            {showHistory ? 'Hide history' : 'History'}
+          </button>
+          {showHistory && <LoanHistory events={l.events} />}
+        </>
+      )}
+    </div>
+  );
+};
+
 const ApplyLoanModal: React.FC<{ token: string; maxInstallments: number; grossSalary: number | null; onClose: () => void; onSaved: () => void }> = ({
   token,
   maxInstallments,
@@ -328,6 +378,9 @@ const ApplyLoanModal: React.FC<{ token: string; maxInstallments: number; grossSa
   const [amount, setAmount] = useState('');
   const [installments, setInstallments] = useState('6');
   const [reason, setReason] = useState('');
+  // Optional: start the installments from a later salary month.
+  const thisMonth = new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 7);
+  const [startMonth, setStartMonth] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const keyboardInset = useKeyboardInset();
@@ -341,7 +394,7 @@ const ApplyLoanModal: React.FC<{ token: string; maxInstallments: number; grossSa
     if (!reason.trim()) return setError('Write what you need it for.');
     setBusy(true);
     try {
-      await call(token, '/api/my-loans/requests', { method: 'POST', body: JSON.stringify({ kind, total_amount: Number(amount), installments: n, reason: reason.trim() }) });
+      await call(token, '/api/my-loans/requests', { method: 'POST', body: JSON.stringify({ kind, total_amount: Number(amount), installments: n, reason: reason.trim(), preferred_start_month: startMonth || null }) });
       onSaved();
     } catch (e: any) {
       setError(e.message);
@@ -396,6 +449,11 @@ const ApplyLoanModal: React.FC<{ token: string; maxInstallments: number; grossSa
             ) : (
               `Up to ${maxInstallments} monthly installments.`
             )}
+          </div>
+          <div className="mt-3">
+            <label htmlFor="loan-start" className="block text-[11px] font-semibold text-slate-500 mb-1">Start the installments from (optional)</label>
+            <input id="loan-start" type="month" min={thisMonth} max={shiftMonth(thisMonth, 12)} value={startMonth} onChange={(e) => setStartMonth(e.target.value)} className={inputCls} />
+            <p className="text-[10px] text-slate-400 mt-1">Leave empty to start the month after you are paid. HR / Accounts set the final plan.</p>
           </div>
           <div className="mt-3">
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">What is it for? *</label>

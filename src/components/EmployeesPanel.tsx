@@ -1646,10 +1646,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     type="text"
                     value={form.zk_device_pin}
                     onChange={(e) => setForm((f) => ({ ...f, zk_device_pin: e.target.value }))}
-                    placeholder="e.g. 1045"
+                    placeholder={editingId ? 'e.g. 1045' : 'Blank = the Employee ID'}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
-                  <p className="text-[11px] text-slate-400 mt-1">The User ID this person is enrolled under on the office fingerprint/face machine — links their punches to Office Attendance.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">The User ID this person is enrolled under on the office fingerprint/face machine — links their punches to Office Attendance.{!editingId && ' Left blank, the Employee ID is used.'}</p>
                 </div>
               </div>
 

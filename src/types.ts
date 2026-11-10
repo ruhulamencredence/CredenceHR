@@ -2109,7 +2109,8 @@ export interface ConveyanceBill {
 // clicks on the same target) so AdminPanel/UserPanel's effect always re-fires,
 // then hands this down to whichever of the two panels is currently mounted.
 export interface ClaimsNavRequest {
-  target: 'movementClaims' | 'billClaim';
+  // noticeBoard: the sidebar's Notice Board (a User Panel page like these).
+  target: 'movementClaims' | 'billClaim' | 'noticeBoard';
   ts: number;
 }
 

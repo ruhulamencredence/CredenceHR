@@ -43,6 +43,96 @@ interface RosterData {
 }
 type Brush = { kind: 'shift'; id: number } | { kind: 'off' } | { kind: 'clear' };
 
+// Rows on one page of the grid: a month for everyone at once is tens of
+// thousands of cells (800 people x 31 days), which made the page slow.
+const PAGE_SIZE = 50;
+
+// One person's row. Memoised: painting a cell re-renders only that row
+// (its `pending` slice changes), not the whole grid.
+const RosterRow = React.memo(function RosterRow({
+  e,
+  days,
+  today,
+  holidays,
+  pending,
+  shiftById,
+  canManage,
+  canPaint,
+  checked,
+  onToggle,
+  onPaintStart,
+  onPaintEnter
+}: {
+  e: RosterEmployee;
+  days: string[];
+  today: string;
+  holidays: Record<string, { title: string; type: string }> | undefined;
+  pending: Record<string, Cell> | undefined;
+  shiftById: Map<number, Shift>;
+  canManage: boolean;
+  canPaint: boolean;
+  checked: boolean;
+  onToggle: (id: number) => void;
+  onPaintStart: (e: RosterEmployee, d: string) => void;
+  onPaintEnter: (e: RosterEmployee, d: string) => void;
+}) {
+  const cellOf = (d: string): Cell | undefined => (pending && d in pending ? pending[d] : e.days[d]);
+  let duty = 0;
+  let off = 0;
+  for (const d of days) {
+    const c = cellOf(d);
+    if (c?.is_off) off++;
+    else if (c?.shift_id != null) duty++;
+  }
+  return (
+    <tr>
+      <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-100 px-3 py-1.5">
+        <span className="flex items-center gap-2">
+          {canManage && <input type="checkbox" checked={checked} onChange={() => onToggle(e.id)} aria-label={`Select ${e.name}`} className="accent-violet-600" />}
+          <span className="min-w-0">
+            <span className="block font-semibold text-slate-900 truncate max-w-[11rem]" title={e.name}>
+              {e.name}
+            </span>
+            <span className="block text-[10px] text-slate-500 truncate max-w-[11rem]">
+              {[e.employee_code, e.department].filter(Boolean).join(' · ')}
+              {duty || off ? ` · ${duty} duty, ${off} off` : ''}
+            </span>
+          </span>
+        </span>
+      </td>
+      {days.map((d) => {
+        const c = cellOf(d);
+        const hol = holidays?.[d];
+        const s = c?.shift_id != null ? shiftById.get(c.shift_id) : undefined;
+        const changed = !!pending && d in pending;
+        const label = c?.is_off ? 'Off day' : s ? `${s.name} ${shiftTime(s)}` : hol ? hol.title : 'Not set — calendar and late policy';
+        return (
+          <td
+            key={d}
+            title={`${e.name} · ${d}: ${label}${s && hol ? ` (on duty on ${hol.title})` : ''}`}
+            onPointerDown={(ev) => {
+              if (!canPaint) return;
+              ev.preventDefault();
+              onPaintStart(e, d);
+            }}
+            onPointerEnter={() => onPaintEnter(e, d)}
+            className={`border-b border-slate-100 p-0.5 text-center ${canPaint ? 'cursor-pointer' : ''} ${hol && !s ? 'bg-slate-50' : ''} ${d === today ? 'bg-violet-50/60' : ''}`}
+          >
+            <div
+              className={`h-7 rounded-md flex items-center justify-center font-bold text-[11px] ${changed ? 'ring-2 ring-amber-400' : ''} ${
+                s ? 'text-white' : c?.is_off ? 'bg-slate-200 text-slate-600' : hol ? 'text-slate-400' : 'text-slate-300'
+              }`}
+              style={s ? { background: s.color } : undefined}
+            >
+              {s ? s.code : c?.is_off ? 'OFF' : hol ? (hol.type === 'weekend' ? 'W' : 'H') : '·'}
+            </div>
+          </td>
+        );
+      })}
+    </tr>
+  );
+});
+
 async function api<T>(token: string, path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(apiUrl(path), {
     method: init?.method || 'GET',
@@ -327,6 +417,23 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
     const t = q.trim().toLowerCase();
     return (data?.employees || []).filter((e) => (!dept || e.department === dept) && (!t || `${e.name} ${e.employee_code || ''} ${e.designation || ''}`.toLowerCase().includes(t)));
   }, [data, q, dept]);
+  // One page of rows on screen; search / department / month go back to page 1.
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [q, dept, month]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pageNo = Math.min(page, pageCount - 1);
+  const pageRows = useMemo(() => rows.slice(pageNo * PAGE_SIZE, pageNo * PAGE_SIZE + PAGE_SIZE), [rows, pageNo]);
+  // Unsaved changes grouped by person, so a row only re-renders when its own change.
+  const pendingByEmp = useMemo(() => {
+    const m = new Map<number, Record<string, Cell>>();
+    for (const [k, c] of pending) {
+      const [id, d] = k.split('|');
+      const n = Number(id);
+      if (!m.has(n)) m.set(n, {});
+      m.get(n)![d] = c;
+    }
+    return m;
+  }, [pending]);
 
   const cellOf = (e: RosterEmployee, d: string): Cell | undefined => {
     const k = `${e.id}|${d}`;
@@ -405,17 +512,26 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
     }
   };
 
-  const totals = (e: RosterEmployee) => {
-    let duty = 0;
-    let off = 0;
-    for (const d of days) {
-      const c = cellOf(e, d);
-      if (c?.is_off) off++;
-      else if (c?.shift_id != null) duty++;
-    }
-    return { duty, off };
-  };
-  const allChecked = rows.length > 0 && rows.every((e) => selected.has(e.id));
+  const allChecked = pageRows.length > 0 && pageRows.every((e) => selected.has(e.id));
+  // Stable handlers for the memoised rows; they read the latest state via a ref.
+  const paintRef = useRef(paint);
+  paintRef.current = paint;
+  const canPaint = canManage && !!brush;
+  const onPaintStart = useCallback((e: RosterEmployee, d: string) => {
+    painting.current = true;
+    paintRef.current(e, d);
+  }, []);
+  const onPaintEnter = useCallback((e: RosterEmployee, d: string) => {
+    if (painting.current) paintRef.current(e, d);
+  }, []);
+  const onToggle = useCallback((id: number) => {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }, []);
 
   const BrushChip: React.FC<{ b: Brush; label: React.ReactNode; color?: string; title?: string }> = ({ b, label, color, title }) => {
     const on = brush && brush.kind === b.kind && (b.kind !== 'shift' || (brush as any).id === b.id);
@@ -606,7 +722,16 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                               <input
                                 type="checkbox"
                                 checked={allChecked}
-                                onChange={() => setSelected(allChecked ? new Set() : new Set(rows.map((e) => e.id)))}
+                                onChange={() =>
+                                  setSelected((s) => {
+                                    const n = new Set(s);
+                                    for (const e of pageRows) {
+                                      if (allChecked) n.delete(e.id);
+                                      else n.add(e.id);
+                                    }
+                                    return n;
+                                  })
+                                }
                                 aria-label="Select everyone shown"
                                 className="accent-violet-600"
                               />
@@ -631,77 +756,47 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((e) => {
-                        const t = totals(e);
-                        return (
-                          <tr key={e.id}>
-                            <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-100 px-3 py-1.5">
-                              <span className="flex items-center gap-2">
-                                {canManage && (
-                                  <input
-                                    type="checkbox"
-                                    checked={selected.has(e.id)}
-                                    onChange={() =>
-                                      setSelected((s) => {
-                                        const n = new Set(s);
-                                        if (n.has(e.id)) n.delete(e.id);
-                                        else n.add(e.id);
-                                        return n;
-                                      })
-                                    }
-                                    aria-label={`Select ${e.name}`}
-                                    className="accent-violet-600"
-                                  />
-                                )}
-                                <span className="min-w-0">
-                                  <span className="block font-semibold text-slate-900 truncate max-w-[11rem]" title={e.name}>
-                                    {e.name}
-                                  </span>
-                                  <span className="block text-[10px] text-slate-500 truncate max-w-[11rem]">
-                                    {[e.employee_code, e.department].filter(Boolean).join(' · ')}
-                                    {t.duty || t.off ? ` · ${t.duty} duty, ${t.off} off` : ''}
-                                  </span>
-                                </span>
-                              </span>
-                            </td>
-                            {days.map((d) => {
-                              const c = cellOf(e, d);
-                              const hol = data.holidays[e.group]?.[d];
-                              const s = c?.shift_id != null ? shiftById.get(c.shift_id) : undefined;
-                              const changed = pending.has(`${e.id}|${d}`);
-                              const label = c?.is_off ? 'Off day' : s ? `${s.name} ${shiftTime(s)}` : hol ? hol.title : 'Not set — calendar and late policy';
-                              return (
-                                <td
-                                  key={d}
-                                  title={`${e.name} · ${d}: ${label}${s && hol ? ` (on duty on ${hol.title})` : ''}`}
-                                  onPointerDown={(ev) => {
-                                    if (!canManage || !brush) return;
-                                    ev.preventDefault();
-                                    painting.current = true;
-                                    paint(e, d);
-                                  }}
-                                  onPointerEnter={() => painting.current && paint(e, d)}
-                                  className={`border-b border-slate-100 p-0.5 text-center ${canManage && brush ? 'cursor-pointer' : ''} ${hol && !s ? 'bg-slate-50' : ''} ${d === today ? 'bg-violet-50/60' : ''}`}
-                                >
-                                  <div
-                                    className={`h-7 rounded-md flex items-center justify-center font-bold text-[11px] ${changed ? 'ring-2 ring-amber-400' : ''} ${
-                                      s ? 'text-white' : c?.is_off ? 'bg-slate-200 text-slate-600' : hol ? 'text-slate-400' : 'text-slate-300'
-                                    }`}
-                                    style={s ? { background: s.color } : undefined}
-                                  >
-                                    {s ? s.code : c?.is_off ? 'OFF' : hol ? (hol.type === 'weekend' ? 'W' : 'H') : '·'}
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        );
-                      })}
+                      {pageRows.map((e) => (
+                        <RosterRow
+                          key={e.id}
+                          e={e}
+                          days={days}
+                          today={today}
+                          holidays={data.holidays[e.group]}
+                          pending={pendingByEmp.get(e.id)}
+                          shiftById={shiftById}
+                          canManage={canManage}
+                          canPaint={canPaint}
+                          checked={selected.has(e.id)}
+                          onToggle={onToggle}
+                          onPaintStart={onPaintStart}
+                          onPaintEnter={onPaintEnter}
+                        />
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
             )
+          )}
+          {data && rows.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-slate-600">
+              <span>
+                {pageNo * PAGE_SIZE + 1}–{Math.min(rows.length, (pageNo + 1) * PAGE_SIZE)} of {rows.length} employees
+                {selected.size ? ` · ${selected.size} selected` : ''}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <button type="button" onClick={() => setPage(pageNo - 1)} disabled={pageNo === 0} className="p-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40" aria-label="Previous page">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-2 font-semibold text-slate-800">
+                  Page {pageNo + 1} / {pageCount}
+                </span>
+                <button type="button" onClick={() => setPage(pageNo + 1)} disabled={pageNo >= pageCount - 1} className="p-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40" aria-label="Next page">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </span>
+            </div>
           )}
           <p className="text-[11px] text-slate-500">
             <b>W</b> / <b>H</b> — calendar Weekend / Holiday (nothing set). <b>OFF</b> — rostered Off day. A shift on a W/H day means that person is on duty that day. "·" — nothing set: the calendar and the Late Attendance Policy apply.

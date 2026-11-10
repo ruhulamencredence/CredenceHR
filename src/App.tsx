@@ -93,6 +93,7 @@ const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendanc
 const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
+import bootIconUrl from './assets/boot/app-icon-336.webp';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
@@ -612,6 +613,12 @@ export default function App() {
     // and any unsent form drafts (formDraft.ts).
     clearScreenCache();
     clearAllDrafts();
+    // Where this person was last located (the Check In/Out map opens there).
+    try {
+      localStorage.removeItem('credence_last_fix');
+    } catch {
+      // storage unavailable
+    }
     refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);
@@ -996,11 +1003,17 @@ export default function App() {
   // reload fires, so the manual-reload gesture ends the same smooth way
   // every other loading state in the app does.
   const pullToRefreshFullscreenLoader = triggering && (
+    // The same orange screen with the app icon that the app opens on
+    // (index.html's #mpr-boot-spinner), so the reload runs straight into
+    // the normal start-up instead of flashing a grey placeholder page.
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-white"
-      style={{ animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
+      className="fixed inset-0 z-[110]"
+      role="progressbar"
+      aria-label="Reloading CredenceHR"
+      style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
     >
-      <AppLoader label="Reloading…" size={72} minHeight={0} />
+      <img src={bootIconUrl} alt="" width={112} height={112} className="absolute left-1/2 top-1/2 -ml-14 -mt-14 w-28 h-28" />
+      <div className="absolute left-1/2 -ml-[60px] w-[120px] h-[3px] rounded-sm bg-white/25" style={{ bottom: 124 }} />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
@@ -1212,10 +1225,11 @@ export default function App() {
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
-      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision)$/.test(title)) {
+      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision|Loan Ready to Pay)$/.test(title)) {
         try {
           sessionStorage.setItem('payroll_tab', 'loans');
-          sessionStorage.setItem('loans_subtab', 'approvals');
+          // "Loan Ready to Pay" (LoanPlan.ts) opens the To Pay list.
+          sessionStorage.setItem('loans_subtab', title === 'Loan Ready to Pay' ? 'topay' : 'approvals');
         } catch {
           // storage unavailable
         }
@@ -1316,6 +1330,7 @@ export default function App() {
       case 'leave': return 'leaveApplication';
       case 'timesheet': return 'timesheet';
       case 'employeeDirectory': return 'employeeDirectory';
+      case 'noticeBoard': return 'noticeBoard';
       default: return null;
     }
   };
@@ -1395,7 +1410,7 @@ export default function App() {
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
-    onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => {
+    onGoToBillClaims: (target: 'movementClaims' | 'billClaim' | 'noticeBoard') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);

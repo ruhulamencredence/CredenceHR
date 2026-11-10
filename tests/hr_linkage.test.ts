@@ -217,6 +217,8 @@ describe("Exit dues (live server)", () => {
     const sim = await call("POST", "/api/mobile-bill/sims", admin.token, { phone_number: `017${digits}`, operator: "GP", employee_id: emp.employeeId, limit_source: "custom", limit_amount: 500 });
     assert.equal(sim.code, 201, JSON.stringify(sim.body));
     const loan = await call("POST", "/api/payroll/advances", admin.token, { employee_id: emp.employeeId, total_amount: 12000, monthly_installment: 2000, reason: "Test loan" });
+    // Only money actually paid out is owed on exit (LoanPlan.ts).
+    await call("POST", `/api/payroll/advances/${loan.body.id}/disburse`, admin.token, { method: "cash" });
     assert.equal(loan.code, 200, JSON.stringify(loan.body));
     const ex = await call("POST", "/api/exit-requests", admin.token, { user_id: emp.userId, exit_type: "resignation", last_working_day: "2026-12-31" });
     assert.equal(ex.code, 201);

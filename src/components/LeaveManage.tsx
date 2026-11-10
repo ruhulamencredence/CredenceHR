@@ -7,6 +7,7 @@ import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
+import { useAdminPhonePage } from '../lib/adminPhone';
 
 import { Combobox, SearchSelect } from './Combobox';
 interface LeaveManageProps {
@@ -40,6 +41,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   // the table below untouched, the Android APK build gets a card list instead
   // (a wide multi-column table doesn't work well on a phone screen).
   const isNativeApp = Capacitor.isNativePlatform();
+  // Phone: the blended app header with "Leave Manage", no breadcrumb (lib/adminPhone.ts).
+  const adminPhone = useAdminPhonePage('Leave Manage');
 
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -789,7 +792,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
-        {!isNativeApp && (
+        {!isNativeApp && !adminPhone && (
           <ModulePath path={['Admin Panel', 'HRM', 'Leave', 'Leave Manage']} onBack={onBack} />
         )}
 

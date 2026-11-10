@@ -42,6 +42,7 @@ import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
 import { SelfBodySkeleton } from './SelfPageSkeleton';
+import { useAdminPhonePage } from '../lib/adminPhone';
 
 import { STD_STYLES, STD_HEAD, STD_FOOT } from '../lib/pdfStandard';
 interface PayrollModuleProps {
@@ -574,6 +575,8 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
 // ---------------------------------------------------------------------------
 export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) => {
   const isNativeApp = Capacitor.isNativePlatform();
+  // Phone: the blended app header with "Payroll", no breadcrumb (lib/adminPhone.ts).
+  const adminPhone = useAdminPhonePage('Payroll');
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [activeTab, setActiveTab] = useState<
@@ -683,7 +686,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
-        {!isNativeApp && (
+        {!isNativeApp && !adminPhone && (
           <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} onBack={onBack} />
         )}
 

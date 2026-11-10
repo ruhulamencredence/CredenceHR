@@ -258,7 +258,7 @@ export async function collectExitDues(queryDB: (sql: string, params?: any[]) => 
   }
   for (const m of (sims || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "active"))
     out.push({ key: `sim:${m.id}`, kind: "sim", label: `SIM ${m.phone_number} (${m.operator})`, detail: "Still active — turn it off or move it in Mobile Bill", amount: null, blocking: true, added: false });
-  for (const a of (advances || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "active")) {
+  for (const a of (advances || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "active" && (x.disbursement_status || "paid") === "paid")) {
     const balance = money(Number(a.total_amount) - Number(a.paid_amount || 0));
     if (balance <= 0) continue;
     const key = `loan:${a.id}`;

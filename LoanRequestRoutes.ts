@@ -24,6 +24,8 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 
+import { accountsPayUserIds, isMonth, loanDetail, logLoanEvent, shiftMonth } from "./LoanPlan";
+
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 type CreateAlert = (
   queryDB: QueryDB,
@@ -108,9 +110,12 @@ export async function finalizeAdvanceRequest(queryDB: QueryDB, createAlert: Crea
   );
   if (took && took.affectedRows === 0) throw Object.assign(new Error("This request has already been decided."), { statusCode: 409 });
   const result: any = await queryDB(
-    "INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind) VALUES (?, ?, ?, ?, ?, ?)",
-    [r.employee_id, money(r.total_amount), money(r.monthly_installment), r.reason, actorId, r.request_kind === "advance" ? "advance" : "loan"]
+    // Waiting for Accounts to pay it out (LoanPlan.ts) — nothing is taken
+    // from the salary until then; the employee's wished start month carries over.
+    "INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by, kind, disbursement_status, repay_start_month) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+    [r.employee_id, money(r.total_amount), money(r.monthly_installment), r.reason, actorId, r.request_kind === "advance" ? "advance" : "loan", isMonth(r.preferred_start_month) ? r.preferred_start_month : null]
   );
+  await logLoanEvent(queryDB, { advanceId: Number(result.insertId), event: "approved", amount: money(r.total_amount), note: remarks, by: actorId });
   await queryDB("UPDATE advance_requests SET advance_id = ? WHERE id = ?", [result.insertId, requestId]);
   const uid = await employeeUserId(queryDB, Number(r.employee_id));
   if (uid) {
@@ -118,12 +123,30 @@ export async function finalizeAdvanceRequest(queryDB: QueryDB, createAlert: Crea
       userId: uid,
       type: "loan_request",
       title: `${kindLabel(r)} Approved`,
-      message: `Your ${kindLabel(r).toLowerCase()} of ${tk(r.total_amount)} was approved. ${tk(r.monthly_installment)} a month will be taken from your salary from the next payroll.`,
+      message: `Your ${kindLabel(r).toLowerCase()} of ${tk(r.total_amount)} was approved. Accounts will pay it to you; ${tk(r.monthly_installment)} a month is taken from your salary ${isMonth(r.preferred_start_month) ? `from ${r.preferred_start_month}` : "from the month after you are paid"}.`,
       relatedType: "advance_request",
       relatedId: requestId
     }).catch(() => {});
   }
+  await tellAccounts(queryDB, createAlert, Number(result.insertId));
   return { advance_id: Number(result.insertId) };
+}
+
+// Accounts (Payroll "Accounts Pay"): a loan is waiting to be paid out.
+export async function tellAccounts(queryDB: QueryDB, createAlert: CreateAlert, advanceId: number) {
+  const rows: any[] = (await queryDB("SELECT a.*, e.name AS employee_name FROM employee_advances a JOIN all_employees e ON e.id = a.employee_id WHERE a.id = ?", [advanceId]).catch(() => [])) || [];
+  const a = rows[0];
+  if (!a) return;
+  for (const id of await accountsPayUserIds(queryDB)) {
+    await createAlert(queryDB, {
+      userId: id,
+      type: "loan_request",
+      title: "Loan Ready to Pay",
+      message: `${a.employee_name}'s ${a.kind === "loan" ? "loan" : "salary advance"} of ${tk(a.total_amount)} is approved. Pay it and mark it paid in Payroll → Loans & Advances.`,
+      relatedType: "employee_advance",
+      relatedId: advanceId
+    }).catch(() => {});
+  }
 }
 
 export async function rejectAdvanceRequest(queryDB: QueryDB, createAlert: CreateAlert, requestId: number, actorId: number | null, remarks: string | null) {
@@ -223,6 +246,7 @@ export function registerLoanRequestRoutes(app: Express, deps: LoanRequestRouteDe
           total_amount: money(r.total_amount),
           monthly_installment: money(r.monthly_installment),
           installments: r.installments != null ? Number(r.installments) : null,
+          preferred_start_month: r.preferred_start_month || null,
           reason: r.reason,
           status: r.status,
           chain_status: r.chain_status,
@@ -233,16 +257,26 @@ export function registerLoanRequestRoutes(app: Express, deps: LoanRequestRouteDe
           decided_at: r.decided_at
         });
       }
-      const outLoans = (loans || []).map((l: any) => ({
-        id: Number(l.id),
-        total_amount: money(l.total_amount),
-        monthly_installment: money(l.monthly_installment),
-        paid_amount: money(l.paid_amount),
-        remaining: money(Number(l.total_amount) - Number(l.paid_amount)),
-        reason: l.reason,
-        status: l.status,
-        created_at: l.created_at
-      }));
+      // Each loan with whether it's been paid out, its repayment plan, the
+      // months to come and its history (LoanPlan.ts).
+      const thisMonth = new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 7);
+      const outLoans: any[] = [];
+      for (const l of loans || []) {
+        const d = await loanDetail(queryDB, l, thisMonth);
+        outLoans.push({
+          id: Number(l.id),
+          kind: l.kind === "loan" ? "loan" : "advance",
+          total_amount: money(l.total_amount),
+          monthly_installment: money(l.monthly_installment),
+          paid_amount: money(l.paid_amount),
+          remaining: money(Number(l.total_amount) - Number(l.paid_amount)),
+          reason: l.reason,
+          status: l.status,
+          created_at: l.created_at,
+          ...d,
+          events: d.events.map((e: any) => ({ event: e.event, amount: e.amount, event_date: e.event_date, method: e.method, reference: e.reference, note: e.note, created_at: e.created_at }))
+        });
+      }
       const pending = outRequests.find((r) => r.status === "pending");
       const running = outLoans.find((l: any) => l.status === "active" && l.remaining > 0);
       res.json({
@@ -277,6 +311,13 @@ export function registerLoanRequestRoutes(app: Express, deps: LoanRequestRouteDe
         return res.status(400).json({ error: `Repay it in 1 to ${MAX_INSTALLMENTS} monthly installments.` });
       }
       if (!reason) return res.status(400).json({ error: "Write what you need it for." });
+      // Optional: the month the employee would like installments to start
+      // (this month up to 12 months ahead). HR / Accounts set the final plan.
+      const thisMonth = new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 7);
+      const preferred = req.body?.preferred_start_month ? String(req.body.preferred_start_month) : null;
+      if (preferred && (!isMonth(preferred) || preferred < thisMonth || preferred > shiftMonth(thisMonth, 12))) {
+        return res.status(400).json({ error: "Pick a start month from this month to 12 months ahead." });
+      }
       const pending: any[] = (await queryDB("SELECT id FROM advance_requests WHERE employee_id = ? AND status = 'pending'", [emp.id])) || [];
       if (pending.length) return res.status(400).json({ error: "You already have a request waiting for a decision." });
       const loans: any[] = (await queryDB("SELECT * FROM employee_advances WHERE employee_id = ? AND status = 'active'", [emp.id])) || [];
@@ -286,9 +327,9 @@ export function registerLoanRequestRoutes(app: Express, deps: LoanRequestRouteDe
       }
       const installment = money(Math.ceil((total / installments) * 100) / 100);
       const r: any = await queryDB(
-        `INSERT INTO advance_requests (employee_id, total_amount, monthly_installment, reason, requested_by, request_kind, installments, chain_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress')`,
-        [emp.id, total, installment, reason, uid, kind, installments]
+        `INSERT INTO advance_requests (employee_id, total_amount, monthly_installment, reason, requested_by, request_kind, installments, chain_status, preferred_start_month)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?)`,
+        [emp.id, total, installment, reason, uid, kind, installments, preferred]
       );
       const id = Number(r.insertId);
       // Two sent at the same moment both pass the check above; the later one is taken back.

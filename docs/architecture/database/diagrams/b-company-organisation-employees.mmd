@@ -165,6 +165,15 @@ erDiagram
     date confirmation_date
     date contract_end_date
   }
+  loan_events {
+    int id PK
+    int advance_id
+    varchar event
+    decimal amount
+    date event_date
+    varchar method
+    varchar reference
+  }
   projects {
     int id PK
     varchar project_name

@@ -727,8 +727,10 @@ html[data-ui="orange"] {
   --g-accent-975: #421805;
   --g-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
 
-  /* Phone header + the welcome banner under it, the sidebar (white text). */
-  --g-header-gradient: linear-gradient(160deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+  /* Phone header + the welcome banner under it (white text). Left to right,
+     like the banner's own gradient (WelcomeBanner.tsx), so the two read as
+     one piece — a diagonal here left a seam where the banner starts. */
+  --g-header-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
   --g-banner-1: #ff9238;
   --g-banner-2: #f47920;
   --g-banner-3: #e2600e;
@@ -913,4 +915,240 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
    paths and the floating cards stand out (Analytics-style map). */
 .tracking-tiles {
   filter: grayscale(1) contrast(0.92) brightness(1.06);
+}
+
+/*
+  Admin Panel on a phone (≤ 767 px) — the Self Service look, without
+  touching desktop (docs/plans/admin-panel-mobile.md, lib/adminPhone.ts sets
+  <html data-admin-phone> only on a phone while an Admin page is open):
+    - the page's outer white boxes go flat: the content sits on the page
+      with a 12 px gutter, no border / shadow / double padding;
+    - a row of underline sub-tabs becomes a row of round chips that scrolls
+      sideways (lines up with Self Service's "Pending / History" chips);
+    - buttons, selects and inputs are at least 40 px tall, text ≥ 12 px.
+  Step 1 of the plan; tables → cards, filter / add sheets and sticky grids
+  come in the next steps per module.
+*/
+@media (max-width: 767px) {
+  /* The page column: Self Service's gutter. */
+  html[data-admin-phone] main > div > .w-full.px-4 { padding-left: 12px; padding-right: 12px; }
+
+  /* Outer boxes (the module's own card: bg-white + border + rounded) go flat. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl,
+  html[data-admin-phone] main .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-xl {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  /* …but the inner cards (lists, tiles, forms) stay cards. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl .bg-white.border.border-slate-200.rounded-2xl,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 .bg-white.rounded-2xl.shadow-sm.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.border.border-slate-200 .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 .bg-white.rounded-2xl.border.border-slate-200,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-xl .bg-white.border.border-slate-200.rounded-xl {
+    background: rgba(255, 255, 255, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.9) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 6px 16px -10px rgba(60, 30, 10, 0.25) !important;
+  }
+  /* The box's head strip (title + buttons) loses its padding box and rule. */
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-6.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-6.border-b,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-5.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-5.border-b,
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-4.border-b,
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-4.border-b {
+    padding: 4px 4px 12px !important;
+    border-bottom-color: transparent !important;
+  }
+  html[data-admin-phone] main .bg-white.border.border-slate-200.rounded-2xl > .p-6:not(.border-b),
+  html[data-admin-phone] main .bg-white.rounded-2xl.shadow-sm.border.border-slate-200 > .p-6:not(.border-b) { padding: 4px !important; }
+
+  /* Underline sub-tabs → round chips in one scrolling row. */
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200,
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto,
+  html[data-admin-phone] main [role="tablist"].border-b {
+    border-bottom: none !important;
+    gap: 8px !important;
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none;
+    padding: 2px 2px 6px;
+    margin-bottom: 8px !important;
+  }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200::-webkit-scrollbar,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200::-webkit-scrollbar,
+  html[data-admin-phone] main [role="tablist"].border-b::-webkit-scrollbar { display: none; }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button,
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button,
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto > button,
+  html[data-admin-phone] main [role="tablist"].border-b > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    border: none !important;
+    border-radius: 9999px !important;
+    margin-bottom: 0 !important;
+    padding: 9px 16px !important;
+    min-height: 40px;
+    font-size: 13px !important;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--g-text, #44403c) !important;
+    box-shadow: 0 2px 6px rgba(60, 30, 10, 0.08);
+  }
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button[class*="border-blue-600"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button[class*="border-blue-600"],
+  html[data-admin-phone] main .flex.border-b.border-slate-200.overflow-x-auto > button[class*="border-blue-600"],
+  html[data-admin-phone] main [role="tablist"].border-b > button[aria-selected="true"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-gray-200 > button[class*="text-blue-600"],
+  html[data-admin-phone] main .flex.gap-1.border-b.border-slate-200 > button[class*="text-blue-600"] {
+    background: var(--g-accent, #f47920) !important;
+    color: #ffffff !important;
+    font-weight: 700;
+  }
+  /* The pill-group tabs (inline-flex rounded-xl bg-slate-100 p-1) scroll sideways too. */
+  html[data-admin-phone] main .inline-flex.rounded-xl.bg-slate-100.p-1 {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  html[data-admin-phone] main .inline-flex.rounded-xl.bg-slate-100.p-1 > button { flex: 0 0 auto; white-space: nowrap; min-height: 36px; }
+
+  /* Thumb-sized controls. */
+  html[data-admin-phone] main button:not([aria-label]):not(.hdr-round):not(.liquid-glass-chip):not([class*="w-7"]):not([class*="w-8"]):not([class*="w-9"]):not([class*="h-7"]):not([class*="h-8"]),
+  html[data-admin-phone] main select,
+  html[data-admin-phone] main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+    min-height: 40px;
+  }
+  html[data-admin-phone] main .text-\[10px\],
+  html[data-admin-phone] main .text-\[11px\] { font-size: 12px !important; }
+}
+
+/*
+  Admin Panel on a phone, step 2: list tables as cards (lib/adminPhone.ts
+  usePhoneTableCards flags them and copies each column heading onto its
+  cells as data-label). Each row is a card; the first cell is the card's
+  title, every other cell a "Heading  value" line; a cell spanning the
+  whole row (an empty-state message) stays one plain line. Real grids are
+  never flagged.
+*/
+@media (max-width: 767px) {
+  html[data-admin-phone] table[data-phone-card] { display: block; width: 100% !important; min-width: 0 !important; border: none !important; background: transparent !important; }
+  html[data-admin-phone] table[data-phone-card] > thead { display: none; }
+  html[data-admin-phone] table[data-phone-card] > tbody { display: flex; flex-direction: column; gap: 10px; border: none !important; }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 12px 14px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    background: linear-gradient(135deg, rgba(255, 237, 213, 0.75) 0%, rgba(255, 255, 255, 0.82) 55%, #fffaf5 100%) !important;
+    box-shadow: 0 6px 16px -10px rgba(60, 30, 10, 0.25);
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 5px 0 !important;
+    border: none !important;
+    white-space: normal !important;
+    text-align: right !important;
+    font-size: 13px; min-width: 0; max-width: none !important; width: auto !important;
+    overflow-wrap: anywhere;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto; max-width: 45%;
+    text-align: left; font-size: 12px; font-weight: 600; color: #78716c;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td[data-label=""]::before { display: none; }
+  /* The first cell: the card's title, label off, left-aligned and bigger. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child {
+    justify-content: flex-start; text-align: left !important;
+    font-size: 15px; font-weight: 700; padding-bottom: 8px !important;
+    border-bottom: 1px solid rgba(120, 80, 40, 0.1) !important; margin-bottom: 2px;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child::before { display: none; }
+  /* A first cell that only holds a checkbox: put it in the corner instead. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child:has(> input[type="checkbox"]:only-child) { border-bottom: none !important; padding-bottom: 0 !important; }
+  /* An empty-state / full-row message: one centred line, no card chrome. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr:has(> td[colspan]:only-child) { background: transparent !important; box-shadow: none; border-color: transparent !important; }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td[colspan]:only-child { justify-content: center; text-align: center !important; border-bottom: none !important; font-weight: 500; font-size: 13px; }
+  /* Action cells keep their buttons in a row, aligned right. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td > .flex { flex-wrap: wrap; justify-content: flex-end; }
+  /* The scroll box a table sat in no longer needs to scroll. */
+  html[data-admin-phone] .overflow-x-auto:has(> table[data-phone-card]) { overflow: visible !important; }
+}
+
+/*
+  Admin Panel on a phone, step 3: the sheet a form or a filter row moves
+  into (components/PhoneSheet.tsx). The block's own white box is dropped —
+  the sheet is the card — and its fields go full width, one per line.
+*/
+.phone-sheet-body > .bg-white,
+.phone-sheet-body > div > .bg-white.border {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.phone-sheet-body > .bg-white > h3:first-child { display: none; }
+.phone-sheet-body .flex.flex-wrap.items-end { flex-direction: column; align-items: stretch; }
+.phone-sheet-body .flex.flex-wrap.items-end > * { width: 100%; }
+.phone-sheet-body input:not([type="checkbox"]):not([type="radio"]),
+.phone-sheet-body select,
+.phone-sheet-body button[type="submit"] { min-height: 44px; width: 100%; font-size: 14px !important; }
+.phone-sheet-body label { font-size: 12px !important; }
+/* Admin Panel on a phone: long explanations folded to two lines + "More" (lib/adminPhone.ts). */
+@media (max-width: 767px) {
+  html[data-admin-phone] main p[data-phone-fold]:not([data-open]) {
+    position: relative;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    padding-right: 52px;
+    cursor: pointer;
+  }
+  html[data-admin-phone] main p[data-phone-fold]:not([data-open])::after {
+    content: "More";
+    position: absolute; right: 0; bottom: 0;
+    padding: 0 2px 0 10px;
+    font-weight: 700;
+    color: var(--g-accent, #f47920);
+    background: linear-gradient(90deg, transparent, var(--page-flat, #fbf7f4) 30%);
+  }
+  html[data-admin-phone] main p[data-phone-fold][data-open] { cursor: pointer; }
+}
+
+/*
+  Admin Panel on a phone, step 4: real grids (Duty Roster, Monthly
+  Attendance Report…; lib/adminPhone.ts flags them data-phone-grid). The
+  name column stays put and gets narrower so more days fit; the days scroll
+  sideways under it, with a one-line hint above the grid.
+*/
+@media (max-width: 767px) {
+  html[data-admin-phone] table[data-phone-grid] tr > :first-child {
+    position: sticky; left: 0; z-index: 10;
+    min-width: 104px !important; width: 118px !important; max-width: 118px !important;
+    padding-left: 8px !important; padding-right: 6px !important;
+    box-shadow: 6px 0 8px -6px rgba(60, 30, 10, 0.18);
+  }
+  html[data-admin-phone] table[data-phone-grid] thead tr > :first-child { z-index: 30; }
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child,
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child * {
+    white-space: normal !important; overflow-wrap: break-word; word-break: normal; font-size: 12px !important; line-height: 1.25;
+  }
+  html[data-admin-phone] table[data-phone-grid] tbody tr > :first-child { background: #ffffff; }
+  html[data-admin-phone] :has(> table[data-phone-grid]) {
+    overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%;
+    border-radius: 18px;
+  }
+  html[data-admin-phone] :has(> table[data-phone-grid])::before {
+    content: "Swipe sideways to see every day  ←  →";
+    display: block; position: sticky; left: 0;
+    padding: 6px 10px; font-size: 12px; font-weight: 600; color: #78716c;
+  }
 }

@@ -13,6 +13,7 @@ import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
 import { BLENDED_HEADER_TITLES, useHeaderPageTitle } from '../lib/headerPageTitle';
+import { useAdminPhoneFlag } from '../lib/adminPhone';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
 // stacked vertically, matching the app's own rounded-corner language (the
@@ -191,7 +192,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   // picked (or the theme's) glow behind it —
   // and turns to frosted glass once the page scrolls under it. Every other
   // page keeps the purple header (`purple`).
-  const blend = transparentHeader && !!headerPageTitle && BLENDED_HEADER_TITLES.has(headerPageTitle);
+  // An Admin Panel page on a phone blends too (lib/adminPhone.ts sets
+  // <html data-admin-phone> together with the title).
+  const adminPhone = useAdminPhoneFlag();
+  const blend = transparentHeader && !!headerPageTitle && (adminPhone || BLENDED_HEADER_TITLES.has(headerPageTitle));
   const purple = transparentHeader && !blend;
   // Flat page colour under the glow while a blended page is open (index.css
   // html[data-blend-page]) — the theme's own background gradient would put

@@ -104,6 +104,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>লোনের টাকা কে দেয়, কীভাবে প্রমাণ থাকে?</td>
+<td>অনুমোদনের পর লোন "Waiting for payment" থাকে, বেতন থেকে কাটা হয় না। শুধু Accounts Pay layer-ধারী (বা Superadmin) টাকা দিয়ে "Mark as paid" দেন — তারিখ, মাধ্যম, reference সহ; বেতনের বাইরে ফেরতও তাঁরাই গোনেন। প্রতিটা ধাপ (কে, কবে, কত, কীভাবে) <code>loan_events</code>-এ, কর্মী নিজের History দেখেন। <code>LoanPlan.ts</code>, টেস্ট <code>docs/test-logs/2026-11-09/scripts/loan-payout-plan.mjs</code> (৪০/৪০)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>একজন একাই বেতন বানিয়ে পরিশোধ করতে পারে?</td>
 <td>না। HR বানায় → Audit অনুমোদন → Accounts পরিশোধ। যে বেতন চালিয়েছে/বদলেছে বা submit করেছে সে অনুমোদন দিতে পারে না; যে চালিয়েছে, submit বা অনুমোদন করেছে সে পরিশোধ করতে পারে না। Audit/Accounts "View only" layer পায় (দেখে, বদলাতে পারে না)। Audit Manager টেস্ট ৪৯/৪৯ পাস (<code>test-logs/2026-10-25/06-audit-manager-retest.log</code>)। ব্যতিক্রম: Superadmin।</td>
 <td>⚠️</td>
@@ -551,4 +556,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <p><strong>প্রশ্ন: কল চলার সময় অ্যাপ থেকে বের হলে কি অ্যাপ গোপনে মাইক বা ক্যামেরা চালু রাখে?</strong>
 উত্তর: শুধু চলমান কলের সময়, আর তখন সবসময় একটা "Call in progress" notification দেখা যায় (<code>CallService.java</code>)। Android-ও নিজের মাইক/ক্যামেরা চিহ্ন দেখায়। কল শেষ হলে বা notification-এর Hang up চাপলে service বন্ধ হয়ে যায়। কল ছাড়া এই service কখনো চলে না।</p>
 <p><strong>প্রশ্ন: 360 ERP থেকে CredenceHR-এ password ছাড়া ঢোকা যায় — কেউ কি এটা দিয়ে অন্যের account-এ ঢুকে পড়তে পারে?</strong>
-উত্তর: link বানাতে পারে শুধু সেই application-এর (360 ERP বা Superadmin যাকে যোগ করেছেন) সার্ভার, Superadmin-এর দেওয়া তার নিজের App ID ও Secret দিয়ে, HTTPS-এ, আর চাইলে শুধু তার IP থেকে। মানুষ মেলে email আর Employee ID দুটো দিয়েই। link একবারই চলে আর দুই মিনিটের মধ্যে মেয়াদ শেষ হয়। ঢোকার পর password sign-in-এর মতোই সব যাচাই হয় (block, App access, ফোনের সীমা)। প্রতিটা চেষ্টা log-এ থাকে (Active Users → Partner app sign-in)। secret হারালে বা সন্দেহ হলে সেই application-এর "New secret" চাপলে আগেরটা সাথে সাথে অকেজো হয়; "Switched on" বন্ধ বা "Remove" করলে শুধু সেই application বন্ধ হয়, বাকিগুলো নয়।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+উত্তর: link বানাতে পারে শুধু সেই application-এর (360 ERP বা Superadmin যাকে যোগ করেছেন) সার্ভার, Superadmin-এর দেওয়া তার নিজের App ID ও Secret দিয়ে, HTTPS-এ, আর চাইলে শুধু তার IP থেকে। মানুষ মেলে email আর Employee ID দুটো দিয়েই। link একবারই চলে আর দুই মিনিটের মধ্যে মেয়াদ শেষ হয়। ঢোকার পর password sign-in-এর মতোই সব যাচাই হয় (block, App access, ফোনের সীমা)। প্রতিটা চেষ্টা log-এ থাকে (Active Users → Partner app sign-in)। secret হারালে বা সন্দেহ হলে সেই application-এর "New secret" চাপলে আগেরটা সাথে সাথে অকেজো হয়; "Switched on" বন্ধ বা "Remove" করলে শুধু সেই application বন্ধ হয়, বাকিগুলো নয়।</p>
+<p><strong>প্রশ্ন: Check In/Out দ্রুত করতে ফোন আগের অবস্থান মনে রাখে — তাহলে কি পুরোনো জায়গা থেকে check-in করা যায়?</strong>
+উত্তর: না। শেষ অবস্থান (<code>credence_last_fix</code>) শুধু map কোথায় খুলবে তা ঠিক করে; Check In / Check Out-এ পাঠানো অবস্থান সবসময় নতুন GPS fix (ফোনের নিজের, সর্বোচ্চ ৩০ সেকেন্ড পুরোনো)। শেষ অবস্থান ১২ ঘণ্টা পর বাদ, logout-এ মুছে যায়, তাই একই ফোনে অন্য কেউ login করলে আগের জনের জায়গা দেখে না। Map-এর ছবি (tile) ফোনে জমা থাকে, কিন্তু তাতে কারও তথ্য নেই।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
