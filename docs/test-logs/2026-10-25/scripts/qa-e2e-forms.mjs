@@ -50,7 +50,7 @@ async function signIn(identifier, password) {
     await page.getByRole('button', { name: 'Next' }).click();
   }
   await page.getByPlaceholder(/Project Name/).fill(identifier);
-  await page.getByPlaceholder('••••••••').fill(password);
+  await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 const signedIn = () => page.getByRole('button', { name: 'Logout' }).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
@@ -61,7 +61,7 @@ await signIn('admin@credence.test', 'wrong-password');
 await page.waitForTimeout(2500);
 const loginText = await textOf();
 await T('E2E-01', /invalid|incorrect|wrong|not match/i.test(loginText) && !(await visible(page.getByRole('button', { name: 'Logout' }))), 'Wrong password: the form says so and does not sign in', loginText.slice(0, 200).replace(/\s+/g, ' '));
-await page.getByPlaceholder('••••••••').fill('AdminPass123');
+await page.locator('input[type="password"]').fill('AdminPass123');
 await page.getByRole('button', { name: 'Sign in' }).click();
 await T('E2E-02', await signedIn(), 'Right password: signed in, the menu is shown');
 

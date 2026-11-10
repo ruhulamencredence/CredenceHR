@@ -7,7 +7,7 @@ const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.pu
 const R = []; const ok = (n, c, i = '') => { R.push(!!c); console.log((c ? 'PASS ' : 'FAIL ') + n + (i ? ' — ' + i : '')); };
 await p.goto(B + '/'); const ws = p.getByLabel('Workspace code');
 if (await ws.isVisible({ timeout: 30000 }).catch(() => false)) { await ws.fill('credence'); await p.getByRole('button', { name: 'Next' }).click(); }
-await p.getByPlaceholder(/Employee ID/).fill('admin@credence.test'); await p.getByPlaceholder('••••••••').fill('ProbePass123'); await p.getByRole('button', { name: 'Sign in' }).click(); await p.waitForTimeout(6000);
+await p.getByPlaceholder(/Employee ID/).fill('admin@credence.test'); await p.locator('input[type="password"]').fill('ProbePass123'); await p.getByRole('button', { name: 'Sign in' }).click(); await p.waitForTimeout(6000);
 for (const t of ['duty-roster', 'attendance-reports']) {
   await p.goto(`${B}/admin/${t}`); await p.waitForTimeout(5000);
   const l = p.getByRole('button', { name: "Don't ask again" }); if (await l.isVisible().catch(() => false)) await l.click();

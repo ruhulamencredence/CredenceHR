@@ -8,7 +8,7 @@ const login = async (vp, mobile) => {
   const p = await ctx.newPage(); p.errs = []; p.on('pageerror', (e) => p.errs.push(String(e)));
   await p.goto(B + '/'); const ws = p.getByLabel('Workspace code');
   if (await ws.isVisible({ timeout: 30000 }).catch(() => false)) { await ws.fill('credence'); await p.getByRole('button', { name: 'Next' }).click(); }
-  await p.getByPlaceholder(/Employee ID/).fill('admin@credence.test'); await p.getByPlaceholder('••••••••').fill('ProbePass123'); await p.getByRole('button', { name: 'Sign in' }).click(); await p.waitForTimeout(6000);
+  await p.getByPlaceholder(/Employee ID/).fill('admin@credence.test'); await p.locator('input[type="password"]').fill('ProbePass123'); await p.getByRole('button', { name: 'Sign in' }).click(); await p.waitForTimeout(6000);
   return p;
 };
 const go = async (p, t) => { await p.goto(`${B}/admin/${t}`); await p.waitForTimeout(4500); const l = p.getByRole('button', { name: "Don't ask again" }); if (await l.isVisible().catch(() => false)) await l.click(); };

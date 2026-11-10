@@ -13,7 +13,7 @@ await p.goto(B + '/', { waitUntil: 'domcontentloaded' });
 const ws = p.getByLabel('Workspace code');
 if (await ws.isVisible({ timeout: 30000 }).catch(() => false)) { await ws.fill('credence'); await p.getByRole('button', { name: 'Next' }).click(); }
 await p.getByPlaceholder(/Employee ID/).fill('admin@credence.test');
-await p.getByPlaceholder('••••••••').fill('ProbePass123');
+await p.locator('input[type="password"]').fill('ProbePass123');
 await p.getByRole('button', { name: 'Sign in' }).click();
 await p.waitForTimeout(7000);
 const dismiss = async () => { for (const n of ["Don't ask again", 'Get started']) { const l = p.getByRole('button', { name: n }); if (await l.isVisible().catch(() => false)) { await l.click().catch(() => {}); await p.waitForTimeout(400); } } };
