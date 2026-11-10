@@ -16,8 +16,9 @@ await row.scrollIntoViewIfNeeded();
 const btns = row.locator('button'); const n = await btns.count();
 ok('departments: card has its buttons', n >= 2, `${n} buttons`);
 await btns.first().click(); await p.waitForTimeout(1200);
-const editing = await p.locator('main input:visible').count();
-ok('departments: edit button responds', editing > 0);
+// Since step 3 the edit form opens in the bottom sheet (PhoneSheet.tsx), outside <main>.
+const editing = await p.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => getComputedStyle(d).display !== 'none' && d.querySelector('.phone-sheet-body input')));
+ok('departments: edit button opens the edit sheet', editing);
 await p.screenshot({ path: `${OUT}/dep-edit.png` });
 // Employees: the edit (pencil) action on a card
 await go('employees');
