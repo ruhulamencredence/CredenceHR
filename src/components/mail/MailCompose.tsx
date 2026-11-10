@@ -1020,6 +1020,7 @@ export const MailCompose: React.FC<{
       {mode === 'max' && <div className="fixed inset-0 z-[89] liquid-glass-backdrop" onClick={() => setMode('normal')} />}
       <div
         ref={winRef}
+        data-kb-self=""
         // phones: full screen, so start below the status bar (--native-safe-area-inset-top is set
         // by the Android app, where env() reads 0)
         className={`fixed z-[90] bg-white flex flex-col overflow-hidden max-sm:pt-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] ${

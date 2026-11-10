@@ -404,7 +404,7 @@ const ApplyLoanModal: React.FC<{ token: string; maxInstallments: number; grossSa
   };
 
   return (
-    <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
+    <div data-kb-self="" className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
       <div className="w-full max-w-md max-h-full flex" onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-[32px] p-5 w-full overflow-y-auto" onFocusCapture={scrollFocusedFieldIntoView}>
           <div className="flex items-start justify-between gap-3">

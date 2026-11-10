@@ -361,7 +361,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Check In/Out">
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Check In/Out" data-kb-self="">
       <style>{'@keyframes cio-pulse{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.8);opacity:0}}'}</style>
       {wide ? (
         <div className="absolute inset-0 liquid-glass-backdrop flex items-center justify-center p-6" onClick={() => !submitting && onClose()}>

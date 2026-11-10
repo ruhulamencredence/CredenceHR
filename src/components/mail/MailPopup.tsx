@@ -30,7 +30,7 @@ export const MailPopup: React.FC<{
   // table cell (e.g. HR Letters -> Signatures) doesn't take on the cell's
   // right-aligned, no-wrap text or get cut by its scrolling.
   const popup = (
-    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 text-left whitespace-normal" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined} onClick={onClose}>
+    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 text-left whitespace-normal" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined} onClick={onClose}>
       <div className={`w-full ${width} max-h-[92dvh] sm:max-h-[90vh] flex`} onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-t-[32px] sm:rounded-[32px] w-full flex flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-3">
