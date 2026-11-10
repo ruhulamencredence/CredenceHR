@@ -322,6 +322,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>formDraft.ts</code>, <code>App.tsx</code> (<code>clearAllDrafts</code>)</td>
 </tr>
 <tr>
+<td>ফোন / ব্রাউজারে শেষ অবস্থান ও map-এর ছবি</td>
+<td>Check In/Out-এর map যেন সঙ্গে সঙ্গে খোলে: শেষ GPS অবস্থান (<code>credence_last_fix</code>, ১২ ঘণ্টা) ডিভাইসের <code>localStorage</code>-এ, আর দেখা OpenStreetMap tile service worker-এর cache-এ (<code>map-tiles-v1</code>, ৬০০টা, ৩০ দিন; tile-এ কারও তথ্য নেই)। শেষ অবস্থান শুধু map কোথায় খুলবে তার জন্য — Check In/Out-এ যায় না, সেখানে সবসময় নতুন fix; <strong>logout-এ মুছে যায়</strong>।</td>
+<td><code>currentCoords.ts</code>, <code>public/sw.js</code>, <code>App.tsx</code></td>
+</tr>
+<tr>
 <td>AI Assistant</td>
 <td>আসল API-কে প্রশ্নকারীর <strong>নিজের token</strong> দিয়ে ডাকে, তাই অধিকারের বাইরে কিছু দেখায় না — সব রিপোর্টও সেই রিপোর্টের নিজের API দিয়ে, database সরাসরি কখনো নয়; যেখানে API পাতার চেয়ে ঢিলা (PEPM entries) সেখানে পাতার module + layer নিয়ম আগে যাচাই (<code>hasModuleLayer</code>); ৮ রকম অনুমতি-মিশ্রণে (module নেই, শুধু Claims, Payroll view-only / sheet+log, admin+Roster, Reports layer আছে/নেই, Superadmin) ২২টা রিপোর্ট-প্রশ্নে পরীক্ষিত; নিজে কিছু লেখে না — ছুটি, Book a Ride, হাজিরা ঠিক করা, Check In/Out-এর খসড়া কার্ড শুধু কর্মী নিজে বোতাম চাপলে পাতার একই API-তে যায় (একই যাচাই, একই অনুমোদন); Gemini চালু না থাকলে কোনো ডাটা বাইরে যায় না। Voice আলাদা সুইচ (<code>can_use_assistant_voice</code>, শুরুতে বন্ধ, server-এও যাচাই): কণ্ঠের রেকর্ড শুধু লিখে নেওয়ার জন্য Google-এ যায়, আমাদের সার্ভারে বা ডাটাবেসে জমা হয় না; সর্বোচ্চ ৪ MB, প্রশ্নের হার-সীমা একই</td>
 <td><code>AiAssistantRoutes.ts</code></td>
