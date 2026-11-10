@@ -35,6 +35,8 @@ interface Req {
 interface Settings {
   email_code_enabled: boolean;
   hr_request_enabled: boolean;
+  // Profile -> Change Username for everyone (off by default).
+  username_change_enabled?: boolean;
   mailer: boolean;
   // The last reset-code email: where it went (masked) and the error, if any.
   last_mail?: { at: string; to: string | null; error: string | null } | null;
@@ -170,6 +172,13 @@ export const PasswordRequestsPopup: React.FC<{ token: string; onClose: () => voi
                 onChange={(v) => void saveSettings({ hr_request_enabled: v })}
                 label="Ask HR"
                 hint="The request comes here; you give a temporary password."
+              />
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider pt-2">Login ID (Superadmin)</div>
+              <Toggle
+                checked={!!settings.username_change_enabled}
+                onChange={(v) => void saveSettings({ username_change_enabled: v })}
+                label="Let people change their own username"
+                hint="Profile -> Change Username. Off: nobody but a Superadmin can change their own; HR still can from Users."
               />
               {settings.mailer && (
                 <div className="pt-1 space-y-1.5">

@@ -144,6 +144,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>PasswordResetRoutes.ts</code></td>
 </tr>
 <tr>
+<td>নিজের Login ID বদল</td>
+<td>Profile → Change Username <strong>শুরুতে বন্ধ</strong> — শুধু Superadmin Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করলে সবাই পায় (<code>password_reset_settings.username_change_enabled</code>)। বন্ধ থাকলে মেনু দেখায় না <strong>আর</strong> <code>PUT /api/profile/username</code> 403 ফেরায়; Superadmin নিজেরটা সবসময় বদলাতে পারেন। HR অন্যেরটা আগের মতো Users থেকে বদলায় (<code>users</code> module + <code>edit_add</code> layer)। চালু থাকলেও বর্তমান password লাগে।</td>
+<td></td>
+</tr>
+<tr>
 <td>Fingerprint / Passkey</td>
 <td>অ্যাপ: ফোনের Keystore/Keychain-এ সিক্রেট (সার্ভারে শুধু SHA-256); ওয়েব: WebAuthn passkey (সার্ভারে শুধু public key)। পাসওয়ার্ড বদলালে/ডিভাইস সরালে/সুইচ বন্ধ হলে অচল। ভুল চেষ্টা লগইন-লকে গোনা হয়</td>
 <td><code>FingerprintRoutes.ts</code></td>
