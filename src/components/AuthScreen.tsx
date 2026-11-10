@@ -137,6 +137,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // move into, independent of whether dvh/visualViewport behave correctly
   // on this device — same fix as ChatPanel.tsx's own keyboard handling.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Phone, typing (a field focused with the on-screen keyboard up): the
+  // illustration and logo step aside so the Login ID / Password card sits
+  // at the top, above the keyboard, instead of under it.
+  const [fieldFocused, setFieldFocused] = useState(false);
+  const touchPhone = typeof window !== 'undefined' && window.innerWidth < 1024 && !!window.matchMedia?.('(pointer: coarse)').matches;
+  const compact = (isNativeApp && keyboardHeight > 0) || (touchPhone && fieldFocused);
 
   useEffect(() => {
     if (!isNativeApp) return;
@@ -356,10 +362,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       // overflow-y-auto lets that happen normally; nothing here actually
       // needed the clipping (the decorative glow below is sized to this
       // div's own bounds, inset-0, so it was never overflowing it anyway).
-      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-y-auto"
+      className={`min-h-dvh flex flex-col items-center px-5 py-6 sm:py-12 relative overflow-y-auto ${compact ? 'justify-start' : 'justify-center'}`}
+      onFocusCapture={(e) => {
+        if ((e.target as HTMLElement).matches('input, textarea')) setFieldFocused(true);
+      }}
+      onBlurCapture={() => window.setTimeout(() => setFieldFocused(!!document.activeElement?.matches?.('input, textarea')), 0)}
       style={{
         background: 'var(--g-bg-gradient)',
-        paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)',
+        paddingTop: `calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + ${compact ? '1rem' : '1.5rem'})`,
         ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
       }}
     >
@@ -393,14 +403,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             side instead, at full size). Pulled up a bit (-mt-2) so the
             bigger animation below doesn't push the card as far down the
             screen — less blank space above the logo instead. */}
-        <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
-          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+        {/* The company's logo sits under the illustration. While typing on a
+            phone both step aside (compact) so the card is above the keyboard. */}
+        <div className={`${compact ? 'hidden' : 'flex'} lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2`}>
           <div className="hero-art relative isolate w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
             <HeroSpotlight />
           </div>
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mt-1 sm:mt-2" />
         </div>
 
         {/* Right side (desktop) / below (mobile): greeting + the sign-in form,

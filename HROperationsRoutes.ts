@@ -787,7 +787,10 @@ interface EmployeeSnapshot {
   employee: any;
   service: any | null;
   salary: any | null;
-  supervisor: { id: number; name: string } | null;
+  // from_department: nobody is set as this person's own supervisor, so it is
+  // their Department's Supervisor (Departments page) — the same person the
+  // approval chain uses as "Supervisor is 1st layer".
+  supervisor: { id: number; name: string; from_department?: boolean } | null;
   project: { id: number; name: string } | null;
 }
 
@@ -821,13 +824,31 @@ export function snapshotOf(world: World, employeeId: number, asOf?: string): Emp
     .filter((s: any) => Number(s.employee_id) === employeeId && Number(s.is_direct) === 1)
     .sort((a: any, b: any) => Number(b.id) - Number(a.id))[0];
   const supEmp = supRow ? world.employees.find((e: any) => Number(e.id) === Number(supRow.supervisor_id)) : null;
+  // No supervisor of their own: the Department's Supervisor (a login), shown
+  // as that person's Employee record when they have one. Not when the
+  // Department's Supervisor is this person themself.
+  let deptSup: { id: number; name: string; from_department: true } | null = null;
+  if (!supEmp) {
+    const dept = world.departments.find(
+      (d: any) =>
+        (employee.department_id != null && Number(d.id) === Number(employee.department_id)) ||
+        (employee.department_id == null && employee.department && String(d.name || "").trim().toLowerCase() === String(employee.department).trim().toLowerCase())
+    );
+    const supUserId = dept?.supervisor_user_id ? Number(dept.supervisor_user_id) : null;
+    if (supUserId && supUserId !== Number(employee.user_id || 0)) {
+      const asEmp = world.employees.find((e: any) => Number(e.user_id) === supUserId && Number(e.is_active ?? 1) === 1) || world.employees.find((e: any) => Number(e.user_id) === supUserId);
+      const asUser = world.users.find((u: any) => Number(u.id) === supUserId);
+      if (asEmp && Number(asEmp.id) !== employeeId) deptSup = { id: Number(asEmp.id), name: asEmp.name, from_department: true };
+      else if (!asEmp && asUser) deptSup = { id: 0, name: asUser.name, from_department: true };
+    }
+  }
   const user = employee.user_id ? world.users.find((u: any) => Number(u.id) === Number(employee.user_id)) : null;
   const project = user?.attendance_project_id ? world.projects.find((p: any) => Number(p.id) === Number(user.attendance_project_id)) : null;
   return {
     employee,
     service,
     salary: latestSalary(world, employeeId, asOf),
-    supervisor: supEmp ? { id: Number(supEmp.id), name: supEmp.name } : null,
+    supervisor: supEmp ? { id: Number(supEmp.id), name: supEmp.name } : deptSup,
     project: project ? { id: Number(project.id), name: project.project_name } : null
   };
 }
@@ -841,8 +862,10 @@ export function currentValues(snap: EmployeeSnapshot) {
     department: e.department || null,
     branch_id: e.branch_id != null ? Number(e.branch_id) : null,
     branch: e.branch || null,
-    supervisor_id: snap.supervisor?.id ?? null,
-    supervisor: snap.supervisor?.name ?? null,
+    // Only a supervisor set for this person counts as "from" in an action;
+    // the Department's Supervisor is shown, not moved.
+    supervisor_id: snap.supervisor && !snap.supervisor.from_department ? snap.supervisor.id : null,
+    supervisor: snap.supervisor && !snap.supervisor.from_department ? snap.supervisor.name : null,
     grade: snap.service?.grade || null,
     gross_salary: snap.salary ? Number(snap.salary.gross_salary) : null,
     basic_salary: snap.salary ? Number(snap.salary.basic_salary) : null,
@@ -1474,7 +1497,9 @@ export async function buildServiceBook(queryDB: QueryDB, today: string, employee
       department: e.department,
       branch: e.branch,
       grade: cur.grade,
-      supervisor: cur.supervisor,
+      // Their own supervisor, else their Department's Supervisor.
+      supervisor: snap.supervisor?.name || null,
+      supervisor_from_department: !!snap.supervisor?.from_department,
       project: snap.project?.name || null,
       joining_date: joining,
       job_base: e.job_base || null,
@@ -1589,7 +1614,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
               grade: cur.grade,
               project: snap.project?.name || null,
               supervisor_id: cur.supervisor_id,
-              supervisor: cur.supervisor,
+              supervisor: snap.supervisor?.name || null,
               joining_date: joining,
               is_active: Number(e.is_active ?? 1) !== 0,
               user_id: e.user_id ? Number(e.user_id) : null,
