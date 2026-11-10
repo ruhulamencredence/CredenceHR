@@ -1,7 +1,7 @@
 # Admin Panel: ফোনে Self Service-এর মতো — পরিকল্পনা ও তালিকা
 
-অবস্থা: **পরিকল্পনা — mockup অনুমোদনের অপেক্ষায়। কোনো code বদলানো হয়নি।**
-তারিখ: ৯ নভেম্বর ২০২৬।
+অবস্থা: **৫টা ধাপই হয়ে গেছে (১০ নভেম্বর ২০২৬)।** ফল ও কী কোথায় — নিচে §৭; test log `docs/test-logs/2026-11-10/`।
+তারিখ: পরিকল্পনা ৯ নভেম্বর ২০২৬।
 
 ## ১. সমস্যা (ফোনে ৩৯০ px চওড়ায় ৪৬টা module খুলে দেখা)
 
@@ -114,3 +114,17 @@ Self Service-এর পাতাগুলো ফোনে অ্যাপের 
 - ফোনের ছবি (আগে): scratchpad-এ, পরে test log-এ যোগ হবে।
 - Desktop baseline: প্রতি ধাপের পর মেলানোর জন্য।
 - Mockup: https://claude.ai/artifact/Qc9rKPgSZ2rFpKwQfxkc86 (৫টা board: Employees, Approval Chain, Remote Attendance, Departments, Duty Roster — আগে / পরে)।
+
+## ৭. যা হয়েছে (১০ নভেম্বর ২০২৬)
+
+| ধাপ | কী | কোথায় | commit |
+|---|---|---|---|
+| ১ | App header (গোল Back, নাম, ⋮), breadcrumb নেই, বাইরের বাক্স সমান, sub-tab গোল chip, বোতাম ≥ ৪০ px, লেখা ≥ ১২ px | `src/lib/adminPhone.ts` `useAdminPhonePage` (AdminPanel, Payroll, Leave Manage), `index.css` `html[data-admin-phone]` | `8e50ee0` |
+| ২ | তালিকার table → কার্ড (প্রথম ঘর শিরোনাম, বাকি "Heading  value"), কার্ডেই বোতাম | `usePhoneTableCards` (cell-এ data-label), `table[data-phone-card]` | `79793c1` |
+| ৩ | Add ফর্ম আর filter → বোতাম + sheet; লম্বা ব্যাখ্যা দুই লাইন + "More" | `src/components/PhoneSheet.tsx` (Department, User, MPR No, Branch, Project; Remote Attendance ও PEPM Reports-এর filter) | `970fbe7` |
+| ৪ | Grid (Duty Roster, Monthly Attendance Report): নাম স্থির ও সরু, দিন পাশে সরে, "Swipe" ইঙ্গিত | `table[data-phone-grid]` | `c82180a` |
+| ৫ | পুরো test, docs | এই ফাইল, `02-application-workflow.md`, test log | — |
+
+যা ইচ্ছা করে বাকি রাখা হয়েছে (ঝুঁকি বেশি, আলাদা কাজ হিসেবে করা যায়): Monthly Attendance Report-এর filter অংশ
+(view-বদলের বোতাম আর Export-এর সাথে জড়ানো) sheet-এ নেওয়া হয়নি; Bill Claim, Disbursement, Target Reports, Feedback-এর
+filter এখনো পাতার ওপরেই (ধাপ ১-এর মাপে বড় ও পরিষ্কার)।

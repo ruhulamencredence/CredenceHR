@@ -783,6 +783,17 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 Login পেজের illustration animation (`office-illustration.json`, ~৮৬৫ KB, gzip-এ অনেক ছোট) একটা আলাদা JSON ফাইল, যার নামে তার content-এর hash থাকে। প্রথমবার নামার পর browser-এর **Cache Storage**-এ (`credence-static-v1`) রাখা হয় (`src/lib/assetCache.ts`, `src/lib/authHeroAsset.ts`)। website, ফোনের browser, "Add to Home screen" আর Android অ্যাপ সব জায়গায় পরের বার network ছাড়াই দেখায়। সাধারণ HTTP cache-এর মতো এটা browser-এর জায়গা দরকার হলে মুছে যায় না। login অবস্থায় অ্যাপ খোলার ৮ সেকেন্ড পর একবার পেছনে নামিয়ে রাখে, তাই sign-out-এর পর login পেজে সাথে সাথে আসে। animation বদলালে নতুন hash হয়, নতুনটা নামে, পুরনোটা মুছে যায়। শুধু অ্যাপের স্থির ফাইল রাখা হয়, `/api`-এর কোনো data কখনো না।
 
+## Admin Panel: ফোনে Self Service-এর মতো
+
+ফোনে (৭৬৭ px পর্যন্ত) Admin Panel-এর প্রতিটা পাতা, Payroll আর Leave Manage Self Service-এর মতো দেখায় (পরিকল্পনা ও তালিকা `docs/plans/admin-panel-mobile.md`)। Desktop হুবহু আগের মতো — সব বদল শুধু ফোনে, `<html data-admin-phone>` থাকলে।
+
+- **Header:** module-এর নাম মাঝে, গোল Back (এক ধাপ পেছনে — module থেকে Admin Dashboard, সেখান থেকে Dashboard), ডানে ⋮; কমলা logo bar আর breadcrumb ফোনে নেই (`src/lib/adminPhone.ts` `useAdminPhonePage`, Navbar.tsx)।
+- **পাতা:** বাইরের সাদা বাক্স নেই, ভেতরের কার্ড কার্ডই থাকে; sub-tab একসারি গোল chip (পাশে সরে); বোতাম ও ঘর অন্তত ৪০ px, লেখা অন্তত ১২ px (`index.css`)।
+- **তালিকা:** প্রতিটা table-এর সারি একটা কার্ড — প্রথম ঘর শিরোনাম, বাকি ঘর "column-এর নাম  মান", বোতাম কার্ডের ভেতরেই। Table-এ কিছু বদলায় না, শুধু ঘরে column-এর নাম (`data-label`) বসে; ফোনের layout বন্ধ হলে সরে যায়।
+- **Grid:** Duty Roster আর Monthly Attendance Report (দিনের নম্বরের column) table-ই থাকে — নামের column স্থির ও সরু, দিনগুলো পাশে সরে।
+- **Add ফর্ম আর filter:** Department, User, MPR No, Branch, Project-এর "Add" ফর্ম আর Remote Attendance ও PEPM Reports-এর filter ফোনে একটা বোতাম; চাপলে একই ফর্ম নিচ থেকে sheet-এ (`src/components/PhoneSheet.tsx`)। ফর্ম সবসময় mounted থাকে, তাই লেখা হারায় না; pencil-এ edit করলে sheet নিজে খোলে, বন্ধ করলে edit বাতিল; save হলে বা Apply চাপলে বন্ধ হয়। Filter-এর বোতামে কয়টা filter বসানো আছে তার সংখ্যা।
+- **লম্বা ব্যাখ্যা:** ১৬০ অক্ষরের বেশি ধূসর অনুচ্ছেদ দুই লাইন + "More"; ছুঁলে পুরোটা।
+
 ## App খোলা: splash → প্রথম frame → launch animation
 
 App-এর icon কমলা (v3: `android/app/src/main/res/mipmap-*`, adaptive background `#F47920`; website / "Add to Home screen": `public/icons/*`, `public/favicon.png`)। অ্যাপের ভেতরের রং আগের মতো বেগুনি।
