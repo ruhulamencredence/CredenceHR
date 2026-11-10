@@ -109,6 +109,7 @@ import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
 import { GroupCallLayer } from './components/GroupCallLayer';
+import { CallSetupPrompt } from './components/CallSetupCard';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
 import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { requestQuickAccessTab } from './lib/quickAccess';
@@ -1976,6 +1977,7 @@ export default function App() {
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallSetupPrompt />}
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />

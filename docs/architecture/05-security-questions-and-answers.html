@@ -199,6 +199,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>অ্যাপ বন্ধ থাকলে কল বাজাতে অ্যাপ কোন বাড়তি Android অনুমতি নেয়?</td>
+<td><code>FOREGROUND_SERVICE_PHONE_CALL</code> আর <code>MANAGE_OWN_CALLS</code> (install-এ পাওয়া যায়, শুধু কল বাজার সময়ের service-এর জন্য), আর ঐচ্ছিক <code>SYSTEM_ALERT_WINDOW</code> ("Display over other apps", ব্যবহারকারী নিজে চালু করেন, শুধু কল-পর্দা দেখাতে)। ফোনের আসল কল, contacts বা call log ছোঁয় না।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কেউ Fake GPS app দিয়ে Employee Tracking-এ ভুয়া জায়গা দেখাতে পারে?</td>
 <td>নতুন APK-এ এমন প্রতিটা point ধরা পড়ে (Android-এর mock-location চিহ্ন) — map-এ লাল "!", live board-এ লাল ring, route ও Stay Report-এ গোনা হয় না। Root করা ফোনে চিহ্নটাও লুকানো সম্ভব, তাই এটা সতর্কসংকেত, প্রমাণ নয়। Remote Attendance-এর Check In / Out-এও নতুন APK fake GPS ধরলে punch হয় না (সার্ভারও ফেরায়, চেষ্টা <code>attendance_mock_attempts</code>-এ থাকে); web browser ও পুরনো APK থেকে এই যাচাই হয় না।</td>
 <td>⚠️ আংশিক</td>

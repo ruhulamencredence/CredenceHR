@@ -25,6 +25,12 @@
 // members of the chat. A group call leaves "📞 … started a group call" (with
 // the chat's push) and, when it ends, its length in the chat.
 //
+// Phones with the app closed or in the background: the members' Android
+// devices also get a high-priority "call_incoming" push (group: "1"), which
+// rings with the phone's ringtone and shows the call screen
+// (IncomingCallService.java); Accept opens the app and joins. "call_cancel"
+// stops it when that member joins or declines on another device, or the call ends.
+//
 // Several workers (PM2 + Redis adapter): a call lives on the worker it was
 // started on; the other workers pass its events there (gcall:relay), the same
 // way one-to-one calls do.
@@ -33,6 +39,7 @@ import type { Server as SocketIOServer, Socket } from "socket.io";
 import crypto from "crypto";
 import { insertChatMessage, notifyNewMessage } from "./ChatRoutes";
 import { inOneToOneCall } from "./CallRoutes";
+import { sendSilentPushToUserIds } from "./PushNotificationService";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -50,7 +57,11 @@ interface GroupCall {
   startedAt: number;
   participants: Map<string, { userId: number; name: string; joinedAt: number }>; // socket id -> who
   endTimer: NodeJS.Timeout | null;
+  // Members whose phones were rung by push and haven't joined / declined yet.
+  rung: Set<number>;
 }
+
+const RING_MS = 45 * 1000;
 
 // Set by setupGroupCallSocket — lets one-to-one calls (CallRoutes.ts) say
 // "already in a call" for someone in a group call on this worker.
@@ -80,9 +91,16 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
   const roomState = (c: GroupCall | null, roomId: number) =>
     io.to(`room:${roomId}`).emit("gcall:room", c ? { roomId, callId: c.id, kind: c.kind, count: new Set(Array.from(c.participants.values()).map((p) => p.userId)).size } : { roomId, callId: null });
 
+  // Their phones stop ringing (the call screen started by the push).
+  const stopRingPush = (c: GroupCall, userIds: number[]) => {
+    const ids = userIds.filter((id) => c.rung.delete(id));
+    if (ids.length) void sendSilentPushToUserIds(queryDB, ids, { type: "call_cancel", callId: c.id }, RING_MS);
+  };
+
   const finish = (c: GroupCall) => {
     if (!calls.has(c.id)) return;
     calls.delete(c.id);
+    stopRingPush(c, Array.from(c.rung));
     if (c.endTimer) clearTimeout(c.endTimer);
     io.to(`room:${c.roomId}`).emit("gcall:ended", { callId: c.id });
     roomState(null, c.roomId);
@@ -128,6 +146,7 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
       c.endTimer = null;
       for (const o of others) io.to(o.socketId).emit("gcall:joined", { callId: c.id, socketId, userId: me, name: data?.name || "Someone" });
       io.to(`user:${me}`).except(socketId).emit("gcall:stop-ring", { callId: c.id });
+      stopRingPush(c, [me]);
       roomState(c, c.roomId);
       return { ok: true, callId: c.id, roomId: c.roomId, title: c.title, kind: c.kind, startedAt: c.startedAt, participants: others };
     }
@@ -196,7 +215,8 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
           startedByName: mine.name,
           startedAt: Date.now(),
           participants: new Map(),
-          endTimer: null
+          endTimer: null,
+          rung: new Set()
         };
         // Nobody joins (the starter's join fails): it ends by itself.
         call.endTimer = setTimeout(() => {
@@ -205,9 +225,21 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
         calls.set(call.id, call);
         // Ring the members who can take calls (all their devices).
         const members: any[] = (await queryDB("SELECT user_id FROM chat_room_members WHERE room_id = ? AND user_id <> ?", [roomId, me])) || [];
+        const ringIds: number[] = [];
         for (const m of members) {
           if (!(await callAccess(Number(m.user_id))).ok) continue;
+          ringIds.push(Number(m.user_id));
           io.to(`user:${m.user_id}`).emit("gcall:incoming", { callId: call.id, roomId, title: call.title, kind, from: { id: me, name: mine.name } });
+        }
+        // Phones with the app closed / in the background ring too (push).
+        if (ringIds.length) {
+          for (const id of ringIds) call.rung.add(id);
+          void sendSilentPushToUserIds(
+            queryDB,
+            ringIds,
+            { type: "call_incoming", group: "1", callId: call.id, roomId: String(roomId), kind, fromId: String(me), fromName: mine.name, title: call.title },
+            RING_MS
+          );
         }
         void post(roomId, me, `📞 ${mine.name} started a group ${kind === "video" ? "video" : "audio"} call`, true);
         roomState(call, roomId);
@@ -230,7 +262,14 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
     });
     socket.on("gcall:signal", (data: { callId: string; to: string; data: any }) => void handleOrRelay("signal", String(data?.callId), me, socket.id, { to: data?.to, data: data?.data }));
     socket.on("gcall:leave", (data: { callId: string }) => void handleOrRelay("leave", String(data?.callId), me, socket.id, null));
-    socket.on("gcall:decline", (data: { callId: string }) => io.to(`user:${me}`).emit("gcall:stop-ring", { callId: String(data?.callId) }));
+    socket.on("gcall:decline", (data: { callId: string }) => {
+      const callId = String(data?.callId);
+      io.to(`user:${me}`).emit("gcall:stop-ring", { callId });
+      // Their other phones' call screens stop too.
+      const c = calls.get(callId);
+      if (c) stopRingPush(c, [me]);
+      else void sendSilentPushToUserIds(queryDB, [me], { type: "call_cancel", callId }, RING_MS);
+    });
     socket.on("gcall:active", async (data: { roomId: number }, ack?: (r: any) => void) => {
       try {
         const roomId = Number(data?.roomId);

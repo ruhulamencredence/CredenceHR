@@ -1,5 +1,7 @@
 package com.mprtracker.app;
 
+import com.getcapacitor.JSObject;
+
 import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.app.PictureInPictureParams;
@@ -58,6 +60,12 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         onScreen = true;
+        // Opened (e.g. from the launcher) while the call screen rings: the
+        // page shows and rings the call itself.
+        if (IncomingCallService.current() != null) {
+            IncomingCallService.stopFor(this, null);
+            CallAudioPlugin.ringHandover();
+        }
     }
 
     @Override
@@ -102,7 +110,15 @@ public class MainActivity extends BridgeActivity {
         } else {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
-        CallAudioPlugin.setPendingCall(callId, action == null ? "open" : action);
+        JSObject group = null;
+        if (intent.getBooleanExtra(IncomingCall.EXTRA_GROUP, false)) {
+            group = new JSObject();
+            group.put("roomId", intent.getStringExtra("roomId"));
+            group.put("title", intent.getStringExtra("title"));
+            group.put("kind", intent.getStringExtra("kind"));
+            group.put("fromName", intent.getStringExtra("fromName"));
+        }
+        CallAudioPlugin.setPendingCall(callId, action == null ? "open" : action, group);
     }
 
     @Override

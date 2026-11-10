@@ -32,6 +32,7 @@ import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { confirmDialog } from '../lib/confirmDialog';
+import { CallSetupSheet, callSetupMissing, useCallSetup } from './CallSetupCard';
 
 interface ChatPanelProps {
   token: string;
@@ -196,6 +197,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const canCall = user.role === 'superadmin' || !!user.can_use_calls;
+  // Android app: what this phone allows for calls with the app closed (CallSetupCard.tsx).
+  const callSetup = useCallSetup();
+  const [showCallSetup, setShowCallSetup] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -1039,6 +1043,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           : undefined
       }
     >
+      {showCallSetup && <CallSetupSheet onClose={() => setShowCallSetup(false)} />}
       {/* Sidebar: room list */}
       <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
@@ -1095,6 +1100,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           )}
         </div>
         <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
+          {listTab === 'calls' && canCall && callSetupMissing(callSetup) && (
+            <button
+              type="button"
+              onClick={() => setShowCallSetup(true)}
+              className="w-full text-left px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-3"
+            >
+              <Phone className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="flex-1 text-xs text-amber-900 leading-snug">
+                <b>Calls may not ring with the app closed.</b> Tap to turn on what this phone needs.
+              </span>
+            </button>
+          )}
           {filteredRooms.length === 0 && (
             <div className="p-8 text-center text-sm text-slate-400">
               {roomDepts.length > 0
