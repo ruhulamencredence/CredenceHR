@@ -25,7 +25,7 @@ import 'leaflet/dist/leaflet.css';
 import { ArrowLeft, Building2, LocateFixed, LogIn, LogOut, MapPin, Route } from 'lucide-react';
 import type { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
-import { getCurrentCoords } from '../lib/currentCoords';
+import { getCurrentCoords, lastKnownCoords } from '../lib/currentCoords';
 import { clearDraft, readDraft, saveDraft } from '../lib/formDraft';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { scrollFocusedFieldIntoView, useKeyboardGap } from '../lib/useKeyboardInset';
@@ -157,7 +157,10 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   const fitRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!boxRef.current || mapRef.current) return;
-    const map = L.map(boxRef.current, { center: DHAKA, zoom: 12, zoomControl: false, attributionControl: false });
+    // Opens where you were last seen (if within 12 h) instead of all of
+    // Dhaka, so the right tiles load at once; your fresh fix moves it.
+    const last = lastKnownCoords();
+    const map = L.map(boxRef.current, { center: last ? [last.latitude, last.longitude] : DHAKA, zoom: last ? ZOOM : 12, zoomControl: false, attributionControl: false });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     mapRef.current = map;
     const ro = new ResizeObserver(() => {

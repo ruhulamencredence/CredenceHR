@@ -754,6 +754,8 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 ফোনে Check In/Out পাতার **Add Check In/Out** বোতাম (আর তালিকায় খোলা claim-এর **Check Out**), আর website-এ Check In / Check Out বোতাম এখন পুরো পর্দার map খোলে (`src/components/CheckInOutMap.tsx`; ফোনে পুরো পর্দা, বড় পর্দায় বড় card — বাঁয়ে map, ডানে panel)। আগের ছোট form-এর popup আর ছোট map-এর popup (`ClaimMapConfirm.tsx`) নেই।
 
+**Map দ্রুত খোলা (ফোন ও APK):** Home খোলার পর ফোন অলস হলে Check In/Out-এর map-এর code (Leaflet সহ) আগেই নেমে থাকে (`UserPanel.tsx`, শুধু যাঁর Check In/Out চালু)। Map খোলে শেষ জানা অবস্থানে (১২ ঘণ্টার মধ্যে; `credence_last_fix`, `src/lib/currentCoords.ts`) — শুধু map-এর দৃশ্যের জন্য; Check In/Out-এর অবস্থান সবসময় নতুন GPS fix, তবে ফোনের ৩০ সেকেন্ডের মধ্যের fix গ্রহণযোগ্য (`maximumAge`)। একবার দেখা map-এর ছবি (OpenStreetMap tile) service worker (`public/sw.js`, এখন প্রতিবার app খুললেই register হয়) ফোনে রাখে — সর্বোচ্চ ৬০০টা, ৩০ দিন; একসাথে আগাম নামানো হয় না (OSM-এর নিয়ম)।
+
 - নিজেই বোঝে কোনটা: খোলা claim নেই → **Check In**, আছে → **Check Out** (`GET /api/claims/status`)।
 - map-এ নীল ফোঁটা = আপনি এখন; নিচের sheet-এ ঠিকানা (`/api/vehicles/places/reverse`), coordinate, "My location" বোতাম (GPS আবার পড়ে)।
 - Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো), কাছের project site-গুলো এক চাপে Purpose-এ বসানোর chip (`/api/vehicles/places/nearby`, ৫ km-এর মধ্যে), Remarks, **Check In here**।

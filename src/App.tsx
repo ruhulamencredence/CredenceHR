@@ -612,6 +612,12 @@ export default function App() {
     // and any unsent form drafts (formDraft.ts).
     clearScreenCache();
     clearAllDrafts();
+    // Where this person was last located (the Check In/Out map opens there).
+    try {
+      localStorage.removeItem('credence_last_fix');
+    } catch {
+      // storage unavailable
+    }
     refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);

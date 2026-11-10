@@ -127,6 +127,16 @@ function Root() {
   );
 }
 
+// The service worker (public/sw.js) — push notifications and the map tiles
+// kept on the device. Registered on every start, not only when push is
+// turned on, so the map cache works for everyone (web and the APK).
+try {
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => undefined), { once: true });
+  }
+} catch {
+  // no service worker here — the map just loads from the network
+}
 const render = () =>
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
