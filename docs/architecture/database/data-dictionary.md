@@ -383,6 +383,7 @@ Unique: `uq_mail_group_email`(email)
 | `send_error` | varchar(500) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `via_internal` | tinyint(1) | না | default 0 | |
+| `flags_changed_at` | datetime | হ্যাঁ |  | |
 
 Unique: `uq_mail_uid`(account_id,folder_role,uid)
 

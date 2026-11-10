@@ -307,6 +307,10 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
+  // When read / star was last changed here (UTC). The mail server is told in
+  // the background; until it has surely caught up, a sync must not put back
+  // what the server still says (see the flag reconcile in the sync).
+  await run("mail_messages.flags_changed_at", "ALTER TABLE mail_messages ADD COLUMN flags_changed_at DATETIME NULL", ["ER_DUP_FIELDNAME"]);
   // Groups (see "Groups" below). Central: one address on our domain that
   // reaches every member, set up in Mail Administration. Personal: a named
   // list of addresses in someone's own Credence Mail (users.can_use_mail_groups).
@@ -485,6 +489,9 @@ const ROLE_LABEL: Record<string, string> = { inbox: "Inbox", sent: "Sent", junk:
 const SYNC_ROLES = ["inbox", "sent", "junk"];
 const INITIAL_SYNC = Math.max(20, Number(process.env.MAIL_INITIAL_SYNC) || 200);
 const BATCH_MAX = 300;
+// Minutes a read / star change made here is kept even if the mail server
+// still says otherwise (it is told in the background).
+const FLAG_GRACE_MIN = 10;
 
 // Mail sent AS a person from another part of the app (the AI Assistant's
 // report Email): from that person's own connected mailbox (the default one),
@@ -987,7 +994,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
               if (flagsByUid.size) {
                 const uids = [...flagsByUid.keys()];
                 const rows: any[] = await queryDB(
-                  `SELECT id, uid, is_read, is_starred FROM mail_messages WHERE account_id = ? AND folder_role = 'inbox' AND uid IN (${uids.map(() => "?").join(",")})`,
+                  // Not the ones just read / starred here — the server may not have them yet.
+                  `SELECT id, uid, is_read, is_starred FROM mail_messages WHERE account_id = ? AND folder_role = 'inbox' AND uid IN (${uids.map(() => "?").join(",")})
+                     AND (flags_changed_at IS NULL OR flags_changed_at < UTC_TIMESTAMP() - INTERVAL ${FLAG_GRACE_MIN} MINUTE)`,
                   [Number(a.id), ...uids]
                 );
                 for (const r of rows) {
@@ -2080,6 +2089,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         where.push("category = ?");
         params.push(str(req.query.category, 30));
       }
+      // "Unread" filter on any folder.
+      if (req.query.unread === "1") where.push("is_read = 0");
       const q = str(req.query.q, 200);
       if (q) {
         // Each word on its own, anywhere in the mail (subject, people, text).
@@ -2283,7 +2294,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       newRole = roleForLabels(labels, row.folder_role);
     }
     const a = await accountOf(userId, row.account_id);
-    if (Object.keys(flagSet).length) await serverFlags(a, row, flagSet).catch((e) => console.warn("⚠️ Credence Mail flags:", e?.message));
+    if (Object.keys(flagSet).length) {
+      sets.push("flags_changed_at = UTC_TIMESTAMP()");
+      const push = serverFlags(a, row, flagSet).catch((e) => console.warn("⚠️ Credence Mail flags:", e?.message));
+      // Read / star alone: saved here at once, the mail server is told in the
+      // background (it can take seconds). With a move, its uid changes, so
+      // the flags go first.
+      if (Array.isArray(patch.labels)) await push;
+    }
     if (newRole && newRole !== row.folder_role && row.uid) {
       const moved = await serverMove(a, row, newRole).catch((e) => {
         console.warn("⚠️ Credence Mail move:", e?.message);
@@ -2428,16 +2446,22 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       sets.push("category = ?");
       vals.push(str(patch.category, 30) || "primary");
     }
-    if (flags.length) {
-      for (const g of byServerFolder(rows.map((r) => ({ r })))) {
-        await onServerFolder(userId, Number(g[0].r.account_id), g[0].r.folder_role, async (c) => {
-          for (const [flag, on] of flags) await (on ? c.messageFlagsAdd(uidList(g), [flag], { uid: true }) : c.messageFlagsRemove(uidList(g), [flag], { uid: true }));
-        }).catch((e) => console.warn("⚠️ Credence Mail flags:", e?.message));
-      }
-    }
+    if (flags.length) sets.push("flags_changed_at = UTC_TIMESTAMP()");
+    // Saved here first, so the list and the counts are right at once ...
     if (sets.length) {
       const ids = rows.map((r) => Number(r.id));
       await queryDB(`UPDATE mail_messages SET ${sets.join(", ")} WHERE user_id = ? AND id IN (${ids.map(() => "?").join(",")})`, [...vals, userId, ...ids]);
+    }
+    // ... then the mail server, in the background (a login there can take
+    // seconds). Meanwhile a sync leaves these mails alone (flags_changed_at).
+    if (flags.length) {
+      void (async () => {
+        for (const g of byServerFolder(rows.map((r) => ({ r })))) {
+          await onServerFolder(userId, Number(g[0].r.account_id), g[0].r.folder_role, async (c) => {
+            for (const [flag, on] of flags) await (on ? c.messageFlagsAdd(uidList(g), [flag], { uid: true }) : c.messageFlagsRemove(uidList(g), [flag], { uid: true }));
+          }).catch((e) => console.warn("⚠️ Credence Mail flags:", e?.message));
+        }
+      })();
     }
   }
 
