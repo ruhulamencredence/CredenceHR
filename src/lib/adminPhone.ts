@@ -45,6 +45,89 @@ export function useAdminPhoneFlag(): boolean {
 }
 
 /**
+ * Step 2: on a phone every list table inside the page becomes a stack of
+ * cards — each row a card, each cell "Column name: value" (index.css,
+ * table[data-phone-card]). Nothing in the table changes: only the cells get
+ * a data-label copied from their column heading, and the table a flag; both
+ * are taken off again when the phone layout ends.
+ *
+ * Real grids are left as tables (step 4 gives them a fixed name column):
+ * a table with more than 9 columns, a calendar of day numbers, or one
+ * marked data-grid-table. Tables in popups keep their own layout.
+ */
+const isGrid = (table: HTMLTableElement, heads: string[]) => {
+  if (table.hasAttribute('data-grid-table')) return true;
+  if (heads.length > 20) return true;
+  return heads.filter((h) => /^\s*\d{1,2}\s*$/.test(h) || /^\s*(Su|Mo|Tu|We|Th|Fr|Sa)\s*\d{1,2}\s*$/i.test(h)).length >= 5;
+};
+function headsOf(table: HTMLTableElement): string[] {
+  // A head can have a second row of filter boxes: take the row with the
+  // most written headings.
+  const rows = Array.from(table.tHead?.rows || []);
+  let best: string[] = [];
+  let bestFilled = -1;
+  for (const row of rows) {
+    const out: string[] = [];
+    for (const th of Array.from(row.cells)) {
+      const n = Math.max(1, Number(th.getAttribute('colspan')) || 1);
+      const text = (th.textContent || '').replace(/\s+/g, ' ').trim();
+      for (let i = 0; i < n; i++) out.push(text);
+    }
+    const filled = out.filter(Boolean).length;
+    if (filled > bestFilled) {
+      best = out;
+      bestFilled = filled;
+    }
+  }
+  return best;
+}
+function stackTable(table: HTMLTableElement) {
+  if (table.closest('[role="dialog"], .fixed')) return;
+  const heads = headsOf(table);
+  if (!heads.length || isGrid(table, heads)) return;
+  table.setAttribute('data-phone-card', '');
+  for (const body of Array.from(table.tBodies)) {
+    for (const tr of Array.from(body.rows)) {
+      let col = 0;
+      for (const td of Array.from(tr.cells)) {
+        const span = Math.max(1, Number(td.getAttribute('colspan')) || 1);
+        const label = span > 1 ? '' : heads[col] || '';
+        if (td.getAttribute('data-label') !== label) td.setAttribute('data-label', label);
+        col += span;
+      }
+    }
+  }
+}
+function unstackAll(root: ParentNode) {
+  root.querySelectorAll('table[data-phone-card]').forEach((t) => t.removeAttribute('data-phone-card'));
+  root.querySelectorAll('td[data-label], th[data-label]').forEach((c) => c.removeAttribute('data-label'));
+}
+
+export function usePhoneTableCards(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const root = document.querySelector('main');
+    if (!root) return;
+    let queued = false;
+    const run = () => {
+      queued = false;
+      root.querySelectorAll('table').forEach((t) => stackTable(t as HTMLTableElement));
+    };
+    run();
+    const mo = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(run);
+    });
+    mo.observe(root, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      unstackAll(root);
+    };
+  }, [active]);
+}
+
+/**
  * Call once from an Admin page's root component with the module's name. On
  * a phone it shows that name in the app header and switches the phone
  * layout on; it takes both back off when the page closes.
@@ -64,5 +147,6 @@ export function useAdminPhonePage(title: string | null | undefined, active = tru
       setHeaderPageTitle(null);
     };
   }, [on, title]);
+  usePhoneTableCards(on);
   return on;
 }

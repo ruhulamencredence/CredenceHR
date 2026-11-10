@@ -1026,3 +1026,56 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
   html[data-admin-phone] main .text-\[10px\],
   html[data-admin-phone] main .text-\[11px\] { font-size: 12px !important; }
 }
+
+/*
+  Admin Panel on a phone, step 2: list tables as cards (lib/adminPhone.ts
+  usePhoneTableCards flags them and copies each column heading onto its
+  cells as data-label). Each row is a card; the first cell is the card's
+  title, every other cell a "Heading  value" line; a cell spanning the
+  whole row (an empty-state message) stays one plain line. Real grids are
+  never flagged.
+*/
+@media (max-width: 767px) {
+  html[data-admin-phone] table[data-phone-card] { display: block; width: 100% !important; min-width: 0 !important; border: none !important; background: transparent !important; }
+  html[data-admin-phone] table[data-phone-card] > thead { display: none; }
+  html[data-admin-phone] table[data-phone-card] > tbody { display: flex; flex-direction: column; gap: 10px; border: none !important; }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 12px 14px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    background: linear-gradient(135deg, rgba(255, 237, 213, 0.75) 0%, rgba(255, 255, 255, 0.82) 55%, #fffaf5 100%) !important;
+    box-shadow: 0 6px 16px -10px rgba(60, 30, 10, 0.25);
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 5px 0 !important;
+    border: none !important;
+    white-space: normal !important;
+    text-align: right !important;
+    font-size: 13px; min-width: 0; max-width: none !important; width: auto !important;
+    overflow-wrap: anywhere;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto; max-width: 45%;
+    text-align: left; font-size: 12px; font-weight: 600; color: #78716c;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td[data-label=""]::before { display: none; }
+  /* The first cell: the card's title, label off, left-aligned and bigger. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child {
+    justify-content: flex-start; text-align: left !important;
+    font-size: 15px; font-weight: 700; padding-bottom: 8px !important;
+    border-bottom: 1px solid rgba(120, 80, 40, 0.1) !important; margin-bottom: 2px;
+  }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child::before { display: none; }
+  /* A first cell that only holds a checkbox: put it in the corner instead. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td:first-child:has(> input[type="checkbox"]:only-child) { border-bottom: none !important; padding-bottom: 0 !important; }
+  /* An empty-state / full-row message: one centred line, no card chrome. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr:has(> td[colspan]:only-child) { background: transparent !important; box-shadow: none; border-color: transparent !important; }
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td[colspan]:only-child { justify-content: center; text-align: center !important; border-bottom: none !important; font-weight: 500; font-size: 13px; }
+  /* Action cells keep their buttons in a row, aligned right. */
+  html[data-admin-phone] table[data-phone-card] > tbody > tr > td > .flex { flex-wrap: wrap; justify-content: flex-end; }
+  /* The scroll box a table sat in no longer needs to scroll. */
+  html[data-admin-phone] .overflow-x-auto:has(> table[data-phone-card]) { overflow: visible !important; }
+}
