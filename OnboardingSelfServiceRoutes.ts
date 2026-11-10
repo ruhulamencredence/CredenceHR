@@ -921,6 +921,12 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           joining_date: toDate(a.joining_date)
         };
         for (const f of [...PERSONAL_TEXT_FIELDS, ...PERSONAL_DATE_FIELDS]) cols[f] = p[f] ?? null;
+        // ZKT Device PIN = the new Employee ID (what HR enrols them under on
+        // the machine), when nobody has that PIN yet.
+        if (String(code).length <= 20) {
+          const pinTaken: any[] = await q("SELECT id FROM all_employees WHERE zk_device_pin = ?", [code]);
+          if (!pinTaken.length) cols.zk_device_pin = code;
+        }
         const keys = Object.keys(cols);
         const ins: any = await q(`INSERT INTO all_employees (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`, keys.map((k) => cols[k]));
         const employeeId = Number(ins.insertId);
