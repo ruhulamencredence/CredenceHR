@@ -1517,7 +1517,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
 
   // EMPLOYEE TRACKING (background location pings from the APK)
   if (lowerSql.startsWith("insert into location_pings")) {
-    const [user_id, lat, lng, accuracy_m, battery_pct, recorded_at] = params;
+    const [user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock] = params;
     const newId = memoryDb.location_pings.length > 0 ? Math.max(...memoryDb.location_pings.map((p: any) => p.id)) + 1 : 1;
     memoryDb.location_pings.push({
       id: newId,
@@ -1526,6 +1526,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       lng,
       accuracy_m: accuracy_m ?? null,
       battery_pct: battery_pct ?? null,
+      is_mock: is_mock ? 1 : 0,
       recorded_at: recorded_at ? new Date(recorded_at) : new Date(),
       created_at: new Date()
     });

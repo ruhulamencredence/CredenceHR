@@ -348,6 +348,8 @@ export interface LocationPing {
   battery_pct?: number | null;
   recorded_at: string;
   created_at?: string;
+  // 1 = the phone said it came from a mock-location ("fake GPS") app.
+  is_mock?: number | boolean | null;
 }
 
 // One row of the company-wide Employee Directory (Admin Panel -> Employees, an

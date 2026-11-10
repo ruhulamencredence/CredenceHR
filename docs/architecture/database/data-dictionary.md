@@ -1158,6 +1158,7 @@ Unique: `unique_employee_waiver_date`(employee_id,waiver_date)
 | `battery_pct` | int(11) | হ্যাঁ |  | |
 | `recorded_at` | timestamp | না |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `is_mock` | tinyint(1) | না | default 0 | |
 
 ### `site_attendance_entries`
 

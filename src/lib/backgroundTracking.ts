@@ -44,6 +44,8 @@ interface BGLocation {
   longitude: number;
   accuracy: number;
   time: number;
+  // Android: the fix came from a mock-location ("fake GPS") app.
+  simulated?: boolean;
 }
 
 interface BackgroundGeolocationPlugin {
@@ -168,7 +170,8 @@ async function sendPing() {
         recorded_at: new Date(fix.time).toISOString(),
         repeat,
         mode,
-        points: batch.map((f) => ({ lat: f.latitude, lng: f.longitude, accuracy_m: f.accuracy, recorded_at: new Date(f.time).toISOString() }))
+        mock: !!fix.simulated,
+        points: batch.map((f) => ({ lat: f.latitude, lng: f.longitude, accuracy_m: f.accuracy, recorded_at: new Date(f.time).toISOString(), mock: !!f.simulated }))
       })
     });
     if (res.ok && !repeat) {

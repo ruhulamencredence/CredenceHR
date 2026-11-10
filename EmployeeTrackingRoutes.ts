@@ -56,6 +56,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       const accuracy_m = req.body.accuracy_m != null && Number.isFinite(Number(req.body.accuracy_m)) ? Math.round(Number(req.body.accuracy_m)) : null;
       const battery_pct = req.body.battery_pct != null && Number.isFinite(Number(req.body.battery_pct)) ? Math.round(Number(req.body.battery_pct)) : null;
       const recorded_at = req.body.recorded_at ? new Date(req.body.recorded_at) : new Date();
+      // The phone's own word that a fix came from a mock-location app.
+      const is_mock = req.body.mock === true ? 1 : 0;
       // A phone standing still re-sends its last fix as a heartbeat: nothing new
       // to store (that only added duplicate rows), but it still answers
       // "should I go live?".
@@ -69,22 +71,23 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
           const pat = pt?.recorded_at ? new Date(pt.recorded_at) : null;
           if (!Number.isFinite(plat) || !Number.isFinite(plng) || !pat || Number.isNaN(pat.getTime())) continue;
           if (pat.getTime() >= recorded_at.getTime()) continue;
-          await queryDB("INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)", [
+          await queryDB("INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)", [
             req.user.id,
             plat,
             plng,
             pt?.accuracy_m != null && Number.isFinite(Number(pt.accuracy_m)) ? Math.round(Number(pt.accuracy_m)) : null,
             battery_pct,
-            pat
+            pat,
+            pt?.mock === true ? 1 : 0
           ]);
         }
         await queryDB(
-          "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
+          "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock]
         );
       }
       await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
-      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat });
+      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat, mock: !!is_mock });
       res.json({ success: true, live_until });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
