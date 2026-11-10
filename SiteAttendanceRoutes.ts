@@ -27,6 +27,15 @@
 //   confirmed = 1 — that's what Employee 360, Employee Reports and the
 //   Payroll wizard read (loadSiteEntries below).
 //
+//   A member who also checks in themselves (Remote Attendance on the app, or
+//   the office ZK device by their Device PIN) shows that time on the sheet
+//   (rows[].own_check_in) and a new sheet starts with them already marked
+//   from it — Present, or Late past the shift's / Late Policy's grace — for
+//   the supervisor to confirm. An entry whose arrival time is that check-in
+//   is saved with from_app = 1 (Register dot, Today count). HR turns this
+//   off with settings.use_app_checkin. Counting is unchanged: the person's
+//   own check-in still wins wherever both exist.
+//
 //   A supervisor who hasn't submitted today's sheet by 11:00 gets one
 //   reminder alert per team per day (working days only).
 //
@@ -37,7 +46,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
-import { loadRoster } from "./RosterRoutes";
+import { loadRoster, lateThresholds } from "./RosterRoutes";
 import { runsBackgroundJobs } from "./jobRunner";
 
 import { attachPersonInfo } from "./personInfo";
@@ -119,6 +128,8 @@ export async function ensureSiteAttendanceSchema(dbPool: any): Promise<void> {
       out_time VARCHAR(5) NULL,
       remarks VARCHAR(255) NULL,
       confirmed TINYINT(1) NOT NULL DEFAULT 0,
+      -- the time matches the person's own check-in that day
+      from_app TINYINT(1) NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY unique_site_entry (employee_id, attendance_date),
       INDEX idx_site_entry_date (attendance_date),
@@ -132,6 +143,8 @@ export async function ensureSiteAttendanceSchema(dbPool: any): Promise<void> {
       require_location TINYINT(1) NOT NULL DEFAULT 0,
       backdate_days INT NOT NULL DEFAULT 2,
       reminder_time VARCHAR(5) NOT NULL DEFAULT '11:00',
+      -- show members' own check-in (app GPS / office device) on the sheet
+      use_app_checkin TINYINT(1) NOT NULL DEFAULT 1,
       updated_by INT NULL,
       updated_at TIMESTAMP NULL DEFAULT NULL
     )`
@@ -141,6 +154,17 @@ export async function ensureSiteAttendanceSchema(dbPool: any): Promise<void> {
       await dbPool.query(sql);
     } catch (err: any) {
       console.warn("⚠️ Could not ensure Site Attendance table: " + err.message);
+    }
+  }
+  // Columns added after the first release.
+  for (const sql of [
+    "ALTER TABLE site_attendance_settings ADD COLUMN use_app_checkin TINYINT(1) NOT NULL DEFAULT 1",
+    "ALTER TABLE site_attendance_entries ADD COLUMN from_app TINYINT(1) NOT NULL DEFAULT 0"
+  ]) {
+    try {
+      await dbPool.query(sql);
+    } catch (err: any) {
+      if (!/duplicate column/i.test(String(err?.message))) console.warn("⚠️ Could not update Site Attendance table: " + err.message);
     }
   }
 }
@@ -190,8 +214,29 @@ async function loadSettings(queryDB: QueryDB) {
     require_photo: !!Number(r?.require_photo ?? 0),
     require_location: !!Number(r?.require_location ?? 0),
     backdate_days: Math.max(0, Math.min(31, Number(r?.backdate_days ?? 2))),
-    reminder_time: TIME_RE.test(String(r?.reminder_time || "")) ? String(r.reminder_time) : "11:00"
+    reminder_time: TIME_RE.test(String(r?.reminder_time || "")) ? String(r.reminder_time) : "11:00",
+    use_app_checkin: !!Number(r?.use_app_checkin ?? 1)
   };
+}
+
+// "HH:MM" of a stored time. With the pool's dateStrings a TIMESTAMP arrives as
+// "YYYY-MM-DD HH:MM:SS" in the server's (Dhaka) time; a Date (memory DB) is
+// read in Asia/Dhaka.
+const hhmmOf = (v: any): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour12: false }).slice(0, 5);
+  const m = String(v).match(/(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : null;
+};
+const minutesOf = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+export interface OwnCheckIn {
+  in: string;
+  out: string | null;
+  source: "app" | "device" | "both";
+  // What the sheet suggests: Late when the In is past the shift's / Late
+  // Policy's grace, else Present.
+  suggest: "present" | "late";
 }
 
 export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceRouteDeps) {
@@ -365,6 +410,75 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
     return out;
   }
 
+  // Each person's own check-in on `date`: the Remote Attendance (app GPS)
+  // rows of their login and the office device punches of their Device PIN —
+  // the earliest In and the latest Out of the two.
+  async function ownCheckIns(date: string, emps: any[]): Promise<Map<number, OwnCheckIn>> {
+    const out = new Map<number, OwnCheckIn>();
+    const byUser = new Map<number, number>();
+    const byPin = new Map<string, number>();
+    for (const e of emps) {
+      if (!e) continue;
+      if (e.user_id != null) byUser.set(Number(e.user_id), Number(e.id));
+      if (e.zk_device_pin) byPin.set(String(e.zk_device_pin).trim(), Number(e.id));
+    }
+    if (!byUser.size && !byPin.size) return out;
+    const acc = new Map<number, { ins: string[]; outs: string[]; app: boolean; device: boolean }>();
+    const slot = (id: number) => {
+      if (!acc.has(id)) acc.set(id, { ins: [], outs: [], app: false, device: false });
+      return acc.get(id)!;
+    };
+    if (byUser.size) {
+      const rows: any[] = (await queryDB("SELECT user_id, attendance_date, check_in_at, check_out_at FROM attendance WHERE attendance_date = ?", [date]).catch(() => [])) || [];
+      for (const r of rows) {
+        const id = byUser.get(Number(r.user_id));
+        if (!id || ymd(r.attendance_date) !== date) continue;
+        const i = hhmmOf(r.check_in_at);
+        if (!i) continue;
+        const x = slot(id);
+        x.app = true;
+        x.ins.push(i);
+        const o = hhmmOf(r.check_out_at);
+        if (o) x.outs.push(o);
+      }
+    }
+    if (byPin.size) {
+      const rows: any[] =
+        (await queryDB("SELECT device_user_pin, punch_time FROM zk_attendance_logs WHERE punch_time >= ? AND punch_time < ? + INTERVAL 1 DAY", [date, date]).catch(() => [])) || [];
+      const punches = new Map<number, string[]>();
+      for (const r of rows) {
+        const id = byPin.get(String(r.device_user_pin).trim());
+        const d = r.punch_time instanceof Date ? r.punch_time.toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }) : String(r.punch_time).slice(0, 10);
+        const t = hhmmOf(r.punch_time);
+        if (!id || d !== date || !t) continue;
+        punches.set(id, [...(punches.get(id) || []), t]);
+      }
+      for (const [id, ts] of punches) {
+        ts.sort();
+        const x = slot(id);
+        x.device = true;
+        x.ins.push(ts[0]);
+        // One punch so far is only an In.
+        if (ts.length > 1) x.outs.push(ts[ts.length - 1]);
+      }
+    }
+    if (!acc.size) return out;
+    const policy: any = (
+      ((await queryDB("SELECT * FROM late_policy_settings WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1", [date]).catch(() => [])) || []) as any[]
+    )[0];
+    const roster = await loadRoster(queryDB, date, date, [...acc.keys()]);
+    for (const [id, x] of acc) {
+      const first = x.ins.sort()[0];
+      const last = x.outs.sort().pop() || null;
+      const shift = roster.shiftOn(id, date);
+      const th = lateThresholds(policy, shift);
+      // A night shift's early punches are last night's Out — no suggestion of Late.
+      const late = !th.crossesMidnight && minutesOf(first) > th.delay;
+      out.set(id, { in: first, out: last && last > first ? last : null, source: x.app && x.device ? "both" : x.app ? "app" : "device", suggest: late ? "late" : "present" });
+    }
+    return out;
+  }
+
   // ======================= supervisor =======================
 
   app.get("/api/site-attendance/my-teams", authenticateToken, async (req: any, res) => {
@@ -420,6 +534,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       const holidays = await holidayFor(date, people.map((p) => p.employee_id));
       const shifts = await shiftFor(date, people.map((p) => p.employee_id));
       const lock = lockReason(s, date, today, settings, hr);
+      const own = settings.use_app_checkin ? await ownCheckIns(date, people.map((p) => w.empById.get(p.employee_id))) : new Map<number, OwnCheckIn>();
       res.json({
         team: view,
         date,
@@ -443,7 +558,9 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
             app_leave: emp?.user_id != null ? leaves.get(Number(emp.user_id)) || null : null,
             holiday: holidays.get(p.employee_id) || null,
             shift: shifts.get(p.employee_id) || null,
-            marked_by_other_team: otherTeam.get(p.employee_id) || null
+            marked_by_other_team: otherTeam.get(p.employee_id) || null,
+            own_check_in: own.get(p.employee_id) || null,
+            from_app: !!Number(e?.from_app || 0)
           };
         })
       });
@@ -599,21 +716,27 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       }
 
       const oldByEmp = new Map<number, any>(oldEntries.map((e) => [Number(e.employee_id), e]));
+      // Worked with the person's own check-in time as the arrival: marked
+      // "from app" (decided here, never taken from the phone).
+      const own = settings.use_app_checkin ? await ownCheckIns(date, [...clean.keys()].map((id) => w.empById.get(id))) : new Map<number, OwnCheckIn>();
       for (const [empId, v] of clean) {
         const old = oldByEmp.get(empId);
+        const o = own.get(empId);
+        const fromApp = o && (v.status === "present" || v.status === "late") && v.in_time === o.in ? 1 : 0;
         if (old) {
-          await queryDB("UPDATE site_attendance_entries SET status = ?, in_time = ?, out_time = ?, remarks = ?, confirmed = ? WHERE id = ?", [
+          await queryDB("UPDATE site_attendance_entries SET status = ?, in_time = ?, out_time = ?, remarks = ?, confirmed = ?, from_app = ? WHERE id = ?", [
             v.status,
             v.in_time,
             v.out_time,
             v.remarks,
             confirmed,
+            fromApp,
             Number(old.id)
           ]);
         } else {
           await queryDB(
-            "INSERT INTO site_attendance_entries (sheet_id, team_id, employee_id, attendance_date, status, in_time, out_time, remarks, confirmed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [sheetId, teamId, empId, date, v.status, v.in_time, v.out_time, v.remarks, confirmed]
+            "INSERT INTO site_attendance_entries (sheet_id, team_id, employee_id, attendance_date, status, in_time, out_time, remarks, confirmed, from_app) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [sheetId, teamId, empId, date, v.status, v.in_time, v.out_time, v.remarks, confirmed, fromApp]
           );
         }
       }
@@ -682,18 +805,27 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
         require_photo: b.require_photo === undefined ? cur.require_photo : !!b.require_photo,
         require_location: b.require_location === undefined ? cur.require_location : !!b.require_location,
         backdate_days: b.backdate_days === undefined ? cur.backdate_days : Math.max(0, Math.min(31, Math.round(Number(b.backdate_days) || 0))),
-        reminder_time: b.reminder_time === undefined ? cur.reminder_time : String(b.reminder_time).slice(0, 5)
+        reminder_time: b.reminder_time === undefined ? cur.reminder_time : String(b.reminder_time).slice(0, 5),
+        use_app_checkin: b.use_app_checkin === undefined ? cur.use_app_checkin : !!b.use_app_checkin
       };
       if (!TIME_RE.test(next.reminder_time)) throw bad("Reminder time must look like 11:00.");
-      const vals = [next.require_approval ? 1 : 0, next.require_photo ? 1 : 0, next.require_location ? 1 : 0, next.backdate_days, next.reminder_time, Number(req.user.id)];
+      const vals = [
+        next.require_approval ? 1 : 0,
+        next.require_photo ? 1 : 0,
+        next.require_location ? 1 : 0,
+        next.backdate_days,
+        next.reminder_time,
+        next.use_app_checkin ? 1 : 0,
+        Number(req.user.id)
+      ];
       if (cur.id)
         await queryDB(
-          "UPDATE site_attendance_settings SET require_approval = ?, require_photo = ?, require_location = ?, backdate_days = ?, reminder_time = ?, updated_by = ?, updated_at = ? WHERE id = ?",
+          "UPDATE site_attendance_settings SET require_approval = ?, require_photo = ?, require_location = ?, backdate_days = ?, reminder_time = ?, use_app_checkin = ?, updated_by = ?, updated_at = ? WHERE id = ?",
           [...vals, new Date(), cur.id]
         );
       else
         await queryDB(
-          "INSERT INTO site_attendance_settings (require_approval, require_photo, require_location, backdate_days, reminder_time, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO site_attendance_settings (require_approval, require_photo, require_location, backdate_days, reminder_time, use_app_checkin, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           [...vals, new Date()]
         );
       res.json(await loadSettings(queryDB));
@@ -830,16 +962,49 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       const settings = await loadSettings(queryDB);
       const sheets: any[] = (await all("site_attendance_sheets")).filter((s) => ymd(s.attendance_date) === date);
       const entries = await entriesOnDate(date);
-      const teams = w.teams
-        .filter((t) => Number(t.is_active ?? 1) === 1 || sheets.some((s) => Number(s.team_id) === Number(t.id)))
+      const shown = w.teams.filter((t) => Number(t.is_active ?? 1) === 1 || sheets.some((s) => Number(s.team_id) === Number(t.id)));
+      const memberIds = new Set<number>();
+      for (const t of shown) for (const mm of teamView(t, w).members) memberIds.add(mm.employee_id);
+      for (const e of entries) memberIds.add(Number(e.employee_id));
+      const own = settings.use_app_checkin ? await ownCheckIns(date, [...memberIds].map((id) => w.empById.get(id))) : new Map<number, OwnCheckIn>();
+      const teams = shown
         .map((t) => {
           const v = teamView(t, w);
           const s = sheets.find((x) => Number(x.team_id) === v.id) || null;
           const es = s ? entries.filter((e) => Number(e.sheet_id) === Number(s.id)) : [];
-          return { ...v, members: undefined, member_count: v.members.length, sheet: sheetLite(s, w), counts: countsOf(es, Math.max(v.members.length, es.length)) };
+          const ids = new Set<number>([...v.members.map((mm) => mm.employee_id), ...es.map((e) => Number(e.employee_id))]);
+          const byEmp = new Map<number, any>(es.map((e) => [Number(e.employee_id), e]));
+          let appIn = 0;
+          const mismatch: string[] = [];
+          for (const id of ids) {
+            if (!own.has(id)) continue;
+            appIn++;
+            const e = byEmp.get(id);
+            // Checked in themselves, yet the sheet says Absent / Leave.
+            if (e && (e.status === "absent" || e.status === "leave")) mismatch.push(w.empById.get(id)?.name || "Someone");
+          }
+          return {
+            ...v,
+            members: undefined,
+            member_count: v.members.length,
+            sheet: sheetLite(s, w),
+            counts: countsOf(es, Math.max(v.members.length, es.length)),
+            app_checked_in: appIn,
+            app_mismatch: mismatch
+          };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
-      const total = { teams: teams.length, submitted: teams.filter((t) => t.sheet).length, present: 0, late: 0, absent: 0, leave: 0, unmarked: 0, people: 0 };
+      const total = {
+        teams: teams.length,
+        submitted: teams.filter((t) => t.sheet).length,
+        present: 0,
+        late: 0,
+        absent: 0,
+        leave: 0,
+        unmarked: 0,
+        people: 0,
+        app_checked_in: teams.reduce((n, t) => n + t.app_checked_in, 0)
+      };
       for (const t of teams) {
         total.present += t.counts.present;
         total.late += t.counts.late;
@@ -946,7 +1111,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
           const id = Number(e.id);
           const hol = roster.holidaysFor(id, ((maps as any)[groups.get(id) || "head_office"] as Map<string, any>) || new Map());
           const mine = entries.filter((x) => Number(x.employee_id) === id);
-          const cells: Record<string, { code: string; confirmed: boolean; in: string | null; out: string | null }> = {};
+          const cells: Record<string, { code: string; confirmed: boolean; in: string | null; out: string | null; app?: boolean }> = {};
           const tot = { present: 0, late: 0, absent: 0, leave: 0, not_marked: 0, holiday: 0 };
           for (let d = 1; d <= days; d++) {
             const ds = `${month}-${String(d).padStart(2, "0")}`;
@@ -957,7 +1122,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
             const offDay = hol?.get(ds);
             if (x && !(offDay && (x.status === "absent" || x.status === "leave"))) {
               const code = x.status === "present" ? "P" : x.status === "late" ? "L" : x.status === "absent" ? "A" : "LV";
-              cells[ds] = { code, confirmed: Number(x.confirmed) === 1, in: x.in_time || null, out: x.out_time || null };
+              cells[ds] = { code, confirmed: Number(x.confirmed) === 1, in: x.in_time || null, out: x.out_time || null, app: !!Number(x.from_app || 0) };
               (tot as any)[x.status]++;
             } else if (hol?.get(ds)) {
               cells[ds] = { code: hol.get(ds).roster_off ? "O" : hol.get(ds).day_type === "weekend" ? "W" : "H", confirmed: true, in: null, out: null };

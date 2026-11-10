@@ -1172,6 +1172,7 @@ Unique: `unique_employee_waiver_date`(employee_id,waiver_date)
 | `out_time` | varchar(5) | হ্যাঁ |  | |
 | `remarks` | varchar(255) | হ্যাঁ |  | |
 | `confirmed` | tinyint(1) | না | default 0 | |
+| `from_app` | tinyint(1) | না | default 0 | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `unique_site_entry`(employee_id,attendance_date)
@@ -1197,6 +1198,7 @@ Unique: `unique_site_member`(employee_id)
 | `require_location` | tinyint(1) | না | default 0 | |
 | `backdate_days` | int(11) | না | default 2 | |
 | `reminder_time` | varchar(5) | না | default '11:00' | |
+| `use_app_checkin` | tinyint(1) | না | default 1 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
