@@ -1382,6 +1382,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   useEffect(() => {
     if (!claimsNavRequest || !isLatestNav(claimsNavRequest)) return;
+    if (claimsNavRequest.target === 'noticeBoard') {
+      setMobileActiveSection('noticeBoard');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const wantsMovement = claimsNavRequest.target === 'movementClaims';
     if (wantsMovement ? !canSeeMovementClaim : !canSeeBillClaim) return;
     setMobileActiveSection(wantsMovement ? 'claim' : 'billClaim');

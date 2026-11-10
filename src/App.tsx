@@ -1330,6 +1330,7 @@ export default function App() {
       case 'leave': return 'leaveApplication';
       case 'timesheet': return 'timesheet';
       case 'employeeDirectory': return 'employeeDirectory';
+      case 'noticeBoard': return 'noticeBoard';
       default: return null;
     }
   };
@@ -1409,7 +1410,7 @@ export default function App() {
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
-    onGoToBillClaims: (target: 'movementClaims' | 'billClaim') => {
+    onGoToBillClaims: (target: 'movementClaims' | 'billClaim' | 'noticeBoard') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);

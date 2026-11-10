@@ -670,6 +670,8 @@ Admin Panel → **Notices** → **New notice** — চার ধাপের এ
 
 কর্মীর দিকে: popup একটা bottom sheet — ছবি থাকলে ছবি আর তার ওপর Important / Pinned, না থাকলে priority-র রঙে বড় আইকন; কে পাঠিয়েছেন, কবে, কত মিনিটের পড়া; লম্বা লেখা বা সংযুক্তি থাকলে "Read full" পুরো notice খোলে; কয়টা notice বাকি তা ফোঁটায় ("1 of 3"); "I have read this" না হয় "Got it"; Urgent-এ "Remind me later" শুধু এবারের মতো সরায়। Notice Board: খোঁজা, All / Unread / Urgent / Pinned / Has files, না-পড়া Urgent সবার ওপরে লাল কার্ডে (সেখানেই "I have read this"), তারপর Pinned, তারপর Latest (ছবি থাকলে বড় কার্ড, না থাকলে ছোট সারি, না-পড়ায় বেগুনি ফোঁটা)। চাপলে পুরো notice (`notice/NoticeDetail.tsx`): ওপরে ছবি ও শিরোনাম, লেখা, সংযুক্তি কার্ডে, নিচে বাটন। Popup দেখা বা Board-এ notice খোলা "opened" হিসেবে ধরা হয় (`notice_reads`) — শুধু Board-এ আসা আর নয়। কে পাঠিয়েছেন তা `/api/notices/active` ও `/board`-এ `from_name`। আগের সাধারণ লেখায় দেওয়া line break এখন ঠিক দেখায়।
 
+**দেখা notice পরে কোথায়:** Notice Board-এ — কর্মীকে পাঠানো সব notice সেখানে থাকে। খোলা যায় বাঁদিকের মেনু → Self Service → Others → **Notice Board** (desktop ও ফোনের মেনু, সবার জন্য), ফোনের More (⊞) → Notice Board, আর desktop Dashboard-এর Notice Board কার্ড থেকে।
+
 ছবি ও ফাইল থাকে `.env`-এর `NOTICE_FILES_DIR` folder-এ (না দিলে `uploads/notices`), database-এ শুধু path (`notice_files`); notice মুছলে বা ফাইল সরালে ফাইলও মোছে, ২ দিনের বেশি পুরনো ব্যবহার-না-হওয়া upload নিজে মোছে (`noticeFiles.ts`, `NoticeRoutes.ts`)।
 
 
