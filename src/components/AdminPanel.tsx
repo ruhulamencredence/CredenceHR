@@ -7764,6 +7764,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           departments={departments}
           viewer={{ isSuperAdmin, canGrantModuleAccess }}
           backTo={moduleAccessFrom === 'employees' && canSee('employees') ? 'Employees' : 'Users'}
+          templatesAllowed={canSee('users')}
+          canSaveTemplate={canSee('users') && usersLayer('edit_add')}
           onClose={() => {
             setManagingModulesFor(null);
             if (moduleAccessFrom === 'employees' && canSee('employees')) setActiveTab('employees');

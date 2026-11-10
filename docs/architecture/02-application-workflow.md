@@ -751,6 +751,14 @@ Search-এ নাম বা Employee ID লিখলে Department-এর তা
 
 `.env`-এ `IP_REDIRECT_TO=https://hr.credencegroupbd.com` থাকলে, কেউ browser-এ server-এর IP দিয়ে অ্যাপ খুললে (যেমন `http://203.95.222.58:3000/login` বা `http://192.168.66.4:3000/...`) একই পাতা domain-এ খোলে (302 redirect, পথ আর `?…` একই থাকে)। যা redirect হয় না: `/api`, `/iclock` (ZKTeco push), `/socket.io`, `/downloads`, GET ছাড়া অন্য request, আর Android অ্যাপের WebView (পুরনো APK এখনো IP থেকে চলে)। `127.0.0.1` / `localhost` (nginx-এর proxy) কখনো redirect হয় না। খালি থাকলে কিছুই হয় না। IP দিয়ে port 80/443 (360 ERP) nginx নিজে `https://360.credencegroupbd.com`-এ পাঠায়।
 
+## Access Template: Module Access থেকে বানানো ও দেওয়া
+
+Admin Panel → Users → Manage → **Module Access** পাতায়, "Copy access from…"-এর পাশে:
+
+- **Save as template** (Users module-এর Edit / Add layer লাগে, একজনকে খোলা থাকলে): পর্দায় যা আছে (Save না করা বদলসহ) নাম দিয়ে template হয় — module, প্রতিটার ভেতরের layer, সব switch আর Mobile App (APK) access (`access_templates.access_json`)। Department-সীমা আর Tracking-এ কাকে দেখে, এগুলো প্রত্যেকের নিজের, template-এ যায় না। এর থেকে switch ও module-এর তালিকাও (`features_json` / `modules_json`) বসে, তাই Users তালিকার "Apply template…" আর Data Import-এর default template-ও একই দেয়।
+- **Apply template…** (Users module লাগে): বাছলে form পূরণ হয়, "Copy access from…"-এর মতো — Save না চাপা পর্যন্ত কিছু বদলায় না, আর Save হয় প্রতিটা account-এর নিজের access endpoint দিয়ে (একই অনুমতি-যাচাই ও audit log)। Module Access থেকে বানানো template হুবহু বসে (পরে যোগ হওয়া, template-এ নেই এমন switch আগের মতো থাকে); পুরনো ধরনের template (শুধু switch + module) কেবল সেগুলো যোগ করে।
+- Users → Access Templates তালিকায় এমন template-এ "Full access · layers + App" চিহ্ন; সেখানে switch / module বদলালে পুরো access-ও সেই মতো বদলায়।
+
 ## App restart-এর সময় "We'll be right back" পাতা
 
 Deploy বা `pm2 restart`-এর সময় Node app কয়েক সেকেন্ড উত্তর দেয় না; nginx তখন নিজের সাদা "502 Bad Gateway" দেখাত। এখন nginx-এর `error_page 502 503 504 @credence_down` (`deploy/error-pages/README.md`) সেই সময় `deploy/error-pages/credence-down.html` দেখায় — app-এর কমলা পর্দা, icon (ফাইলের ভেতরেই, app ছাড়াই চলে) আর এক লাইন ইংরেজি লেখা। পাতাটা প্রতি ৫ সেকেন্ডে (এক মিনিট পর ১০ সেকেন্ডে) একই ঠিকানায় `HEAD` পাঠিয়ে দেখে; app উত্তর দিলেই নিজে reload হয়ে আগের পাতায় ফেরে। `/api/...` ও `/socket.io/...`-এ পাতা নয়, ছোট JSON error যায়। Status code 502-ই থাকে।

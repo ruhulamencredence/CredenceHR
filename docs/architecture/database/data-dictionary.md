@@ -1390,6 +1390,7 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `features_rev` | int(11) | না | default 1 | |
+| `access_json` | longtext | হ্যাঁ |  | |
 
 ### `admin_module_permission_layers`
 

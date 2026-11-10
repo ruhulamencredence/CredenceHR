@@ -46,6 +46,7 @@
 | দূরের সাইটের ZKTeco মেশিন internet-এ punch পাঠায় — কেউ ভুয়া punch পাঠাতে পারে? | ADMS protocol-এ password নেই, তাই শুধু register করা চালু মেশিনের Serial number মানা হয়, আর সাইটের IP দিলে শুধু সেখান থেকে; অচেনা SN-এর কিছু লেখা হয় না, শুধু punch নেওয়া হয়, মেশিনে কোনো command যায় না। SN জেনে IP-সীমা ছাড়া মেশিন নকল করা সম্ভব — তাই fixed IP থাকলে দেওয়ার পরামর্শ (`zkMachines.ts`, 04 §১০ নং ১৩)। | ⚠️ |
 | এক মেশিনের PIN অন্য মেশিনের কারও হাজিরায় চলে যায় না? | "Its own numbers" ধরনের মেশিনে প্রতিটা PIN আলাদা করে link হয় (`zk_device_pins`); link না হলে punch কারও হাজিরায় যায় না। link / unlink শুধু Office Attendance-এর "Link Device PINs" layer-এর (API 403, UI লুকানো)। | ✅ |
 | Site supervisor কি team-এর লোকদের নিজের check-in দেখতে পান? কতটুকু? | শুধু নিজের team-এর member-দের, শুধু যে তারিখের শিট খোলা সেদিনের In / Out সময় (কোথা থেকে, অর্থাৎ location নয়)। HR Site Attendance → Settings-এ "Use members' own check-in" বন্ধ করলে supervisor কিছুই পান না; setting শুধু Office Attendance মডিউলের HR বদলাতে পারেন। | ✅ |
+| Access Template দিয়ে কেউ কি নিজের চেয়ে বেশি access অন্যকে দিয়ে দিতে পারে? | না। Template শুধু Module Access-এর form পূরণ করে; Save হয় প্রতিটা account-এর access endpoint দিয়ে, যা দেওয়ার মানুষটির নিজের অনুমতি যাচাই করে ও audit log-এ রাখে। Template বানাতে Users module-এর Edit / Add অনুমতি লাগে। | ✅ |
 
 ## গ. ডাটা সুরক্ষা
 
