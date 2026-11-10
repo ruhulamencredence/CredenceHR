@@ -432,7 +432,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
             <div className="mb-5">
               <h1 className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--g-text)' }}>
-                {ownerMode ? 'System owner sign-in' : workspace ? 'Welcome back 👋' : 'Welcome 👋'}
+                {ownerMode ? 'System owner sign-in' : workspace ? 'Welcome back' : 'Welcome'}
               </h1>
               <p className="text-sm mt-1" style={{ color: 'var(--g-text-muted)' }}>
                 {ownerMode ? (
