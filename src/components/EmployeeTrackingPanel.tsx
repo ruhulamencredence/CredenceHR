@@ -10,6 +10,7 @@ import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone } from 'lucide-react';
 import { LocationPing } from '../types';
+import { cleanPath, ROUGH_LABEL, MAX_ACCURACY_M, RoughReason } from '../lib/trackPath';
 import { apiUrl } from '../lib/api';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
@@ -92,8 +93,9 @@ function getInitials(name: string): string {
 // avatar when the account has no Personal Data photo uploaded. Replaces the
 // old plain colored dot so an Admin can recognize who's who on the map at a
 // glance instead of hovering every marker.
-const liveMarkerIcon = (stale: boolean, name: string, photoUrl: string | null | undefined) => {
-  const ringColor = stale ? '#94a3b8' : '#059669';
+const liveMarkerIcon = (stale: boolean, name: string, photoUrl: string | null | undefined, mock = false) => {
+  // Red ring: the last fix came from a mock-location ("fake GPS") app.
+  const ringColor = mock ? '#e11d48' : stale ? '#94a3b8' : '#059669';
   const avatarHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:100%;object-fit:cover;" />`
     : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${avatarColor(name)};color:#fff;font-size:13px;font-weight:700;">${getInitials(name)}</div>`;
@@ -114,6 +116,20 @@ const pathPointIcon = L.divIcon({
   html: `<div style="width:10px;height:10px;border-radius:9999px;background:var(--g-accent,#7F00FF);border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>`,
   iconSize: [10, 10],
   iconAnchor: [5, 5]
+});
+// Left out of the route (lib/trackPath.ts): grey for a rough fix / jump,
+// red with a ! for a fake-GPS fix.
+const roughPointIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:9px;height:9px;border-radius:9999px;background:#94a3b8;border:2px solid white;opacity:.85;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>`,
+  iconSize: [9, 9],
+  iconAnchor: [4.5, 4.5]
+});
+const mockPointIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:16px;height:16px;border-radius:9999px;background:#e11d48;border:2px solid white;color:#fff;font:700 10px/12px system-ui;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.4);">!</div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8]
 });
 
 // Which Live-board cards are folded down to their title bar — kept per
@@ -220,6 +236,10 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<{ id: number; name: string } | null>(null);
   const [history, setHistory] = useState<LocationPing[]>([]);
+  // The route without rough fixes, jumps and fake-GPS points (kept apart).
+  const cleaned = useMemo(() => cleanPath(history), [history]);
+  const mockCount = useMemo(() => cleaned.rough.filter((p) => p.rough === 'mock').length, [cleaned]);
+  const [showRough, setShowRough] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -500,6 +520,16 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   }, [token, fromDate, toDate, fromTime, toTime]);
 
   const reportRows = useMemo(() => [...history].sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1)), [history]);
+  // Which report rows were left out of the route, and why (by the row itself).
+  const roughById = useMemo(() => {
+    const byTime = new Map<string, RoughReason>(cleaned.rough.map((p) => [`${p.recorded_at}|${p.lat}|${p.lng}`, p.rough]));
+    const m = new Map<LocationPing, RoughReason>();
+    for (const p of history) {
+      const r = byTime.get(`${p.recorded_at}|${p.lat}|${p.lng}`);
+      if (r) m.set(p, r);
+    }
+    return m;
+  }, [cleaned, history]);
 
   // While the report is open, look up the address of every distinct spot
   // (cached across openings; one request at a time, see reverseGeocode.ts).
@@ -559,7 +589,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           String(idx + 1),
           formatDateTime(p.recorded_at),
           addressOf(p),
-          p.accuracy_m != null ? String(p.accuracy_m) : '—',
+          (p.accuracy_m != null ? String(p.accuracy_m) : '—') + (roughById.get(p) ? ` (${roughById.get(p) === 'mock' ? 'Fake GPS' : roughById.get(p) === 'jump' ? 'jump' : 'rough'})` : ''),
           p.battery_pct != null ? `${p.battery_pct}%` : '—'
         ]),
         styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
@@ -629,17 +659,43 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     if (selectedUser) {
       lastFitRef.current = null;
       // Path playback mode — connected trail, oldest -> newest.
-      const sorted = [...history].sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1));
-      if (sorted.length === 0) return;
+      // The route: only fixes good enough to draw (lib/trackPath.ts).
+      const sorted = cleaned.route;
+      const shownRough = cleaned.rough.filter((p) => p.rough === 'mock' || showRough);
+      if (sorted.length === 0 && shownRough.length === 0) return;
       const latlngs = sorted.map(p => [Number(p.lat), Number(p.lng)] as [number, number]);
-      L.polyline(latlngs, { color: '#7F00FF', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(layer);
+      if (latlngs.length > 1) L.polyline(latlngs, { color: '#7F00FF', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(layer);
+      // Tapping a point also shows how far off it may be (the phone's own
+      // accuracy estimate) as a faint circle.
+      const withAccuracyCircle = (marker: L.Marker, p: LocationPing, color: string) => {
+        let circle: L.Circle | null = null;
+        marker.on('popupopen', () => {
+          if (p.accuracy_m != null && Number(p.accuracy_m) > 0)
+            circle = L.circle([Number(p.lat), Number(p.lng)], { radius: Number(p.accuracy_m), color, weight: 1, fillOpacity: 0.08 }).addTo(layer);
+        });
+        marker.on('popupclose', () => {
+          if (circle) layer.removeLayer(circle);
+          circle = null;
+        });
+      };
+      const acc = (p: LocationPing) => (p.accuracy_m != null ? `<br/>Accuracy: ± ${p.accuracy_m} m` : '');
       sorted.forEach((p, i) => {
         const marker = L.marker([Number(p.lat), Number(p.lng)], { icon: pathPointIcon }).addTo(layer);
         marker.bindPopup(
-          `<div style="font-size:12px;"><b>${i === 0 ? 'Start' : i === sorted.length - 1 ? 'Latest' : 'Point ' + (i + 1)}</b><br/>${formatDate(p.recorded_at)}${p.battery_pct != null ? `<br/>Battery: ${p.battery_pct}%` : ''}</div>`
+          `<div style="font-size:12px;"><b>${i === 0 ? 'Start' : i === sorted.length - 1 ? 'Latest' : 'Point ' + (i + 1)}</b><br/>${formatDate(p.recorded_at)}${acc(p)}${p.battery_pct != null ? `<br/>Battery: ${p.battery_pct}%` : ''}</div>`
         );
+        withAccuracyCircle(marker, p, '#7F00FF');
       });
-      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 17 });
+      shownRough.forEach((p) => {
+        const mock = p.rough === 'mock';
+        const marker = L.marker([Number(p.lat), Number(p.lng)], { icon: mock ? mockPointIcon : roughPointIcon, zIndexOffset: mock ? 500 : -100 }).addTo(layer);
+        marker.bindPopup(
+          `<div style="font-size:12px;"><b style="color:${mock ? '#e11d48' : '#475569'}">${ROUGH_LABEL[p.rough as RoughReason]}</b><br/>${formatDate(p.recorded_at)}${acc(p)}<br/><span style="color:#64748b">Not part of the route.</span></div>`
+        );
+        withAccuracyCircle(marker, p, mock ? '#e11d48' : '#64748b');
+      });
+      const all = [...latlngs, ...shownRough.map((p) => [Number(p.lat), Number(p.lng)] as [number, number])];
+      map.fitBounds(L.latLngBounds(all), { padding: [40, 40], maxZoom: 17 });
     } else {
       // Live board mode — one dot (now an avatar/photo) per user, latest
       // position only, restricted to whoever matches the employee filter.
@@ -648,7 +704,8 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       filteredLive.forEach(p => {
         const stale = minutesAgo(p.recorded_at) > STALE_AFTER_MIN;
         const name = p.user_name || 'User';
-        const icon = liveMarkerIcon(stale, name, photoUrls[p.user_id]);
+        const mock = Number((p as any).is_mock) === 1;
+        const icon = liveMarkerIcon(stale, name, photoUrls[p.user_id], mock);
         const marker = L.marker([Number(p.lat), Number(p.lng)], { icon }).addTo(layer);
         // Built as elements (a name is text, never HTML), with Live (opens
         // Live Follow, needs the tracking "live" layer) and Path buttons.
@@ -658,6 +715,12 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
         const b = document.createElement('b');
         b.textContent = name;
         box.appendChild(b);
+        if (mock) {
+          const w = document.createElement('div');
+          w.textContent = '⚠ Fake GPS — this location came from a mock-location app';
+          w.style.cssText = 'color:#e11d48;font-weight:600;margin-top:2px;';
+          box.appendChild(w);
+        }
         const info = document.createElement('div');
         info.textContent = agoLabel(p.recorded_at);
         box.appendChild(info);
@@ -693,7 +756,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       if (bounds.length > 0 && sig !== lastFitRef.current) map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 15 });
       lastFitRef.current = sig;
     }
-  }, [filteredLive, history, selectedUser, photoUrls, canLive]);
+  }, [filteredLive, history, cleaned, showRough, selectedUser, photoUrls, canLive]);
 
   const bars = status?.updates_per_minute || [];
   const barMax = Math.max(1, ...bars);
@@ -749,7 +812,26 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
             Apply
           </button>
           {historyLoading && <span className="text-xs text-slate-400">Loading…</span>}
-          {!historyLoading && <span className="text-xs text-slate-500">{history.length} point{history.length === 1 ? '' : 's'}</span>}
+          {!historyLoading && (
+            <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 flex-wrap">
+              {cleaned.route.length} point{cleaned.route.length === 1 ? '' : 's'}
+              {cleaned.rough.length - mockCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowRough((v) => !v)}
+                  className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${showRough ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                  title={`Rough fixes (worse than ± ${MAX_ACCURACY_M} m — Wi-Fi / mobile-tower guesses, not GPS) and jumps out of line are left out of the route. Tap to show them in grey.`}
+                >
+                  {showRough ? 'Hide' : 'Show'} {cleaned.rough.length - mockCount} rough
+                </button>
+              )}
+              {mockCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold" title="The phone said these locations came from a mock-location (fake GPS) app.">
+                  {mockCount} fake GPS
+                </span>
+              )}
+            </span>
+          )}
           <button
             onClick={() => setShowReport(true)}
             disabled={history.length === 0}
@@ -1211,7 +1293,14 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                             </span>
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-slate-600">{p.accuracy_m != null ? p.accuracy_m : '—'}</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {p.accuracy_m != null ? p.accuracy_m : '—'}
+                          {roughById.get(p) && (
+                            <span className={`block text-[10px] font-semibold ${roughById.get(p) === 'mock' ? 'text-rose-600' : 'text-slate-400'}`}>
+                              {roughById.get(p) === 'mock' ? 'Fake GPS' : roughById.get(p) === 'jump' ? 'Jump' : 'Rough'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-slate-600">{p.battery_pct != null ? `${p.battery_pct}%` : '—'}</td>
                       </tr>
                     );

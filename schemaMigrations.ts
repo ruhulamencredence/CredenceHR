@@ -1183,6 +1183,13 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure location_pings table exists: " + err.message);
   }
+  // 1 = the phone said this fix came from a mock-location ("fake GPS") app
+  // (Android Location.isMock(); APK DutyTrackingService / LiveTrackingService).
+  try {
+    await dbPool.query("ALTER TABLE location_pings ADD COLUMN is_mock TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add location_pings.is_mock: " + err.message);
+  }
   // What the phone itself says about location, sent with every heartbeat of the
   // APK's tracking (POST /api/tracking/state) — one row per user. Lets Employee
   // Tracking tell "Phone Location is OFF" / "permission removed" / "app closed"

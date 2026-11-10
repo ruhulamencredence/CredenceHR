@@ -727,6 +727,16 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 - সার্ভারে কীভাবে মানা হয়: অ্যাপের token-এ `cl: "app"` থাকে। এমন request-এ `queryDB` নিজে থেকে ওই অ্যাকাউন্টের নিজের `admin_module_permissions` সারি থেকে অ্যাপে না-থাকা module বাদ দেয়, আর `users`-এর নিজের সারিতে অ্যাপে না-থাকা `can_*` switch 0 করে দেয় (`maskRowsForApp`)। তাই `requireModule`, `requireModuleLayer`, প্রতিটা Self Service check, আর অ্যাপ যে user object পায় (login, `/api/auth/me`), সবাই অ্যাপের ছোট অনুমতিই দেখে, আর অ্যাপের menu-ও সেভাবে লুকায়। Chat, Calls, Mail-এর ৩০ সেকেন্ডের access cache অ্যাপের request-এ ব্যবহার হয় না।
 - সীমা: ফোনের browser দিয়ে ওয়েবসাইট খুললে সেটা Web হিসেবেই গণ্য হয়; শুধু APK আলাদা চেনা যায়।
 
+## Employee Tracking: path পরিষ্কার রাখা ও Fake GPS ধরা
+
+**Map-এর path (`src/lib/trackPath.ts` `cleanPath`):** জমা থাকা কোনো point মোছা হয় না; শুধু route-এ কোনটা আঁকা হবে তা বাছা হয়।
+- **Rough** — ফোনের নিজের accuracy ±১০০ m-এর চেয়ে খারাপ (GPS না পেয়ে Wi-Fi / mobile tower-এর আন্দাজ, যা map-এ লম্বা সোজা লাফ আঁকত)।
+- **Jump** — একটা মাত্র point লাইনের বাইরে: যেতে-আসতে ঘণ্টায় ১২০ km-এর বেশি লাগত, অথবা ২৫০ m+ দূরে অথচ আগের ও পরের point কাছাকাছি (১০ মিনিটের মধ্যে out-and-back)। সত্যিকারের যাত্রা একদিকে চলে বা কয়েকটা point রাখে, তাই থাকে।
+- **Fake GPS** — ফোন বলেছে fix mock-location app থেকে (`location_pings.is_mock`); সবসময় লাল "!" চিহ্নে দেখায়, route-এ যায় না।
+- উপরে "21 points · Show 3 rough · 1 fake GPS"; "Show … rough" চাপলে বাদ পড়াগুলো ধূসর দেখায়। Point-এ চাপলে "Accuracy: ± N m" আর সেই মাপের হালকা বৃত্ত। Report-এর table / PDF-এ সেই সারিতে Rough / Jump / Fake GPS লেখা। Live board-এ শেষ fix fake হলে ছবির ring লাল আর popup-এ সতর্কবার্তা। Stay Report fake GPS point-কে থাকা হিসেবে গোনে না।
+
+**APK-এ (DutyTrackingService / LiveTrackingService, নতুন APK লাগে):** প্রতিটা fix-এ Android-এর `isMock()` দেখে `mock: true` পাঠায় (`MockLocation.java`); web watcher-ও (`backgroundTracking.ts`) plugin-এর `simulated` পাঠায়। পুরনো cached অবস্থান নতুন হিসেবে নেয় না (`setMaxUpdateAgeMillis`); চলার সময় প্রথম fix-এ একটু অপেক্ষা করে GPS-মানের fix নেয় (`setWaitForAccurateLocation`)। Battery বাঁচাতে বসে থাকার (idle) সময় আগের মতোই কম-শক্তির Balanced mode — আর সেখানে আগের অবস্থান থেকে নিজের ভুলের (±) সীমার মধ্যে থাকা rough fix-কে নড়াচড়া ধরে না (Wi-Fi drift): তাতে পুরো GPS অকারণে জাগে না, লাফও আঁকা হয় না।
+
 ## Employee Tracking: অ্যাপ বন্ধ থাকলেও location যায়
 
 আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, `DutyTrackingService.java`:
