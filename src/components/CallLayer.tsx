@@ -602,6 +602,17 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       }),
     []
   );
+  // Back on screen (e.g. an iPhone Home Screen app opened from its call
+  // notification — iOS keeps the old connection looking alive while the app
+  // sleeps): ask whether a call is ringing for us, so it rings here.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && phaseRef.current === 'idle') getChatSocket()?.emit('call:announce');
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   // The app came on screen while the phone's call screen rang: ring here.
   useEffect(
     () =>

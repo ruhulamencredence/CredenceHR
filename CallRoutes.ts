@@ -39,6 +39,11 @@
 // only ever went to the callee's own devices). "call_cancel" takes the screen
 // away when the call ends or is answered elsewhere.
 //
+// An iPhone / iPad Home Screen app (no Android push, can't ring with the app
+// closed): a call notification every few seconds while the call rings —
+// WebPushService webRing / public/sw.js. Tapping it opens the chat, where the
+// call rings (announce).
+//
 // ICE servers (GET /api/calls/ice-servers): Google's public STUN always, plus
 // TURN when the server is given one in .env —
 //   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN  (Cloudflare Calls TURN), or
@@ -53,6 +58,7 @@ import crypto from "crypto";
 import { insertChatMessage, notifyNewMessage } from "./ChatRoutes";
 import { currentAppMask } from "./AppAccess";
 import { sendSilentPushToUserIds } from "./PushNotificationService";
+import { webRing, type WebRing } from "./WebPushService";
 import { inGroupCall } from "./GroupCallRoutes";
 
 // Set by setupCallSocket: this account is in a one-to-one call on this worker
@@ -171,6 +177,9 @@ interface Call {
   // Decline on that screen end the call without signing in.
   pushed: boolean;
   pushKey: string;
+  // iPhone / iPad Home Screen app: a notification every few seconds while
+  // it rings (WebPushService webRing), stopped on answer / end.
+  webRing: WebRing | null;
 }
 
 export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) {
@@ -206,6 +215,7 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     if (c.awayTimer) clearTimeout(c.awayTimer);
     if (busy.get(c.callerId) === c.id) busy.delete(c.callerId);
     if (busy.get(c.calleeId) === c.id) busy.delete(c.calleeId);
+    c.webRing?.stop();
     // Take the phone's incoming-call screen away (still ringing there).
     if (c.pushed) void sendSilentPushToUserIds(queryDB, [c.calleeId], { type: "call_cancel", callId: c.id }, RING_MS);
     const payload = { callId: c.id, reason };
@@ -274,6 +284,7 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
       io.to(c.callerSocket).emit("call:accepted", { callId: c.id });
       // The callee's other devices stop ringing.
       io.to(`user:${me}`).except(socketId).emit("call:taken", { callId: c.id });
+      c.webRing?.stop();
       // Other phones of the callee may still show the call screen.
       if (c.pushed) void sendSilentPushToUserIds(queryDB, [c.calleeId], { type: "call_cancel", callId: c.id }, RING_MS);
       return { ok: true };
@@ -378,7 +389,19 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
           { type: "call_incoming", callId, roomId: String(roomId), kind, fromId: String(me), fromName: mine.name, declineKey: pushKey },
           RING_MS
         );
-        if (peerSockets.length === 0 && pushedTo === 0) {
+        // An iPhone / iPad Home Screen app can't ring: it gets a call
+        // notification, repeated while the call rings (sound + buzz each time).
+        const ring = webRing(
+          queryDB,
+          [peerId],
+          `📞 ${mine.name}`,
+          `Incoming ${label(kind)} · tap to answer`,
+          { type: "call", callId, roomId: String(roomId), kind },
+          RING_MS
+        );
+        const webTo = await ring.sent;
+        if (peerSockets.length === 0 && pushedTo === 0 && webTo === 0) {
+          ring.stop();
           void logCall({ roomId, callerId: me, kind }, `📞 Missed ${label(kind)}`);
           return reply({ ok: false, error: `${peer.name} isn't online right now — they'll see a missed call.` });
         }
@@ -397,7 +420,8 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
           ringTimer: null,
           awayTimer: null,
           pushed: pushedTo > 0,
-          pushKey: pushedTo > 0 ? pushKey : ""
+          pushKey: pushedTo > 0 ? pushKey : "",
+          webRing: ring
         };
         call.ringTimer = setTimeout(() => finish(call, "no-answer", null), RING_MS);
         calls.set(call.id, call);

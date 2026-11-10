@@ -33,6 +33,8 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { confirmDialog } from '../lib/confirmDialog';
 import { CallSetupSheet, callSetupMissing, useCallSetup } from './CallSetupCard';
+import { enableWebPush, webPushPermission } from '../lib/webPush';
+import { isIOSDevice, isStandalone } from './AddToHomeScreen';
 
 interface ChatPanelProps {
   token: string;
@@ -200,6 +202,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // Android app: what this phone allows for calls with the app closed (CallSetupCard.tsx).
   const callSetup = useCallSetup();
   const [showCallSetup, setShowCallSetup] = useState(false);
+  // iPhone / iPad Home Screen app: calls reach it closed only as notifications
+  // (WebPushService webRing) — offer to turn them on from the Calls list.
+  const iosApp = isIOSDevice() && isStandalone();
+  const [iosPush, setIosPush] = useState(() => (iosApp ? webPushPermission() : 'granted'));
+  const [iosPushMsg, setIosPushMsg] = useState('');
+  const turnOnIosPush = async () => {
+    const r = await enableWebPush(token);
+    setIosPush(webPushPermission());
+    setIosPushMsg(r.status === 'denied' ? 'Blocked — open iPhone Settings → Notifications → CredenceHR and allow them.' : r.status === 'failed' ? (r as { reason: string }).reason : '');
+  };
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -1111,6 +1123,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 <b>Calls may not ring with the app closed.</b> Tap to turn on what this phone needs.
               </span>
             </button>
+          )}
+          {listTab === 'calls' && canCall && iosApp && iosPush !== 'granted' && iosPush !== 'unsupported' && (
+            <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-3">
+              <Phone className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="flex-1 text-xs text-amber-900 leading-snug">
+                <b>Turn on notifications</b> so calls reach this iPhone when CredenceHR is closed.
+                {iosPushMsg && <span className="block mt-1 text-rose-700">{iosPushMsg}</span>}
+              </span>
+              <button type="button" onClick={() => void turnOnIosPush()} className="liquid-glass-button rounded-full px-3 py-1.5 text-xs font-semibold shrink-0">
+                Turn on
+              </button>
+            </div>
           )}
           {filteredRooms.length === 0 && (
             <div className="p-8 text-center text-sm text-slate-400">

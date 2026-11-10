@@ -101,6 +101,97 @@ export async function sendWebPushToUserIds(
   }
 }
 
+// ---- Incoming calls on an iPhone / iPad Home Screen app --------------------
+// Apple lets a web app neither play its own ringtone nor vibrate for long,
+// and it can't run with the app closed. What it can do: a notification, with
+// the phone's notification sound and buzz. So while a call rings, the
+// account's Apple subscriptions (endpoint on *.push.apple.com — iPhone / iPad
+// Home Screen apps and Mac Safari) get one every RING_EVERY_MS: public/sw.js
+// shows each as a fresh notification (the previous one goes), so the phone
+// sounds and buzzes again and again, like a call ringing. Tapping one opens
+// the app on that chat, where the call rings (one-to-one: the server
+// announces it to the new connection; group: the chat's "Join" bar). The
+// call's own line in the chat (Missed call / call length), whose push comes
+// next, clears the last one (sw.js).
+const RING_EVERY_MS = 5000;
+const isApple = (endpoint: string) => {
+  try {
+    return /(^|\.)push\.apple\.com$/.test(new URL(endpoint).host);
+  } catch {
+    return false;
+  }
+};
+
+export interface WebRing {
+  /** How many Apple subscriptions the first ring reached. */
+  sent: Promise<number>;
+  /** Stop ringing these accounts (all when omitted). */
+  stop(userIds?: number[]): void;
+}
+
+export function webRing(queryDB: QueryDB, userIds: number[], title: string, body: string, data: Record<string, string>, ringMs: number): WebRing {
+  let timer: NodeJS.Timeout | null = null;
+  let subs: { id: number; userId: number; endpoint: string; p256dh: string; auth: string }[] = [];
+  const stopped = new Set<number>();
+  let ended = false;
+  const until = Date.now() + ringMs;
+  const once = async (): Promise<number> => {
+    if (ended) return 0;
+    const live = subs.filter((r) => !stopped.has(r.userId));
+    if (!live.length) return 0;
+    const payload = JSON.stringify({ title, body, kind: "call", data });
+    let ok = 0;
+    const gone: number[] = [];
+    await Promise.all(
+      live.map(async (r) => {
+        try {
+          await webpush.sendNotification({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }, payload, { TTL: 30, urgency: "high" });
+          ok++;
+        } catch (err: any) {
+          if (err?.statusCode === 404 || err?.statusCode === 410) gone.push(r.id);
+        }
+      })
+    );
+    if (gone.length) {
+      subs = subs.filter((r) => !gone.includes(r.id));
+      void queryDB(`DELETE FROM web_push_subscriptions WHERE id IN (${gone.map(() => "?").join(",")})`, gone).catch(() => undefined);
+    }
+    return ok;
+  };
+  const ring: WebRing = {
+    sent: (async () => {
+      const ids = [...new Set(userIds.map(Number))].filter(Boolean);
+      if (!ready || !ids.length) return 0;
+      try {
+        const rows: any[] =
+          (await queryDB(`SELECT id, user_id, endpoint, p256dh, auth FROM web_push_subscriptions WHERE user_id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
+        subs = rows.filter((r) => isApple(String(r.endpoint))).map((r) => ({ id: Number(r.id), userId: Number(r.user_id), endpoint: r.endpoint, p256dh: r.p256dh, auth: r.auth }));
+        if (!subs.length) return 0;
+        const n = await once();
+        if (n > 0 && !ended) {
+          timer = setInterval(() => {
+            if (Date.now() > until || subs.every((r) => stopped.has(r.userId))) return ring.stop();
+            void once();
+          }, RING_EVERY_MS);
+        }
+        return n;
+      } catch (err: any) {
+        console.warn("⚠️ Web push call ring failed: " + err.message);
+        return 0;
+      }
+    })(),
+    stop(stopIds?: number[]) {
+      if (stopIds) for (const id of stopIds) stopped.add(Number(id));
+      if (!stopIds) ended = true;
+      if (ended || (subs.length && subs.every((r) => stopped.has(r.userId)))) {
+        if (timer) clearInterval(timer);
+        timer = null;
+      }
+    }
+  };
+  return ring;
+}
+
 /** A test message to this account's own browsers, with each push service's answer (Apple/Google/Mozilla) so a failure can be read. */
 export async function sendWebPushTest(queryDB: QueryDB, userId: number) {
   if (!ready) return { available: false, results: [] as any[] };

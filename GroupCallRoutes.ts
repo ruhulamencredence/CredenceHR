@@ -30,6 +30,8 @@
 // rings with the phone's ringtone and shows the call screen
 // (IncomingCallService.java); Accept opens the app and joins. "call_cancel"
 // stops it when that member joins or declines on another device, or the call ends.
+// iPhone / iPad Home Screen apps get repeated call notifications instead
+// (WebPushService webRing), stopped the same way.
 //
 // Several workers (PM2 + Redis adapter): a call lives on the worker it was
 // started on; the other workers pass its events there (gcall:relay), the same
@@ -40,6 +42,7 @@ import crypto from "crypto";
 import { insertChatMessage, notifyNewMessage } from "./ChatRoutes";
 import { inOneToOneCall } from "./CallRoutes";
 import { sendSilentPushToUserIds } from "./PushNotificationService";
+import { webRing, type WebRing } from "./WebPushService";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -59,6 +62,8 @@ interface GroupCall {
   endTimer: NodeJS.Timeout | null;
   // Members whose phones were rung by push and haven't joined / declined yet.
   rung: Set<number>;
+  // iPhone / iPad Home Screen apps: repeated call notifications while it rings.
+  webRing: WebRing | null;
 }
 
 const RING_MS = 45 * 1000;
@@ -93,6 +98,7 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
 
   // Their phones stop ringing (the call screen started by the push).
   const stopRingPush = (c: GroupCall, userIds: number[]) => {
+    c.webRing?.stop(userIds);
     const ids = userIds.filter((id) => c.rung.delete(id));
     if (ids.length) void sendSilentPushToUserIds(queryDB, ids, { type: "call_cancel", callId: c.id }, RING_MS);
   };
@@ -101,6 +107,7 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
     if (!calls.has(c.id)) return;
     calls.delete(c.id);
     stopRingPush(c, Array.from(c.rung));
+    c.webRing?.stop();
     if (c.endTimer) clearTimeout(c.endTimer);
     io.to(`room:${c.roomId}`).emit("gcall:ended", { callId: c.id });
     roomState(null, c.roomId);
@@ -216,7 +223,8 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
           startedAt: Date.now(),
           participants: new Map(),
           endTimer: null,
-          rung: new Set()
+          rung: new Set(),
+          webRing: null
         };
         // Nobody joins (the starter's join fails): it ends by itself.
         call.endTimer = setTimeout(() => {
@@ -238,6 +246,14 @@ export function setupGroupCallSocket(io: SocketIOServer, deps: { queryDB: QueryD
             queryDB,
             ringIds,
             { type: "call_incoming", group: "1", callId: call.id, roomId: String(roomId), kind, fromId: String(me), fromName: mine.name, title: call.title },
+            RING_MS
+          );
+          call.webRing = webRing(
+            queryDB,
+            ringIds,
+            `📞 ${mine.name} · ${call.title}`,
+            `Group ${kind === "video" ? "video" : "audio"} call · tap to join`,
+            { type: "call", group: "1", callId: call.id, roomId: String(roomId), kind },
             RING_MS
           );
         }
