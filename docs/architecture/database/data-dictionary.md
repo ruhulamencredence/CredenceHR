@@ -1533,6 +1533,7 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `id` | int(11) | না | PK  | |
 | `email_code_enabled` | tinyint(1) | না | default 0 | |
 | `hr_request_enabled` | tinyint(1) | না | default 1 | |
+| `username_change_enabled` | tinyint(1) | না | default 0 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 

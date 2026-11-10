@@ -1,4 +1,5 @@
 import { useMdUp } from '../lib/useMdUp';
+import { apiUrl } from '../lib/api';
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { User } from '../types';
 import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint, BellRing, BookOpen, Camera, Palette, Contact } from 'lucide-react';
@@ -128,6 +129,19 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showNotifications, setShowNotifications] = useState(false);
   const appVersion = `web ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : ''}`.trim();
   const [username, setUsername] = useState(user.username || '');
+  // Change Username only when a Superadmin has it on (Admin Panel -> Users ->
+  // Password requests); the server refuses it otherwise too.
+  const [canChangeUsername, setCanChangeUsername] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl('/api/profile/username-change'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && setCanChangeUsername(!!d?.allowed))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [token]);
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
     applyBackgroundTheme(id, true);
@@ -331,7 +345,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />
               )}
               {!Capacitor.isNativePlatform() && <ProfileRow icon={<BellRing className="w-4 h-4" />} label="Notifications" onClick={() => setShowNotifications(true)} />}
-              {!!username && (
+              {!!username && canChangeUsername && (
                 <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} />
               )}
               {canGiveFeedback(user) && (
@@ -430,7 +444,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             {canUseFingerprint(user) && <MenuItem icon={Fingerprint} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />}
             <MenuHeading>Security</MenuHeading>
             <MenuItem icon={Lock} label="Change Password" active={panel === 'password'} onClick={() => setPanel('password')} />
-            {!!username && <MenuItem icon={UserCircle2} label="Change Username" active={panel === 'username'} onClick={() => setPanel('username')} />}
+            {!!username && canChangeUsername && <MenuItem icon={UserCircle2} label="Change Username" active={panel === 'username'} onClick={() => setPanel('username')} />}
             {canGiveFeedback(user) && (
               <>
                 <MenuHeading>Help</MenuHeading>
