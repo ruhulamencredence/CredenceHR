@@ -387,7 +387,7 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 </tr>
 <tr>
 <td><strong>Credence Mail</strong></td>
-<td>নিজস্ব মেইল ক্লায়েন্ট; IMAP/SMTP দিয়ে মেইল সার্ভারের সাথে; পাসওয়ার্ড AES-256-GCM-এ এনক্রিপ্ট; গ্রুপ, ফিল্টার, টেমপ্লেট, নির্ধারিত পাঠানো</td>
+<td>নিজস্ব মেইল ক্লায়েন্ট; IMAP/SMTP দিয়ে মেইল সার্ভারের সাথে; পাসওয়ার্ড AES-256-GCM-এ এনক্রিপ্ট; গ্রুপ, ফিল্টার, টেমপ্লেট, নির্ধারিত পাঠানো। Mail খুললেই read: list আর Inbox-এর unread সংখ্যা সাথে সাথে বদলায়, server আগে নিজের ডাটাবেসে লেখে আর মেইল সার্ভারকে (<code>\Seen</code> / <code>\Flagged</code>) পরে, পেছনে জানায়; ১০ মিনিট পর্যন্ত sync সেই মেইলের read/star মেইল সার্ভারের পুরনো অবস্থা দিয়ে উল্টে দেয় না (<code>mail_messages.flags_changed_at</code>)। List-এর উপরে <strong>Unread</strong> বোতাম: শুধু না-পড়া মেইল (যেকোনো folder, <code>GET /api/mail/messages?unread=1</code>)</td>
 </tr>
 <tr>
 <td><strong>Alerts (বেল)</strong></td>
