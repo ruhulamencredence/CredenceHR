@@ -727,8 +727,10 @@ html[data-ui="orange"] {
   --g-accent-975: #421805;
   --g-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
 
-  /* Phone header + the welcome banner under it, the sidebar (white text). */
-  --g-header-gradient: linear-gradient(160deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+  /* Phone header + the welcome banner under it (white text). Left to right,
+     like the banner's own gradient (WelcomeBanner.tsx), so the two read as
+     one piece — a diagonal here left a seam where the banner starts. */
+  --g-header-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
   --g-banner-1: #ff9238;
   --g-banner-2: #f47920;
   --g-banner-3: #e2600e;
