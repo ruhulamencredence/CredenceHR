@@ -421,14 +421,6 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     prepare?: (ctx: Ctx) => Promise<any>;
     row: (v: any, ctx: Ctx, prep: any) => Promise<Omit<RowResult, "row">>;
   };
-  // Loosely the same person's name ("Md. Abdul Karim" ~ "Abdul Karim").
-  const NAME_FILLER = new Set(["md", "mohammad", "mohammed", "muhammad", "mohd", "mst", "mosammat", "mosamat", "most", "sree", "sri", "shri", "engr", "dr", "mr", "mrs", "ms", "sk", "sheikh"]);
-  const nameWords = (s: string) => String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !NAME_FILLER.has(w));
-  const sameName = (a: string, b: string) => {
-    const x = nameWords(a), y = new Set(nameWords(b));
-    if (!x.length || !y.size) return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-    return x.some((w) => y.has(w));
-  };
   const fail = (message: string): never => {
     throw new Error(message);
   };
@@ -523,18 +515,15 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         let relinkExisting: { id: number; name: string } | null = null;
         if (existing && !existing.user_id && code) {
           const orphan = prep.orphanLogins.get(codeKey);
-          if (orphan && !prep.claimedUsers.has(orphan.id) && sameName(orphan.name, str(v.name) || String(existing.name || ""))) {
+          if (orphan && !prep.claimedUsers.has(orphan.id)) {
             relinkExisting = orphan;
             prep.claimedUsers.add(orphan.id);
           }
         }
         if (!existing && code) {
           const orphan = prep.orphanLogins.get(codeKey);
+          // Employee ID = Login ID: the same ID is the same person, whatever the name says.
           if (orphan && !prep.claimedUsers.has(orphan.id)) {
-            if (!sameName(orphan.name, str(v.name)))
-              fail(
-                `${code} is the Login ID of "${orphan.name}", a login with no employee record, but this row's name is "${str(v.name)}". If it is the same person, write the name as in Users; otherwise use another Employee ID.`
-              );
             relink = orphan;
             prep.claimedUsers.add(orphan.id);
           }

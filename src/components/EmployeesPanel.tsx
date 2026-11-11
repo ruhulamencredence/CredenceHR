@@ -16,6 +16,7 @@ import { useMyCompanies } from '../lib/company';
 
 import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
+import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
@@ -420,6 +421,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // pointing at this Employee instead of a brand-new account being made for
   // them (see PUT /api/employees/:id/link-user).
   const [linkingUserFor, setLinkingUserFor] = useState<Employee | null>(null);
+  // "Unlinked logins": link logins that have no Employee record (UnlinkedLoginsPopup).
+  const [unlinkedOpen, setUnlinkedOpen] = useState(false);
   const [unlinkedUsers, setUnlinkedUsers] = useState<{ id: number; name: string; email: string | null; username: string | null; role: string }[]>([]);
   const [loadingUnlinkedUsers, setLoadingUnlinkedUsers] = useState(false);
   const [linkUserSearch, setLinkUserSearch] = useState('');
@@ -1268,13 +1271,23 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             The company-wide employee directory — Employee ID, Name, Designation, Department, Email, Phone.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="flex items-center justify-center gap-1.5 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" /> New Employee
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setUnlinkedOpen(true)}
+            className="flex items-center justify-center gap-1.5 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
+            title="Logins with no employee record linked — link them here"
+          >
+            <Link2 className="w-4 h-4" /> Unlinked logins
+          </button>
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="flex items-center justify-center gap-1.5 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> New Employee
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -1342,6 +1355,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         </div>
       )}
 
+      {unlinkedOpen && <UnlinkedLoginsPopup token={token} onClose={() => setUnlinkedOpen(false)} onLinked={() => void fetchEmployees()} />}
+
       {view === 'history' ? (
         <EmployeeChangeHistory token={token} />
       ) : loading ? (
@@ -1359,20 +1374,20 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location / Branch</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500">Actions</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
+                  <th className="sticky right-0 z-[1] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {pageRows.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap">
+                  <tr key={emp.id} className="group hover:bg-slate-50 transition-colors">
+                    <td className="px-2.5 py-3 min-w-[130px]">
                       <div className="font-semibold text-slate-900 text-xs">
                         {emp.name}
                         {companyCode((emp as any).company_id) && (
@@ -1385,52 +1400,54 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         <div className="text-[11px] text-slate-400 font-mono">{emp.employee_id}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
+                    <td className="px-2.5 py-3 text-xs text-slate-700 min-w-[95px] max-w-[160px]">
                       {emp.designation ? (
-                        <span className="inline-flex items-center gap-1"><Briefcase className="w-3 h-3 text-slate-400" />{emp.designation}</span>
+                        <span className="inline-flex items-start gap-1"><Briefcase className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />{emp.designation}</span>
                       ) : '—'}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
+                    <td className="px-2.5 py-3 text-xs text-slate-700 min-w-[90px] max-w-[150px]">
                       {emp.department ? (
-                        <span className="inline-flex items-center gap-1" title={departmentSupervisorLabel(emp.department_id)}>
-                          <Building2 className="w-3 h-3 text-slate-400" />{emp.department}
+                        <span className="inline-flex items-start gap-1" title={departmentSupervisorLabel(emp.department_id)}>
+                          <Building2 className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />{emp.department}
                         </span>
                       ) : '—'}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
+                    <td className="px-2.5 py-3 text-xs text-slate-700 min-w-[105px] max-w-[170px]">
                       {(() => {
                         // The linked Branch (Admin Panel -> Branches), else the imported text.
                         const b = emp.branch_id ? branches.find((x) => x.id === Number(emp.branch_id)) : undefined;
                         const label = b?.branch_name || emp.branch || '';
                         if (!label) return '—';
                         return (
-                          <span className="inline-flex items-center gap-1" title={b ? undefined : 'Not in Admin Panel -> Branches'}>
-                            <MapPin className="w-3 h-3 text-slate-400" />
-                            {label}
-                            {b && (
-                              <span className={`ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
-                                {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
-                              </span>
-                            )}
+                          <span className="flex items-start gap-1" title={b ? undefined : 'Not in Admin Panel -> Branches'}>
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                            <span className="min-w-0">
+                              <span className="block">{label}</span>
+                              {b && (
+                                <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
+                                  {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                                </span>
+                              )}
+                            </span>
                           </span>
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
+                    <td className="px-2.5 py-3 text-xs text-slate-600 min-w-[130px] max-w-[180px]">
                       {emp.email && (
-                        <div className="flex items-center gap-1"><Mail className="w-3 h-3 text-slate-400" />{emp.email}</div>
+                        <div className="flex items-center gap-1 min-w-0 max-w-[150px]" title={emp.email}><Mail className="w-3 h-3 text-slate-400 shrink-0" /><span className="truncate">{emp.email}</span></div>
                       )}
                       {emp.phone && (
                         <div className="flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3 text-slate-400" />{emp.phone}</div>
                       )}
                       {!emp.email && !emp.phone && '—'}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-2.5 py-3 whitespace-nowrap">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${emp.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
                         {emp.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-2.5 py-3 whitespace-nowrap">
                       {emp.user_id ? (
                         <div className="flex items-center gap-1">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
@@ -1465,7 +1482,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1">
+                        <div className="flex flex-col items-start gap-1">
                           <button
                             type="button"
                             onClick={() => openCreateLoginForm(emp)}
@@ -1485,12 +1502,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-right">
+                    <td className="sticky right-0 bg-white group-hover:bg-slate-50 px-2 py-3 whitespace-nowrap text-right shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
                           onClick={() => openTransferForm(emp)}
-                          className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
                           title="Transfer / Change Role"
                         >
                           <ArrowLeftRight className="w-4 h-4" />
@@ -1498,7 +1515,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         <button
                           type="button"
                           onClick={() => openEditForm(emp)}
-                          className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
@@ -1508,7 +1525,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           type="button"
                           onClick={() => handleDelete(emp.id)}
                           disabled={deletingId === emp.id}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />

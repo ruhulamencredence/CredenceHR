@@ -18,6 +18,7 @@ import { leaveLabelFn, loadAttendanceData, computeAttendanceDays, summarizeDays 
 interface ManagementDashboardDeps {
   authenticateToken: any;
   requireModule: (moduleKey: "management_dashboard") => any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   todayInDhaka: () => string;
 }
@@ -57,6 +58,21 @@ const safe = async <T>(p: Promise<T>, fallback: T): Promise<T> => {
   }
 };
 
+// Its permission layers (Module Access): which part of the page each one
+// opens. A part not given is left out of the reply, not just hidden.
+export const MD_SECTIONS = {
+  md_people: "people",
+  md_attendance: "attendance",
+  md_money: "money",
+  md_approvals: "approvals",
+  md_projects: "projects",
+  md_recruitment: "recruitment",
+  md_fleet: "fleet"
+} as const;
+type MdSection = (typeof MD_SECTIONS)[keyof typeof MD_SECTIONS];
+// "Needs attention" items, by the part their link opens.
+const ATTENTION_SECTION: Record<string, MdSection> = { approvals: "approvals", attendance: "attendance", targets: "projects", salary: "money", headcount: "people" };
+
 const SOURCE_LABEL: Record<string, string> = {
   leave_application: "Leave Application",
   bill_claim: "Bill Claim",
@@ -70,7 +86,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export function registerManagementDashboardRoutes(app: Express, deps: ManagementDashboardDeps) {
-  const { authenticateToken, requireModule, queryDB, todayInDhaka } = deps;
+  const { authenticateToken, requireModule, hasModuleLayer, queryDB, todayInDhaka } = deps;
 
   app.get("/api/management-dashboard", authenticateToken, requireModule("management_dashboard"), async (req: any, res: any) => {
     try {
@@ -363,7 +379,12 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
 
       const departments = [...new Set(activeEmps.map((e) => deptOf(e)))].sort((a, b) => a.localeCompare(b));
 
-      res.json({
+      const sections = new Set<MdSection>();
+      for (const [layer, section] of Object.entries(MD_SECTIONS)) {
+        if (await hasModuleLayer(req.user, "management_dashboard", layer)) sections.add(section);
+      }
+      const has = (x: MdSection) => sections.has(x);
+      const body: Record<string, any> = {
         month,
         prev_month: prev,
         today,
@@ -414,7 +435,35 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
           awaiting_ack: assignScoped.filter((a) => !a.acknowledged_at).length
         },
         attention
-      });
+      };
+      // Only the parts this account is given (Module Access layers).
+      const k = body.kpis;
+      if (!has("people")) {
+        delete k.headcount;
+        for (const x of ["flow", "headcount_by_department", "workforce"]) delete body[x];
+      }
+      if (!has("attendance")) {
+        delete k.attendance;
+        delete k.on_leave_today;
+        for (const x of ["attendance_by_department", "on_leave_today"]) delete body[x];
+      }
+      if (!has("money")) {
+        delete k.salary;
+        for (const x of ["salary_by_department", "money"]) delete body[x];
+      }
+      if (!has("approvals")) {
+        delete k.approvals;
+        for (const x of ["approvals_by_type", "approvals_oldest"]) delete body[x];
+      }
+      if (!has("projects")) {
+        delete k.targets;
+        for (const x of ["projects", "targets_by_department", "ops"]) delete body[x];
+      }
+      if (!has("recruitment")) delete body.recruitment;
+      if (!has("fleet")) delete body.fleet;
+      body.attention = attention.filter((a) => has(ATTENTION_SECTION[a.target] || "people"));
+      body.sections = [...sections];
+      res.json(body);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

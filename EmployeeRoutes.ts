@@ -18,7 +18,7 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
-import { employeeIdConflict, syncEmployeeLoginId } from "./EmployeeLoginId";
+import { autoLinkByEmployeeId, employeeIdConflict, orphanLoginForEmployeeId, syncEmployeeLoginId } from "./EmployeeLoginId";
 import { requestApprovalReconcile } from "./approvalReconcile";
 
 export interface RegisterEmployeeRoutesDeps {
@@ -53,6 +53,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       // Same lazy catch-up for approved HR Operations actions (grade,
       // confirmation, separation…) whose Effective Date has arrived.
       await applyDueHrActions(queryDB, todayInDhaka());
+      // Logins whose Login ID is an unlinked employee's Employee ID (EmployeeLoginId.ts).
+      await autoLinkByEmployeeId(queryDB);
       const rows = await queryDB("SELECT * FROM all_employees");
       const allSorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       // ?slim=1 : who's who only (pickers) — id, code, name, designation, department, active.
@@ -188,6 +190,67 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     }
   });
 
+  // GET /api/employees/link-suggestions — every login with no Employee
+  // record linked to it (Employee Tracking lists them under "No employee
+  // record"), each with the unlinked Employee it most likely belongs to:
+  // the same email, an Employee ID equal to its username, or the same name
+  // (ignoring Md. / Mohammad / Mst.… and punctuation). Only a match that is
+  // the one and only candidate on both sides is suggested; nothing is linked
+  // here — Admin Panel -> Employees -> "Unlinked logins" shows the list and
+  // links each confirmed pair through PUT /:id/link-user. Same Employees
+  // module as Link Existing; the Superadmin account only for the Superadmin.
+  app.get("/api/employees/link-suggestions", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
+    try {
+      const users: any[] = await queryDB(
+        `SELECT id, name, email, username, role FROM users
+         WHERE id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`
+      );
+      const visible = req.user.role === "superadmin" ? users : users.filter((u: any) => u.role !== "superadmin");
+      const emps: any[] = await queryDB(
+        "SELECT id, employee_id, name, designation, department, email, personal_email, is_active FROM all_employees WHERE user_id IS NULL"
+      );
+      const low = (s: any) => String(s || "").trim().toLowerCase();
+      const FILLER = new Set(["md", "mohammad", "mohammed", "muhammad", "mohd", "mst", "mosammat", "mosamat", "most", "sree", "sri", "shri", "engr", "dr", "mr", "mrs", "ms", "sk", "sheikh"]);
+      const nameKey = (s: any) =>
+        String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && !FILLER.has(w)).sort().join(" ");
+      const candidates = (u: any): { emp: any; why: string }[] => {
+        const email = low(u.email);
+        const uname = low(u.username);
+        const nk = nameKey(u.name);
+        const byEmail = email ? emps.filter((e) => low(e.email) === email || low(e.personal_email) === email) : [];
+        if (byEmail.length) return byEmail.map((emp) => ({ emp, why: "same email" }));
+        const byId = uname ? emps.filter((e) => low(e.employee_id) === uname) : [];
+        if (byId.length) return byId.map((emp) => ({ emp, why: "Employee ID = username" }));
+        const byName = nk.length >= 3 ? emps.filter((e) => nameKey(e.name) === nk) : [];
+        return byName.map((emp) => ({ emp, why: "same name" }));
+      };
+      const found = visible.map((u: any) => ({ u, c: candidates(u) }));
+      // An Employee two logins point at is nobody's suggestion.
+      const claims = new Map<number, number>();
+      for (const f of found) if (f.c.length === 1) claims.set(Number(f.c[0].emp.id), (claims.get(Number(f.c[0].emp.id)) || 0) + 1);
+      const rows = found
+        .map(({ u, c }) => {
+          const one = c.length === 1 && claims.get(Number(c[0].emp.id)) === 1 ? c[0] : null;
+          return {
+            user: { id: Number(u.id), name: u.name, email: u.email || null, username: u.username || null, role: u.role },
+            suggestion: one
+              ? { id: Number(one.emp.id), employee_id: one.emp.employee_id || null, name: one.emp.name, designation: one.emp.designation || null, department: one.emp.department || null, is_active: !!Number(one.emp.is_active), why: one.why }
+              : null,
+            candidates: c.length
+          };
+        })
+        .sort((a, b) => Number(!!b.suggestion) - Number(!!a.suggestion) || String(a.user.name || "").localeCompare(String(b.user.name || "")));
+      res.json({
+        rows,
+        employees: emps
+          .map((e) => ({ id: Number(e.id), employee_id: e.employee_id || null, name: e.name, designation: e.designation || null, department: e.department || null, is_active: !!Number(e.is_active) }))
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Resolves a submitted department_id (Admin Panel -> Departments) into the
   // pair actually written to all_employees — falls back to the legacy
   // free-text `department` field when no department_id is given (old API
@@ -285,9 +348,15 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           zkPin.pin = code;
         }
       }
-      // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice.
-      const idClash = await employeeIdConflict(queryDB, employee_id);
+      // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice —
+      // except the login with that Login ID that has no employee record: that
+      // is this person, and the new employee is linked to it (below).
+      const orphanLogin = await orphanLoginForEmployeeId(queryDB, employee_id);
+      const idClash = await employeeIdConflict(queryDB, employee_id, orphanLogin ? { userId: orphanLogin } : {});
       if (idClash) return res.status(409).json({ error: idClash });
+      if (orphanLogin && create_login) {
+        return res.status(409).json({ error: `${String(employee_id).trim()} already has a login (with no employee record). Save without "Also create a login account" — the employee is linked to that login.` });
+      }
       const branch = await resolveEmployeeBranch(req.body);
 
       let newUserId: number | null = null;
@@ -374,6 +443,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (zkPin.set && zkPin.pin) {
         await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, result.insertId]);
       }
+      if (!newUserId && orphanLogin && (await autoLinkByEmployeeId(queryDB, Number(result.insertId)))) newUserId = orphanLogin;
       res.status(201).json({ id: result.insertId, user_id: newUserId, project_ids: grantedProjectIds, module_keys: grantedModuleKeys });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -399,7 +469,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const zkPin = await checkZkDevicePin(req.body, id);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       if (String(employee_id ?? "").trim().toLowerCase() !== String(existing[0].employee_id ?? "").trim().toLowerCase()) {
-        const idClash = await employeeIdConflict(queryDB, employee_id, { employeeRowId: id, userId: existing[0].user_id || null });
+        const orphanLogin = existing[0].user_id ? null : await orphanLoginForEmployeeId(queryDB, employee_id);
+        const idClash = await employeeIdConflict(queryDB, employee_id, { employeeRowId: id, userId: existing[0].user_id || orphanLogin || null });
         if (idClash) return res.status(409).json({ error: idClash });
       }
       const branch = await resolveEmployeeBranch(req.body);
@@ -468,6 +539,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       }
       // A new Employee ID becomes the login's Login ID too.
       await syncEmployeeLoginId(queryDB, id, existing[0].employee_id);
+      // No login yet, and one has this Employee ID as its Login ID: link it.
+      if (!existing[0].user_id) await autoLinkByEmployeeId(queryDB, id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
