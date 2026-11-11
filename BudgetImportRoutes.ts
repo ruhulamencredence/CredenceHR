@@ -6,6 +6,7 @@
 // MPR Numbers, Budgets (Excel import, publish, submit, approve), Rate File, Delivery Date conditions and Jobs routes,
 // moved out of server.ts unchanged. The shared helpers they use are passed in by startServer().
 
+import { isJobSubmitted, isProjectLocked, jobProjectId, onTeam, projectsToLock, teamScopeSql, unlockBudgetSubmission } from "./PepmTeam";
 import { activeGroupId } from "./companyContext";
 import { DeliveryConditionType } from "./deliveryDateConditions";
 import { addDaysToDateStr } from "./deliveryDateConditions";
@@ -103,11 +104,30 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const counts = await queryDB("SELECT budget_id, COUNT(*) as cnt FROM budget_items GROUP BY budget_id");
       const countMap: Record<number, number> = {};
       for (const c of counts) countMap[c.budget_id] = Number(c.cnt);
-      // Which of these Budgets has THIS user already submitted (and is therefore
-      // locked from further entries)? Scoped to req.user.id, not global.
-      const submittedRows = await queryDB("SELECT budget_id FROM budget_submissions WHERE user_id = ?", [
-        (req as any).user.id
-      ]);
+      // Which of these Budgets are Final Submitted (locked from further entries)
+      // for the caller? With Project teams (PepmTeam.ts): every Project the
+      // caller works on that the Budget has rows for is locked — or, for an
+      // account with no such Project (an Admin entering their own), every
+      // Project of its own entries there.
+      const user = (req as any).user;
+      const submittedRows = await queryDB(
+        `SELECT b.id AS budget_id FROM budgets b
+          WHERE EXISTS (SELECT 1 FROM budget_project_locks l WHERE l.budget_id = b.id)
+            AND NOT EXISTS (
+              SELECT 1 FROM projects p
+                JOIN budget_items bi ON bi.budget_id = b.id AND LOWER(TRIM(bi.project_name)) = LOWER(TRIM(p.project_name))
+                JOIN user_project_permissions upp ON upp.project_id = p.id AND upp.user_id = ?
+               WHERE NOT EXISTS (SELECT 1 FROM budget_project_locks l2 WHERE l2.budget_id = b.id AND l2.project_id = p.id))
+            AND NOT EXISTS (
+              SELECT 1 FROM entries e
+               WHERE e.budget_id = b.id AND e.created_by = ? AND e.deleted_at IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM budget_project_locks l3 WHERE l3.budget_id = b.id AND l3.project_id = e.project_id))
+            AND (EXISTS (SELECT 1 FROM user_project_permissions u2 JOIN projects p2 ON p2.id = u2.project_id
+                           JOIN budget_items bi2 ON bi2.budget_id = b.id AND LOWER(TRIM(bi2.project_name)) = LOWER(TRIM(p2.project_name))
+                          WHERE u2.user_id = ?)
+                 OR EXISTS (SELECT 1 FROM entries e2 WHERE e2.budget_id = b.id AND e2.created_by = ? AND e2.deleted_at IS NULL))`,
+        [user.id, user.id, user.id, user.id]
+      );
       const submittedSet = new Set(submittedRows.map((r: any) => Number(r.budget_id)));
       const isAdmin = (req as any).user.role === "admin" || (req as any).user.role === "superadmin";
       const mapped = budgets.map((b: any) => ({
@@ -197,17 +217,18 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
   // Nos were imported into that Budget, so only those can be picked for a new entry.
   app.get("/api/budgets/:id/items", authenticateToken, requireBudgetRead, async (req: any, res) => {
     try {
-      // requisitioned_by_me: how much of THIS item's Qty the CALLING user has already
-      // put into their own active entries — lets the User Entry Form show/cap the
-      // remaining Requisitioned Qty available to them for each item (req_qty is the
-      // item's total from the imported Excel, shared across the sheet; consumption is
-      // tracked per user, per the app's Requisitioned Qty splitting feature).
+      // requisitioned_by_me: how much of THIS item's Qty the caller's Project team
+      // (PepmTeam.ts) has already put into active entries — lets the User Entry
+      // Form show/cap the remaining Requisitioned Qty available for each item
+      // (req_qty is the item's total from the imported Excel; consumption is
+      // tracked per Project team, per the Requisitioned Qty splitting feature).
+      const team = teamScopeSql("e", req.user);
       const items = await queryDB(
         `SELECT bi.*,
            (SELECT COALESCE(SUM(e.requisitioned_qty), 0) FROM entries e
-              WHERE e.budget_item_id = bi.id AND e.created_by = ? AND e.deleted_at IS NULL) AS requisitioned_by_me
+              WHERE e.budget_item_id = bi.id AND ${team.sql} AND e.deleted_at IS NULL) AS requisitioned_by_me
          FROM budget_items bi WHERE bi.budget_id = ? ORDER BY bi.id ASC`,
-        [req.user.id, req.params.id]
+        [...team.params, req.params.id]
       );
       res.json(items);
     } catch (err: any) {
@@ -233,64 +254,69 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
     }
   });
 
-  // "Submit Budget" — a User marks a Budget as finished once they've entered every Job
-  // they intend to under it. Recorded per (budget_id, user_id): after this, POST
-  // /api/entries rejects any further entries from THIS user under THIS budget. It does
-  // not affect other users still working on the same Budget, and it's irreversible from
-  // the User side (only an Admin deleting the Budget clears it).
+  // "Submit Budget" — the Project team marks a Budget as finished once every Job
+  // it intends is entered. With Project teams (PepmTeam.ts) it locks the Budget
+  // for the whole team of every Project the submitter works on in it
+  // (budget_project_locks), exactly as one shared project login used to lock
+  // it for itself: POST /api/entries then rejects any further entries there
+  // from anyone on those teams. budget_submissions keeps who submitted (Admin
+  // -> Submissions, where an Admin can unlock it). Irreversible from the User side.
   app.post("/api/budgets/:id/submit", authenticateToken, requireBudgetModuleAccess, async (req: any, res) => {
     try {
       const budgetId = Number(req.params.id);
       const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
       if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
 
-      const already = await queryDB("SELECT * FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [
-        budgetId,
-        req.user.id
-      ]);
-      if (already.length > 0) {
+      const projectIds = await projectsToLock(queryDB, req.user, budgetId);
+      const open: number[] = [];
+      for (const pid of projectIds) if (!(await isProjectLocked(queryDB, budgetId, pid))) open.push(pid);
+      if (projectIds.length > 0 && open.length === 0) {
         return res.json({ success: true, already_submitted: true });
       }
 
-      // Block submitting an empty Budget as "finished" — this user must have created
-      // at least one entry under this Budget first. Enforced here too (not just a
-      // disabled button in the UI) so it can't be bypassed via a direct API call.
-      const ownEntryRows = await queryDB("SELECT id FROM entries WHERE budget_id = ? AND created_by = ? LIMIT 1", [
-        budgetId,
-        req.user.id
-      ]);
-      if (ownEntryRows.length === 0) {
+      // Block submitting an empty Budget as "finished" — the team must have at
+      // least one entry under this Budget in those Projects first. Enforced here
+      // too (not just a disabled button in the UI) so it can't be bypassed via a
+      // direct API call.
+      const teamEntryRows = open.length
+        ? await queryDB(
+            `SELECT id FROM entries WHERE budget_id = ? AND deleted_at IS NULL AND project_id IN (${open.map(() => "?").join(",")}) LIMIT 1`,
+            [budgetId, ...open]
+          )
+        : [];
+      if (teamEntryRows.length === 0) {
         return res.status(400).json({
           error: "You haven't added any entries to this Budget yet. Add at least one MPR entry before submitting."
         });
       }
 
-      await queryDB("INSERT INTO budget_submissions (budget_id, user_id) VALUES (?, ?)", [budgetId, req.user.id]);
+      await queryDB("INSERT IGNORE INTO budget_submissions (budget_id, user_id) VALUES (?, ?)", [budgetId, req.user.id]);
+      for (const pid of open) {
+        await queryDB("INSERT IGNORE INTO budget_project_locks (budget_id, project_id, user_id) VALUES (?, ?, ?)", [budgetId, pid, req.user.id]);
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to submit budget" });
     }
   });
 
-  // Final Submit ONE Job — only that Job's entries lock for this user; the
-  // Budget's other Jobs stay open. Needs at least one of the user's own active
-  // entries in the Job.
+  // Final Submit ONE Job — only that Job's entries lock, for the whole Project
+  // team; the Budget's other Jobs stay open. Needs at least one active entry
+  // in the Job, and the caller on the Job's Project team.
   app.post("/api/jobs/:id/submit", authenticateToken, requireBudgetModuleAccess, async (req: any, res) => {
     try {
       const jobId = Number(req.params.id);
-      const jobs = await queryDB("SELECT id, budget_id, job_no FROM jobs WHERE id = ?", [jobId]);
+      const jobs = await queryDB("SELECT id, budget_id, job_no, created_by FROM jobs WHERE id = ?", [jobId]);
       if (jobs.length === 0) return res.status(404).json({ error: "Job not found" });
       const job = jobs[0];
-      const own = await queryDB("SELECT id FROM entries WHERE job_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1", [
-        jobId,
-        req.user.id
-      ]);
-      if (own.length === 0) return res.status(400).json({ error: "You have no entries in this Job to submit." });
-      const budgetDone = job.budget_id
-        ? await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [job.budget_id, req.user.id])
-        : [];
-      const already = await queryDB("SELECT id FROM job_submissions WHERE job_id = ? AND user_id = ?", [jobId, req.user.id]);
-      if (budgetDone.length > 0 || already.length > 0) return res.json({ success: true, already_submitted: true });
+      const projectId = await jobProjectId(queryDB, jobId);
+      const active = await queryDB("SELECT id FROM entries WHERE job_id = ? AND deleted_at IS NULL LIMIT 1", [jobId]);
+      if (active.length === 0 || !(await onTeam(queryDB, req.user, projectId, job.created_by))) {
+        return res.status(400).json({ error: "You have no entries in this Job to submit." });
+      }
+      if ((await isProjectLocked(queryDB, job.budget_id, projectId)) || (await isJobSubmitted(queryDB, jobId))) {
+        return res.json({ success: true, already_submitted: true });
+      }
       await queryDB("INSERT INTO job_submissions (job_id, budget_id, user_id) VALUES (?, ?, ?)", [jobId, job.budget_id || null, req.user.id]);
       res.json({ success: true, job_no: job.job_no });
     } catch (err: any) {
@@ -362,8 +388,9 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         const userId = Number(req.params.userId);
         // ?job_id= unlocks that one Job's Final Submit; without it, the whole Budget's.
         const jobId = Number(req.query.job_id) || null;
-        if (jobId) await queryDB("DELETE FROM job_submissions WHERE job_id = ? AND user_id = ? AND budget_id = ?", [jobId, userId, budgetId]);
-        else await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+        // Lifts the lock for the whole Project team (PepmTeam.ts).
+        if (jobId) await queryDB("DELETE FROM job_submissions WHERE job_id = ? AND budget_id = ?", [jobId, budgetId]);
+        else await unlockBudgetSubmission(queryDB, budgetId, userId);
         res.json({ success: true });
       } catch (err: any) {
         res.status(500).json({ error: err.message || "Failed to unlock this Budget submission" });
@@ -692,6 +719,7 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       await queryDB("DELETE FROM jobs WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM budget_items WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM budget_submissions WHERE budget_id = ?", [budgetId]);
+      await queryDB("DELETE FROM budget_project_locks WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM budgets WHERE id = ?", [budgetId]);
 
       // Now that this Budget's own rows are gone, remove each candidate MPR No from

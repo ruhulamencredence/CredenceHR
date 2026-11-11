@@ -1226,6 +1226,8 @@ export interface Entry {
   job_duration: string;
   mpr_no: string;
   user_name?: string;
+  // Who entered the row — a Project team has several members (PepmTeam.ts).
+  entered_by_name?: string | null;
   budget_name?: string | null;
   created_at?: string;
   // Pulled from the matching imported Budget Excel row (budget_id + MRF No + Description)

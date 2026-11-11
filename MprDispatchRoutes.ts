@@ -30,6 +30,7 @@
 // row's timeline). Nothing is ever deleted: a wrong dispatch is cancelled
 // (while not yet received), with a reason.
 
+import { onTeam, teamScopeSql } from "./PepmTeam";
 import type { Express } from "express";
 import { resolveMinLeadDays, addDaysToDateStr, materialRules, materialKey } from "./deliveryDateConditions";
 import { poLinesFor } from "./PoImportRoutes";
@@ -602,17 +603,17 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     if (!(await canReceive(req.user))) throw bad("Material Receive isn't turned on for your account.", 403);
   };
 
-  // The rows this account entered itself (entries.created_by) that Purchase
-  // took into Dispatch Material — every status, read only.
+  // The rows of this account's Project team(s) (PepmTeam.ts — every entry of
+  // the Projects it was given) that Purchase took into Dispatch Material —
+  // every status, read only.
   app.get(
     "/api/material-receive/my-mpr",
     authenticateToken,
     handler(async (req, res) => {
       await receiveGate(req);
+      const team = teamScopeSql("e", req.user);
       const rows: any[] =
-        (await queryDB(`${ROW_SQL} AND e.md_queued_at IS NOT NULL AND e.created_by = ? ORDER BY e.md_status = 'received', e.delivery_date ASC, e.id ASC`, [
-          Number(req.user.id)
-        ])) || [];
+        (await queryDB(`${ROW_SQL} AND e.md_queued_at IS NOT NULL AND ${team.sql} ORDER BY e.md_status = 'received', e.delivery_date ASC, e.id ASC`, team.params)) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
       // Where a take-back's new Delivery Date may fall (the date picker's limits).
       const out = [];
@@ -671,7 +672,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || Number(entry.created_by) !== me || !entry.md_queued_at || entry.md_confirmed_at) continue;
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by)) || !entry.md_queued_at || entry.md_confirmed_at) continue;
         const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
         if (Number(sent[0]?.n || 0) > 0) continue;
         const r: any = await queryDB("UPDATE entries SET md_confirmed_at = NOW(), md_confirmed_by = ? WHERE id = ? AND md_queued_at IS NOT NULL AND md_confirmed_at IS NULL", [me, id]);
@@ -756,7 +757,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || Number(entry.created_by) !== me) {
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by))) {
           notYours++;
           continue;
         }
