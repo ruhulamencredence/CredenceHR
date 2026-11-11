@@ -16,6 +16,7 @@ import { useMyCompanies } from '../lib/company';
 
 import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
+import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
@@ -420,6 +421,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // pointing at this Employee instead of a brand-new account being made for
   // them (see PUT /api/employees/:id/link-user).
   const [linkingUserFor, setLinkingUserFor] = useState<Employee | null>(null);
+  // "Unlinked logins": link logins that have no Employee record (UnlinkedLoginsPopup).
+  const [unlinkedOpen, setUnlinkedOpen] = useState(false);
   const [unlinkedUsers, setUnlinkedUsers] = useState<{ id: number; name: string; email: string | null; username: string | null; role: string }[]>([]);
   const [loadingUnlinkedUsers, setLoadingUnlinkedUsers] = useState(false);
   const [linkUserSearch, setLinkUserSearch] = useState('');
@@ -1268,13 +1271,23 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             The company-wide employee directory — Employee ID, Name, Designation, Department, Email, Phone.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="flex items-center justify-center gap-1.5 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" /> New Employee
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setUnlinkedOpen(true)}
+            className="flex items-center justify-center gap-1.5 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
+            title="Logins with no employee record linked — link them here"
+          >
+            <Link2 className="w-4 h-4" /> Unlinked logins
+          </button>
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="flex items-center justify-center gap-1.5 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> New Employee
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -1341,6 +1354,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
           </SearchSelect>
         </div>
       )}
+
+      {unlinkedOpen && <UnlinkedLoginsPopup token={token} onClose={() => setUnlinkedOpen(false)} onLinked={() => void fetchEmployees()} />}
 
       {view === 'history' ? (
         <EmployeeChangeHistory token={token} />

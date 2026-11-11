@@ -188,6 +188,67 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     }
   });
 
+  // GET /api/employees/link-suggestions — every login with no Employee
+  // record linked to it (Employee Tracking lists them under "No employee
+  // record"), each with the unlinked Employee it most likely belongs to:
+  // the same email, an Employee ID equal to its username, or the same name
+  // (ignoring Md. / Mohammad / Mst.… and punctuation). Only a match that is
+  // the one and only candidate on both sides is suggested; nothing is linked
+  // here — Admin Panel -> Employees -> "Unlinked logins" shows the list and
+  // links each confirmed pair through PUT /:id/link-user. Same Employees
+  // module as Link Existing; the Superadmin account only for the Superadmin.
+  app.get("/api/employees/link-suggestions", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
+    try {
+      const users: any[] = await queryDB(
+        `SELECT id, name, email, username, role FROM users
+         WHERE id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`
+      );
+      const visible = req.user.role === "superadmin" ? users : users.filter((u: any) => u.role !== "superadmin");
+      const emps: any[] = await queryDB(
+        "SELECT id, employee_id, name, designation, department, email, personal_email, is_active FROM all_employees WHERE user_id IS NULL"
+      );
+      const low = (s: any) => String(s || "").trim().toLowerCase();
+      const FILLER = new Set(["md", "mohammad", "mohammed", "muhammad", "mohd", "mst", "mosammat", "mosamat", "most", "sree", "sri", "shri", "engr", "dr", "mr", "mrs", "ms", "sk", "sheikh"]);
+      const nameKey = (s: any) =>
+        String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && !FILLER.has(w)).sort().join(" ");
+      const candidates = (u: any): { emp: any; why: string }[] => {
+        const email = low(u.email);
+        const uname = low(u.username);
+        const nk = nameKey(u.name);
+        const byEmail = email ? emps.filter((e) => low(e.email) === email || low(e.personal_email) === email) : [];
+        if (byEmail.length) return byEmail.map((emp) => ({ emp, why: "same email" }));
+        const byId = uname ? emps.filter((e) => low(e.employee_id) === uname) : [];
+        if (byId.length) return byId.map((emp) => ({ emp, why: "Employee ID = username" }));
+        const byName = nk.length >= 3 ? emps.filter((e) => nameKey(e.name) === nk) : [];
+        return byName.map((emp) => ({ emp, why: "same name" }));
+      };
+      const found = visible.map((u: any) => ({ u, c: candidates(u) }));
+      // An Employee two logins point at is nobody's suggestion.
+      const claims = new Map<number, number>();
+      for (const f of found) if (f.c.length === 1) claims.set(Number(f.c[0].emp.id), (claims.get(Number(f.c[0].emp.id)) || 0) + 1);
+      const rows = found
+        .map(({ u, c }) => {
+          const one = c.length === 1 && claims.get(Number(c[0].emp.id)) === 1 ? c[0] : null;
+          return {
+            user: { id: Number(u.id), name: u.name, email: u.email || null, username: u.username || null, role: u.role },
+            suggestion: one
+              ? { id: Number(one.emp.id), employee_id: one.emp.employee_id || null, name: one.emp.name, designation: one.emp.designation || null, department: one.emp.department || null, is_active: !!Number(one.emp.is_active), why: one.why }
+              : null,
+            candidates: c.length
+          };
+        })
+        .sort((a, b) => Number(!!b.suggestion) - Number(!!a.suggestion) || String(a.user.name || "").localeCompare(String(b.user.name || "")));
+      res.json({
+        rows,
+        employees: emps
+          .map((e) => ({ id: Number(e.id), employee_id: e.employee_id || null, name: e.name, designation: e.designation || null, department: e.department || null, is_active: !!Number(e.is_active) }))
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Resolves a submitted department_id (Admin Panel -> Departments) into the
   // pair actually written to all_employees — falls back to the legacy
   // free-text `department` field when no department_id is given (old API
