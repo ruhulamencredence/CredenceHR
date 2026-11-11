@@ -3,6 +3,9 @@ package com.mprtracker.app;
 import com.getcapacitor.JSObject;
 
 import android.Manifest;
+import androidx.core.graphics.Insets;
+import android.view.ViewGroup;
+import android.graphics.Color;
 import android.content.ActivityNotFoundException;
 import android.app.PictureInPictureParams;
 import android.content.Intent;
@@ -155,6 +158,7 @@ public class MainActivity extends BridgeActivity {
 
         webView = this.bridge.getWebView();
         appServerUrl = this.bridge.getServerUrl();
+        setUpNavBarStrip();
 
         // Android's Autofill (saved passwords / "save data" suggestions)
         // popped up on every letter typed in the sign-in fields and closed
@@ -265,9 +269,25 @@ public class MainActivity extends BridgeActivity {
             int topPx = insets.getInsets(
                 WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.displayCutout()
             ).top;
-            int bottomPx = insets.getInsets(
-                WindowInsetsCompat.Type.navigationBars() | WindowInsetsCompat.Type.displayCutout()
-            ).bottom;
+            // The phone's own navigation bar (3 buttons or the gesture
+            // line): the page is no longer drawn behind it. The WebView ends
+            // just above it (a margin), so no popup, sheet, button or the
+            // last line of any page can sit under it, whatever its CSS does;
+            // the strip behind the bar is plain white (setUpNavBarStrip).
+            Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
+            ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams m = (ViewGroup.MarginLayoutParams) lp;
+                if (m.bottomMargin != nav.bottom || m.leftMargin != nav.left || m.rightMargin != nav.right) {
+                    m.bottomMargin = nav.bottom;
+                    m.leftMargin = nav.left;
+                    m.rightMargin = nav.right;
+                    view.setLayoutParams(m);
+                }
+            }
+            // What is still under something at the bottom inside the WebView
+            // (a cutout there, rare): the page keeps its own room for that.
+            int bottomPx = Math.max(0, insets.getInsets(WindowInsetsCompat.Type.displayCutout()).bottom - nav.bottom);
             // Some heavily-customized OEM skins report a wrong (often 0)
             // status bar inset through the modern WindowInsetsCompat API for
             // their own non-standard status bar implementation, even with
@@ -293,6 +313,19 @@ public class MainActivity extends BridgeActivity {
             return insets;
         });
         ViewCompat.requestApplyInsets(webView);
+    }
+
+    // Behind the phone's navigation bar (the page now ends above it): white,
+    // with dark buttons / gesture line on it.
+    private void setUpNavBarStrip() {
+        try {
+            View parent = (View) webView.getParent();
+            if (parent != null) parent.setBackgroundColor(Color.WHITE);
+            getWindow().getDecorView().setBackgroundColor(Color.WHITE);
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightNavigationBars(true);
+        } catch (Exception ignored) {
+            // cosmetic only
+        }
     }
 
     private String permissionFor(String resource) {
