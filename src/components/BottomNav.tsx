@@ -201,7 +201,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   useEffect(() => {
     setMoreOpen(false);
   }, [active]);
-  // On the Dashboard the Credence Assistant is reached from More, so its
+  // On the Dashboard the CredenceHR AI Assistant is reached from More, so its
   // floating button steps aside (index.css).
   useEffect(() => {
     if (!showMore) return;

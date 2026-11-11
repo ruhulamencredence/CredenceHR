@@ -220,7 +220,7 @@ export async function deviceBanglaVoices(): Promise<{ id: string; label: string 
     .map((v) => ({ id: v.voiceURI || v.name, label: v.name }));
 }
 // A short sentence in the picked voice, so people can hear it before choosing.
-export const SAMPLE_TEXT = 'আসসালামু আলাইকুম! আমি Credence Assistant। আপনার ছুটি, হাজিরা বা যেকোনো প্রশ্নে আমি সাহায্য করতে পারি।';
+export const SAMPLE_TEXT = 'আসসালামু আলাইকুম! আমি CredenceHR AI Assistant। আপনার ছুটি, হাজিরা বা যেকোনো প্রশ্নে আমি সাহায্য করতে পারি।';
 export function previewVoice(pref: VoicePref, token: string, onPlaying?: () => void): Promise<void> {
   return speak(SAMPLE_TEXT, token, onPlaying, pref);
 }

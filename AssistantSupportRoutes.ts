@@ -1,4 +1,4 @@
-// Assistant live support — from the Credence Assistant chat a person can ask
+// Assistant live support — from the CredenceHR AI Assistant chat a person can ask
 // for a real human. The request waits in a queue; a support agent picks it up
 // and they chat in real time inside the Assistant panel (Socket.IO, the same
 // connection Chat uses: every socket is in its "user:<id>" room). The agent
