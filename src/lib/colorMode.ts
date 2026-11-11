@@ -3,18 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Light / Dark / Like this device (Profile -> Settings -> Appearance).
-// Dark sets <html data-dark>, and index.css's "Dark mode" section turns the
-// whole app charcoal (pages, cards, sidebar, header, phone bars, popups) on
-// top of whichever background theme is picked; the accent colour stays.
+// Light / Dark / Dark Glass / Like this device (Profile -> Settings ->
+// Appearance). Dark sets <html data-dark>, and index.css's "Dark mode"
+// section turns the whole app charcoal (pages, cards, sidebar, header, phone
+// bars, popups) on top of whichever background theme is picked; the accent
+// colour stays. Dark Glass is Dark plus <html data-glass>: a near-black page
+// with soft accent glows behind frosted, see-through cards and bars
+// (index.css "Dark Glass"). "Like this device" follows the device with
+// plain Dark.
 // Per device, like the other Appearance choices (localStorage). index.html
 // applies it before the first paint so a dark page doesn't flash light.
 import { useEffect, useState } from 'react';
 
-export type ColorMode = 'light' | 'dark' | 'system';
+export type ColorMode = 'light' | 'dark' | 'glass' | 'system';
 export const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
+  { id: 'glass', label: 'Dark Glass' },
   { id: 'system', label: 'Like this device' }
 ];
 const KEY = 'mpr_color_mode';
@@ -25,7 +30,7 @@ export const DARK_PAGE = '#25282c';
 export function getSavedColorMode(): ColorMode {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === 'light' || v === 'dark' || v === 'system') return v;
+    if (v === 'light' || v === 'dark' || v === 'glass' || v === 'system') return v;
   } catch {
     // storage unavailable — light
   }
@@ -43,11 +48,13 @@ const systemDark = () => {
 export const isDarkNow = () => document.documentElement.hasAttribute('data-dark');
 
 let lightThemeColor: string | null = null;
-function paint(dark: boolean) {
+function paint(dark: boolean, glass = false) {
   const root = document.documentElement;
   const was = root.hasAttribute('data-dark');
   if (dark) root.setAttribute('data-dark', '');
   else root.removeAttribute('data-dark');
+  if (dark && glass) root.setAttribute('data-glass', '');
+  else root.removeAttribute('data-glass');
   // The browser's own bar (Android Chrome, iPhone Safari / Home Screen app).
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
@@ -76,7 +83,7 @@ export function applyColorMode(mode: ColorMode, remember = false): void {
       mql = null;
     }
   }
-  paint(mode === 'dark' || (mode === 'system' && systemDark()));
+  paint(mode === 'dark' || mode === 'glass' || (mode === 'system' && systemDark()), mode === 'glass');
   if (!remember) return;
   try {
     localStorage.setItem(KEY, mode);

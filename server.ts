@@ -77,6 +77,7 @@ import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
 import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
+import { ensurePepmTeamSchema } from "./PepmTeam";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
@@ -363,6 +364,8 @@ async function initDB() {
     await autoLinkByEmployeeId(queryDB);
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
+    // PEPM Project teams: the per-Project Final Submit locks (PepmTeam.ts).
+    await ensurePepmTeamSchema(queryDB).catch((e: any) => console.warn("⚠️ PEPM project locks: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) {
       startZkSyncSchedule(dbPool);
@@ -3807,6 +3810,7 @@ async function startServer() {
     requireModule,
     getAdminModules,
     requireModuleLayer,
+    hasModuleLayer,
     requireBudgetModuleAccess,
     requireBudgetRead,
     queryDB,

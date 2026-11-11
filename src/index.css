@@ -1424,3 +1424,69 @@ html[data-dark] :is(.text-violet-700, .text-violet-800, .text-violet-900, .hover
 html[data-dark] :is(.text-purple-700, .text-purple-800, .text-purple-900, .hover\:text-purple-700:hover, .hover\:text-purple-800:hover) { color: var(--color-purple-300) !important; }
 html[data-dark] :is(.text-fuchsia-700, .text-fuchsia-800, .text-fuchsia-900, .hover\:text-fuchsia-700:hover, .hover\:text-fuchsia-800:hover) { color: var(--color-fuchsia-300) !important; }
 html[data-dark] :is(.text-pink-700, .text-pink-800, .text-pink-900, .hover\:text-pink-700:hover, .hover\:text-pink-800:hover) { color: var(--color-pink-300) !important; }
+
+/* ================================================================
+   Dark Glass (Appearance -> Mode -> Dark Glass; colorMode.ts sets
+   <html data-dark data-glass>). Everything from Dark mode above, plus: a
+   near-black page with soft accent / indigo / teal glows (body::before),
+   and the cards, sidebar, header, phone banner, bottom bar and liquid-glass
+   popups turned into frosted, see-through glass over those glows.
+   ================================================================ */
+html[data-dark][data-glass] { background: #101216 !important; }
+html[data-dark][data-glass] body { background: transparent !important; }
+html[data-dark][data-glass] body * { --page-flat: transparent; }
+html[data-dark][data-glass] body::before {
+  background:
+    radial-gradient(60% 45% at 8% 6%, rgba(var(--g-accent-rgb), .55), transparent 70%),
+    radial-gradient(50% 45% at 95% 30%, rgba(99, 102, 241, .38), transparent 70%),
+    radial-gradient(55% 50% at 40% 100%, rgba(var(--g-accent-rgb), .30), transparent 70%),
+    radial-gradient(45% 40% at 75% 85%, rgba(20, 184, 166, .22), transparent 70%),
+    #101216 !important;
+}
+html[data-dark][data-glass] .page-glow { background: transparent !important; }
+html[data-dark][data-glass] :is(.bg-white, [class*="bg-white/"]):not(.gsidebar *):not(button):not(.bg-white .bg-white):not(nav *) {
+  background: linear-gradient(160deg, rgba(255,255,255,.10), rgba(255,255,255,.04)) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  border-color: rgba(255,255,255,.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.04), 0 18px 40px -18px rgba(0,0,0,.7) !important;
+}
+html[data-dark][data-glass] .bg-white .bg-white, html[data-dark][data-glass] .bg-white [class*="bg-white/"] { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.10) !important; }
+html[data-dark][data-glass] .gsidebar {
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03)) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(170%); backdrop-filter: blur(30px) saturate(170%);
+  border-right: 1px solid rgba(255,255,255,.12) !important;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,.05) !important;
+}
+html[data-dark][data-glass] .gsidebar [class*="bg-white/15"] { background-color: rgba(255,255,255,.12) !important; }
+html[data-dark][data-glass] header.sticky {
+  background: rgba(20,22,26,.45) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  border-bottom-color: rgba(255,255,255,.10) !important;
+}
+html[data-dark][data-glass] nav path[fill="var(--g-accent)"] { fill: rgba(26,28,33,.9) !important; stroke: rgba(255,255,255,.12); stroke-width: 1; }
+html[data-dark][data-glass] nav.fixed.bottom-0 > div:has(svg) { -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.07) !important; }
+html[data-dark][data-glass] .liquid-glass {
+  background: linear-gradient(160deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.06) 55%, rgba(255,255,255,.09) 100%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  border-color: rgba(255,255,255,.18) !important;
+}
+html[data-dark][data-glass] .liquid-glass-backdrop { background: rgba(0,0,0,.35); }
+html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"],
+html[data-dark][data-glass] svg:has(path[fill="url(#welcomeBannerGradient)"]) { background: transparent !important; }
+html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.06) !important; stroke: rgba(255,255,255,.12); }
+html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: rgba(255,255,255,.06) !important; backdrop-filter: blur(24px); border-bottom: 1px solid rgba(255,255,255,.12); }
+/* Cards floating over a map (Employee Tracking's "Right now" and the map's
+   chips — the z-[1000] overlays): the light map would show through clear
+   glass and wash out the light text, so they are near-solid dark glass. */
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"]:is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
+  background: rgba(28, 30, 35, 0.9) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+/* The sidebar's "Search menu…" box: a dark well, not the open-item highlight
+   (its focus:bg-white/15 class matched that rule) tinted by the glow. */
+html[data-dark][data-glass] .gsidebar input[type="text"] { background-color: rgba(10, 12, 16, 0.45) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important; color: #e4e6ea !important; }
+html[data-dark][data-glass] .gsidebar input[type="text"]::placeholder { color: #8d939a; }

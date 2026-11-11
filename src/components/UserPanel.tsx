@@ -338,7 +338,11 @@ const EntryRow = React.memo(function EntryRow({
   return (
     <tr className={`${split ? split.row : 'odd:bg-white even:bg-slate-50/70'} hover:bg-blue-50/50 transition-colors`}>
       <td className={`px-2 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums ${split ? split.edge : ''}`}>{idx + 1}.</td>
-      <td className="px-2 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={it.job_no}>{it.job_no}</td>
+      <td className="px-2 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={it.job_no}>
+        {it.job_no}
+        {/* A Project team has several members (PepmTeam.ts): who entered this row. */}
+        {it.entered_by_name && <div className="text-[10px] font-normal text-slate-400 truncate" title={`Entered by ${it.entered_by_name}`}>by {it.entered_by_name}</div>}
+      </td>
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
           (and the Edit button never even renders, see the "Locked" fallback below)
@@ -640,6 +644,7 @@ const EntryCard = React.memo(function EntryCard({
             <span className="font-semibold text-blue-600 text-sm truncate">{it.job_no}</span>
             {split && <SplitBadge split={split} />}
           </div>
+          {it.entered_by_name && <div className="text-[10px] text-slate-400 truncate">by {it.entered_by_name}</div>}
         </div>
         {isEditing ? (
           <div className="flex items-center gap-1 flex-shrink-0">
@@ -1912,9 +1917,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   const hasActiveEntryColumnFilter = Object.values(entryColumnFilters).some((v) => v.trim());
 
-  // Live preview of what this User's next Job No under the selected Budget WILL
-  // become on submit — mirrors the server's own "JOB-000X, sequential per user per
-  // budget" logic (COUNT of this user's distinct Jobs under this Budget, + 1) so the
+  // Live preview of what the next Job No under the selected Budget WILL become
+  // on submit — the server's own "JOB-000X, sequential per Project team per
+  // budget" logic (PepmTeam.ts) (COUNT of this user's distinct Jobs under this Budget, + 1) so the
   // Job No field shows something meaningful instead of sitting blank until submit.
   // Asked from the server (GET /api/jobs/next-no) — it knows about Jobs in the
   // Recycle bin and permanently deleted ones, which this panel's entries don't.
@@ -1925,7 +1930,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       return;
     }
     let cancelled = false;
-    fetch(apiUrl(`/api/jobs/next-no?budget_id=${selectedBudget.id}`), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(`/api/jobs/next-no?budget_id=${selectedBudget.id}&project_id=${encodeURIComponent(projectId || '')}`), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!cancelled && d?.job_no) setNextJobNoPreview(d.job_no);
@@ -1934,7 +1939,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     return () => {
       cancelled = true;
     };
-  }, [selectedBudget, entries, token]);
+  }, [selectedBudget, projectId, entries, token]);
 
   // Only Projects that were actually imported into the selected Budget's Excel sheet
   // (and that this User already has access to) may be picked for a new entry.
@@ -2277,7 +2282,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const sortedEntries: Entry[] = React.useMemo(() => {
     const newestFirst = [...entries].sort((a, b) => b.id - a.id);
     const splitKey = (e: Entry) =>
-      `${e.created_by ?? ''}|${e.budget_item_id ? `bi:${e.budget_item_id}` : `m:${e.mpr_id}|${String(e.item_name || '').trim().toLowerCase()}`}`;
+      `${e.project_id ?? ''}|${e.budget_item_id ? `bi:${e.budget_item_id}` : `m:${e.mpr_id}|${String(e.item_name || '').trim().toLowerCase()}`}`;
     const groups = new Map<string, Entry[]>();
     for (const e of newestFirst) {
       const k = splitKey(e);
@@ -2303,12 +2308,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // offers (see JobEditPanel.tsx's own saveEdit, which PUTs just the date). This
   // restores the older policy where Job Edit permission also unlocked that same
   // change right here from Job Entry Details, not only from the Job Edit panel.
-  const isDateOnlyEditableEntry = (entry: Entry): boolean =>
-    entry.created_by === user.id && !!entry.budget_locked && !!user.can_job_edit;
+  // Every entry listed here is one of the user's Project team's (PepmTeam.ts —
+  // the server sends only those), so any of them may be edited by the team.
+  const isDateOnlyEditableEntry = (entry: Entry): boolean => !!entry.budget_locked && !!user.can_job_edit;
   // Whether the Edit button should show at all for this entry — fully unlocked
-  // (own entry, Budget not yet Final Submitted) OR the Delivery-Date-only case above.
-  const isEntryEditable = (entry: Entry): boolean =>
-    (entry.created_by === user.id && !entry.budget_locked) || isDateOnlyEditableEntry(entry);
+  // (Budget not yet Final Submitted) OR the Delivery-Date-only case above.
+  const isEntryEditable = (entry: Entry): boolean => !entry.budget_locked || isDateOnlyEditableEntry(entry);
 
   // Every distinct Item Name already present across this user's own "Job Entry
   // Details" rows — offered as a type-or-select dropdown on the Item Name filter
@@ -2390,7 +2395,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const splitToneByEntryId = React.useMemo(() => {
     const groups = new Map<string, Entry[]>();
     for (const e of entries) {
-      const key = `${e.created_by ?? ''}|${
+      const key = `${e.project_id ?? ''}|${
         e.budget_item_id ? `bi:${e.budget_item_id}` : `m:${e.mpr_id}|${String(e.item_name || '').trim().toLowerCase()}`
       }`;
       const list = groups.get(key);
@@ -2751,7 +2756,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     if (!target || target.submitted) return;
 
     const confirmed = (await confirmDialog(
-      `Submit "${target.budget_name}"? Once submitted, you won't be able to add any more entries to this Budget.`
+      `Submit "${target.budget_name}"? Once submitted, nobody on your Project team can add more entries to this Budget.`
     ));
     if (!confirmed) return;
 
@@ -3734,7 +3739,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-4 flex items-start gap-2.5">
                 <Lock className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-600" />
                 <span>
-                  You already submitted this Budget as finished. No new MPR entries can be added to it anymore.
+                  This Budget is Final Submitted for your Project team. No new MPR entries can be added to it anymore.
                   Use <span className="font-semibold">Back to Budgets</span> to pick a different Budget.
                 </span>
               </div>
@@ -4752,7 +4757,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     keeps the full heading. */}
                 <div className="hidden md:block">
                   <h3 className="text-lg font-bold text-slate-900">Job Entry Details</h3>
-                  <p className="text-xs text-slate-500">Every one of your own submitted MPR entries — search or filter any column below</p>
+                  <p className="text-xs text-slate-500">Every MPR entry of your Project team — whoever entered it. Search or filter any column below</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className="text-xs px-2.5 py-1 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none text-slate-700 font-medium border border-white/60 md:border-slate-200 whitespace-nowrap">
@@ -5311,7 +5316,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             )}
             <div className="px-6 py-3 border-t border-slate-200">
               <p className="text-[10px] text-slate-400">
-                You can edit or delete your own entries until you submit that entry's Budget as finished. All edits are recorded server-side; a deleted entry moves into the Admin's Job Recycle bin.
+                Your Project team can edit or delete these entries until the Budget (or Job) is Final Submitted. All edits are recorded server-side; a deleted entry moves into the Admin's Job Recycle bin.
               </p>
             </div>
           </div>

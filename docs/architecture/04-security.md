@@ -235,6 +235,10 @@
 
 ৭ নভেম্বরের টেস্টে ধরা এবং **ঠিক হওয়া**: PEPM Budget / item / MPR No / Job-এর API Budget switch দেখত না (এখন `requireBudgetRead`), Admin Dashboard অনুমতি-ছাড়া module-এর tile দেখাত ও আটকানো request পাঠাত।
 
+১১ নভেম্বর **ঠিক হওয়া**: PEPM entries-এ যেকোনো Admin role-এর account Self Service পাতাতেও সবার entry পেত, আর অন্যের entry (Final Submit হয়ে যাওয়াগুলোও) edit / split / delete করতে পারত — কোনো module যাচাই ছাড়াই। এখন `GET /api/entries` সবাইকে (Admin, Superadmin-ও) শুধু নিজের entry দেয়; সবারটা শুধু `?scope=all` + Reports module-এর Read layer-এ (Superadmin সবসময়)। অন্যের entry বা Job-এ edit / split / Add MPR লাগে Reports-এর `edit_add`, delete লাগে `delete_trash` layer (`EntriesRoutes.ts`, server-এর `hasModuleLayer`)। Owner নিজের entry-তে আগের মতোই।
+
+১২ নভেম্বর — **PEPM প্রজেক্ট team** (`PepmTeam.ts`): Self Service-এ entry দেখা ও বদলানো এখন প্রজেক্টের permission (`user_project_permissions`) ধরে — একই প্রজেক্টের সবাই সবার entry দেখে ও বদলায়, অন্য প্রজেক্টের কিছু নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের সব entry-র অধিকার সাথে সাথে যায় (নিজের দেওয়াগুলোরও)। server-এর প্রতিটা route (`GET/PUT/DELETE /api/entries`, split, Add MPR, Job Edit, Final Submit, `material-receive/my-mpr`, confirm, take-back) প্রজেক্ট যাচাই করে; Admin role একা যথেষ্ট নয় (Reports layer লাগে, আগের মতো)। Final Submit-এর আটকানো প্রতি Budget + প্রজেক্ট (`budget_project_locks`), তাই submit-কারী transfer হলেও খোলে না।
+
 ২৫ অক্টোবরের আগে ধরা এবং এখন **ঠিক হওয়া** জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।
 
 ---

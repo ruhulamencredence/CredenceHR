@@ -8,6 +8,13 @@ erDiagram
     varchar mrf_no
     varchar item_date
   }
+  budget_project_locks {
+    int id PK
+    int budget_id FK
+    int project_id FK
+    int user_id FK
+    timestamp submitted_at
+  }
   budget_submissions {
     int id PK
     int budget_id FK
@@ -169,6 +176,9 @@ erDiagram
     int id PK
   }
   budgets ||--o{ budget_items : "budget_id"
+  budgets ||..o{ budget_project_locks : "budget_id"
+  projects ||..o{ budget_project_locks : "project_id"
+  users ||..o{ budget_project_locks : "user_id"
   budgets ||--o{ budget_submissions : "budget_id"
   users ||--o{ budget_submissions : "user_id"
   delivery_material_conditions ||--o{ delivery_material_condition_items : "condition_id"
@@ -185,6 +195,7 @@ erDiagram
   jobs ||--o{ job_submissions : "job_id"
   users ||--o{ job_submissions : "user_id"
   budgets ||..o{ job_submissions : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"

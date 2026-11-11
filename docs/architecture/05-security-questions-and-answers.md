@@ -164,6 +164,9 @@
 **প্রশ্ন: "Conveyance Bill Claim" থেকে "Bill Claim" নাম বদলানোর পর কেউ কি অনুমতি হারায় বা বাড়তি পায়?**
 উত্তর: না। Server চালু হওয়ার সময় (`billClaimRename.ts`) আগে দেওয়া প্রতিটা অনুমতি একই মানুষের কাছে নতুন নামে সরে যায়: Admin module `conveyance` → `bill_claim`, তার layer, Data Import-এর `import_conveyance` → `import_bill_claims`, Self Service switch `can_view_conveyance_claims` → `can_view_bill_claims`, App access আর Access Template-এর টিক। নতুন কিছু দেওয়া হয় না। পুরনো API (`/api/user-claims`) আর নেই, নতুন `/api/bill-claims` আগের মতোই module / layer / switch যাচাই করে।
 
+**প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
+উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
+
 **প্রশ্ন: কারো Budget (PEPM) switch বন্ধ থাকলে সে কি API দিয়ে Budget বা MPR No-র তালিকা পড়তে পারে?**
 উত্তর: না (৭ নভেম্বর ২০২৬ থেকে)। আগে menu লুকাত কিন্তু `/api/budgets`, budget item, MPR No, Job-এর তালিকা যেকোনো login করা account পেত — পুরো-অ্যাপ টেস্টে ধরা পড়ে। এখন `requireBudgetRead` শুধু Superadmin, Budget switch চালু, Job Edit, আর PEPM module (Imports, MPR Nos, Reports, Projects) থাকা Admin-কে দেয়; বাকিরা 403। Admin Dashboard-ও এখন শুধু দেওয়া module-এর tile দেখায় ও তার ডাটাই চায়।
 

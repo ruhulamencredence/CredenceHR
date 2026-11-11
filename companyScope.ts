@@ -206,6 +206,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["tracking_employee_access", ["user_id", "users"]],
   ["budget_items", ["budget_id", "budgets"]],
   ["budget_submissions", ["budget_id", "budgets"]],
+  ["budget_project_locks", ["budget_id", "budgets"]],
   ["job_submissions", ["job_id", "jobs"]],
   ["entries", ["budget_id", "budgets"]],
   ["jobs", ["budget_id", "budgets"]],

@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৫টি টেবিল, ২৭৮২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৬টি টেবিল, ২৭৮৭টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2030,6 +2030,18 @@ Unique: `uniq_web_push_endpoint`(endpoint)
 | `app_user` | varchar(100) | হ্যাঁ |  | |
 | `site_sup_date` | varchar(50) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `budget_project_locks`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `budget_id` | int(11) | না |  | logical → `budgets` |
+| `project_id` | int(11) | না |  | logical → `projects` |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `submitted_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_budget_project`(budget_id,project_id)
 
 ### `budget_submissions`
 
