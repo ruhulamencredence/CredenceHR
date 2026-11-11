@@ -1,9 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
-import { useScrolling } from '../lib/useScrolling';
-import { useChatUnread } from '../lib/useChatUnread';
-import { ChatBubbleLogo } from './FloatingChatButton';
+import { ChatHead } from './ChatHead';
+import type { User } from '../types';
 
 export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'billClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
 
@@ -18,9 +17,9 @@ interface BottomNavProps {
   canViewLeave?: boolean;
   // Self Service modules shown in the More popup (Dashboard only).
   moreItems?: MoreItem[];
-  // The chat head just above More (Dashboard only, same behaviour as More).
-  // Passed only for an account that may use Chat (chatAllowed).
-  chat?: { token: string; onOpen: () => void } | null;
+  // The Dashboard's chat head (ChatHead.tsx). Passed only for an account
+  // that may use Chat (chatAllowed).
+  chat?: { token: string; user: User } | null;
 }
 
 // One tile in the More popup — same look as the mobile Dashboard's tile menu.
@@ -94,7 +93,6 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
 }
 
 export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [], chat = null }: BottomNavProps) {
-  const chatUnread = useChatUnread(chat?.token);
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Check In/Out', icon: Route }] : []),
@@ -195,7 +193,6 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
   const OutIcon = tabs[pair.out]?.icon;
   const InIcon = tabs[pair.in]?.icon;
-  const scrollingAway = useScrolling() && !moreOpen;
   // Dashboard (Home): the chat head floats above the bar's right end.
   const showMore = active === null;
   useEffect(() => {
@@ -218,28 +215,9 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   return (
     <nav className={`md:hidden fixed bottom-0 left-0 right-0 ${moreOpen ? 'z-[61]' : 'z-40'}`}>
       <div className="relative" style={{ height: BAR_H }}>
-        {/* Chat head: a glass circle floating just above the bar's right end
-            (Dashboard only; steps aside while the page scrolls). */}
-        {showMore && chat && !moreOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setMoreOpen(false);
-              chat.onOpen();
-            }}
-            data-tour="nav-chat"
-            aria-label={chatUnread > 0 ? `Chat, ${chatUnread} unread` : 'Chat'}
-            style={{ bottom: BAR_H + 14, transform: scrollingAway ? 'translateX(calc(100% + 1.5rem))' : undefined, transition: 'transform 0.3s ease-out' }}
-            className="absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full bg-white/45 backdrop-blur-xl border border-white/70 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
-          >
-            <ChatBubbleLogo className="w-[26px] h-[26px]" style={{ color: 'var(--g-accent)' }} />
-            {chatUnread > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center border-2 border-white">
-                {chatUnread > 99 ? '99+' : chatUnread}
-              </span>
-            )}
-          </button>
-        )}
+        {/* Chat head (ChatHead.tsx): draggable, opens Chat in a window;
+            Dashboard only, hidden while More's sheet is open. */}
+        {chat && <ChatHead token={chat.token} user={chat.user} hidden={!showMore || moreOpen} />}
         {moreOpen &&
           createPortal(
             <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
