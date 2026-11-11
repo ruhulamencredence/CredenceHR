@@ -687,16 +687,16 @@ html[data-ui="orange"] {
   --g-accent-900: #7f3300;
   --g-accent-950: #4a1d00;
   --g-accent-975: #2e1200;
-  --g-gradient: linear-gradient(90deg, #ff6700 0%, #fb7216 50%, #ff8532 100%);
+  --g-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
 
   /* Phone header + the welcome banner under it (white text). Left to right,
      like the banner's own gradient (WelcomeBanner.tsx), so the two read as
      one piece — a diagonal here left a seam where the banner starts. */
-  --g-header-gradient: linear-gradient(90deg, #ff6700 0%, #fb7216 50%, #ff8532 100%);
-  --g-banner-1: #ff6700;
+  --g-header-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
+  --g-banner-1: #ff8532;
   --g-banner-2: #fb7216;
-  --g-banner-3: #ff8532;
-  --g-sidebar-bg: linear-gradient(165deg, rgba(255, 103, 0, 0.97) 0%, rgba(251, 114, 22, 0.97) 55%, rgba(255, 133, 50, 0.98) 100%);
+  --g-banner-3: #ff6700;
+  --g-sidebar-bg: linear-gradient(165deg, rgba(255, 133, 50, 0.97) 0%, rgba(251, 114, 22, 0.97) 55%, rgba(255, 103, 0, 0.98) 100%);
 
   --g-avatar-1: #ff6700;
   --g-avatar-2: #fb7216;
