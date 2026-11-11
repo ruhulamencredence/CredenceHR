@@ -14,6 +14,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 import { useMyCompanies } from '../lib/company';
 
+import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -28,7 +29,7 @@ type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' |
 const FORM_TABS: { key: EmployeeFormTab; label: string; short: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', short: 'Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', short: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
-  { key: 'contact', label: 'Contact', short: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
+  { key: 'contact', label: 'Personal Contact', short: 'Personal', icon: <MapPin className="w-3.5 h-3.5" /> },
   { key: 'career', label: 'Experience & Education', short: 'Career', icon: <GraduationCap className="w-3.5 h-3.5" /> },
   { key: 'supervisor', label: 'Supervisor', short: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
   { key: 'payment', label: 'Payment', short: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
@@ -1647,7 +1648,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Phone</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Contact No.</label>
                   <input
                     type="text"
                     value={form.phone}
@@ -1898,9 +1899,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               {formTab === 'contact' && (
                 <div className="space-y-4">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Contact</p>
+                    {/* The person's own numbers / email / addresses; the office email
+                        and phone are on Employee Info. */}
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Personal Contact</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <TextField label="Mobile" value={form.mobile} onChange={(v) => setForm((f) => ({ ...f, mobile: v }))} placeholder="e.g. 01896055404" />
+                      <TextField label="Personal Mobile" value={form.mobile} onChange={(v) => setForm((f) => ({ ...f, mobile: v }))} placeholder="e.g. 01896055404" />
                       <TextField label="Telephone" value={form.telephone} onChange={(v) => setForm((f) => ({ ...f, telephone: v }))} placeholder="Landline" />
                       <TextField label="Personal Email" value={form.personal_email} onChange={(v) => setForm((f) => ({ ...f, personal_email: v }))} placeholder="name@gmail.com" type="email" />
                     </div>
@@ -2681,7 +2684,7 @@ const TextField: React.FC<{ label: string; value: string; onChange: (v: string) 
 const DateField: React.FC<{ label: string; value: string; onChange: (v: string) => void }> = ({ label, value, onChange }) => (
   <div>
     <label className={fieldLabelClass}>{label}</label>
-    <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className={fieldInputClass} />
+    <DateInput value={value} onChange={onChange} className={fieldInputClass} aria-label={label} />
   </div>
 );
 
