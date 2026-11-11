@@ -2,6 +2,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
+import { BootIntroGate } from './components/BootIntroAnimation';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
 import './index.css';
 
@@ -19,6 +20,14 @@ const isStandaloneChat = window.location.pathname === '/chat';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isStandaloneChat ? <ChatStandalone /> : <App />}
+    {isStandaloneChat ? (
+      <ChatStandalone />
+    ) : (
+      <>
+        <App />
+        {/* Native app only: the orange open animation over the app. */}
+        <BootIntroGate />
+      </>
+    )}
   </StrictMode>,
 );
