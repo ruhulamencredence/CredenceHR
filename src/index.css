@@ -1431,7 +1431,7 @@ html[data-dark] :is(.text-pink-700, .text-pink-800, .text-pink-900, .hover\:text
    near-black page with soft accent / indigo / teal glows (body::before),
    and the cards, sidebar, header, phone banner, bottom bar and liquid-glass
    popups turned into frosted, see-through glass over those glows.
-   ================================================================
+   ================================================================ */
 html[data-dark][data-glass] { background: #101216 !important; }
 html[data-dark][data-glass] body { background: transparent !important; }
 html[data-dark][data-glass] body * { --page-flat: transparent; }
@@ -1476,3 +1476,17 @@ html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient
 html[data-dark][data-glass] svg:has(path[fill="url(#welcomeBannerGradient)"]) { background: transparent !important; }
 html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.06) !important; stroke: rgba(255,255,255,.12); }
 html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: rgba(255,255,255,.06) !important; backdrop-filter: blur(24px); border-bottom: 1px solid rgba(255,255,255,.12); }
+/* Cards floating over a map (Employee Tracking's "Right now" and the map's
+   chips — the z-[1000] overlays): the light map would show through clear
+   glass and wash out the light text, so they are near-solid dark glass. */
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"]:is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
+  background: rgba(28, 30, 35, 0.9) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+/* The sidebar's "Search menu…" box: a dark well, not the open-item highlight
+   (its focus:bg-white/15 class matched that rule) tinted by the glow. */
+html[data-dark][data-glass] .gsidebar input[type="text"] { background-color: rgba(10, 12, 16, 0.45) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important; color: #e4e6ea !important; }
+html[data-dark][data-glass] .gsidebar input[type="text"]::placeholder { color: #8d939a; }
