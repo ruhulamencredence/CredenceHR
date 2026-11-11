@@ -81,6 +81,23 @@
         <receiver
             android:name=".CallService$HangupReceiver"
             android:exported="false" />
+        <!-- Incoming chat call with the app closed (IncomingCallService.java):
+             rings with the phone's ringtone, shows the call notification and
+             the full-screen call screen over the lock screen
+             (IncomingCallActivity.java). -->
+        <service
+            android:name=".IncomingCallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall" />
+        <activity
+            android:name=".IncomingCallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.mprtracker.app.incomingcall"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <!-- Incoming chat call: Decline from the notification (IncomingCall.java). -->
         <receiver
             android:name=".IncomingCall$DeclineReceiver"
@@ -150,5 +167,14 @@
          without it the call still rings as a heads-up notification. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The ringing incoming-call service (IncomingCallService.java) is a
+         phoneCall foreground service: Android 14+ needs both of these
+         (MANAGE_OWN_CALLS is granted at install, no prompt). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <!-- Optional, the person turns it on (Chat -> Calls on this phone):
+         "Display over other apps" lets the call screen open while the phone
+         is in use, not only as the notification at the top. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

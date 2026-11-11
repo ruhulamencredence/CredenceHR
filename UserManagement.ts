@@ -181,8 +181,36 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     if (!name) throw Object.assign(new Error("Template name is required."), { status: 400 });
     const description = typeof body?.description === "string" ? body.description.trim().slice(0, 255) : "";
     const features = (Array.isArray(body?.features) ? body.features : []).filter((f: any) => TEMPLATE_FEATURES.includes(f));
-    const modules = (Array.isArray(body?.modules) ? body.modules : []).filter((m: any) => adminModuleKeys.includes(m));
-    return { name, description, features, modules, is_default: body?.is_default === true };
+    let modules = (Array.isArray(body?.modules) ? body.modules : []).filter((m: any) => adminModuleKeys.includes(m));
+    const access = parseTemplateAccess(body?.access);
+    // Saved from Module Access: the switches and modules lists follow it, so
+    // "Apply template" from the Users list and Data Import give the same.
+    if (access) {
+      modules = access.modules;
+      for (const f of TEMPLATE_FEATURES) if (access.flags[f] === true && !features.includes(f)) features.push(f);
+    }
+    return { name, description, features, modules, is_default: body?.is_default === true, access };
+  }
+  // { modules, layers: {module: [layer]}, flags: {key: bool}, app: {can, custom, items} }.
+  // Only applied in the browser through each account's own access endpoints,
+  // which check the person doing it — here it is just kept tidy and small.
+  function parseTemplateAccess(a: any) {
+    if (!a || typeof a !== "object") return null;
+    const keyOk = (k: any) => typeof k === "string" && /^[a-z0-9_]{1,60}$/.test(k);
+    const modules = (Array.isArray(a.modules) ? a.modules : []).filter((m: any) => adminModuleKeys.includes(m));
+    const layers: Record<string, string[]> = {};
+    if (a.layers && typeof a.layers === "object")
+      for (const [m, ls] of Object.entries(a.layers)) {
+        if (!keyOk(m) || !Array.isArray(ls)) continue;
+        layers[m] = [...new Set((ls as any[]).filter(keyOk))].slice(0, 60) as string[];
+      }
+    const flags: Record<string, boolean> = {};
+    if (a.flags && typeof a.flags === "object") for (const [k, v] of Object.entries(a.flags)) if (keyOk(k) && typeof v === "boolean") flags[k] = v;
+    const app =
+      a.app && typeof a.app === "object"
+        ? { can: a.app.can !== false, custom: !!a.app.custom, items: [...new Set((Array.isArray(a.app.items) ? a.app.items : []).filter(keyOk))].slice(0, 300) }
+        : null;
+    return { modules, layers, flags, app };
   }
   // Makes `id` the only default among this company's templates.
   async function setDefaultTemplate(id: number) {
@@ -204,7 +232,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       description: r.description || "",
       features: parse(r.features_json),
       modules: parse(r.modules_json),
-      is_default: Number(r.is_default || 0) === 1
+      is_default: Number(r.is_default || 0) === 1,
+      access: (() => {
+        try {
+          return r.access_json ? JSON.parse(r.access_json) : null;
+        } catch {
+          return null;
+        }
+      })()
     };
   }
 
@@ -222,8 +257,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     try {
       const t = parseTemplateBody(req.body);
       const result: any = await queryDB(
-        "INSERT INTO access_templates (name, description, features_json, modules_json, created_by) VALUES (?, ?, ?, ?, ?)",
-        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), req.user.id]
+        "INSERT INTO access_templates (name, description, features_json, modules_json, access_json, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), t.access ? JSON.stringify(t.access) : null, req.user.id]
       );
       if (t.is_default) await setDefaultTemplate(Number(result.insertId));
       res.json({ id: Number(result.insertId), ...t });
@@ -236,14 +271,30 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     try {
       const id = Number(req.params.id);
       const t = parseTemplateBody(req.body);
+      // Edited in the Access Templates list (switches + modules only): a
+      // full Module Access copy it holds follows those lists.
+      let access: any = t.access;
+      if (!access) {
+        const cur: any[] = (await queryDB("SELECT access_json FROM access_templates WHERE id = ?", [id])) || [];
+        try {
+          access = cur[0]?.access_json ? JSON.parse(cur[0].access_json) : null;
+        } catch {
+          access = null;
+        }
+        if (access) {
+          access.modules = t.modules;
+          access.layers = Object.fromEntries(Object.entries(access.layers || {}).filter(([m]) => m === "leave_manage" || t.modules.includes(m)));
+          for (const f of TEMPLATE_FEATURES) access.flags = { ...(access.flags || {}), [f]: t.features.includes(f) };
+        }
+      }
       const result: any = await queryDB(
-        "UPDATE access_templates SET name = ?, description = ?, features_json = ?, modules_json = ? WHERE id = ?",
-        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), id]
+        "UPDATE access_templates SET name = ?, description = ?, features_json = ?, modules_json = ?, access_json = ? WHERE id = ?",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), access ? JSON.stringify(access) : null, id]
       );
       if (!result.affectedRows) return res.status(404).json({ error: "Template not found." });
       // Unticking the default only happens by making another one the default.
       if (t.is_default) await setDefaultTemplate(id);
-      res.json({ id, ...t });
+      res.json({ id, ...t, access });
     } catch (err: any) {
       res.status(err.status || 500).json({ error: err.message });
     }

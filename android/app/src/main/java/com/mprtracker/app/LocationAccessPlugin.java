@@ -1,6 +1,7 @@
 package com.mprtracker.app;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -11,6 +12,11 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.content.ContextCompat;
 import androidx.core.location.LocationManagerCompat;
+import com.google.android.gms.location.CurrentLocationRequest;
+import com.google.android.gms.location.Granularity;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+import com.google.android.gms.tasks.CancellationTokenSource;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -172,6 +178,49 @@ public class LocationAccessPlugin extends Plugin {
             }
         }
         call.resolve();
+    }
+
+    // One fresh position for Remote Attendance Check In / Out
+    // (src/lib/attendanceFix.ts), with whether it came from a mock-location
+    // ("fake GPS") app — Capacitor's Geolocation plugin doesn't say. The
+    // server refuses a mock fix. A fix taken in the last maxAgeMs (30 s) is
+    // accepted as is, so it's as quick as before.
+    @SuppressLint("MissingPermission")
+    @PluginMethod
+    public void getCurrentFix(PluginCall call) {
+        if (!hasForeground()) {
+            call.reject("Location permission is required to mark attendance. Please allow location access and try again.", "PERMISSION");
+            return;
+        }
+        int maxAge = call.getInt("maxAgeMs", 30000);
+        int timeout = call.getInt("timeoutMs", 15000);
+        CurrentLocationRequest req = new CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setMaxUpdateAgeMillis(maxAge)
+            .setDurationMillis(timeout)
+            .setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
+            .build();
+        CancellationTokenSource cts = new CancellationTokenSource();
+        try {
+            LocationServices.getFusedLocationProviderClient(getContext())
+                .getCurrentLocation(req, cts.getToken())
+                .addOnSuccessListener(loc -> {
+                    if (loc == null) {
+                        call.reject("Couldn't get your location. Turn on Location and try again.", "NO_FIX");
+                        return;
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("latitude", loc.getLatitude());
+                    ret.put("longitude", loc.getLongitude());
+                    if (loc.hasAccuracy()) ret.put("accuracy", (double) loc.getAccuracy());
+                    ret.put("time", loc.getTime());
+                    ret.put("mock", MockLocation.of(loc));
+                    call.resolve(ret);
+                })
+                .addOnFailureListener(e -> call.reject("Couldn't get your location. Please try again.", "NO_FIX"));
+        } catch (SecurityException e) {
+            call.reject("Location permission is required to mark attendance. Please allow location access and try again.", "PERMISSION");
+        }
     }
 
     // The phone's Location (GPS) switch.

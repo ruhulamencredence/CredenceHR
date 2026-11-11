@@ -32,7 +32,7 @@ import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera, Minimize2 } from 'lucide-react';
-import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, onCallHangup, onPictureInPicture, cancelIncomingCallScreen } from '../lib/callAudio';
+import { callAudioAvailable, setCallSpeaker, startCallAudio, stopCallAudio, takePendingCall, onCallAction, onCallHangup, onPictureInPicture, cancelIncomingCallScreen, phoneRingFirst, onRingHandover } from '../lib/callAudio';
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
@@ -80,8 +80,27 @@ const RECONNECT_GIVE_UP_MS = 40 * 1000;
 // ICE "disconnected" often heals by itself; restart only if it lasts.
 const ICE_RESTART_AFTER_MS = 2500;
 
-// A soft ring made with WebAudio (no sound file needed).
+// A soft ring made with WebAudio (no sound file needed) — the caller's
+// "ringing" tone, and an incoming call on the website / an older APK. The
+// Android app rings an incoming call with the phone's own ringtone instead
+// (phoneRingFirst, lib/callAudio.ts).
 function makeRinger() {
+  const web = makeWebRinger();
+  const phone = phoneRingFirst({ start: () => web.start('incoming'), stop: () => web.stop() });
+  return {
+    start(kind: 'incoming' | 'outgoing') {
+      this.stop();
+      if (kind === 'incoming') phone.start();
+      else web.start('outgoing');
+    },
+    stop() {
+      phone.stop();
+      web.stop();
+    }
+  };
+}
+
+function makeWebRinger() {
   let ctx: AudioContext | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   const beep = (freq: number, len: number) => {
@@ -417,8 +436,9 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       setKind(d.kind);
       setNotice('');
       setPhase('incoming');
-      // Rings here now: the phone's own call screen isn't needed.
-      cancelIncomingCallScreen(d.callId);
+      // Rings here now: the phone's own call screen isn't needed — unless
+      // the app is in the background (then that screen keeps ringing).
+      cancelIncomingCallScreen(d.callId, true);
       const p = pendingAnswer.current;
       if (p && p.callId === d.callId && Date.now() - p.at < 60_000) {
         pendingAnswer.current = null;
@@ -579,6 +599,25 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     () =>
       onCallHangup(() => {
         if (callIdRef.current) hangUpRef.current();
+      }),
+    []
+  );
+  // Back on screen (e.g. an iPhone Home Screen app opened from its call
+  // notification — iOS keeps the old connection looking alive while the app
+  // sleeps): ask whether a call is ringing for us, so it rings here.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && phaseRef.current === 'idle') getChatSocket()?.emit('call:announce');
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  // The app came on screen while the phone's call screen rang: ring here.
+  useEffect(
+    () =>
+      onRingHandover(() => {
+        if (phaseRef.current === 'incoming') ringer.current.start('incoming');
       }),
     []
   );

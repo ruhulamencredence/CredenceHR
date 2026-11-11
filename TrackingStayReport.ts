@@ -86,7 +86,8 @@ export interface StayOptions {
 
 export function buildStayReport(rawPings: any[], o: StayOptions) {
   const pings: Ping[] = rawPings
-    .filter((r) => r.accuracy_m == null || Number(r.accuracy_m) <= MAX_ACCURACY_M)
+    // Rough fixes, and fake-GPS (mock location) ones, never count as a stay.
+    .filter((r) => (r.accuracy_m == null || Number(r.accuracy_m) <= MAX_ACCURACY_M) && Number(r.is_mock || 0) !== 1)
     .map((r) => ({ t: wallMinutes(r.recorded_at)!, lat: Number(r.lat), lng: Number(r.lng) }))
     .filter((p) => p.t != null && Number.isFinite(p.lat) && Number.isFinite(p.lng))
     .sort((a, b) => a.t - b.t);
@@ -244,7 +245,7 @@ export function registerTrackingStayReportRoutes(app: Express, deps: { authentic
       if (!users.length) return res.status(404).json({ error: "Employee not found." });
       const rows: any[] =
         (await queryDB(
-          "SELECT lat, lng, accuracy_m, recorded_at FROM location_pings WHERE user_id = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC",
+          "SELECT lat, lng, accuracy_m, is_mock, recorded_at FROM location_pings WHERE user_id = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC",
           [userId, `${from} 00:00:00`, `${addDays(to, 2)} 00:00:00`]
         )) || [];
       res.json({ user: { id: Number(users[0].id), name: users[0].name }, ...buildStayReport(rows, opts) });

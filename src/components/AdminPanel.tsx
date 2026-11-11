@@ -9,7 +9,8 @@ import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubm
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AdminDashboard } from './AdminDashboard';
-import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserAvatar } from './UserAvatar';
 import { UserBulkBar } from './UserBulkBar';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
@@ -782,6 +783,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const open = () => setShowPhotoRequests(true);
     window.addEventListener('credence:photo-requests', open);
     return () => window.removeEventListener('credence:photo-requests', open);
+  }, []);
+  // Decided in the popup opened from an alert (App.tsx): the count follows.
+  useEffect(() => {
+    const set = (e: Event) => setPhotoRequestCount(Number((e as CustomEvent).detail) || 0);
+    window.addEventListener('credence:photo-requests-count', set);
+    return () => window.removeEventListener('credence:photo-requests-count', set);
   }, []);
   useEffect(() => {
     if (pendingModuleAccessUser == null || activeTab !== 'users') return;
@@ -6630,7 +6637,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900">User Management</h3>
               <p className="text-xs text-slate-500">
@@ -6641,23 +6648,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </div>
             {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
                 without touching the `users` state other tabs on this page depend on. */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            {/* Phone: search on its own line, Role + Department side by side,
+                the buttons wrapping below — one row that never wraps squeezed
+                the search to nothing and pushed the buttons off the screen. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-full sm:w-auto">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
-                  type="text"
+                  type="search"
                   value={userSearchText}
                   onChange={(e) => setUserSearchText(e.target.value)}
                   placeholder="Search name or Login ID..."
                   className="w-full sm:w-56 pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
                 />
               </div>
-              <div className="relative">
+              <div className="flex gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:flex-none min-w-0">
                 <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <select
                   value={userRoleFilter}
                   onChange={(e) => setUserRoleFilter(e.target.value as typeof userRoleFilter)}
-                  className="pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer appearance-none"
+                  className="w-full sm:w-auto pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer appearance-none"
                 >
                   <option value="all">All Roles</option>
                   <option value="superadmin">Superadmin</option>
@@ -6665,11 +6676,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
+              <div className="flex-1 sm:flex-none min-w-0">
               <SearchSelect
                 aria-label="Department filter"
                 value={userDeptFilter}
                 onChange={(e) => setUserDeptFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer max-w-[11rem]"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer sm:max-w-[11rem]"
               >
                 <option value="">All departments</option>
                 {[...new Set(users.map((u) => (u.department || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((n) => (
@@ -6677,10 +6689,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 ))}
                 <option value="__none__">No department</option>
               </SearchSelect>
+              </div>
+              </div>
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setShowAccessTemplates(true)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-full sm:rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
               >
                 <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
               </button>
@@ -6688,7 +6703,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <button
                   type="button"
                   onClick={() => setShowPhotoRequests(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                  className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-full sm:rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
                 >
                   <UserCheck className="w-3.5 h-3.5" /> Photo approvals
                   {photoRequestCount > 0 && <span className="ml-0.5 min-w-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] leading-[18px] text-center">{photoRequestCount}</span>}
@@ -6698,11 +6713,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <button
                   type="button"
                   onClick={() => setShowPasswordRequests(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                  className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-full sm:rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
                 >
                   <KeyRound className="w-3.5 h-3.5" /> Password requests
                 </button>
               )}
+              </div>
             </div>
           </div>
           {/* Quick filters — one tap narrows the list to accounts with a given
@@ -6801,9 +6817,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
-                            {userInitials(u.name)}
-                          </div>
+                          <UserAvatar userId={u.id} name={u.name} token={token} className="w-9 h-9 text-xs" color="var(--g-gradient)" />
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 truncate">{u.name}</div>
                             <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
@@ -6879,9 +6893,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       onClick={(e) => e.stopPropagation()}
                       onChange={() => toggleUserSelected(u.id)}
                     />
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
-                      {userInitials(u.name)}
-                    </div>
+                    <UserAvatar userId={u.id} name={u.name} token={token} className="w-9 h-9 text-xs" color="var(--g-gradient)" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-sm text-slate-900 truncate">{u.name}</span>
@@ -7755,6 +7767,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           departments={departments}
           viewer={{ isSuperAdmin, canGrantModuleAccess }}
           backTo={moduleAccessFrom === 'employees' && canSee('employees') ? 'Employees' : 'Users'}
+          templatesAllowed={canSee('users')}
+          canSaveTemplate={canSee('users') && usersLayer('edit_add')}
           onClose={() => {
             setManagingModulesFor(null);
             if (moduleAccessFrom === 'employees' && canSee('employees')) setActiveTab('employees');

@@ -118,6 +118,14 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
                             Default for new logins
                           </span>
                         )}
+                        {t.access && (
+                          <span
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200"
+                            title="Saved from Module Access: also keeps what they may do in each module and the Mobile App access — applied in full from Module Access → Apply template."
+                          >
+                            Full access · layers + App
+                          </span>
+                        )}
                       </div>
                       {t.description && <div className="text-xs text-slate-500">{t.description}</div>}
                       <div className="mt-1.5 flex flex-wrap gap-1">

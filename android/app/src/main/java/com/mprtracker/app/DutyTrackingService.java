@@ -27,6 +27,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.location.LocationManagerCompat;
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.Granularity;
 import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
@@ -83,6 +84,8 @@ public class DutyTrackingService extends Service {
     private static final long IDLE_AFTER_MS = 15 * 60 * 1000;
     private static final long STATE_MS = 2 * 60 * 1000;
     private static final int MAX_PENDING = 300;
+    // Worse than this (m) = a Wi-Fi / mobile-tower guess, not GPS.
+    private static final float ROUGH_M = 100f;
 
     private FusedLocationProviderClient client;
     private LocationCallback callback;
@@ -230,6 +233,12 @@ public class DutyTrackingService extends Service {
         )
             .setMinUpdateDistanceMeters(asIdle ? IDLE_DISTANCE_M : ACTIVE_DISTANCE_M)
             .setMinUpdateIntervalMillis(asIdle ? IDLE_FIX_MS / 2 : 15 * 1000)
+            // No old cached position handed back as new (a jump on the map).
+            .setMaxUpdateAgeMillis(asIdle ? IDLE_FIX_MS : 30 * 1000)
+            .setGranularity(Granularity.GRANULARITY_FINE)
+            // Moving: wait a moment for a GPS-grade first fix instead of a
+            // rough guess. Idle stays on the low-power Balanced setting.
+            .setWaitForAccurateLocation(!asIdle)
             .build();
         try {
             client.requestLocationUpdates(req, callback, Looper.getMainLooper());
@@ -239,6 +248,15 @@ public class DutyTrackingService extends Service {
     }
 
     private void onFix(Location loc) {
+        // Sitting still, Wi-Fi / tower guesses wander a few hundred metres,
+        // pass the 120 m "moved" test and woke full GPS for nothing (battery)
+        // while drawing a jump. A rough fix within its own error of the last
+        // one is that drift, not movement: ignored. A fake-GPS fix is always
+        // kept — it has to be seen.
+        if (idle && latest != null && loc.hasAccuracy() && loc.getAccuracy() > ROUGH_M && !MockLocation.of(loc)
+            && loc.distanceTo(latest) <= loc.getAccuracy() + (latest.hasAccuracy() ? latest.getAccuracy() : 0f)) {
+            return;
+        }
         latest = loc;
         lastFixAt = System.currentTimeMillis();
         pending.add(loc);
@@ -306,6 +324,7 @@ public class DutyTrackingService extends Service {
             body.put("recorded_at", iso(fix.getTime()));
             body.put("repeat", repeat);
             body.put("mode", mode);
+            if (MockLocation.of(fix)) body.put("mock", true);
             JSONArray points = new JSONArray();
             for (Location l : batch) {
                 JSONObject pt = new JSONObject();
@@ -313,6 +332,7 @@ public class DutyTrackingService extends Service {
                 pt.put("lng", l.getLongitude());
                 if (l.hasAccuracy()) pt.put("accuracy_m", Math.round(l.getAccuracy()));
                 pt.put("recorded_at", iso(l.getTime()));
+                if (MockLocation.of(l)) pt.put("mock", true);
                 points.put(pt);
             }
             body.put("points", points);

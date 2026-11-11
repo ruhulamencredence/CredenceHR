@@ -17,6 +17,15 @@ erDiagram
     datetime requested_check_out_at
     text remarks
   }
+  attendance_mock_attempts {
+    int id PK
+    int user_id FK
+    int project_id FK
+    enum kind
+    decimal lat
+    decimal lng
+    int accuracy_m
+  }
   attendance_report_department_access {
     int id PK
     int user_id FK
@@ -208,6 +217,8 @@ erDiagram
   users ||--o{ attendance : "user_id"
   projects ||--o{ attendance_corrections : "project_id"
   users ||--o{ attendance_corrections : "user_id"
+  users ||--o{ attendance_mock_attempts : "user_id"
+  projects ||..o{ attendance_mock_attempts : "project_id"
   users ||--o{ attendance_report_department_access : "user_id"
   all_employees ||..o{ duty_roster : "employee_id"
   duty_shifts ||..o{ duty_roster : "shift_id"

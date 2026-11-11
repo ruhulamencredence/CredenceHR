@@ -49,7 +49,7 @@ export interface LiveTracking {
   // still = a heartbeat re-sending the last fix (the phone hasn't moved).
   onPing: (
     userId: number,
-    ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date; still?: boolean }
+    ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date; still?: boolean; mock?: boolean }
   ) => Promise<number | null>;
   // A Book a Ride ride just started or ended for these people: re-check at
   // once (no 30s cache wait) and tell / wake their phones.
@@ -287,7 +287,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
           recorded_at: ping.recorded_at.toISOString(),
           // When the phone answered — differs from recorded_at while it stands still.
           heard_at: new Date().toISOString(),
-          still: !!ping.still
+          still: !!ping.still,
+          // From a mock-location ("fake GPS") app, by the phone's own word.
+          mock: !!ping.mock
         };
         for (const w of ws) io?.to(`user:${w}`).emit("tracking:location", payload);
       }

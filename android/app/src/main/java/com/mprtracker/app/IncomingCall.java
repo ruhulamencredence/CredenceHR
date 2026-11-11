@@ -12,6 +12,7 @@ import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import androidx.core.app.NotificationCompat;
 import com.getcapacitor.CapConfig;
 import java.io.OutputStream;
@@ -23,27 +24,30 @@ import org.json.JSONObject;
 
 // A chat call reaching a phone whose app is closed or in the background.
 //
-// The server (CallRoutes.ts) sends a high-priority "call_incoming" push
-// (LiveWakeMessagingService) as well as ringing the open app. When the app
-// isn't on screen this shows the phone's own incoming-call screen: full
-// screen over the lock screen where Android allows it, otherwise a heads-up
-// notification, ringing (the phone's ringtone, repeating) and vibrating,
-// with Accept and Decline.
+// The server (CallRoutes.ts, GroupCallRoutes.ts) sends a high-priority
+// "call_incoming" push (LiveWakeMessagingService) as well as ringing the open
+// app. When the app isn't on screen, show() starts IncomingCallService: the
+// phone's own ringtone, looping (CallRinger), a call notification, and the
+// full-screen call screen over the lock screen (IncomingCallActivity). Where
+// Android won't start that service, showLegacy() is the plain ringing
+// notification used before (its sound comes from the notification channel).
 //
-//   Accept  -> opens the app (MainActivity) with the call id; the page
-//              connects, the server announces the ringing call again and
-//              CallLayer.tsx answers it at once (CallAudioPlugin.takePendingCall).
-//   Decline -> POST /api/calls/push-decline with the one-call key from the
-//              push — the app doesn't have to open.
-//   Tapping the notification itself opens the app on the ringing call.
+//   Accept  -> opens the app (MainActivity) with the call; the page connects,
+//              the server announces the ringing call again and CallLayer.tsx
+//              answers it at once (CallAudioPlugin.takePendingCall); a group
+//              call is joined (GroupCallLayer.tsx).
+//   Decline -> one-to-one: POST /api/calls/push-decline with the one-call key
+//              from the push — the app doesn't have to open. Group: just stops
+//              ringing on this phone.
 //
 // A "call_cancel" push (caller hung up, answered on another device, no
-// answer) takes it away again; it also goes by itself after 45 s.
+// answer, group call over) takes it away again; it also goes by itself after 45 s.
 public final class IncomingCall {
 
     static final String CHANNEL_ID = "incoming_calls";
     static final String EXTRA_CALL_ID = "credence_call_id";
     static final String EXTRA_CALL_ACTION = "credence_call_action";
+    static final String EXTRA_GROUP = "credence_call_group";
     private static final long RING_MS = 45 * 1000;
 
     private IncomingCall() {}
@@ -57,9 +61,15 @@ public final class IncomingCall {
         if (callId == null || callId.isEmpty()) return;
         // The page is on screen: it rings by itself (CallLayer.tsx).
         if (MainActivity.isOnScreen()) return;
+        if (IncomingCallService.start(context, data)) return;
+        showLegacy(context, data);
+    }
+
+    static void showLegacy(Context context, Map<String, String> data) {
+        String callId = data.get("callId");
+        if (callId == null || callId.isEmpty()) return;
         String from = data.get("fromName");
         if (from == null || from.isEmpty()) from = "Someone";
-        boolean video = "video".equals(data.get("kind"));
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
@@ -79,17 +89,16 @@ public final class IncomingCall {
 
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
         int id = notificationId(callId);
-        PendingIntent open = PendingIntent.getActivity(context, id, openIntent(context, callId, "open"), flags);
-        PendingIntent accept = PendingIntent.getActivity(context, id + 1, openIntent(context, callId, "accept"), flags);
-        Intent declineIntent = new Intent(context, DeclineReceiver.class)
-            .putExtra(EXTRA_CALL_ID, callId)
-            .putExtra("key", data.get("declineKey"));
-        PendingIntent decline = PendingIntent.getBroadcast(context, id + 2, declineIntent, flags);
+        Bundle d = new Bundle();
+        for (Map.Entry<String, String> e : data.entrySet()) d.putString(e.getKey(), e.getValue());
+        PendingIntent open = PendingIntent.getActivity(context, id, openIntent(context, d, "open"), flags);
+        PendingIntent accept = PendingIntent.getActivity(context, id + 1, openIntent(context, d, "accept"), flags);
+        PendingIntent decline = PendingIntent.getBroadcast(context, id + 2, declineIntent(context, d), flags);
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle(from)
-            .setContentText(video ? "Incoming video call · CredenceHR" : "Incoming audio call · CredenceHR")
+            .setContentText(IncomingCallService.subtitle(d))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -114,16 +123,34 @@ public final class IncomingCall {
 
     static void cancel(Context context, String callId) {
         if (callId == null) return;
+        IncomingCallService.stopFor(context, callId);
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(notificationId(callId));
     }
 
-    private static Intent openIntent(Context context, String callId, String action) {
-        return new Intent(context, MainActivity.class)
+    // Opens the app on the call (MainActivity.handleCallIntent). A group
+    // call carries what the page needs to join it.
+    static Intent openIntent(Context context, Bundle d, String action) {
+        String callId = d.getString("callId");
+        Intent i = new Intent(context, MainActivity.class)
             .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .setAction("credence.call." + action + "." + callId)
             .putExtra(EXTRA_CALL_ID, callId)
             .putExtra(EXTRA_CALL_ACTION, action);
+        if ("1".equals(d.getString("group"))) {
+            i.putExtra(EXTRA_GROUP, true)
+                .putExtra("roomId", d.getString("roomId"))
+                .putExtra("title", d.getString("title"))
+                .putExtra("kind", d.getString("kind"))
+                .putExtra("fromName", d.getString("fromName"));
+        }
+        return i;
+    }
+
+    static Intent declineIntent(Context context, Bundle d) {
+        return new Intent(context, DeclineReceiver.class)
+            .putExtra(EXTRA_CALL_ID, d.getString("callId"))
+            .putExtra("key", d.getString("declineKey"));
     }
 
     // The server the app talks to: the one tracking saved (the page's real

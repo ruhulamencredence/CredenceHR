@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Route, Filter, LogIn, LogOut, Trash2 } from 'lucide-react';
+import { Route, Filter, LogIn, LogOut, Trash2, MapPin } from 'lucide-react';
+import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimRecord, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -25,6 +26,9 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
   const [toFilter, setToFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Tap a row: where it was checked in (and out) on a map (ClaimLocationMap).
+  const [viewing, setViewing] = useState<ClaimRecord | null>(null);
+  const hasPlace = (c: ClaimRecord) => c.check_in_lat != null && c.check_in_lng != null;
   // One page of the server's list at a time — every claim is reachable, not only the newest 1,000.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -177,7 +181,11 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
           {/* Mobile — stacked cards instead of a squeezed/scrolled table. */}
           <div className="md:hidden divide-y divide-slate-100">
             {claims.map((c) => (
-              <div key={c.id} className="p-4 flex flex-col gap-2.5">
+              <div
+                key={c.id}
+                className={`p-4 flex flex-col gap-2.5 ${hasPlace(c) ? 'cursor-pointer active:bg-slate-50' : ''}`}
+                onClick={() => hasPlace(c) && setViewing(c)}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-900 text-sm truncate">{c.user_name || '—'}</p>
@@ -231,12 +239,20 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs text-slate-500">
+                  <span className="flex items-center gap-3 text-xs text-slate-500">
                     {c.distance_km != null ? `${c.distance_km} km` : '—'}
+                    {hasPlace(c) && (
+                      <span className="inline-flex items-center gap-1 font-semibold text-blue-700">
+                        <MapPin className="w-3.5 h-3.5" /> Map
+                      </span>
+                    )}
                   </span>
                   <button
                     type="button"
-                    onClick={() => handleDelete(c.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(c.id);
+                    }}
                     disabled={deletingId === c.id}
                     className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                   >
@@ -263,7 +279,12 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {claims.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr
+                    key={c.id}
+                    className={`hover:bg-slate-50/80 transition-colors ${hasPlace(c) ? 'cursor-pointer' : ''}`}
+                    onClick={() => hasPlace(c) && setViewing(c)}
+                    title={hasPlace(c) ? 'Show the Check In / Out location on the map' : undefined}
+                  >
                     <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{c.user_name || '—'}</td>
                     <td className="px-4 py-3 text-slate-700 text-xs max-w-[220px]">
                       <span className="block truncate" title={c.purpose}>{c.purpose}</span>
@@ -311,9 +332,26 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-xs">
+                      {hasPlace(c) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewing(c);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Show on the map"
+                          aria-label="Show on the map"
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleDelete(c.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDelete(c.id);
+                        }}
                         disabled={deletingId === c.id}
                         className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                         title="Delete this claim"
@@ -326,6 +364,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
               </tbody>
             </table>
           </div>
+          {viewing && <ClaimLocationMap claim={viewing} onClose={() => setViewing(null)} />}
           <PagerBar page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
         </>
       )}

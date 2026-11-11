@@ -92,6 +92,10 @@ export async function ensureAccessTemplateSchema(queryDB: QueryDB) {
   // in a database (features_rev counts them, so a switch HR later removes
   // from the template isn't put back): rev 1 = My Service Book.
   await addColumn("features_rev", "INT NOT NULL DEFAULT 0");
+  // The whole access a template was saved with from Module Access ("Save as
+  // template"): modules, their layers, every switch and the Mobile App
+  // access. NULL for templates made the old way (features + modules only).
+  await addColumn("access_json", "LONGTEXT NULL");
   // Rows made from now on already have every addition.
   await queryDB("ALTER TABLE access_templates ALTER COLUMN features_rev SET DEFAULT 1").catch(() => undefined);
   try {

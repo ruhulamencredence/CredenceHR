@@ -134,6 +134,8 @@ public class LiveTrackingService extends Service {
         client = LocationServices.getFusedLocationProviderClient(this);
         LocationRequest req = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, FIX_INTERVAL_MS)
             .setMinUpdateIntervalMillis(3000)
+            // No old cached position handed back as new.
+            .setMaxUpdateAgeMillis(10 * 1000)
             .build();
         callback = new LocationCallback() {
             @Override
@@ -185,6 +187,7 @@ public class LiveTrackingService extends Service {
             body.put("recorded_at", iso(loc.getTime()));
             body.put("repeat", repeat);
             body.put("mode", "live");
+            if (MockLocation.of(loc)) body.put("mock", true);
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
 
             c = (HttpURLConnection) new URL(base + "/api/tracking/ping").openConnection();

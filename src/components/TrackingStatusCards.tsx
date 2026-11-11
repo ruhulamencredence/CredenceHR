@@ -21,7 +21,7 @@ import { apiUrl } from '../lib/api';
 import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 
 interface TrackingRow {
-  employee_pk: number;
+  employee_pk: number | null;
   employee_id: string;
   name: string;
   designation: string;
@@ -461,7 +461,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                   </div>
                   <div className="space-y-1">
                     {g.list.map((r) => (
-                      <div key={r.employee_pk} className="flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg">
+                      <div key={r.employee_pk ?? `u${r.user_id}`} className="flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg">
                         {canSend && (
                           <input
                             type="checkbox"

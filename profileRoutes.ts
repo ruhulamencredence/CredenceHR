@@ -234,7 +234,7 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
             userId: Number(s.id),
             type: "profile_photo",
             title: "New Profile Photo to Approve",
-            message: `${req.user.name || "Someone"} uploaded a new profile photo. Approve or reject it in Admin Panel → Users → Photo approvals.`,
+            message: `${req.user.name || "Someone"} uploaded a new profile photo. Tap to approve or reject it.`,
             relatedType: "profile_photo_request",
             relatedId: id
           }).catch(() => {});

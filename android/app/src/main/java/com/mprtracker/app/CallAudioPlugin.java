@@ -1,6 +1,11 @@
 package com.mprtracker.app;
 
+import android.app.NotificationManager;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.provider.Settings;
+import androidx.core.app.NotificationManagerCompat;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
@@ -29,18 +34,22 @@ public class CallAudioPlugin extends Plugin {
     // (IncomingCall.java -> MainActivity), waiting for the page to take it.
     private static String pendingCallId;
     private static String pendingAction;
+    private static JSObject pendingGroup;
     private static long pendingAt;
     private static CallAudioPlugin instance;
 
-    static void setPendingCall(String callId, String action) {
+    // group: { roomId, title, kind } for a group call (GroupCallLayer.tsx), else null.
+    static void setPendingCall(String callId, String action, JSObject group) {
         pendingCallId = callId;
         pendingAction = action;
+        pendingGroup = group;
         pendingAt = System.currentTimeMillis();
         CallAudioPlugin p = instance;
         if (p != null) {
             JSObject d = new JSObject();
             d.put("callId", callId);
             d.put("action", action);
+            if (group != null) d.put("group", group);
             p.notifyListeners("callAction", d);
         }
     }
@@ -50,18 +59,97 @@ public class CallAudioPlugin extends Plugin {
         instance = this;
     }
 
-    // { callId, action: 'accept' | 'open' } once, or {} when there is none
-    // (older than a minute is stale: that call has ended by now).
+    // { callId, action: 'accept' | 'open', group? } once, or {} when there is
+    // none (older than a minute is stale: that call has ended by now).
+    // { group: true } takes only a group call, otherwise only a one-to-one
+    // call — CallLayer and GroupCallLayer each take their own.
     @PluginMethod
     public void takePendingCall(PluginCall call) {
+        boolean wantGroup = Boolean.TRUE.equals(call.getBoolean("group", false));
         JSObject r = new JSObject();
-        if (pendingCallId != null && System.currentTimeMillis() - pendingAt < 60 * 1000) {
-            r.put("callId", pendingCallId);
-            r.put("action", pendingAction);
+        if (pendingCallId != null && (pendingGroup != null) == wantGroup) {
+            if (System.currentTimeMillis() - pendingAt < 60 * 1000) {
+                r.put("callId", pendingCallId);
+                r.put("action", pendingAction);
+                if (pendingGroup != null) r.put("group", pendingGroup);
+            }
+            pendingCallId = null;
+            pendingAction = null;
+            pendingGroup = null;
         }
-        pendingCallId = null;
-        pendingAction = null;
         call.resolve(r);
+    }
+
+    // The page rings (app open): the phone's own ringtone and vibration
+    // instead of the page's beeps (CallRinger: follows Silent / Vibrate / DND).
+    @PluginMethod
+    public void startRinging(PluginCall call) {
+        CallRinger.start(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopRinging(PluginCall call) {
+        // Not while the phone's own call screen is ringing for a call.
+        if (IncomingCallService.current() == null) CallRinger.stop();
+        call.resolve();
+    }
+
+    // What a phone needs for calls to ring with the app closed (Chat ->
+    // "Calls on this phone"): notifications allowed, the full-screen call
+    // screen allowed (Android 14+), "Display over other apps" (call screen
+    // while the phone is in use) and no battery optimisation.
+    @PluginMethod
+    public void getCallSetup(PluginCall call) {
+        Context c = getContext();
+        JSObject r = new JSObject();
+        r.put("notifications", NotificationManagerCompat.from(c).areNotificationsEnabled());
+        boolean full = true;
+        if (Build.VERSION.SDK_INT >= 34) {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            full = nm == null || nm.canUseFullScreenIntent();
+        }
+        r.put("fullScreen", full);
+        r.put("overlay", IncomingCallService.canDrawOverlays(c));
+        boolean battery = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            battery = pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
+        }
+        r.put("battery", battery);
+        call.resolve(r);
+    }
+
+    // which: notifications | fullScreen | overlay | battery — that setting's page.
+    @PluginMethod
+    public void openCallSetting(PluginCall call) {
+        Context c = getContext();
+        String which = call.getString("which", "");
+        Uri pkg = Uri.parse("package:" + c.getPackageName());
+        Intent i;
+        if ("notifications".equals(which) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, c.getPackageName());
+        } else if ("fullScreen".equals(which) && Build.VERSION.SDK_INT >= 34) {
+            i = new Intent("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT", pkg);
+        } else if ("overlay".equals(which) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg);
+        } else if ("battery".equals(which) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkg);
+        } else {
+            i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg);
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            c.startActivity(i);
+        } catch (Exception e) {
+            Intent app = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                c.startActivity(app);
+            } catch (Exception ignored) {
+                // no settings app
+            }
+        }
+        call.resolve();
     }
 
     // A video call is on (start with video .. stop): leaving the app then
@@ -92,11 +180,22 @@ public class CallAudioPlugin extends Plugin {
         }
     }
 
-    // The page rings / answered by itself: take the phone's call screen away.
+    // The page rings / answered / ended it: take the phone's call screen away.
+    // ringingHere (the page got the call and rings): only while the app is
+    // on screen — a page left in the background (its connection still up)
+    // must not take the call screen away; it rings there instead.
     @PluginMethod
     public void cancelIncoming(PluginCall call) {
-        IncomingCall.cancel(getContext(), call.getString("callId"));
+        boolean ringingHere = Boolean.TRUE.equals(call.getBoolean("ringingHere", false));
+        if (!ringingHere || MainActivity.isOnScreen()) IncomingCall.cancel(getContext(), call.getString("callId"));
         call.resolve();
+    }
+
+    // The app came on screen while its call screen was ringing: the page
+    // rings from now on (CallLayer / GroupCallLayer "ringHandover").
+    static void ringHandover() {
+        CallAudioPlugin p = instance;
+        if (p != null) p.notifyListeners("ringHandover", new JSObject());
     }
 
     private AudioManager audio;
