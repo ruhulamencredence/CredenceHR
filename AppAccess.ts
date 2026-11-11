@@ -39,7 +39,7 @@ export const APP_FLAG_KEYS = [
   "can_handle_assistant_support", "can_use_calls", "can_use_disappearing", "can_use_chat", "can_use_mail", "can_view_mail_directory",
   "can_use_mail_groups", "can_receive_material", "can_return_dispatch", "can_give_feedback", "can_use_fingerprint",
   "can_view_roster", "can_take_break", "can_save_ride_places", "can_update_check_out", "can_add_adhoc_approver",
-  "can_use_assistant_voice", "can_sign_documents", "can_view_payslip", "can_request_items", "can_email_reports",
+  "can_use_assistant_voice", "can_sign_documents", "can_view_payslip", "can_request_items", "can_email_reports", "can_view_my_ot", "can_approve_team_ot",
   // Leave Application's older companion switch, on and off with it.
   "can_view_my_leave"
 ] as const;

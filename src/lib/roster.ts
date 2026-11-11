@@ -16,6 +16,10 @@ export interface Shift {
   extreme_grace_minutes: number | null;
   color: string;
   crosses_midnight: boolean;
+  // Overtime: hours the salary pays for (null = the whole shift) and whether
+  // the rest is paid as OT or is part of the salary.
+  normal_minutes?: number | null;
+  extra_mode?: 'ot' | 'salary';
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');

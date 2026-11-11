@@ -40,6 +40,7 @@ import { PayslipManagementPanel } from './PayslipManagementPanel';
 import { LoanAdvanceManagementPanel } from './LoanAdvanceManagementPanel';
 import { PayrollApprovalPanel } from './PayrollApprovalPanel';
 import { PayrollActivityLog } from './PayrollActivityLog';
+import { OtRulesPanel } from './OtRulesPanel';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
 import { SelfBodySkeleton } from './SelfPageSkeleton';
@@ -583,7 +584,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   usePayrollAmounts(token);
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'approval' | 'activity'
+    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'otRules' | 'approval' | 'activity'
   >(() => {
     // A Loan / Advance alert opens Loans & Advances straight away.
     try {
@@ -629,6 +630,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
     bonus: 'Bonus & Incentive',
     adjustments: 'Allowance & Adjustment',
     setup: 'Salary Setup',
+    otRules: 'OT Rules',
     approval: 'Approval',
     activity: 'Activity Log'
   };
@@ -645,12 +647,15 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   // Dashboard, the list, Approval and the log — no tab that changes salaries.
   const [canSeeLog, setCanSeeLog] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  // Payroll -> OT Rules: only for the "ot_rules" layer.
+  const [canOtRules, setCanOtRules] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         setCanSeeLog(!!d?.access_log);
         setCanEdit(!!d?.edit);
+        setCanOtRules(!!d?.ot_rules);
       })
       .catch(() => {});
   }, [authHeaders]);
@@ -802,6 +807,16 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
               Salary Setup
             </button>
           )}
+          {canOtRules && (
+            <button
+              onClick={() => setActiveTab('otRules')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'otRules' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              OT Rules
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('approval')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -824,6 +839,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
 
         {activeTab === 'list' ? (
           <PayrollListPanel token={token} canEdit={canEdit} />
+        ) : activeTab === 'otRules' && canOtRules ? (
+          <OtRulesPanel token={token} />
         ) : !canEdit && ['attendance', 'payslips', 'loans', 'bonus', 'adjustments', 'setup'].includes(activeTab) ? (
           <PayrollApprovalPanel token={token} monthYear={monthYear} />
         ) : activeTab === 'attendance' ? (

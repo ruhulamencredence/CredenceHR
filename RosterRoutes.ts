@@ -124,6 +124,11 @@ export interface RosterShift {
   extreme_grace_minutes: number | null;
   color: string;
   crosses_midnight: boolean;
+  // Overtime (OvertimeRoutes.ts): the hours the salary pays for (null = the
+  // whole shift), and whether the rest of the shift is paid as OT ("ot") or
+  // is part of the salary ("salary").
+  normal_minutes: number | null;
+  extra_mode: "ot" | "salary";
 }
 export interface RosterDay {
   is_off: boolean;
@@ -159,7 +164,9 @@ export function shiftFromRow(r: any): RosterShift {
     grace_minutes: r.grace_minutes == null ? null : Number(r.grace_minutes),
     extreme_grace_minutes: r.extreme_grace_minutes == null ? null : Number(r.extreme_grace_minutes),
     color: String(r.color || "#7F00FF"),
-    crosses_midnight: minutesOf(end) <= minutesOf(start)
+    crosses_midnight: minutesOf(end) <= minutesOf(start),
+    normal_minutes: r.normal_minutes == null ? null : Number(r.normal_minutes),
+    extra_mode: r.extra_mode === "salary" ? "salary" : "ot"
   };
 }
 
@@ -318,7 +325,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
 
   async function companyEmployees(): Promise<any[]> {
     // Only what the roster uses — not every column (addresses…) of every Employee.
-    const rows: any[] = (await queryDB("SELECT id, name, employee_id, designation, department, branch_id, is_active, company_id FROM all_employees")) || [];
+    const rows: any[] = (await queryDB("SELECT id, name, employee_id, designation, department, branch_id, is_active, company_id, gets_ot FROM all_employees")) || [];
     return rows.filter((e) => Number(e.company_id ?? 1) === activeCompanyId());
   }
 
@@ -339,7 +346,13 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       if (v !== null && (!Number.isFinite(v) || v < 0 || v > 600)) throw bad(`${label} must be between 0 and 600.`);
     }
     if (grace !== null && extreme !== null && extreme <= grace) throw bad("Extreme Delay minutes must be more than the grace minutes.");
-    return { name, code, start_time: hms(start), end_time: hms(end), grace_minutes: grace, extreme_grace_minutes: extreme, color };
+    // Overtime: normal hours (null = the whole shift) and what the rest is.
+    let len = minutesOf(hms(end)) - minutesOf(hms(start));
+    if (len <= 0) len += 1440;
+    const normal = num(body?.normal_minutes);
+    if (normal !== null && (!Number.isFinite(normal) || normal <= 0 || normal > len)) throw bad(`Normal hours must be more than 0 and at most the shift's ${Math.round((len / 60) * 100) / 100} h.`);
+    const extraMode = body?.extra_mode === "salary" ? "salary" : "ot";
+    return { name, code, start_time: hms(start), end_time: hms(end), grace_minutes: grace, extreme_grace_minutes: extreme, color, normal_minutes: normal !== null && normal < len ? normal : null, extra_mode: extraMode };
   }
 
   // ---- shifts ----
@@ -347,7 +360,9 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
     try {
       const scope = await scopeOf(req.user);
       const canManageRoster = await hasModuleLayer(req.user, "duty_roster", "roster_manage");
-      res.json({ can_manage: canManageRoster, can_edit_shifts: canManageRoster && !scope, departments: scope, shifts: await loadShifts(queryDB), inactive: ((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)) });
+      // Overtime / guard tabs (OvertimeRoutes.ts, GuardRoutes.ts), each behind its own layer.
+      const [canOtApprove, canGuardPosts] = await Promise.all([hasModuleLayer(req.user, "duty_roster", "ot_approve"), hasModuleLayer(req.user, "duty_roster", "guard_posts")]);
+      res.json({ can_manage: canManageRoster, can_edit_shifts: canManageRoster && !scope, can_ot_approve: canOtApprove, can_guard_posts: canGuardPosts, departments: scope, shifts: await loadShifts(queryDB), inactive: ((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)) });
     } catch (err) {
       fail(res, err);
     }
@@ -359,8 +374,8 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       const dup = (await loadShifts(queryDB, true)).find((x) => x.code === s.code);
       if (dup) throw bad(`Code ${s.code} is already used by "${dup.name}".`);
       const r: any = await queryDB(
-        "INSERT INTO duty_shifts (name, code, start_time, end_time, grace_minutes, extreme_grace_minutes, color, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [s.name, s.code, s.start_time, s.end_time, s.grace_minutes, s.extreme_grace_minutes, s.color, req.user.id]
+        "INSERT INTO duty_shifts (name, code, start_time, end_time, grace_minutes, extreme_grace_minutes, color, normal_minutes, extra_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [s.name, s.code, s.start_time, s.end_time, s.grace_minutes, s.extreme_grace_minutes, s.color, s.normal_minutes, s.extra_mode, req.user.id]
       );
       res.json({ id: r.insertId });
     } catch (err) {
@@ -378,8 +393,8 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       if (dup) throw bad(`Code ${s.code} is already used by "${dup.name}".`);
       const isActive = req.body?.is_active === undefined ? 1 : req.body.is_active ? 1 : 0;
       await queryDB(
-        "UPDATE duty_shifts SET name = ?, code = ?, start_time = ?, end_time = ?, grace_minutes = ?, extreme_grace_minutes = ?, color = ?, is_active = ? WHERE id = ?",
-        [s.name, s.code, s.start_time, s.end_time, s.grace_minutes, s.extreme_grace_minutes, s.color, isActive, id]
+        "UPDATE duty_shifts SET name = ?, code = ?, start_time = ?, end_time = ?, grace_minutes = ?, extreme_grace_minutes = ?, color = ?, normal_minutes = ?, extra_mode = ?, is_active = ? WHERE id = ?",
+        [s.name, s.code, s.start_time, s.end_time, s.grace_minutes, s.extreme_grace_minutes, s.color, s.normal_minutes, s.extra_mode, isActive, id]
       );
       res.json({ success: true });
     } catch (err) {
@@ -422,13 +437,21 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       const scope = await scopeOf(req.user);
       const active = employees.filter((e) => Number(e.is_active ?? 1) === 1 && (!scope || scope.includes(String(e.department || ""))));
       const raw: any[] =
-        (await queryDB("SELECT employee_id, roster_date, shift_id, is_off, note FROM duty_roster WHERE roster_date BETWEEN ? AND ?", [from, to]).catch(() => [])) || [];
+        (await queryDB("SELECT employee_id, roster_date, shift_id, is_off, note, planned_ot_minutes, post_id FROM duty_roster WHERE roster_date BETWEEN ? AND ?", [from, to]).catch(() =>
+          queryDB("SELECT employee_id, roster_date, shift_id, is_off, note FROM duty_roster WHERE roster_date BETWEEN ? AND ?", [from, to]).catch(() => [])
+        )) || [];
       const branchName = new Map<number, string>((branches || []).map((b: any) => [Number(b.id), b.branch_name]));
-      const byEmp = new Map<number, Record<string, { shift_id: number | null; is_off: boolean; note: string | null }>>();
+      const byEmp = new Map<number, Record<string, { shift_id: number | null; is_off: boolean; note: string | null; planned_ot_minutes: number; post_id: number | null }>>();
       for (const r of raw) {
         const id = Number(r.employee_id);
         if (!byEmp.has(id)) byEmp.set(id, {});
-        byEmp.get(id)![ymd(r.roster_date)] = { shift_id: r.shift_id == null ? null : Number(r.shift_id), is_off: Number(r.is_off) === 1, note: r.note || null };
+        byEmp.get(id)![ymd(r.roster_date)] = {
+          shift_id: r.shift_id == null ? null : Number(r.shift_id),
+          is_off: Number(r.is_off) === 1,
+          note: r.note || null,
+          planned_ot_minutes: Number(r.planned_ot_minutes || 0),
+          post_id: r.post_id == null ? null : Number(r.post_id)
+        };
       }
       const holidayCells = (g: HolidayAppliesTo) => {
         const out: Record<string, { title: string; type: string }> = {};
@@ -450,6 +473,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
             department: e.department || null,
             branch: e.branch_id != null ? branchName.get(Number(e.branch_id)) || null : null,
             group: groups.get(Number(e.id)) || "head_office",
+            gets_ot: Number(e.gets_ot) === 1,
             days: byEmp.get(Number(e.id)) || {}
           }))
           .sort((a, b) => String(a.department || "").localeCompare(String(b.department || "")) || String(a.name).localeCompare(String(b.name)))
@@ -472,7 +496,12 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       const shifts = new Map<number, RosterShift>((await loadShifts(queryDB)).map((s) => [s.id, s]));
       const inactive = new Set<number>(((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)));
       const seen = new Set<string>();
-      const sets: [number, string, number | null, number, string | null][] = [];
+      const KEEP = -1;
+      const sets: [number, string, number | null, number, string | null, number, number | null][] = [];
+      // Guard posts this company has (GuardRoutes.ts), for a cell's post.
+      const postIds = new Set<number>(
+        ((await queryDB("SELECT id, company_id FROM guard_posts").catch(() => [])) || []).filter((p: any) => Number(p.company_id ?? 1) === activeCompanyId()).map((p: any) => Number(p.id))
+      );
       const clears: [number, string][] = [];
       for (const c of cells) {
         const employeeId = Number(c?.employee_id);
@@ -490,8 +519,17 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
         if (shiftId !== null && !shifts.has(shiftId)) throw bad("One of the shifts doesn't exist.");
         if (shiftId !== null && inactive.has(shiftId)) throw bad(`Shift "${shifts.get(shiftId)!.name}" is switched off — switch it on first.`);
         const note = c?.note ? String(c.note).trim().slice(0, 255) || null : null;
+        // OT set for the day (approved in advance, OvertimeRoutes.ts) and the
+        // guard post the shift is at.
+        // A cell sent without them keeps what it had (KEEP, filled in below).
+        const hasPlanned = c && Object.prototype.hasOwnProperty.call(c, "planned_ot_minutes");
+        const planned = !hasPlanned ? KEEP : c.planned_ot_minutes == null || c.planned_ot_minutes === "" ? 0 : Math.round(Number(c.planned_ot_minutes));
+        if (planned !== KEEP && (!Number.isFinite(planned) || planned < 0 || planned > 960)) throw bad("OT for a day must be between 0 and 16 hours.");
+        const hasPost = c && Object.prototype.hasOwnProperty.call(c, "post_id");
+        const postId = !hasPost ? KEEP : c.post_id == null || c.post_id === "" ? null : Number(c.post_id);
+        if (postId !== null && postId !== KEEP && !postIds.has(postId)) throw bad("One of the posts doesn't exist.");
         if (!isOff && shiftId === null) clears.push([employeeId, date]);
-        else sets.push([employeeId, date, isOff ? null : shiftId, isOff ? 1 : 0, note]);
+        else sets.push([employeeId, date, isOff ? null : shiftId, isOff ? 1 : 0, note, planned, isOff ? null : postId]);
       }
       // What changes for whom, for their alert (only real changes).
       const touchedIds = [...new Set([...sets.map((s) => s[0]), ...clears.map((c) => c[0])])];
@@ -508,11 +546,27 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       }
       for (const [id, d] of clears) if (before.get(id, d)) markChange(id, d);
 
+      // Fill in KEEP from the rows as they are.
+      if (sets.some((x) => x[5] === KEEP || x[6] === KEEP)) {
+        const ids = [...new Set(sets.map((x) => x[0]))];
+        const ds = sets.map((x) => x[1]).sort();
+        const cur: any[] =
+          (await queryDB(
+            `SELECT employee_id, roster_date, planned_ot_minutes, post_id FROM duty_roster WHERE roster_date BETWEEN ? AND ? AND employee_id IN (${ids.map(() => "?").join(",")})`,
+            [ds[0], ds[ds.length - 1], ...ids]
+          ).catch(() => [])) || [];
+        const curBy = new Map<string, any>(cur.map((r) => [`${r.employee_id}|${ymd(r.roster_date)}`, r]));
+        for (const x of sets) {
+          const was = curBy.get(`${x[0]}|${x[1]}`);
+          if (x[5] === KEEP) x[5] = Number(was?.planned_ot_minutes || 0);
+          if (x[6] === KEEP) x[6] = x[3] === 1 || was?.post_id == null ? null : Number(was.post_id);
+        }
+      }
       for (let i = 0; i < sets.length; i += 300) {
         const chunk = sets.slice(i, i + 300);
         await queryDB(
-          `INSERT INTO duty_roster (employee_id, roster_date, shift_id, is_off, note, updated_by) VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?)").join(", ")}
-           ON DUPLICATE KEY UPDATE shift_id = VALUES(shift_id), is_off = VALUES(is_off), note = VALUES(note), updated_by = VALUES(updated_by)`,
+          `INSERT INTO duty_roster (employee_id, roster_date, shift_id, is_off, note, planned_ot_minutes, post_id, updated_by) VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}
+           ON DUPLICATE KEY UPDATE shift_id = VALUES(shift_id), is_off = VALUES(is_off), note = VALUES(note), planned_ot_minutes = VALUES(planned_ot_minutes), post_id = VALUES(post_id), updated_by = VALUES(updated_by)`,
           chunk.flatMap((s) => [...s, req.user.id])
         );
       }

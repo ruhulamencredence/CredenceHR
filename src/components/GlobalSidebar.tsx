@@ -9,7 +9,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, Timer, TimerReset, PenLine, ReceiptText,
   Coffee, MessageSquareHeart, PlayCircle
 } from 'lucide-react';
 import { openTutorials, useTutorialsState } from '../lib/tutorials';
@@ -83,7 +83,7 @@ interface GlobalSidebarProps {
   onGoToBillClaims: (target: 'movementClaims' | 'billClaim' | 'noticeBoard') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myOt' | 'teamOt' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
   // Admin Panel's own Check In/Out / Bill Claim review tabs —
   // separate feature from onGoToBillClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -416,6 +416,16 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_roster) {
     selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster'), href: selfHref('myRoster') });
   }
+  // My OT (MyOvertime.tsx) — own overtime. users.can_view_my_ot, off until
+  // turned on in Module Access.
+  if (isSuperAdmin || !!user.can_view_my_ot) {
+    selfServiceItems.push({ key: 'myOt', label: 'My OT', icon: Timer, onClick: () => onGoToSelfServiceTab('myOt'), href: selfHref('myOt') });
+  }
+  // Team OT (OtApprovalPanel.tsx) — approve the team's overtime as its
+  // supervisor. users.can_approve_team_ot, off until turned on.
+  if (isSuperAdmin || !!user.can_approve_team_ot) {
+    selfServiceItems.push({ key: 'teamOt', label: 'Team OT', icon: TimerReset, onClick: () => onGoToSelfServiceTab('teamOt'), href: selfHref('teamOt') });
+  }
   // Break Time (MyBreak.tsx) — start / end a break. users.can_take_break,
   // off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_take_break) {
@@ -725,7 +735,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const selfGroups = makeGroups([
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
-    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myBreak') },
+    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myOt', 'teamOt', 'myBreak') },
     {
       key: 'g_requests',
       label: 'Requests & Claims',

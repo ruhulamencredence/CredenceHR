@@ -49,6 +49,7 @@ import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { activeCompanyId } from "./companyContext";
 import { isMailerConfigured, sendMail } from "./mailer";
 import { computePayLines, savePayLines, loadPayLines } from "./PayrollItemsRoutes";
+import { payableOt } from "./OvertimeRoutes";
 
 interface PayrollRouteDeps {
   authenticateToken: any;
@@ -552,7 +553,7 @@ function buildPayslipEmailHtml(record: any): string {
           <td style="${cell}">Tax Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.tax_deduction)}</td>
         </tr>
         <tr>
-          <td style="${cell}">Overtime</td><td style="${cell} text-align:right;">${fmtMoney(record.overtime_amount)}</td>
+          <td style="${cell}">Overtime${Number(record.overtime_hours) > 0 && Number(record.overtime_amount) > 0 ? ` (${Number(record.overtime_hours)} h × ${fmtMoney(Math.round((Number(record.overtime_amount) / Number(record.overtime_hours)) * 100) / 100)})` : ""}</td><td style="${cell} text-align:right;">${fmtMoney(record.overtime_amount)}</td>
           <td style="${cell}">Provident Fund</td><td style="${cell} text-align:right;">${fmtMoney(record.pf_deduction)}</td>
         </tr>
         <tr>
@@ -3307,7 +3308,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         return n;
       };
 
+      // Overtime approved for the salary month (OvertimeRoutes.ts): hours,
+      // rate and amount fill in by themselves; HR may change them, with a
+      // reason (generate-bulk).
+      const otByEmployee = await payableOt(queryDB, monthStart, monthEnd, employees.map((e: any) => Number(e.id))).catch(() => new Map());
+      let otPendingTotal = 0;
+      for (const v of otByEmployee.values()) otPendingTotal += v.pending;
+
       const result = employees.map((e: any) => {
+        const ot = otByEmployee.get(Number(e.id));
         // has_attendance_data must mean "we actually found at least one
         // present day for this person", not just "their pin is registered
         // somewhere in the system" — pinToUserId.has(own pin) was always
@@ -3352,7 +3361,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           absent_days: hasAttendanceData ? absent : 0,
           leave_days: leave,
           lwp_days: lwp,
-          overtime_hours: 0,
+          overtime_hours: ot ? ot.hours : 0,
+          overtime_rate: ot ? ot.rate : 0,
+          overtime_amount: ot ? ot.amount : 0,
+          ot_from_approval: !!ot,
+          ot_pending: ot ? ot.pending : 0,
+          ot_normal_minutes: ot ? ot.normal_minutes : 0,
+          ot_off_minutes: ot ? ot.off_minutes : 0,
+          ot_normal_rate: ot ? ot.normal_rate : 0,
+          ot_off_rate: ot ? ot.off_rate : 0,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,
           extreme_late_count: extremeLateCount,
@@ -3368,6 +3385,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         month_year: monthYear,
         period_start: monthStart,
         period_end: monthEnd,
+        ot_pending_total: otPendingTotal,
         days_in_month: daysInMonth,
         working_days: workingDaysDisplay,
         late_policy: {
@@ -3531,6 +3549,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const rows: any[] = Array.isArray(req.body?.employees) ? req.body.employees : [];
       const method = typeof req.body?.payment_method === "string" && req.body.payment_method.trim() ? req.body.payment_method.trim().slice(0, 50) : "Bank Transfer";
 
+      // Overtime as approved (OvertimeRoutes.ts) — a row that pays other
+      // hours or another amount needs a reason, kept in ot_payroll_changes.
+      const otPeriod = await getSalaryPeriod(monthYear);
+      const otSource = await payableOt(queryDB, otPeriod.start, otPeriod.end, rows.map((r: any) => Number(r?.employee_id)).filter(Boolean)).catch(() => new Map());
+
       const results = [];
       for (const row of rows) {
         const employeeId = Number(row?.employee_id);
@@ -3582,6 +3605,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays });
           if (daysProblem) {
             results.push({ employee_id: employeeId, success: false, error: daysProblem });
+            continue;
+          }
+          const otWas = otSource.get(employeeId) || { hours: 0, amount: 0 };
+          const otChanged = Math.abs(otHours - otWas.hours) > 0.009 || Math.abs(otAmount - otWas.amount) > 0.009;
+          const otReason = typeof row.ot_change_reason === "string" ? row.ot_change_reason.trim().slice(0, 500) : "";
+          if (otChanged && otReason.length < 3) {
+            results.push({ employee_id: employeeId, success: false, error: `Overtime changed from ${otWas.hours} h (approved) to ${otHours} h — give the reason.` });
             continue;
           }
           const note = typeof row.remarks === "string" ? row.remarks.trim().slice(0, 1000) : null;
@@ -3670,6 +3700,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           // Consume any staged bonus for this employee/month now that a
           // real run exists — prevents it from being offered/applied again.
           await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
+          if (otChanged) {
+            await queryDB(
+              "INSERT INTO ot_payroll_changes (employee_id, month_year, from_hours, to_hours, from_amount, to_amount, reason, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              [employeeId, monthYear, otWas.hours, otHours, otWas.amount, otAmount, otReason, req.user.id]
+            ).catch(() => {});
+          }
           results.push({ employee_id: employeeId, success: true, id: result.insertId, net_salary: netSalary, payment_split: paymentSplit });
         } catch (rowErr: any) {
           results.push({ employee_id: employeeId, success: false, error: rowErr?.code === "ER_DUP_ENTRY" ? "Payroll for this employee/month has already been generated." : (rowErr?.message || "Failed to generate payroll.") });

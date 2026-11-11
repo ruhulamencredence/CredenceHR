@@ -75,7 +75,10 @@ const EMPLOYEE_TABLES = new Set([
   "salary_adjustments",
   "salary_structures",
   "site_attendance_entries",
-  "duty_roster"
+  "duty_roster",
+  "ot_entries",
+  "ot_payroll_changes",
+  "guard_relief"
 ]);
 
 // Tables whose rows belong to a login (users.id).
@@ -144,6 +147,9 @@ export const OWN_TABLES = new Set([
   "payroll_batch_events",
   "payroll_access_log",
   "duty_shifts",
+  "ot_settings",
+  "ot_rates",
+  "guard_posts",
   "break_settings",
   "esign_settings",
   "esign_certificates"
@@ -193,6 +199,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["asset_requisition_events", ["requisition_id", "asset_requisitions"]],
   ["attendance_report_department_access", ["user_id", "users"]],
   ["duty_roster_department_access", ["user_id", "users"]],
+  ["guard_post_needs", ["post_id", "guard_posts"]],
   ["tracking_department_access", ["user_id", "users"]],
   ["tracking_employee_access", ["user_id", "users"]],
   ["budget_items", ["budget_id", "budgets"]],

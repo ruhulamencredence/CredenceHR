@@ -1,6 +1,6 @@
 # পরিকল্পনা: Overtime (OT) নিজে হিসাব, Roster-এ OT, Payroll — আর Security Guard
 
-অবস্থা: **চূড়ান্ত প্রস্তাব** — আগের ৩টা প্রশ্ন এখন system-এর setting; আপনার OK পেলে কাজ শুরু। তারিখ: 2026-11-11।
+অবস্থা: **তৈরি** (2026-11-11) — আগের ৩টা প্রশ্ন system-এর setting। কীভাবে চলে: `docs/architecture/02-application-workflow.md` → "Overtime (OT) আর Security Guard"। তারিখ: 2026-11-11।
 
 ## এখন কী আছে
 

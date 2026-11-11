@@ -213,6 +213,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>নতুন APK-এ এমন প্রতিটা point ধরা পড়ে (Android-এর mock-location চিহ্ন) — map-এ লাল "!", live board-এ লাল ring, route ও Stay Report-এ গোনা হয় না। Root করা ফোনে চিহ্নটাও লুকানো সম্ভব, তাই এটা সতর্কসংকেত, প্রমাণ নয়। Remote Attendance-এর Check In / Out-এও নতুন APK fake GPS ধরলে punch হয় না (সার্ভারও ফেরায়, চেষ্টা <code>attendance_mock_attempts</code>-এ থাকে); web browser ও পুরনো APK থেকে এই যাচাই হয় না।</td>
 <td>⚠️ আংশিক</td>
 </tr>
+<tr>
+<td>Overtime কে অনুমোদন দেন, কেউ কি অন্যের বা নিজের OT বাড়িয়ে নিতে পারে?</td>
+<td>কে দেবেন সেটা Payroll → OT Rules-এর setting (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর); সার্ভার প্রতিটা entry-তে দেখে — supervisor শুধু নিজের team-এর, Roster manager শুধু নিজের Duty Roster department-এর। হিসাবের চেয়ে বেশি ঘণ্টা অনুমোদন হয় না; সিদ্ধান্ত হওয়া দিন আর বদলায় না; Run Payroll-এ হাতে বদলালে কারণ লিখতে হয় ও থেকে যায়। নিয়ম বদলাতে <code>ot_rules</code>, অনুমোদনে <code>ot_approve</code> / Team OT সুইচ — সব শুরুতে বন্ধ (<code>OvertimeRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
 </tbody>
 </table>
 <h2 id="_3">গ. ডাটা সুরক্ষা</h2>

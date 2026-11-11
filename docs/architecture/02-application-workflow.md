@@ -847,6 +847,21 @@ Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amoun
 
 নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker `payroll_salary_amounts_grant`), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।
 
+## Overtime (OT) আর Security Guard
+
+OT নিজে হিসাব হয়, Roster-এ ঠিক হয়, যিনি অনুমোদন দেবেন তিনি setting-এ ঠিক করা, আর Payroll-এ নিজে বসে (`OvertimeCalc.ts`, `OvertimeRoutes.ts`, `GuardRoutes.ts`)।
+
+1. **Payroll → OT Rules** (layer `ot_rules`): rate-এর ধরন (শ্রম আইন: মূল ÷ ২০৮ × ২ / নির্দিষ্ট ৳ ঘণ্টায় / gross ভিত্তিক), গুণক, "কত মিনিট পর থেকে" (৩০), "গোল করা" (৩০), দিনে / মাসে সর্বোচ্চ, office-এর সময় (roster না থাকলে), **কে অনুমোদন দেবেন** (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর), পদ বা কর্মী ধরে নিজের rate, আর **কে OT পাবেন** (`all_employees.gets_ot`, শুরুতে সবার বন্ধ)।
+2. **Duty Roster → Shifts**: প্রতিটা shift-এ "স্বাভাবিক সময়" আর তার বেশি সময় "OT হিসেবে টাকা" নাকি "বেতনের মধ্যেই" (guard-এর ১২ ঘণ্টা: ৮ স্বাভাবিক + ৪ OT, বা ১২-ই বেতনে)। **Roster**-এ দিনের ঘরে "+১ / +২ ঘণ্টা OT" (আগে থেকে অনুমোদিত)।
+3. **হাজিরা সবার মতো**: app Check In / Out, office device বা Site Attendance muster — দিনের প্রথম In থেকে শেষ Out। রাতের shift পরের দিন সকালে শেষ হলেও যেদিন শুরু সেদিনের।
+4. **হিসাব** (`ot_entries`, তালিকা / Payroll খুললে নতুন করে, যে দিনের সিদ্ধান্ত হয়ে গেছে সেটা বদলায় না): কাজের দিনে shift শেষের পরের সময় (+ shift-এর ভেতরের OT), Off / ছুটির দিনে পুরো সময় (Off দিনের rate-এ)। Roster-এ আগে থেকে দেওয়া OT নিজে অনুমোদিত, বাকিটা অপেক্ষায়। "OT পান না" এমন কর্মীর বাড়তি সময় শুধু দেখায় (`not_eligible`), টাকা হয় না।
+5. **অনুমোদন**: Duty Roster → **OT Approval** (layer `ot_approve`) বা Self Service → **Team OT** (`users.can_approve_team_ot`)। Team Supervisor = Direct Supervisor (login আছে এমন) বা Site Attendance team-এর supervisor / backup — শুধু নিজের team; Roster manager = `ot_approve` আছে আর Duty Roster-এর department-এ পড়ে। যাঁর supervisor নেই তাঁর OT Roster manager-এর কাছে। টিক দিয়ে একসাথে Approve, ঘণ্টা কমানো, Reject। "দুজনই পরপর" হলে supervisor হ্যাঁ বললে Roster manager-এর কাছে যায়।
+6. **Payroll → Run Payroll**: অনুমোদিত ঘণ্টা, rate আর টাকা নিজে বসে (মাসের সর্বোচ্চ মেনে); অপেক্ষায় থাকলে সতর্কতা। হাতে বদলালে কারণ লিখতে হয় (`ot_payroll_changes`)। Payslip-এ "Overtime (১৮ h × ১১৫.৩৮)"।
+7. **Self Service → My OT** (`users.can_view_my_ot`): নিজের OT — ঘণ্টা ও অবস্থা, টাকা নয়।
+8. **Security Guard** — Duty Roster → **Guard Posts** (layer `guard_posts`): post আর কোন shift-এ কতজন লাগবে, সপ্তাহের coverage (খালি লাল), এক ক্লিকে relief (যিনি Off বা অন্য shift-এ; relief-এর সময় OT, অপেক্ষায়), আর ছক দিয়ে মাস ভরা (৬ দিন ১ Off / দিন-রাত প্রতি সপ্তাহ / ৪ দিন ৪ রাত ২ Off)। Guard-এর হাজিরার আলাদা কিছু নেই।
+
+পরীক্ষা: `docs/test-logs/2026-11-11/scripts/ot-*.{ts,mjs}` — হিসাব ১৭/১৭, API ৬৪/৬৪, browser ৩২/৩২।
+
 ## Admin Dashboard: Pending Attendance — একসাথে Approve
 
 Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে Check In/Out) আর **Pending Attendance Recon.** (হাজিরা সংশোধন) — দুটোতেই চাপলে একই popup খোলে (০ থাকলেও; "Nothing is waiting")। যে সারি এই অ্যাকাউন্ট approve করতে পারে, শুধু তার পাশে tick box; উপরে "Select all you can approve", নিচে **Approve selected (n)** — জিজ্ঞেস করে (`confirmDialog`) তারপর একটা একটা করে approve করে, আর তালিকা নতুন করে আনে। কে পারে তা সার্ভার ঠিক করে (`/api/admin-dashboard/extras`, প্রতিটা সারির `approve`), একক approve-এর একই নিয়মে:

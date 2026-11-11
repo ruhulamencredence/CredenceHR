@@ -44,6 +44,7 @@ erDiagram
     date roster_date
     tinyint is_off
     varchar note
+    int planned_ot_minutes
   }
   duty_roster_department_access {
     int id PK
@@ -66,6 +67,27 @@ erDiagram
     datetime started_at
     datetime ended_at
     int minutes
+    varchar note
+  }
+  guard_post_needs {
+    int id PK
+    int post_id FK
+    int shift_id FK
+    int headcount
+  }
+  guard_posts {
+    int id PK
+    int company_id
+    varchar name
+    varchar site
+    tinyint is_active
+  }
+  guard_relief {
+    int id PK
+    int employee_id FK
+    int shift_id FK
+    date relief_date
+    int post_id
     varchar note
   }
   late_policy_settings {
@@ -95,6 +117,42 @@ erDiagram
     int battery_pct
     timestamp recorded_at
   }
+  ot_entries {
+    int id PK
+    int employee_id FK
+    int shift_id FK
+    date work_date
+    varchar day_kind
+    tinyint relief
+    datetime in_at
+  }
+  ot_payroll_changes {
+    int id PK
+    int employee_id FK
+    int user_id FK
+    varchar month_year
+    decimal from_hours
+    decimal to_hours
+    decimal from_amount
+  }
+  ot_rates {
+    int id PK
+    int employee_id FK
+    int company_id
+    varchar designation
+    varchar rate_type
+    decimal rate
+    decimal off_rate
+  }
+  ot_settings {
+    int id PK
+    int company_id
+    varchar rate_type
+    decimal divisor
+    decimal multiplier
+    decimal off_multiplier
+    decimal fixed_rate
+  }
   site_attendance_entries {
     int id PK
     int sheet_id FK
@@ -116,7 +174,7 @@ erDiagram
     tinyint require_location
     int backdate_days
     varchar reminder_time
-    tinyint use_app_checkin
+    int company_id
   }
   site_attendance_sheets {
     int id PK
@@ -224,9 +282,18 @@ erDiagram
   duty_shifts ||..o{ duty_roster : "shift_id"
   users ||--o{ duty_roster_department_access : "user_id"
   users ||--o{ employee_breaks : "user_id"
+  guard_posts ||--o{ guard_post_needs : "post_id"
+  duty_shifts ||..o{ guard_post_needs : "shift_id"
+  all_employees ||..o{ guard_relief : "employee_id"
+  duty_shifts ||..o{ guard_relief : "shift_id"
   all_employees ||--o{ late_waivers : "employee_id"
   users ||--o{ late_waivers : "waived_by"
   users ||--o{ location_pings : "user_id"
+  all_employees ||..o{ ot_entries : "employee_id"
+  duty_shifts ||..o{ ot_entries : "shift_id"
+  all_employees ||..o{ ot_payroll_changes : "employee_id"
+  users ||..o{ ot_payroll_changes : "user_id"
+  all_employees ||..o{ ot_rates : "employee_id"
   all_employees ||--o{ site_attendance_entries : "employee_id"
   site_attendance_sheets ||--o{ site_attendance_entries : "sheet_id"
   all_employees ||--o{ site_attendance_members : "employee_id"

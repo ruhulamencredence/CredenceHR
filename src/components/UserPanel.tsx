@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest, chatAllowed } from '../types';
-import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, CreditCard, PackageCheck, Coffee, MessageSquareHeart } from 'lucide-react';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, Timer, TimerReset, PenLine, ReceiptText, CreditCard, PackageCheck, Coffee, MessageSquareHeart } from 'lucide-react';
 import { canGiveFeedback } from './feedback/FeedbackPopup';
 import type { MoreItem } from './BottomNav';
 
@@ -108,7 +108,7 @@ interface UserPanelProps {
 
 export type SelfServiceTarget =
   | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
-  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | 'chat' | 'alerts' | 'erp360';
+  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myOt' | 'teamOt' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -1296,6 +1296,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_roster
             ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRoster') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_view_my_ot
+            ? [{ key: 'myOt', label: 'My OT', icon: Timer, iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myOt') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_approve_team_ot
+            ? [{ key: 'teamOt', label: 'Team OT', icon: TimerReset, iconBg: 'from-orange-300 to-orange-600 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('teamOt') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_take_break
             ? [{ key: 'myBreak', label: 'Break Time', icon: Coffee, iconBg: 'from-amber-300 to-amber-500 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => openSelfService('myBreak') }]

@@ -18,12 +18,17 @@ import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { shiftTime, type Shift } from '../lib/roster';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn, Toggle } from './mail/MailPopup';
+import { OtApprovalPanel } from './OtApprovalPanel';
+import { GuardPostsPanel } from './GuardPostsPanel';
 
 import { SearchSelect } from './Combobox';
 interface Cell {
   shift_id: number | null;
   is_off: boolean;
   note?: string | null;
+  // OT set for the day in advance (OvertimeRoutes.ts), minutes.
+  planned_ot_minutes?: number;
+  post_id?: number | null;
 }
 interface RosterEmployee {
   id: number;
@@ -33,6 +38,8 @@ interface RosterEmployee {
   department: string | null;
   branch: string | null;
   group: 'head_office' | 'project_site';
+  // Payroll -> OT Rules -> Who gets OT.
+  gets_ot?: boolean;
   days: Record<string, Cell>;
 }
 interface RosterData {
@@ -41,7 +48,7 @@ interface RosterData {
   holidays: Record<'head_office' | 'project_site', Record<string, { title: string; type: string }>>;
   employees: RosterEmployee[];
 }
-type Brush = { kind: 'shift'; id: number } | { kind: 'off' } | { kind: 'clear' };
+type Brush = { kind: 'shift'; id: number } | { kind: 'off' } | { kind: 'clear' } | { kind: 'ot'; minutes: number };
 
 // Rows on one page of the grid: a month for everyone at once is tens of
 // thousands of cells (800 people x 31 days), which made the page slow.
@@ -90,8 +97,9 @@ const RosterRow = React.memo(function RosterRow({
         <span className="flex items-center gap-2">
           {canManage && <input type="checkbox" checked={checked} onChange={() => onToggle(e.id)} aria-label={`Select ${e.name}`} className="accent-violet-600" />}
           <span className="min-w-0">
-            <span className="block font-semibold text-slate-900 truncate max-w-[11rem]" title={e.name}>
-              {e.name}
+            <span className="flex items-center gap-1 font-semibold text-slate-900 max-w-[11rem]" title={e.name}>
+              <span className="truncate">{e.name}</span>
+              {e.gets_ot && <span className="shrink-0 text-[9px] font-bold text-orange-700 bg-orange-50 rounded px-1" title="Gets OT (Payroll → OT Rules)">OT</span>}
             </span>
             <span className="block text-[10px] text-slate-500 truncate max-w-[11rem]">
               {[e.employee_code, e.department].filter(Boolean).join(' · ')}
@@ -125,6 +133,11 @@ const RosterRow = React.memo(function RosterRow({
               style={s ? { background: s.color } : undefined}
             >
               {s ? s.code : c?.is_off ? 'OFF' : hol ? (hol.type === 'weekend' ? 'W' : 'H') : '·'}
+              {!!c?.planned_ot_minutes && (
+                <sup className={`ml-0.5 text-[8px] font-bold ${s ? 'text-white/90' : 'text-orange-700'}`} title={`OT set for the day: ${c.planned_ot_minutes / 60} h`}>
+                  +{Math.round((c.planned_ot_minutes / 60) * 10) / 10}
+                </sup>
+              )}
             </div>
           </td>
         );
@@ -164,7 +177,8 @@ const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // The office week starts on Saturday.
 const WEEK_ORDER = [6, 0, 1, 2, 3, 4, 5];
 const SWATCHES = ['#7F00FF', '#2563EB', '#0891B2', '#059669', '#D97706', '#DC2626', '#DB2777', '#475569'];
-const sameCell = (a: Cell | undefined, b: Cell | undefined) => (a?.is_off || false) === (b?.is_off || false) && (a?.shift_id ?? null) === (b?.shift_id ?? null);
+const sameCell = (a: Cell | undefined, b: Cell | undefined) =>
+  (a?.is_off || false) === (b?.is_off || false) && (a?.shift_id ?? null) === (b?.shift_id ?? null) && (a?.planned_ot_minutes || 0) === (b?.planned_ot_minutes || 0);
 const isEmpty = (c: Cell | undefined) => !c || (!c.is_off && c.shift_id == null);
 
 // ---------------------------------------------------------------------------
@@ -179,17 +193,30 @@ const ShiftForm: React.FC<{ token: string; shift: Shift | null; active: boolean;
     grace_minutes: shift?.grace_minutes == null ? '' : String(shift.grace_minutes),
     extreme_grace_minutes: shift?.extreme_grace_minutes == null ? '' : String(shift.extreme_grace_minutes),
     color: shift?.color || SWATCHES[0],
-    is_active: active
+    is_active: active,
+    // Overtime: normal hours (empty = the whole shift) and what the rest is.
+    normal_hours: shift?.normal_minutes == null ? '' : String(Math.round((shift.normal_minutes / 60) * 100) / 100),
+    extra_mode: (shift?.extra_mode || 'ot') as 'ot' | 'salary'
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k: keyof typeof f, v: any) => setF((x) => ({ ...x, [k]: v }));
   const night = f.end_time <= f.start_time;
+  const spanHours = (() => {
+    const [a, b] = [f.start_time, f.end_time].map((t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)));
+    return Math.round((((b - a + 1440) % 1440 || 1440) / 60) * 100) / 100;
+  })();
   const save = async () => {
     setBusy(true);
     setError('');
     try {
-      const body = { ...f, grace_minutes: f.grace_minutes === '' ? null : Number(f.grace_minutes), extreme_grace_minutes: f.extreme_grace_minutes === '' ? null : Number(f.extreme_grace_minutes) };
+      const body = {
+        ...f,
+        grace_minutes: f.grace_minutes === '' ? null : Number(f.grace_minutes),
+        extreme_grace_minutes: f.extreme_grace_minutes === '' ? null : Number(f.extreme_grace_minutes),
+        normal_minutes: f.normal_hours === '' ? null : Math.round(Number(f.normal_hours) * 60),
+        extra_mode: f.extra_mode
+      };
       if (shift) await api(token, `/api/roster/shifts/${shift.id}`, { method: 'PUT', body });
       else await api(token, '/api/roster/shifts', { method: 'POST', body });
       onSaved();
@@ -252,6 +279,26 @@ const ShiftForm: React.FC<{ token: string; shift: Shift | null; active: boolean;
           </div>
         </div>
         <p className="text-[11px] text-slate-500">Leave a minutes box empty to use the Late Attendance Policy's (Payroll).</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls} htmlFor="shift-normal">Normal hours (overtime)</label>
+            <input id="shift-normal" type="number" min={0} step="0.5" className={inputCls} value={f.normal_hours} onChange={(e) => set('normal_hours', e.target.value)} placeholder={`Whole shift (${spanHours} h)`} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="shift-extra">Hours over normal</label>
+            <select id="shift-extra" className={inputCls} value={f.extra_mode} onChange={(e) => set('extra_mode', e.target.value)} disabled={f.normal_hours === '' || Number(f.normal_hours) >= spanHours}>
+              <option value="ot">Paid as OT</option>
+              <option value="salary">In the salary (no OT)</option>
+            </select>
+          </div>
+        </div>
+        {f.normal_hours !== '' && Number(f.normal_hours) < spanHours && (
+          <p className="liquid-glass-inset rounded-xl px-3 py-2 text-[11px] text-slate-600">
+            {f.extra_mode === 'ot'
+              ? `Every day on this shift earns ${Math.round((spanHours - Number(f.normal_hours)) * 100) / 100} h of OT (for people who get OT), approved by itself.`
+              : `The ${Math.round((spanHours - Number(f.normal_hours)) * 100) / 100} h over normal are part of the salary — only time after the shift ends can be OT.`}
+          </p>
+        )}
         <div>
           <label className={labelCls}>Colour</label>
           <div className="flex gap-2 flex-wrap">
@@ -343,7 +390,10 @@ const PatternForm: React.FC<{
 // Page
 // ---------------------------------------------------------------------------
 export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) => {
-  const [tab, setTab] = useState<'roster' | 'shifts'>('roster');
+  const [tab, setTab] = useState<'roster' | 'shifts' | 'ot' | 'guards'>('roster');
+  // OT Approval / Guard Posts tabs, each behind its own Duty Roster layer.
+  const [canOtApprove, setCanOtApprove] = useState(false);
+  const [canGuardPosts, setCanGuardPosts] = useState(false);
   const [month, setMonth] = useState(() => ymdOf(new Date()).slice(0, 7));
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [inactive, setInactive] = useState<Set<number>>(new Set());
@@ -365,8 +415,10 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   const painting = useRef(false);
 
   const loadShifts = useCallback(async () => {
-    const r = await api<{ can_manage: boolean; can_edit_shifts: boolean; departments: string[] | null; shifts: Shift[]; inactive: number[] }>(token, '/api/roster/shifts');
+    const r = await api<{ can_manage: boolean; can_edit_shifts: boolean; can_ot_approve?: boolean; can_guard_posts?: boolean; departments: string[] | null; shifts: Shift[]; inactive: number[] }>(token, '/api/roster/shifts');
     setCanEditShifts(!!r.can_edit_shifts);
+    setCanOtApprove(!!r.can_ot_approve);
+    setCanGuardPosts(!!r.can_guard_posts);
     setScope(r.departments || null);
     setShifts(r.shifts);
     setInactive(new Set(r.inactive));
@@ -450,9 +502,15 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
       return next;
     });
   };
-  const brushCell = (): Cell | null => (!brush ? null : brush.kind === 'shift' ? { shift_id: brush.id, is_off: false } : brush.kind === 'off' ? { shift_id: null, is_off: true } : { shift_id: null, is_off: false });
+  const brushCell = (cur: Cell | undefined): Cell | null => {
+    if (!brush) return null;
+    // OT for the day: only on a day that has a shift (or is Off), kept with it.
+    if (brush.kind === 'ot') return isEmpty(cur) ? null : { ...(cur as Cell), planned_ot_minutes: brush.minutes };
+    const keep = cur?.planned_ot_minutes ? { planned_ot_minutes: cur.planned_ot_minutes } : {};
+    return brush.kind === 'shift' ? { shift_id: brush.id, is_off: false, ...keep } : brush.kind === 'off' ? { shift_id: null, is_off: true, ...keep } : { shift_id: null, is_off: false };
+  };
   const paint = (e: RosterEmployee, d: string) => {
-    const c = brushCell();
+    const c = brushCell(cellOf(e, d));
     if (!canManage || !c) return;
     stage([[e, d, c]]);
   };
@@ -471,7 +529,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
     try {
       const cells = [...pending.entries()].map(([k, c]) => {
         const [id, date] = k.split('|');
-        return { employee_id: Number(id), date, shift_id: c.shift_id, is_off: c.is_off };
+        return { employee_id: Number(id), date, shift_id: c.shift_id, is_off: c.is_off, ...(c.planned_ot_minutes !== undefined ? { planned_ot_minutes: c.planned_ot_minutes } : {}) };
       });
       const r = await api<{ changed: number }>(token, '/api/roster/cells', { method: 'PUT', body: { cells } });
       setPending(new Map());
@@ -534,7 +592,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   }, []);
 
   const BrushChip: React.FC<{ b: Brush; label: React.ReactNode; color?: string; title?: string }> = ({ b, label, color, title }) => {
-    const on = brush && brush.kind === b.kind && (b.kind !== 'shift' || (brush as any).id === b.id);
+    const on = brush && brush.kind === b.kind && (b.kind !== 'shift' || (brush as any).id === b.id) && (b.kind !== 'ot' || (brush as any).minutes === b.minutes);
     return (
       <button
         type="button"
@@ -559,7 +617,9 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
             {(
               [
                 ['roster', 'Roster'],
-                ['shifts', 'Shifts']
+                ['shifts', 'Shifts'],
+                ...(canOtApprove ? ([['ot', 'OT Approval']] as const) : []),
+                ...(canGuardPosts ? ([['guards', 'Guard Posts']] as const) : [])
               ] as const
             ).map(([k, label]) => (
               <button key={k} type="button" onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>
@@ -581,7 +641,11 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
         </div>
       )}
 
-      {tab === 'shifts' ? (
+      {tab === 'ot' && canOtApprove ? (
+        <OtApprovalPanel token={token} />
+      ) : tab === 'guards' && canGuardPosts ? (
+        <GuardPostsPanel token={token} />
+      ) : tab === 'shifts' ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-slate-600 max-w-2xl">
@@ -605,6 +669,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                       <th className="px-4 py-2.5 font-semibold">Time</th>
                       <th className="px-4 py-2.5 font-semibold">Delay after</th>
                       <th className="px-4 py-2.5 font-semibold">Extreme Delay after</th>
+                      <th className="px-4 py-2.5 font-semibold">Normal · over normal</th>
                       {canEditShifts && <th className="px-4 py-2.5 font-semibold text-right">Actions</th>}
                     </tr>
                   </thead>
@@ -624,6 +689,18 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                         <td className="px-4 py-2.5 text-slate-700 whitespace-nowrap">{shiftTime(s)}</td>
                         <td className="px-4 py-2.5 text-slate-600">{s.grace_minutes == null ? 'Policy' : `${s.grace_minutes} min`}</td>
                         <td className="px-4 py-2.5 text-slate-600">{s.extreme_grace_minutes == null ? 'Policy' : `${s.extreme_grace_minutes} min`}</td>
+                        <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
+                          {s.normal_minutes == null ? (
+                            'Whole shift'
+                          ) : (
+                            <>
+                              {Math.round((s.normal_minutes / 60) * 100) / 100} h ·{' '}
+                              <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${s.extra_mode === 'salary' ? 'bg-slate-100 text-slate-600' : 'bg-violet-50 text-violet-700'}`}>
+                                {s.extra_mode === 'salary' ? 'In the salary' : 'Paid as OT'}
+                              </span>
+                            </>
+                          )}
+                        </td>
                         {canEditShifts && (
                           <td className="px-4 py-2.5 text-right whitespace-nowrap">
                             <button type="button" onClick={() => setEditing(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600" aria-label={`Edit ${s.name}`} title="Edit">
@@ -681,6 +758,12 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
               ))}
               <BrushChip b={{ kind: 'off' }} label="Off day" color="#94a3b8" />
               <BrushChip b={{ kind: 'clear' }} label={<><Eraser className="w-3.5 h-3.5" /> Clear</>} />
+              <span className="w-px h-5 bg-slate-200 mx-1" />
+              <span className="text-xs text-slate-500" title="OT set for the day is approved in advance (Payroll → OT Rules)">OT for the day:</span>
+              {[60, 120].map((m) => (
+                <BrushChip key={m} b={{ kind: 'ot', minutes: m }} label={`+${m / 60}h`} color="#ea580c" title="Paint on days that have a shift" />
+              ))}
+              <BrushChip b={{ kind: 'ot', minutes: 0 }} label="No OT" />
               {!activeShifts.length && (
                 <button type="button" onClick={() => setTab('shifts')} className="text-xs font-semibold text-violet-700 hover:underline">
                   Add a shift first

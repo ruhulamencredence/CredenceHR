@@ -44,3 +44,25 @@ month_compare, no salary_amounts; Superadmin for comparison.
 | HR Ops reports (`salary-amounts-hrops.mjs`): Gross Salary column offered and filled for payB only | 4/4 |
 | Screen (`salary-amounts-ui.mjs`): payC Dashboard and Payroll List (September) all *****, no ৳ figure, no edit buttons; payB real amounts | 9/9 |
 | Full QA suite (`tests/qa/run-all.sh`) | all green after `qa-group-hr.mjs` ticks Payroll's layers incl. salary_amounts for its Group HR (in both companies) — before that GH-05..07 were refused with "needs See salary amounts", i.e. the new rule working |
+
+# Overtime (OT) and security guards
+
+Test server :3200 on the test database. Test world: `scripts/ot-setup.sql` —
+Rafiq (office, Direct Supervisor Imran), Sadia (no OT), two guards without a
+login (Jahid, Rumana) marked by site supervisor Tanvir in Site Attendance,
+Nasrin = Roster manager (Duty Roster read, roster_manage, ot_approve,
+guard_posts; Payroll read, ot_rules, salary_amounts), Kamal = Duty Roster read
++ Payroll read only.
+
+| Check | Result |
+|---|---|
+| Calculation (`ot-calc-unit.ts`): office shift after 18:00, roster +2 h approved, under 30 min, guard 12 h = 4 h built in, 12 h "in the salary" = none, night shift over midnight, Off day relief, a night's morning check-out not counted as the next Off day, next day with nothing rostered, missing Out, day + night relief (24 h), "only approved" off, labour law / gross / fixed rates, exact amount (18 h → 2,076.92), monthly limit | 17/17 |
+| API end to end (`ot-api.mjs`): every new page / route refused without its own layer or switch; settings; shifts with normal hours; roster OT + posts; relief; app check-in + muster → worked out by itself; Team Supervisor sees only own team, Roster manager not when a supervisor exists; "both in turn" step 1 → step 2; reject; decided day never recalculated; Run Payroll filled (4 h × 288.46 = 1,153.85; guard 8 h × ৳100); amounts ***** without "See salary amounts"; changed OT without a reason refused, with a reason kept; My OT (no money); guard pattern, coverage, free list; a roster edit keeps post / OT | 64/64 |
+| Browser (`ot-ui.mjs`, screenshots kept outside the repo): OT Rules (save approver, Gets OT switch), Shifts list + form, roster grid (OT badge, +2, OT brush), OT Approval (select all, trim, confirm, approve), Guard Posts (coverage, relief popup with search, pattern popup), Kamal sees none of the tabs, Team OT and My OT on a phone (no sideways scroll), Run Payroll step 3 (filled from OT Approval, reason needed to go on), no page errors | 32/32 |
+
+Found and fixed while testing: a night guard's morning check-out was cut off
+when the next day had nothing rostered (plain office hours limited the
+window) — only a real roster shift / relief limits the neighbouring day now;
+the amount is worked from the exact rate (not the 2-decimal one); the Run
+Payroll wizard's Next button sat under the floating Chat button (wizard
+raised above it).

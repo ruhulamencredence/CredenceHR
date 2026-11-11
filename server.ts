@@ -66,6 +66,8 @@ import { registerCallRoutes, setupCallSocket, callAccess } from "./CallRoutes";
 import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
+import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
@@ -292,6 +294,8 @@ async function initDB() {
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    await ensureOvertimeSchema(dbPool);
+    await ensureGuardSchema(dbPool);
     // Employee Tracking: whom each account may see (TrackingScope.ts).
     await ensureTrackingScopeSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
@@ -440,7 +444,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "salary_amounts" = See salary amounts: without it every Payroll answer has
 // its amounts shown as ***** and nothing in Payroll can be changed
 // (payrollAmountMask.ts). Explicit-only — never part of the default below.
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review", "salary_amounts"] as const;
+// "ot_rules" = Payroll -> OT Rules: how overtime is paid (rate, who approves,
+// a designation's / person's own rate) and who gets OT (OvertimeRoutes.ts).
+// Explicit-only.
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review", "salary_amounts", "ot_rules"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -498,7 +505,10 @@ const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_setti
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
-const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
+// "ot_approve" = OT Approval: approve / trim / reject overtime as the Roster
+// manager (and as a Team Supervisor). "guard_posts" = guard posts, filling a
+// month from a pattern, relief (GuardRoutes.ts). Both explicit-only.
+const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage", "ot_approve", "guard_posts"] as const;
 // Break Time (BreakRoutes.ts): "read" = the report and who is on a break now;
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -3082,7 +3092,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3897,6 +3907,10 @@ async function startServer() {
   registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
   registerPoImportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
+  // Overtime: rules, daily calculation, approval, My OT (OvertimeRoutes.ts)
+  // and guard posts (GuardRoutes.ts).
+  registerOvertimeRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
+  registerGuardRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
   // Break Time (Self Service + Admin Panel module "break_time").
   registerBreakRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
   // SIM & ID card requisitions: Self Service, My Onboarding, HR Operations.
