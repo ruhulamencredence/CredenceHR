@@ -43,7 +43,7 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     // (Apple Glow, Classic, Minimal Mono) stays.
     id: 'orange',
     label: 'Orange (Default)',
-    swatch: '#F47920',
+    swatch: '#FF6700',
     gradient: [
       'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)',
       'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(255,190,140,0.5) 0%, rgba(255,190,140,0) 65%)',
