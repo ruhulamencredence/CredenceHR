@@ -852,13 +852,13 @@ Login পেজের illustration animation (`office-illustration.json`, ~৮�
 
 ## App খোলা: splash → প্রথম frame → launch animation
 
-App-এর icon কমলা (v3: `android/app/src/main/res/mipmap-*`, adaptive background `#F47920`; website / "Add to Home screen": `public/icons/*`, `public/favicon.png`)। অ্যাপের ভেতরের রং আগের মতো বেগুনি।
+App-এর icon "smile curve" (PR #2): উপরে কমলা অংশে CREDENCE, নিচে cream রঙের বাঁকা অংশে HR। Android: `android/app/src/main/res/mipmap-*` (adaptive foreground / background, round, legacy); website, "Add to Home screen" আর iPhone: `public/icons/app-180/192/512.png` আর `app-512-maskable.png` (manifest-এর maskable, চারপাশে ফাঁকা জায়গা রেখে), `public/favicon.png` (গোল), iOS app: `AppIcon-512@2x.png`। এগুলো design-এর ৩৩৬ px tile (`src/assets/boot/app-icon-336.webp`) থেকে বানানো, কোণগুলো পাশের রঙে ভরা (iPhone / Android নিজে কোণ গোল করে)। অ্যাপের ভেতরের রং আগের মতো বেগুনি।
 
-Android app খুললে তিনটা ধাপ, প্রথম দুটোর ছবি হুবহু এক, তাই মাঝখানে কিছু বদলায় না (আগের হালকা বেগুনি ঝলক নেই):
+Android app খুললে তিনটা ধাপ, প্রথম দুটোর ছবি হুবহু এক, তাই মাঝখানে কিছু বদলায় না:
 
-1. **Native splash** (`drawable*/splash.png`, সব density, port / land, night): কমলা gradient (160°, `#ff9238` → `#f47920` → `#e2600e`), মাঝখানে icon 112 dp, নিচ থেকে 124 dp উপরে 120 × 3 dp-এর খালি loading track (সাদা 25%)।
-2. **WebView-এর প্রথম frame** (`index.html` `#mpr-boot-spinner`): একই gradient, icon (WebP, HTML-এর ভেতরেই — কোনো request লাগে না) আর track, CSS px-এ একই মাপে। JS নামার আগেই দেখায়; website-এও লোড হওয়ার সময় এটাই দেখায়।
-3. **Launch animation** (`src/components/BootIntroAnimation.tsx`, শুধু native app — `shouldShowBootIntro()`): design-এর "Option B" — icon মিলিয়ে যায়, CREDENCE-এর অক্ষর একে একে ওঠে, ধূসর wedge D-এর ওপর উল্টে বসে, সাদা বিন্দু বড় হয়ে HR badge হয়, একটা ring ছড়ায়, প্রথম frame থেকেই একটা loading line ভরে, তারপর splash অ্যাপের ওপর থেকে মিলিয়ে যায় (৪.৩ সেকেন্ড)। একবারই চলে, প্রতি app চালুতে একবার (পাতা নিজে reload হলে — account বদল, নতুন deploy — আবার না; `sessionStorage` `chr_boot_intro_played`)। ছুঁলে সঙ্গে সঙ্গে বন্ধ। ফোনে "Reduce motion / Remove animations" চালু থাকলে কিছু নড়ে না: icon থেকে পুরো logo-তে আলতো বদল, তারপর মিলিয়ে যায় (১.২ সেকেন্ড)। অক্ষর, wedge, HR-এর ছবি `src/assets/boot/`-এ। animation চলার সময় নিচে অ্যাপ লোড হতে থাকে।
+1. **Native splash** (`drawable*/splash.png`, সব density, port / land, night): কমলা gradient, মাঝখানে নতুন icon। Android 12+ নিজের splash আঁকে (icon + রং): `styles.xml`-এর `windowSplashScreenBackground` `#F47920`, তাই সেটাও কমলা, সাদা ঝলক নেই।
+2. **WebView-এর প্রথম frame** (`index.html` `#mpr-boot-spinner`): একই gradient, icon (WebP, HTML-এর ভেতরেই — কোনো request লাগে না) animation-এর প্রথম frame-এর মাপে (৩৬০ px চওড়া ফোনে 112 px, চওড়া অনুযায়ী 95–140 px)। JS নামার আগেই দেখায়; website-এও লোড হওয়ার সময় এটাই দেখায়। টেনে reload করার পর্দাও (App.tsx) একই।
+3. **Launch animation** (`src/components/BootIntroAnimation.tsx`, শুধু native app — `shouldShowBootIntro()`, প্রায় ৪.২ সেকেন্ড): icon মিলিয়ে যায় → CREDENCE-এর অক্ষর একে একে ওঠে → wedge D-এর ওপর উল্টে বসে → একটা বিন্দু লম্বা রেখা হয়ে smile curve-এ খোলে (cream অংশ পুরো পর্দা জুড়ে) → HR আর "OUR PEOPLE · OUR PRIDE / Credence Family.." → অ্যাপের ওপর থেকে মিলিয়ে যায়। নিচে একটা পাতলা loading line পুরো সময় ভরে। একবারই চলে, প্রতি app চালুতে একবার (পাতা নিজে reload হলে — account বদল, নতুন deploy — আবার না; `main.tsx`, `sessionStorage` `chr_boot_intro_played`)। ছুঁলে সঙ্গে সঙ্গে বন্ধ। ফোনে "Reduce motion / Remove animations" চালু থাকলে animation চলে না। ছবি আর slogan-এর font (Manchester Signature, typeline studio) `src/assets/boot/`-এ। animation চলার সময় নিচে অ্যাপ লোড হতে থাকে।
 
 ## 360 ERP থেকে CredenceHR-এ সরাসরি ঢোকা (SSO)
 
