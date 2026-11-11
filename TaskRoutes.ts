@@ -8,7 +8,7 @@
 //   HR (Admin Panel -> Task Management, module "task_management") gives a
 //   task to anyone, sees every task, handles the employees' requests, sets up
 //   recurring tasks and runs the monthly report.
-//   A department head (departments.supervisor_user_id, Admin Panel ->
+//   A department head (departments.head_user_id — Head of Department, Admin Panel ->
 //   Departments) gives tasks to the people of that department from Self
 //   Service -> My Tasks -> My Team.
 //   An employee asks HR for something (employment certificate, ID card…) from Self Service -> My Tasks -> Request to HR; it lands in HR's
@@ -200,7 +200,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDeps) {
   }
   // Departments this account heads.
   async function headedDepartments(userId: number): Promise<{ id: number; name: string }[]> {
-    const rows: any[] = (await queryDB("SELECT id, name FROM departments WHERE supervisor_user_id = ? AND is_active = 1", [userId])) || [];
+    // The Head of Department (DepartmentTeams.ts).
+    const rows: any[] = (await queryDB("SELECT id, name FROM departments WHERE head_user_id = ? AND is_active = 1", [userId])) || [];
     return rows.map((r) => ({ id: Number(r.id), name: String(r.name) }));
   }
   // Accounts of the people in those departments (not the head).

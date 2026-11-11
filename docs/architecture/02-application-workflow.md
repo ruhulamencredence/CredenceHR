@@ -847,6 +847,25 @@ Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amoun
 
 নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker `payroll_salary_amounts_grant`), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।
 
+## Department: Head of Department আর টিম ধরে Supervisor
+
+Admin Panel → Departments → Edit (`DepartmentTeams.ts`, `DepartmentTeamsEditor.tsx`):
+- **Head of Department** — একজন (`departments.head_user_id`)।
+- **Teams** — প্রতিটা টিমের নাম, নিজের **Supervisor**, সদস্য (একজন কর্মী একটাই টিমে)। একটা টিমে টিক দেওয়া যায় "বাকি সবাইও" — যাঁরা অন্য কোনো টিমে নেই (নতুন কর্মীও নিজে সেখানে পড়েন)। Backup Supervisor নেই।
+
+**Approval ধারা** (`createTemplateApprovalRequest`, server.ts) — প্রতিটা অনুরোধে:
+1. **Supervisor**: কর্মীর নিজের Direct Supervisor (Employees → Supervisor) থাকলে তিনি; না থাকলে **নিজের টিমের Supervisor** — অন্য টিমের Supervisor কখনো নয়। টিমে নেই (আর "বাকি সবাই" টিমও নেই) → এই ধাপ নেই। Supervisor নিজে অনুরোধ দিলে এই ধাপ বাদ।
+2. **Head of Department** — শুরু থেকেই সবসময় (আলাদা সুইচ নেই), Department-এ Head থাকলে। Head নিজে অনুরোধকারী বা একই মানুষ আগের ধাপের Supervisor হলে বাদ (`approval_requests.head_step_user_id`)।
+3. তারপর Approval Template-এর layer-গুলো।
+
+টিম / সদস্য / Head বদলালে অপেক্ষমাণ অনুরোধ নিজে নতুন মানুষের কাছে যায় (reconcile); Head সরালে Head ধাপ বাদ দিয়ে পরের layer-এ।
+
+**আগের Department Supervisor (একবার, startup marker `department_teams_from_supervisor`)**: যে Department-এ Supervisor ছিলেন ("approval-এ রাখা" চালু), সেখানে "<Department> team" — Supervisor তিনি, "বাকি সবাই" টিক দেওয়া — আর Head না থাকলে Head-ও তিনি (Head = Supervisor বলে Head ধাপ বাদ): আগের মতোই সব অনুরোধ তাঁর কাছে যায়, Tasks / Targets / Module Access-এও আগের মতো।
+
+অন্য জায়গা: Tasks-এ "department head" = Head of Department; Targets-এ Head পুরো Department দেখেন, টিম Supervisor নিজের টিম; Module Access-এ Head বা টিম Supervisor-এর Department প্রথমবার টিক দেওয়া থাকে; OT Approval-এ টিম Supervisor = Team Supervisor।
+
+পরীক্ষা: `docs/test-logs/2026-11-12` — API ৩৩/৩৩, browser ৭/৭, migration।
+
 ## Overtime (OT) আর Security Guard
 
 OT নিজে হিসাব হয়, Roster-এ ঠিক হয়, যিনি অনুমোদন দেবেন তিনি setting-এ ঠিক করা, আর Payroll-এ নিজে বসে (`OvertimeCalc.ts`, `OvertimeRoutes.ts`, `GuardRoutes.ts`)।

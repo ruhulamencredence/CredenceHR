@@ -97,6 +97,11 @@ type FlagKey =
   | 'can_view_my_ot'
   | 'can_approve_team_ot';
 
+// The Head of a Department, or the Supervisor of one of its teams
+// (DepartmentTeams.ts) — their Department is pre-ticked the first time.
+const leadsDept = (d: { head_user_id?: number | null; teams?: { supervisor_user_id: number | null }[] }, userId: number) =>
+  d.head_user_id === userId || !!d.teams?.some((t) => t.supervisor_user_id === userId);
+
 interface FlagDef {
   key: FlagKey;
   label: string;
@@ -525,7 +530,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         DEPT_KINDS.forEach((d, i) => {
           saved[d.module] = lists[i];
           // A Department they supervise is pre-ticked the first time only.
-          const start = lists[i].length === 0 && d.preTick ? departments.filter((x) => x.supervisor_user_id === u.id).map((x) => x.name) : lists[i];
+          const start = lists[i].length === 0 && d.preTick ? departments.filter((x) => leadsDept(x, u.id)).map((x) => x.name) : lists[i];
           draft[d.module] = new Set(start);
         });
         setDepts((m) => ({ ...m, [u.id]: { saved, draft } }));
@@ -967,7 +972,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
           <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel → Departments).</p>
         ) : (
           <ModuleAccessChecklist
-            items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+            items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.head_user_id === single.id ? 'Head' : x.teams?.some((t) => t.supervisor_user_id === single.id) ? 'Team Supervisor' : undefined }))}
             selected={ds.draft[kind]}
             onToggle={(k) => setDept(kind, [k], !ds.draft[kind].has(k))}
             onSetMany={(keys, checked) => setDept(kind, keys, checked)}
@@ -1005,7 +1010,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
               <p className="text-[11px] text-slate-400 mb-2">No Departments set up yet (Admin Panel → Departments).</p>
             ) : (
               <ModuleAccessChecklist
-                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.head_user_id === single.id ? 'Head' : x.teams?.some((t) => t.supervisor_user_id === single.id) ? 'Team Supervisor' : undefined }))}
                 selected={ts.draft.departments}
                 onToggle={(k) => editTrack((d) => (d.departments.has(k) ? d.departments.delete(k) : d.departments.add(k)))}
                 onSetMany={(keys, checked) => editTrack((d) => keys.forEach((k) => (checked ? d.departments.add(k) : d.departments.delete(k))))}

@@ -6,6 +6,7 @@
 // Superadmin-only diagnostic routes, moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
 import type { Express } from "express";
 
 export interface RegisterDebugRoutesDeps {
@@ -71,12 +72,10 @@ export function registerDebugRoutes(app: Express, deps: RegisterDebugRoutesDeps)
           )
         : [];
       const department = deptRows[0] || null;
-      const departmentUsable =
-        !!department &&
-        !!Number(department.is_active) &&
-        !!Number(department.include_supervisor_approval) &&
-        department.supervisor_user_id != null &&
-        Number(department.supervisor_user_id) !== Number(user.id);
+      // Now the employee's own team Supervisor, then the Head (DepartmentTeams.ts).
+      const teamSupervisorId = await resolveTeamSupervisor(queryDB, Number(user.id));
+      const headId = await resolveDepartmentHead(queryDB, Number(user.id));
+      const departmentUsable = !!teamSupervisorId;
 
       const resolvedSupervisorId = await resolveSupervisorApprover(user.id);
 
@@ -88,7 +87,7 @@ export function registerDebugRoutes(app: Express, deps: RegisterDebugRoutesDeps)
           "A Direct Supervisor row exists but isn't usable — most likely the assigned Supervisor's own Employee Directory record has no login account linked (supervisor_has_login_account: false above), or the Supervisor IS this employee themselves.";
       } else if (directCandidates.length === 0 && !departmentUsable) {
         verdict = department
-          ? "No Direct Supervisor is set for this employee, and the Department fallback isn't usable — either the department's 'Include Supervisor Approval' toggle is off, it has no Supervisor assigned, that Supervisor has no login account, or the department itself is inactive."
+          ? "No Direct Supervisor is set for this employee, and they are in no team of their Department (Admin Panel -> Departments -> Teams) — the request goes to the Head of Department, if set, then the workflow."
           : "No Direct Supervisor is set for this employee, and they have no Department at all for the fallback to use.";
       } else {
         verdict = "No usable Supervisor found by either path — see direct_supervisor_candidates / department below for the specific reason.";
@@ -100,6 +99,8 @@ export function registerDebugRoutes(app: Express, deps: RegisterDebugRoutesDeps)
         direct_supervisor_candidates: directCandidates,
         department,
         department_fallback_usable: departmentUsable,
+        team_supervisor_user_id: teamSupervisorId,
+        head_of_department_user_id: headId,
         resolved_supervisor_user_id: resolvedSupervisorId,
         verdict
       });

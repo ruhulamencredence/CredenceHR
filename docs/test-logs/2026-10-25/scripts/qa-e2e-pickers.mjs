@@ -149,9 +149,10 @@ try {
   const [offered, shown] = await pickPerson(combo('— None —'), 'nusrat a', 'Nusrat Ara');
   await click('Add Department');
   await page.waitForTimeout(2000);
-  const row = sql(`SELECT supervisor_user_id FROM departments WHERE name='Picker Dept'`);
-  await T('PK-06', narrowed(offered, 'Nusrat Ara', 'Kamrul') && shown.startsWith('Nusrat Ara') && row === String(who['Nusrat Ara'].uid), 'Department: Supervisor "nusrat a" → Nusrat Ara, saved with the department', `offered ${offered.slice(0, 4).join(' | ')}; shown "${shown}"; saved supervisor ${row || 'nothing'}`);
-} catch (e) { await T('PK-06', false, 'Department supervisor', e.message.split('\n')[0]); }
+  // The Department's picker is now its Head (teams have their own Supervisors — DepartmentTeams.ts).
+  const row = sql(`SELECT head_user_id FROM departments WHERE name='Picker Dept'`);
+  await T('PK-06', narrowed(offered, 'Nusrat Ara', 'Kamrul') && shown.startsWith('Nusrat Ara') && row === String(who['Nusrat Ara'].uid), 'Department: Head of Department "nusrat a" → Nusrat Ara, saved with the department', `offered ${offered.slice(0, 4).join(' | ')}; shown "${shown}"; saved head ${row || 'nothing'}`);
+} catch (e) { await T('PK-06', false, 'Head of Department', e.message.split('\n')[0]); }
 
 // 7. Mobile SIM given to someone (the field itself searches name / ID / department)
 try {

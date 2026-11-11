@@ -181,6 +181,8 @@
   "branches",
   "companies",
   "company_groups",
+  "department_team_members",
+  "department_teams",
   "departments",
   "employee_advances",
   "employee_change_log",

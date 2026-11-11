@@ -1,6 +1,6 @@
 # পরিকল্পনা: Head of Department আর টিম ধরে Supervisor
 
-অবস্থা: **প্রস্তাব** (মকআপ দেখে সিদ্ধান্ত হলে কাজ শুরু)। তারিখ: 2026-11-11।
+অবস্থা: **তৈরি** (2026-11-12)। সিদ্ধান্ত: Backup Supervisor নেই; Head-এর approval শুরু থেকেই সবসময় (সুইচ নেই); টিমে নেই এমন কর্মীর অনুরোধ Head → workflow। কীভাবে চলে: `docs/architecture/02-application-workflow.md` → "Department: Head of Department আর টিম ধরে Supervisor"। তারিখ: 2026-11-11।
 
 ## এখন কী আছে
 

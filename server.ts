@@ -68,6 +68,7 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
+import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
@@ -296,6 +297,7 @@ async function initDB() {
     await ensureRosterSchema(dbPool);
     await ensureOvertimeSchema(dbPool);
     await ensureGuardSchema(dbPool);
+    await ensureDepartmentTeamsSchema(dbPool);
     // Employee Tracking: whom each account may see (TrackingScope.ts).
     await ensureTrackingScopeSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
@@ -831,25 +833,27 @@ async function resolveApprovalTemplate(employeeUserId: number, requestType: "bil
 // This is the FALLBACK layer — resolveSupervisorApprover below tries the
 // Employee's own Direct Supervisor (employee_supervisors) first and only
 // calls this when that isn't usable.
+// Now the employee's own TEAM's Supervisor (DepartmentTeams.ts): their
+// team in their Department, else the Department's "everyone else" team —
+// never another team's Supervisor; nobody for someone in no team.
 async function resolveDepartmentSupervisor(employeeUserId: number): Promise<number | null> {
-  try {
-    const rows = await queryDB(
-      `SELECT d.supervisor_user_id
-       FROM all_employees e
-       JOIN departments d ON d.id = e.department_id
-       WHERE e.user_id = ? AND d.is_active = 1 AND d.include_supervisor_approval = 1 AND d.supervisor_user_id IS NOT NULL
-       LIMIT 1`,
-      [employeeUserId]
-    );
-    if (rows.length === 0) return null;
-    const supervisorId = Number(rows[0].supervisor_user_id);
-    if (!supervisorId || supervisorId === Number(employeeUserId)) return null;
-    return supervisorId;
-  } catch (err: any) {
-    console.warn("⚠️ Could not resolve department supervisor: " + err.message);
-    return null;
-  }
+  return resolveTeamSupervisor(queryDB, employeeUserId);
 }
+
+// The Head of Department step (DepartmentTeams.ts): after the Supervisor,
+// always, when the employee's Department has a Head — skipped when the Head
+// is the requester, is already the Supervisor step, or can't act any more.
+async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null): Promise<number | null> {
+  const head = await resolveDepartmentHead(queryDB, employeeUserId);
+  if (!head || head === supervisorId) return null;
+  if ((await inactiveUserIds([head])).has(head)) return null;
+  return head;
+}
+// Steps put in front of an Approval Template's own layers: the Supervisor
+// (step 1) and / or the Head of Department (the step after it).
+const autoStepCount = (r: any) => (r?.supervisor_step_user_id ? 1 : 0) + (r?.head_step_user_id ? 1 : 0);
+const headStepNo = (r: any) => (r?.supervisor_step_user_id ? 2 : 1);
+const onHeadStep = (r: any) => !!r?.head_step_user_id && Number(r.current_step) === headStepNo(r);
 
 // Employee's own Direct Supervisor (Admin Panel -> Employees -> Edit ->
 // Supervisor tab, employee_supervisors.is_direct = 1) — tried BEFORE the
@@ -978,8 +982,11 @@ async function createTemplateApprovalRequest(
     : overrideSupervisorId !== undefined
     ? overrideSupervisorId
     : await resolveSupervisorApprover(requestedBy);
+  // Head of Department next (not when HR files with "no Supervisor gate", or
+  // a Template that sets its own first Layer).
+  const headId = template?.skip_auto_supervisor || overrideSupervisorId === null ? null : await resolveHeadApprover(requestedBy, supervisorId || null);
 
-  const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
+  const totalSteps = (supervisorId ? 1 : 0) + (headId ? 1 : 0) + templateSteps;
   if (totalSteps === 0) {
     // HR filing a Vehicle Requisition directly and choosing no Supervisor
     // (overrideSupervisorId === null) with no Template still goes straight
@@ -999,9 +1006,9 @@ async function createTemplateApprovalRequest(
   }
 
   const ins: any = await queryDB(
-    `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
-     VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?)`,
-    [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
+    `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id, head_step_user_id)
+     VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?, ?)`,
+    [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null, headId || null]
   );
   const newId = Number(ins?.insertId);
   if (newId) {
@@ -1096,15 +1103,16 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
         if (!steps) template = null;
       }
       const sup = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(Number(r.requested_by));
-      const total = (sup ? 1 : 0) + steps;
+      const head = template?.skip_auto_supervisor ? null : await resolveHeadApprover(Number(r.requested_by), sup || null);
+      const total = (sup ? 1 : 0) + (head ? 1 : 0) + steps;
       if (!total) continue;
       const done: any = await queryDB(
-        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
-        [template ? template.id : null, sup || null, total, r.id]
+        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, head_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        [template ? template.id : null, sup || null, head || null, total, r.id]
       );
       if (!Number(done?.affectedRows)) continue;
       moved++;
-      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, total_steps: total, current_step: 1 });
+      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, head_step_user_id: head || null, total_steps: total, current_step: 1 });
       const mapping = APPROVAL_ALERT[r.source_type];
       const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [r.requested_by])) || [];
       for (const a of await getCurrentStepApprovers(r)) {
@@ -1136,7 +1144,7 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
 // Everyone on a request's current Template Layer (active or not).
 async function templateLayerApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
   if (!request?.template_id) return [];
-  const templateStepOrder = request.supervisor_step_user_id ? Number(request.current_step) - 1 : Number(request.current_step);
+  const templateStepOrder = Number(request.current_step) - autoStepCount(request);
   const rows: any[] =
     (await queryDB(
       `SELECT sa.user_id, u.name AS user_name
@@ -1261,15 +1269,17 @@ async function reconcileOneApproval(r: any): Promise<number> {
       await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${newName}.`);
       return changed + 1;
     }
-    // No (active) supervisor now: on to the Template's first Layer, or to "no approver".
+    // No (active) supervisor now: on to the Head of Department / the
+    // Template's first Layer, or to "no approver".
     const steps: any[] = r.template_id ? (await queryDB("SELECT id FROM approval_template_steps WHERE template_id = ?", [r.template_id]).catch(() => [])) || [] : [];
-    if (steps.length) {
+    const headLeft = r.head_step_user_id ? 1 : 0;
+    if (steps.length + headLeft) {
       const done: any = await queryDB(
         "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
-        [steps.length, r.id, stored]
+        [steps.length + headLeft, r.id, stored]
       );
       if (!Number(done?.affectedRows)) return changed;
-      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length });
+      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length + headLeft });
       const next = await getCurrentStepApprovers(r);
       for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why} and no other supervisor is set, so it moved on to you.`);
       await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
@@ -1282,6 +1292,55 @@ async function reconcileOneApproval(r: any): Promise<number> {
     if (!Number(done?.affectedRows)) return changed;
     for (const id of await superadminIds(requester)) {
       await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set their Supervisor and it moves there by itself, or decide it yourself in Approve Application.`);
+    }
+    await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
+    return changed + 1;
+  }
+
+  // Waiting on the Head of Department: the Department's CURRENT Head; with
+  // none any more it moves on to the Template's Layer, or to "no approver".
+  if (onHeadStep(r)) {
+    const stored = Number(r.head_step_user_id);
+    const storedGone = (await inactiveUserIds([stored])).has(stored);
+    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null);
+    if (desired === stored && !storedGone) return changed;
+    const who = await whoName();
+    const oldName = await nameOf(stored);
+    const why = storedGone ? `${oldName} is no longer active` : `${oldName} is no longer the Head of ${who}'s Department`;
+    if (desired && desired !== stored) {
+      const done: any = await queryDB("UPDATE approval_requests SET head_step_user_id = ? WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?", [
+        desired,
+        r.id,
+        headStepNo(r),
+        stored
+      ]);
+      if (!Number(done?.affectedRows)) return changed;
+      await tell(desired, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it now waits on you as Head of Department.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${await nameOf(desired)}.`);
+      return changed + 1;
+    }
+    const total = Number(r.total_steps) - 1;
+    if (total >= Number(r.current_step)) {
+      const done: any = await queryDB("UPDATE approval_requests SET head_step_user_id = NULL, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?", [
+        total,
+        r.id,
+        headStepNo(r),
+        stored
+      ]);
+      if (!Number(done?.affectedRows)) return changed;
+      Object.assign(r, { head_step_user_id: null, total_steps: total });
+      const next = await getCurrentStepApprovers(r);
+      for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it moved on to you.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
+      return changed + 1 + (await reconcileOneApproval(r));
+    }
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET head_step_user_id = NULL, supervisor_step_user_id = NULL, current_step = 1, total_steps = 1, awaiting_approver = 1 WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?",
+      [r.id, headStepNo(r), stored]
+    );
+    if (!Number(done?.affectedRows)) return changed;
+    for (const id of await superadminIds(requester)) {
+      await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set the Head of Department and it moves there by itself, or decide it yourself in Approve Application.`);
     }
     await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
     return changed + 1;
@@ -1348,6 +1407,11 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
     if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
     return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
   }
+  if (onHeadStep(request)) {
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.head_step_user_id]);
+    if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
+    return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
+  }
   if (request.template_id) {
     const rows = await templateLayerApprovers(request);
     const gone = await inactiveUserIds(rows.map((r) => r.user_id));
@@ -1365,7 +1429,8 @@ async function getCurrentTemplateStepType(request: any): Promise<string | null> 
   if (!request?.template_id) return null;
   const hasSupervisorStep = !!request.supervisor_step_user_id;
   if (hasSupervisorStep && Number(request.current_step) === 1) return null;
-  const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
+  if (onHeadStep(request)) return null;
+  const templateStepOrder = Number(request.current_step) - autoStepCount(request);
   const steps = await queryDB("SELECT * FROM approval_template_steps");
   const step = steps.find((s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder);
   return step ? step.approver_type || null : null;
@@ -3192,6 +3257,8 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
+  // Head of Department + teams with their own Supervisor (DepartmentTeams.ts).
+  registerDepartmentTeamsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, onChange: () => requestApprovalReconcile() });
 
   // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
   registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });

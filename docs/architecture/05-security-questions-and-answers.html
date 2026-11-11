@@ -218,6 +218,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>কে দেবেন সেটা Payroll → OT Rules-এর setting (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর); সার্ভার প্রতিটা entry-তে দেখে — supervisor শুধু নিজের team-এর, Roster manager শুধু নিজের Duty Roster department-এর। হিসাবের চেয়ে বেশি ঘণ্টা অনুমোদন হয় না; সিদ্ধান্ত হওয়া দিন আর বদলায় না; Run Payroll-এ হাতে বদলালে কারণ লিখতে হয় ও থেকে যায়। নিয়ম বদলাতে <code>ot_rules</code>, অনুমোদনে <code>ot_approve</code> / Team OT সুইচ — সব শুরুতে বন্ধ (<code>OvertimeRoutes.ts</code>)।</td>
 <td>✅</td>
 </tr>
+<tr>
+<td>এক টিমের কর্মীর অনুরোধ কি অন্য টিমের Supervisor দেখতে বা approve করতে পারেন?</td>
+<td>না। অনুরোধ শুধু কর্মীর নিজের টিমের Supervisor-এর কাছে যায় (Direct Supervisor থাকলে তাঁর), তারপর Head of Department, তারপর Template; অন্য টিমের Supervisor তালিকায় পান না আর API দিয়ে approve করলে 403। টিমে নেই এমন কর্মীর অনুরোধ Head-এর কাছে, তারপর workflow। টিম / Head ঠিক করতে Departments module-এর Edit অনুমতি লাগে (<code>DepartmentTeams.ts</code>)।</td>
+<td>✅</td>
+</tr>
 </tbody>
 </table>
 <h2 id="_3">গ. ডাটা সুরক্ষা</h2>

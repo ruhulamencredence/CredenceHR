@@ -585,6 +585,12 @@ export interface Department {
   include_supervisor_approval: boolean;
   is_active: boolean;
   created_at?: string;
+  // Head of Department and teams, each with its own Supervisor
+  // (DepartmentTeams.ts). A request goes to the person's own team
+  // Supervisor, then the Head, then the workflow.
+  head_user_id?: number | null;
+  head_name?: string | null;
+  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; members: number }[];
 }
 
 

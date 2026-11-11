@@ -35,6 +35,19 @@ erDiagram
     varchar workspace_code
     varchar tagline
   }
+  department_team_members {
+    int id PK
+    int team_id FK
+    int employee_id FK
+  }
+  department_teams {
+    int id PK
+    int department_id FK
+    varchar name
+    int supervisor_user_id
+    tinyint everyone_else
+    tinyint is_active
+  }
   departments {
     int id PK
     int supervisor_user_id FK
@@ -42,6 +55,7 @@ erDiagram
     tinyint include_supervisor_approval
     tinyint is_active
     int company_id
+    int head_user_id
   }
   employee_advances {
     int id PK
@@ -197,6 +211,9 @@ erDiagram
   users ||--o{ all_employees : "user_id"
   projects ||--o{ branches : "project_id"
   company_groups ||--o{ companies : "group_id"
+  department_teams ||--o{ department_team_members : "team_id"
+  all_employees ||..o{ department_team_members : "employee_id"
+  departments ||--o{ department_teams : "department_id"
   users ||--o{ departments : "supervisor_user_id"
   all_employees ||--o{ employee_advances : "employee_id"
   users ||--o{ employee_change_log : "action_by"

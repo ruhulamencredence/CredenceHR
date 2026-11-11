@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৩টি টেবিল, ২৭৬৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৫টি টেবিল, ২৭৮২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2763,6 +2763,29 @@ Unique: `unique_company_code`(group_id,short_code)
 
 Unique: `unique_workspace_code`(workspace_code)
 
+### `department_team_members`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `team_id` | int(11) | না |  | FK → `department_teams.id` |
+| `employee_id` | int(11) | না | UNI  | logical → `all_employees` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uniq_team_member`(employee_id)
+
+### `department_teams`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `department_id` | int(11) | না |  | FK → `departments.id` |
+| `name` | varchar(120) | না |  | |
+| `supervisor_user_id` | int(11) | হ্যাঁ |  | |
+| `everyone_else` | tinyint(1) | না | default 0 | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
 ### `departments`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -2775,6 +2798,7 @@ Unique: `unique_workspace_code`(workspace_code)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `head_user_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `unique_company_name`(company_id,name)
 
@@ -4245,6 +4269,7 @@ Unique: `unique_step_order`(step_order)
 | `adhoc_note` | varchar(500) | হ্যাঁ |  | |
 | `stuck_since` | datetime | হ্যাঁ |  | |
 | `supervisor_pinned` | tinyint(1) | না | default 0 | |
+| `head_step_user_id` | int(11) | হ্যাঁ |  | |
 
 ### `approval_template_step_approvers`
 

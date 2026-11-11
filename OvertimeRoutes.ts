@@ -39,7 +39,9 @@
 //
 // Approval (who may act on an entry, approverCan below):
 //   Team Supervisor = the person's Direct Supervisor (Employees -> Supervisor,
-//     with a login) or the supervisor / backup of their Site Attendance team.
+//     with a login), the Supervisor of their team in their Department
+//     (DepartmentTeams.ts), or the supervisor / backup of their Site
+//     Attendance team.
 //     A supervisor acts from Duty Roster -> OT Approval (layer "ot_approve")
 //     or, without Admin Panel access, from Self Service -> Team OT
 //     (users.can_approve_team_ot, off by default). Only their own team's OT.
@@ -54,6 +56,7 @@ import { activeCompanyId } from "./companyContext";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId } from "./holidayRoutes";
 import { getRosterDeptScope } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
+import { teamSupervisorByEmployee } from "./DepartmentTeams";
 import {
   DEFAULT_OT_RULES,
   capMonthly,
@@ -550,6 +553,11 @@ async function approverContext(queryDB: QueryDB, user: any, hasModuleLayer: Regi
   for (const r of site) {
     supervised.add(Number(r.employee_id));
     if (Number(r.supervisor_user_id) === uid || Number(r.backup_user_id) === uid) team.add(Number(r.employee_id));
+  }
+  // Their team in their Department (Admin Panel -> Departments -> Teams).
+  for (const [empId, supUser] of await teamSupervisorByEmployee(queryDB)) {
+    supervised.add(empId);
+    if (supUser === uid) team.add(empId);
   }
   return { superadmin, hasLayer, teamSwitch, deptScope, team, supervised, mode: rules.approver_mode };
 }

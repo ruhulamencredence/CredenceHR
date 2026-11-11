@@ -1821,7 +1821,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               ar && ar.status === "pending"
                 ? ar.supervisor_step_user_id && Number(ar.current_step) === 1
                   ? "Supervisor"
-                  : stepLabel.get(`${ar.template_id}:${Number(ar.current_step) - (ar.supervisor_step_user_id ? 1 : 0)}`) || null
+                  : ar.head_step_user_id && Number(ar.current_step) === (ar.supervisor_step_user_id ? 2 : 1)
+                    ? "Head of Department"
+                    : stepLabel.get(`${ar.template_id}:${Number(ar.current_step) - (ar.supervisor_step_user_id ? 1 : 0) - (ar.head_step_user_id ? 1 : 0)}`) || null
                 : null,
             supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
