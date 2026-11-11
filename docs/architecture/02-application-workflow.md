@@ -859,6 +859,10 @@ Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে C
 
 Login পেজের illustration animation (`office-illustration.json`, ~৮৬৫ KB, gzip-এ অনেক ছোট) একটা আলাদা JSON ফাইল, যার নামে তার content-এর hash থাকে। প্রথমবার নামার পর browser-এর **Cache Storage**-এ (`credence-static-v1`) রাখা হয় (`src/lib/assetCache.ts`, `src/lib/authHeroAsset.ts`)। website, ফোনের browser, "Add to Home screen" আর Android অ্যাপ সব জায়গায় পরের বার network ছাড়াই দেখায়। সাধারণ HTTP cache-এর মতো এটা browser-এর জায়গা দরকার হলে মুছে যায় না। login অবস্থায় অ্যাপ খোলার ৮ সেকেন্ড পর একবার পেছনে নামিয়ে রাখে, তাই sign-out-এর পর login পেজে সাথে সাথে আসে। animation বদলালে নতুন hash হয়, নতুনটা নামে, পুরনোটা মুছে যায়। শুধু অ্যাপের স্থির ফাইল রাখা হয়, `/api`-এর কোনো data কখনো না।
 
+## Admin Panel: কম্পিউটারে Edit জায়গায় দাঁড়িয়েই
+
+Departments-এ নিচের দিকের কোনো সারির Edit চাপলে আগে পাতার উপরের form ভরত — উপরে scroll করে আবার নিচে ফিরতে হতো। এখন একই form popup-এ খোলে, যেখানে আছেন সেখানেই (`PhoneSheet` `editPopupOnDesktop`); পাতা নড়ে না, Save / Cancel / ✕ / Esc / বাইরে ক্লিকে বন্ধ। "Add" form উপরে আগের মতো। ফোনে আগের মতোই নিচ থেকে sheet। অন্য পাতায়ও একই option দিয়ে চালু করা যায়।
+
 ## Admin Panel: ফোনে Self Service-এর মতো
 
 ফোনে (৭৬৭ px পর্যন্ত) Admin Panel-এর প্রতিটা পাতা, Payroll আর Leave Manage Self Service-এর মতো দেখায় (পরিকল্পনা ও তালিকা `docs/plans/admin-panel-mobile.md`)। Desktop হুবহু আগের মতো — সব বদল শুধু ফোনে, `<html data-admin-phone>` থাকলে।

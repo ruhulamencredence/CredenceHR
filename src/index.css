@@ -1153,3 +1153,9 @@ html:not(.kb-open) .fixed.top-0.bottom-0:not([data-nav-self]) {
   border-bottom: var(--nav-room) solid transparent !important;
   --native-safe-area-inset-bottom: 0px;
 }
+
+/* Desktop edit popup (PhoneSheet editPopupOnDesktop): the page's own white
+   form card sits inside the liquid-glass popup, so it drops its own box;
+   room on the right for the popup's round close button. */
+.desktop-edit-popup > .bg-white { background: transparent; border-color: transparent; box-shadow: none; }
+.desktop-edit-popup > .bg-white > h3 { padding-right: 3rem; }

@@ -6960,7 +6960,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           comment in server.ts for the full design. */}
       {activeTab === 'departments' && (
         <div className="space-y-4">
-          <PhoneSheet label="Add Department" title={editingDepartment ? 'Edit Department' : 'Add Department'} editing={!!editingDepartment} onCancelEdit={openCreateDepartment} doneKey={departments.length}>
+          <PhoneSheet label="Add Department" title={editingDepartment ? 'Edit Department' : 'Add Department'} editing={!!editingDepartment} onCancelEdit={openCreateDepartment} doneKey={departments.length} editPopupOnDesktop>
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-1">
               <Users2 className="w-4 h-4 text-blue-600" /> {editingDepartment ? 'Edit Department' : 'Add Department'}
