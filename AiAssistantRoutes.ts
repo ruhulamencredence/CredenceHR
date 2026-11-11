@@ -1773,13 +1773,16 @@ const TOOLS: Tool[] = [
       const k = r.body?.kpis || {};
       const att: any[] = r.body?.attention || [];
       const tk = (v: number) => `৳${bn(Math.round(v || 0).toLocaleString("en-IN"))}`;
-      const text = `**Management Dashboard — ${bnMonth(month)}**\n` +
-        `• কর্মী: ${bn(k.headcount?.value ?? 0)}${k.headcount?.prev != null ? ` (আগের মাসে ${bn(k.headcount.prev)})` : ""}\n` +
-        `• হাজিরা: ${bn(k.attendance?.value ?? 0)}%${k.attendance?.late_pct != null ? `, দেরি ${bn(k.attendance.late_pct)}%` : ""}\n` +
-        `• বেতন: ${k.salary?.value ? tk(k.salary.value) : "এখনো চালানো হয়নি"}${k.salary?.prev ? ` (আগের মাসে ${tk(k.salary.prev)})` : ""}\n` +
-        `• আজ ছুটিতে: ${bn(k.on_leave_today?.value ?? 0)}, কাল ${bn(k.on_leave_today?.tomorrow ?? 0)}, অপেক্ষমাণ ছুটির আবেদন ${bn(k.on_leave_today?.pending ?? 0)}\n` +
-        `• অনুমোদনের অপেক্ষায়: ${bn(k.approvals?.waiting ?? 0)} (আটকে ${bn(k.approvals?.stuck ?? 0)})` +
-        (k.targets?.value != null ? `\n• Target: ${bn(k.targets.value)}%` : "") +
+      // Only the parts this account's Management Dashboard layers give (the API leaves the rest out).
+      const lines: string[] = [];
+      if (k.headcount) lines.push(`• কর্মী: ${bn(k.headcount.value ?? 0)}${k.headcount.prev != null ? ` (আগের মাসে ${bn(k.headcount.prev)})` : ""}`);
+      if (k.attendance) lines.push(`• হাজিরা: ${bn(k.attendance.value ?? 0)}%${k.attendance.late_pct != null ? `, দেরি ${bn(k.attendance.late_pct)}%` : ""}`);
+      if (k.salary) lines.push(`• বেতন: ${k.salary.value ? tk(k.salary.value) : "এখনো চালানো হয়নি"}${k.salary.prev ? ` (আগের মাসে ${tk(k.salary.prev)})` : ""}`);
+      if (k.on_leave_today) lines.push(`• আজ ছুটিতে: ${bn(k.on_leave_today.value ?? 0)}, কাল ${bn(k.on_leave_today.tomorrow ?? 0)}, অপেক্ষমাণ ছুটির আবেদন ${bn(k.on_leave_today.pending ?? 0)}`);
+      if (k.approvals) lines.push(`• অনুমোদনের অপেক্ষায়: ${bn(k.approvals.waiting ?? 0)} (আটকে ${bn(k.approvals.stuck ?? 0)})`);
+      if (k.targets?.value != null) lines.push(`• Target: ${bn(k.targets.value)}%`);
+      if (!lines.length) lines.push("এই account-কে Management Dashboard-এর কোনো অংশ দেওয়া হয়নি।");
+      const text = `**Management Dashboard — ${bnMonth(month)}**\n` + lines.join("\n") +
         (att.length ? "\nনজর দরকার:\n" + att.slice(0, 6).map((x: any) => `• ${x.text || x.title || x.message || JSON.stringify(x)}`).join("\n") : "");
       return { ok: true, text, data: { month, kpis: k, attention: att.slice(0, 10) }, actions: [{ label: "Management Dashboard খুলুন", nav: "admin:management_dashboard" }] };
     }

@@ -52,6 +52,41 @@ import { LoadingBlock } from './LoadingBlock';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
+type MdSection = 'people' | 'attendance' | 'money' | 'approvals' | 'projects' | 'recruitment' | 'fleet';
+const ALL_SECTIONS: MdSection[] = ['people', 'attendance', 'money', 'approvals', 'projects', 'recruitment', 'fleet'];
+// Which part each card / details drawer belongs to.
+const DRAWER_SECTION: Record<string, MdSection> = { headcount: 'people', attendance: 'attendance', leave: 'attendance', salary: 'money', money: 'money', approvals: 'approvals', targets: 'projects', projects: 'projects' };
+// A part left out by the server comes back empty here, so nothing reads a missing field.
+function withEmptyParts(b: any): Dash {
+  const k = b.kpis || {};
+  return {
+    ...b,
+    kpis: {
+      headcount: k.headcount || { value: 0, prev: 0 },
+      attendance: k.attendance || { value: null, prev: null, late_pct: null },
+      salary: k.salary || { value: 0, prev: 0, paid: false },
+      on_leave_today: k.on_leave_today || { value: 0, tomorrow: 0, pending: 0 },
+      approvals: k.approvals || { waiting: 0, stuck: 0, avg_days: null },
+      targets: k.targets || { value: null, prev: null }
+    },
+    flow: b.flow || [],
+    headcount_by_department: b.headcount_by_department || [],
+    attendance_by_department: b.attendance_by_department || [],
+    salary_by_department: b.salary_by_department || [],
+    on_leave_today: b.on_leave_today || [],
+    money: b.money || [],
+    approvals_by_type: b.approvals_by_type || [],
+    approvals_oldest: b.approvals_oldest || [],
+    projects: b.projects || [],
+    targets_by_department: b.targets_by_department || [],
+    ops: b.ops || { mpr_rows: 0, material_on_the_way: 0, tasks_done: 0 },
+    workforce: b.workforce || { joined: 0, left: 0, probation: 0, in_notice: 0, avg_tenure_years: null, male: 0, female: 0 },
+    recruitment: b.recruitment || { open_positions: 0, applied: 0, interview: 0, offered: 0, hired: 0 },
+    fleet: b.fleet || { rides: 0, vehicles_busy_pct: null, assets_in_use: 0, awaiting_ack: 0 },
+    attention: b.attention || []
+  };
+}
+
 interface Dash {
   month: string;
   prev_month: string;
@@ -80,6 +115,9 @@ interface Dash {
   recruitment: { open_positions: number; applied: number; interview: number; offered: number; hired: number };
   fleet: { rides: number; vehicles_busy_pct: number | null; assets_in_use: number; awaiting_ack: number };
   attention: { level: 'high' | 'medium' | 'info'; title: string; detail: string; target: string }[];
+  // The parts this account is given (Module Access layers); the server
+  // leaves the others out. Missing on an older server = everything.
+  sections?: MdSection[];
 }
 
 type DrawerKey = 'headcount' | 'attendance' | 'salary' | 'leave' | 'approvals' | 'targets' | 'money' | 'projects';
@@ -172,7 +210,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
       const res = await fetch(apiUrl(`/api/management-dashboard?${qs}`), { headers: { Authorization: `Bearer ${token}` } });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not load the dashboard.');
-      setData(body);
+      setData(withEmptyParts(body));
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -187,6 +225,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
 
   const drawer: Drawer | null = useMemo(() => {
     if (!data || !open) return null;
+    if (!(data.sections || ALL_SECTIONS).includes(DRAWER_SECTION[open])) return null;
     const k = data.kpis;
     const tone = (n: number | null | undefined, goodWhenUp: boolean): 'good' | 'bad' | undefined => (n == null || n === 0 ? undefined : n > 0 === goodWhenUp ? 'good' : 'bad');
     const signed = (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${n}`);
@@ -287,6 +326,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
   if (loading && !data) return <LoadingBlock />;
   if (error && !data) return <div className="p-6 text-sm text-rose-600">{error}</div>;
   if (!data) return null;
+  const sec = new Set<MdSection>(data.sections || ALL_SECTIONS);
   const k = data.kpis;
   // Payroll for this month not generated yet: say so instead of "-100%".
   const salaryNotRun = k.salary.value === 0 && k.salary.prev > 0;
@@ -300,6 +340,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
     { key: 'approvals', label: 'Waiting for approval', value: String(k.approvals.waiting), trend: { text: k.approvals.stuck ? `${k.approvals.stuck} stuck 3+ days` : 'none stuck', color: k.approvals.stuck ? DOWN : UP }, source: 'Approval engine' },
     { key: 'targets', label: 'Targets achieved', value: k.targets.value == null ? '—' : `${k.targets.value}%`, trend: trend(k.targets.value, k.targets.prev, 'pt', true), source: 'Target Reports' }
   ];
+  const shownKpis = kpis.filter((c) => sec.has(DRAWER_SECTION[c.key]));
   const flowMax = Math.max(1, ...data.flow.map((f) => Math.max(f.joined, f.left)));
   const gridStep = Math.max(1, Math.ceil(flowMax / 3));
   const moneyTotal = moneyRows.reduce((a, m) => a + m.amount, 0);
@@ -352,8 +393,13 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
           </div>
         </div>
 
+        {sec.size === 0 && (
+          <div className="rounded-[18px] border border-[#e7e3f3] bg-white px-5 py-8 text-center text-sm text-[#5b5570]">
+            No part of the Management Dashboard is given to this account. Ask your Superadmin to tick the parts you need (Module Access → Management Dashboard).
+          </div>
+        )}
         <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-          {kpis.map((c) => (
+          {shownKpis.map((c) => (
             <button
               key={c.key}
               type="button"
@@ -373,6 +419,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
         <div className="flex flex-wrap gap-5 items-start">
           <div className="flex flex-col gap-5 min-w-0" style={{ flex: '999 1 760px' }}>
             <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+              {sec.has('people') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">People — joined and left</h2>
@@ -417,7 +464,9 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   </span>
                 </div>
               </section>
+              )}
 
+              {sec.has('attendance') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">Attendance by department</h2>
@@ -441,9 +490,11 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   </button>
                 )}
               </section>
+              )}
             </div>
 
             <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+              {sec.has('money') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">Money out this month</h2>
@@ -482,7 +533,9 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   </div>
                 </div>
               </section>
+              )}
 
+              {sec.has('approvals') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">Approvals — how fast</h2>
@@ -504,9 +557,11 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   );
                 })}
               </section>
+              )}
             </div>
 
             <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+              {sec.has('projects') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">Projects — MPR this month (PEPM)</h2>
@@ -530,7 +585,9 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   </button>
                 ))}
               </section>
+              )}
 
+              {sec.has('projects') && (
               <section className={card}>
                 <div className="flex justify-between items-baseline">
                   <h2 className="text-[15px] font-bold">Targets by department</h2>
@@ -559,10 +616,12 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
                   ))}
                 </div>
               </section>
+              )}
             </div>
           </div>
 
           <div className="flex flex-col gap-5 min-w-0" style={{ flex: '1 1 340px', maxWidth: 460 }}>
+            {sec.has('people') && (
             <section className={card}>
               <h2 className="text-[15px] font-bold">Workforce</h2>
               {[
@@ -585,7 +644,9 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               ))}
               {pageButtons(['employees'])}
             </section>
+            )}
 
+            {sec.has('recruitment') && (
             <section className={card}>
               <h2 className="text-[15px] font-bold">Recruitment pipeline</h2>
               {(() => {
@@ -602,7 +663,9 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               })()}
               {pageButtons(['recruitment'])}
             </section>
+            )}
 
+            {sec.has('fleet') && (
             <section className={card}>
               <h2 className="text-[15px] font-bold">Fleet and assets</h2>
               {[
@@ -618,6 +681,7 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               ))}
               {pageButtons(['vehicle_management', 'asset_management'])}
             </section>
+            )}
 
             <section className="bg-[#1e1b2e] text-white rounded-[20px] p-5 flex flex-col gap-3">
               <h2 className="text-[15px] font-bold">Needs attention</h2>
