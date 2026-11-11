@@ -13,7 +13,7 @@ import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
 import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
-import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
+import { autoLinkByEmployeeId, backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
@@ -353,6 +353,7 @@ async function initDB() {
     await ensureEmployeeRecordsGuard(dbPool);
     // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
     await backfillEmployeeLoginIds(queryDB);
+    await autoLinkByEmployeeId(queryDB);
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).

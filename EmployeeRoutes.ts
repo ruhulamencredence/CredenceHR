@@ -18,7 +18,7 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
-import { employeeIdConflict, syncEmployeeLoginId } from "./EmployeeLoginId";
+import { autoLinkByEmployeeId, employeeIdConflict, orphanLoginForEmployeeId, syncEmployeeLoginId } from "./EmployeeLoginId";
 import { requestApprovalReconcile } from "./approvalReconcile";
 
 export interface RegisterEmployeeRoutesDeps {
@@ -53,6 +53,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       // Same lazy catch-up for approved HR Operations actions (grade,
       // confirmation, separation…) whose Effective Date has arrived.
       await applyDueHrActions(queryDB, todayInDhaka());
+      // Logins whose Login ID is an unlinked employee's Employee ID (EmployeeLoginId.ts).
+      await autoLinkByEmployeeId(queryDB);
       const rows = await queryDB("SELECT * FROM all_employees");
       const allSorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       // ?slim=1 : who's who only (pickers) — id, code, name, designation, department, active.
@@ -346,9 +348,15 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           zkPin.pin = code;
         }
       }
-      // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice.
-      const idClash = await employeeIdConflict(queryDB, employee_id);
+      // The Employee ID is also the Login ID (EmployeeLoginId.ts): never twice —
+      // except the login with that Login ID that has no employee record: that
+      // is this person, and the new employee is linked to it (below).
+      const orphanLogin = await orphanLoginForEmployeeId(queryDB, employee_id);
+      const idClash = await employeeIdConflict(queryDB, employee_id, orphanLogin ? { userId: orphanLogin } : {});
       if (idClash) return res.status(409).json({ error: idClash });
+      if (orphanLogin && create_login) {
+        return res.status(409).json({ error: `${String(employee_id).trim()} already has a login (with no employee record). Save without "Also create a login account" — the employee is linked to that login.` });
+      }
       const branch = await resolveEmployeeBranch(req.body);
 
       let newUserId: number | null = null;
@@ -435,6 +443,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (zkPin.set && zkPin.pin) {
         await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, result.insertId]);
       }
+      if (!newUserId && orphanLogin && (await autoLinkByEmployeeId(queryDB, Number(result.insertId)))) newUserId = orphanLogin;
       res.status(201).json({ id: result.insertId, user_id: newUserId, project_ids: grantedProjectIds, module_keys: grantedModuleKeys });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -460,7 +469,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const zkPin = await checkZkDevicePin(req.body, id);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       if (String(employee_id ?? "").trim().toLowerCase() !== String(existing[0].employee_id ?? "").trim().toLowerCase()) {
-        const idClash = await employeeIdConflict(queryDB, employee_id, { employeeRowId: id, userId: existing[0].user_id || null });
+        const orphanLogin = existing[0].user_id ? null : await orphanLoginForEmployeeId(queryDB, employee_id);
+        const idClash = await employeeIdConflict(queryDB, employee_id, { employeeRowId: id, userId: existing[0].user_id || orphanLogin || null });
         if (idClash) return res.status(409).json({ error: idClash });
       }
       const branch = await resolveEmployeeBranch(req.body);
@@ -529,6 +539,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       }
       // A new Employee ID becomes the login's Login ID too.
       await syncEmployeeLoginId(queryDB, id, existing[0].employee_id);
+      // No login yet, and one has this Employee ID as its Login ID: link it.
+      if (!existing[0].user_id) await autoLinkByEmployeeId(queryDB, id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
