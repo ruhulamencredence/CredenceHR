@@ -484,7 +484,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           (((await queryDB("/*unscoped*/ SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []) as any[]).map((r) => Number(r.user_id))
         );
         const orphanLogins = new Map<string, { id: number; name: string }>();
-        for (const u of ((await queryDB("/*unscoped*/ SELECT id, name, username, email FROM users").catch(() => [])) || []) as any[]) {
+        // Only ordinary accounts of this group: an Admin's or the Superadmin's
+        // login is never put under an employee record by an import (that is
+        // done by hand in Users), and another group's logins are not reached.
+        for (const u of ((await queryDB("/*unscoped*/ SELECT id, name, username, email FROM users WHERE role = 'user' AND group_id = ?", [activeGroupId()]).catch(() => [])) || []) as any[]) {
           if (linkedUserIds.has(Number(u.id))) continue;
           for (const k of [u.username, u.email]) if (k) orphanLogins.set(String(k).trim().toLowerCase(), { id: Number(u.id), name: String(u.name || "") });
         }
