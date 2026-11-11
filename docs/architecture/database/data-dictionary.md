@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৩টি টেবিল, ২৭৬৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৩টি টেবিল, ২৭৬৭টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -172,13 +172,13 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `avatar_data` | longblob | হ্যাঁ |  | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
-| `group_id` | int(11) | না | default 1 | |
 | `description` | varchar(1000) | হ্যাঁ |  | |
 | `avatar_version` | int(11) | না | default 0 | |
 | `info_admins_only` | tinyint(1) | না | default 1 | |
 | `send_admins_only` | tinyint(1) | না | default 0 | |
 | `disappear_seconds` | int(11) | না | default 0 | |
 | `invite_code` | varchar(40) | হ্যাঁ | UNI  | |
+| `group_id` | int(11) | না | default 1 | |
 
 Unique: `uniq_chat_rooms_invite`(invite_code)
 
@@ -1313,8 +1313,8 @@ Unique: `uniq_ot_settings_company`(company_id)
 | `out_time` | varchar(5) | হ্যাঁ |  | |
 | `remarks` | varchar(255) | হ্যাঁ |  | |
 | `confirmed` | tinyint(1) | না | default 0 | |
-| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `from_app` | tinyint(1) | না | default 0 | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `unique_site_entry`(employee_id,attendance_date)
 
@@ -1339,10 +1339,10 @@ Unique: `unique_site_member`(employee_id)
 | `require_location` | tinyint(1) | না | default 0 | |
 | `backdate_days` | int(11) | না | default 2 | |
 | `reminder_time` | varchar(5) | না | default '11:00' | |
+| `use_app_checkin` | tinyint(1) | না | default 1 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
-| `use_app_checkin` | tinyint(1) | না | default 1 | |
 
 ### `site_attendance_sheets`
 
@@ -1527,9 +1527,9 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `features_rev` | int(11) | না | default 1 | |
-| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `access_json` | longtext | হ্যাঁ |  | |
 
 ### `admin_module_permission_layers`
@@ -1596,7 +1596,7 @@ Unique: `app_id`(app_id)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `employee_user_id` | int(11) | না |  | FK → `users.id` |
-| `request_type` | enum('leave','timesheet','asset','vehicle','mobile','loan','bill_claim') | না |  | |
+| `request_type` | enum('bill_claim','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
 | `template_id` | int(11) | না |  | FK → `approval_templates.id` |
 | `assigned_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
@@ -1910,10 +1910,15 @@ Unique: `uniq_session_key`(session_key)
 | `can_manage_leave` | tinyint(1) | না | default 0 | |
 | `can_view_movement_claims` | tinyint(1) | না | default 0 | |
 | `can_view_bill_claims` | tinyint(1) | না | default 0 | |
+| `can_save_ride_places` | tinyint(1) | না | default 0 | |
+| `chat_about` | varchar(140) | হ্যাঁ |  | |
 | `group_id` | int(11) | না | default 1 | |
 | `is_platform_admin` | tinyint(1) | না | default 0 | |
 | `can_view_group_directory` | tinyint(1) | না | default 0 | |
+| `can_work_all_companies` | tinyint(1) | না | default 0 | |
 | `max_devices` | int(11) | না | default 1 | |
+| `can_use_app` | tinyint(1) | না | default 0 | |
+| `app_access_custom` | tinyint(1) | না | default 0 | |
 | `sessions_valid_after` | datetime(3) | হ্যাঁ |  | |
 | `can_view_budget_module` | tinyint(1) | না | default 1 | |
 | `can_view_leave_summary` | tinyint(1) | না | default 0 | |
@@ -1927,7 +1932,9 @@ Unique: `uniq_session_key`(session_key)
 | `is_onboarding` | tinyint(1) | না | default 0 | |
 | `must_change_password` | tinyint(1) | না | default 0 | |
 | `onboarding_expires_at` | datetime | হ্যাঁ |  | |
+| `can_use_disappearing` | tinyint(1) | না | default 0 | |
 | `can_use_calls` | tinyint(1) | না | default 0 | |
+| `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_use_ai_assistant` | tinyint(1) | না | default 1 | |
 | `can_export_assistant_reports` | tinyint(1) | না | default 0 | |
 | `can_handle_assistant_support` | tinyint(1) | না | default 0 | |
@@ -1938,33 +1945,26 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_mobile_bill` | tinyint(1) | না | default 0 | |
 | `can_view_group_dashboard` | tinyint(1) | না | default 0 | |
 | `attendance_project_id` | int(11) | হ্যাঁ |  | FK → `projects.id` |
+| `can_add_adhoc_approver` | tinyint(1) | না | default 0 | |
+| `can_use_assistant_voice` | tinyint(1) | না | default 0 | |
 | `can_use_mail` | tinyint(1) | না | default 0 | |
-| `can_view_roster` | tinyint(1) | না | default 0 | |
-| `can_sign_documents` | tinyint(1) | না | default 0 | |
-| `can_save_ride_places` | tinyint(1) | না | default 0 | |
-| `chat_about` | varchar(140) | হ্যাঁ |  | |
-| `can_work_all_companies` | tinyint(1) | না | default 0 | |
-| `can_use_chat` | tinyint(1) | না | default 1 | |
 | `can_view_mail_directory` | tinyint(1) | না | default 0 | |
 | `can_use_mail_groups` | tinyint(1) | না | default 0 | |
+| `can_view_roster` | tinyint(1) | না | default 0 | |
+| `can_view_my_ot` | tinyint(1) | না | default 0 | |
+| `can_approve_team_ot` | tinyint(1) | না | default 0 | |
 | `can_take_break` | tinyint(1) | না | default 0 | |
 | `can_give_feedback` | tinyint(1) | না | default 0 | |
 | `can_use_fingerprint` | tinyint(1) | না | default 0 | |
-| `can_receive_material` | tinyint(1) | না | default 0 | |
-| `can_return_dispatch` | tinyint(1) | না | default 0 | |
-| `can_view_payslip` | tinyint(1) | না | default 0 | |
-| `can_email_reports` | tinyint(1) | না | default 0 | |
-| `can_request_items` | tinyint(1) | না | default 0 | |
-| `can_add_adhoc_approver` | tinyint(1) | না | default 0 | |
-| `can_use_assistant_voice` | tinyint(1) | না | default 0 | |
-| `can_use_app` | tinyint(1) | না | default 0 | |
-| `app_access_custom` | tinyint(1) | না | default 0 | |
-| `can_update_check_out` | tinyint(1) | না | default 0 | |
-| `can_use_disappearing` | tinyint(1) | না | default 0 | |
 | `welcome_seen_at` | datetime | হ্যাঁ |  | |
 | `tutorials_done` | text | হ্যাঁ |  | |
-| `can_view_my_ot` | tinyint(1) | না | default 0 | |
-| `can_approve_team_ot` | tinyint(1) | না | default 0 | |
+| `can_receive_material` | tinyint(1) | না | default 0 | |
+| `can_return_dispatch` | tinyint(1) | না | default 0 | |
+| `can_sign_documents` | tinyint(1) | না | default 0 | |
+| `can_view_payslip` | tinyint(1) | না | default 0 | |
+| `can_email_reports` | tinyint(1) | না | default 0 | |
+| `can_update_check_out` | tinyint(1) | না | default 0 | |
+| `can_request_items` | tinyint(1) | না | default 0 | |
 
 Unique: `email`(email), `username`(username)
 
@@ -3479,7 +3479,6 @@ Unique: `unique_driver_employee`(employee_id)
 | `destination_lat` | decimal(10,7) | হ্যাঁ |  | |
 | `destination_lng` | decimal(10,7) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
-| `self_drive` | tinyint(1) | না | default 0 | |
 
 ### `vehicles`
 
@@ -3546,7 +3545,6 @@ Unique: `uniq_signature_document`(document_id)
 | `ip` | varchar(64) | হ্যাঁ |  | |
 | `user_agent` | varchar(255) | হ্যাঁ |  | |
 | `decline_reason` | varchar(500) | হ্যাঁ |  | |
-| `on_line` | tinyint(1) | না | default 0 | |
 
 Unique: `uniq_doc_step`(document_id,step_order)
 
@@ -3834,10 +3832,10 @@ Unique: `uq_payroll_batch`(company_id,month_year)
 | `late_deduction_amount` | decimal(10,2) | না | default 0.00 | |
 | `payment_date` | date | হ্যাঁ |  | |
 | `payment_reference` | varchar(150) | হ্যাঁ |  | |
-| `item_earnings` | decimal(10,2) | না | default 0.00 | |
-| `item_deductions` | decimal(10,2) | না | default 0.00 | |
 | `last_edited_by` | int(11) | হ্যাঁ |  | |
 | `loan_deduction` | decimal(10,2) | না | default 0.00 | |
+| `item_earnings` | decimal(10,2) | না | default 0.00 | |
+| `item_deductions` | decimal(10,2) | না | default 0.00 | |
 
 Unique: `unique_employee_month`(employee_id,month_year)
 
@@ -4239,10 +4237,10 @@ Unique: `unique_step_order`(step_order)
 | `group_id` | int(11) | না | default 1 | |
 | `template_id` | int(11) | হ্যাঁ |  | FK → `approval_templates.id` |
 | `supervisor_step_user_id` | int(11) | হ্যাঁ |  | FK → `users.id` |
-| `awaiting_approver` | tinyint(1) | না | default 0 | |
 | `adhoc_approver_id` | int(11) | হ্যাঁ |  | |
 | `adhoc_added_by` | int(11) | হ্যাঁ |  | |
 | `adhoc_note` | varchar(500) | হ্যাঁ |  | |
+| `awaiting_approver` | tinyint(1) | না | default 0 | |
 | `stuck_since` | datetime | হ্যাঁ |  | |
 | `supervisor_pinned` | tinyint(1) | না | default 0 | |
 
@@ -4276,7 +4274,7 @@ Unique: `unique_template_step_order`(template_id,step_order)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `name` | varchar(150) | না |  | |
-| `request_type` | enum('leave','timesheet','asset','vehicle','mobile','loan','bill_claim') | না |  | |
+| `request_type` | enum('bill_claim','leave','timesheet','asset','vehicle','mobile','loan') | না |  | |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `is_active` | tinyint(1) | না | default 1 | |
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
