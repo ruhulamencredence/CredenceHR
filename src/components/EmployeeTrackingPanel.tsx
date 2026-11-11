@@ -236,6 +236,22 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<{ id: number; name: string } | null>(null);
+  // Opened from a person's map elsewhere (Dashboard -> Under tracking ->
+  // a person -> "Full path & live follow", TrackingPersonMap.tsx): show them.
+  useEffect(() => {
+    const take = (u: any) => u && Number(u.id) && setSelectedUser({ id: Number(u.id), name: String(u.name || 'User') });
+    const pending = (window as any).__credenceTrackingFocus;
+    if (pending && Date.now() - Number(pending.at || 0) < 60_000) {
+      take(pending);
+      (window as any).__credenceTrackingFocus = null;
+    }
+    const on = (e: Event) => {
+      take((e as CustomEvent).detail);
+      (window as any).__credenceTrackingFocus = null;
+    };
+    window.addEventListener('credence:tracking-focus', on);
+    return () => window.removeEventListener('credence:tracking-focus', on);
+  }, []);
   const [history, setHistory] = useState<LocationPing[]>([]);
   // The route without rough fixes, jumps and fake-GPS points (kept apart).
   const cleaned = useMemo(() => cleanPath(history), [history]);
@@ -1192,7 +1208,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           </MiniCard>
 
           {/* The who-list / Send Notice / Notice Report popups. */}
-          <TrackingStatusCards token={token} variant="lists" external status={status} openRequest={listRequest} reportRequest={noticeReportRequest} />
+          <TrackingStatusCards token={token} variant="lists" external status={status} openRequest={listRequest} reportRequest={noticeReportRequest} onFullPath={(u) => setSelectedUser(u)} />
         </>
       )}
 

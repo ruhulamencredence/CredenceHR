@@ -382,6 +382,25 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   // Path history for ONE user (Admin Panel -> Employee Tracking -> click a user
   // -> "View path today"), optionally bounded by from/to — lets an Admin/
   // Superadmin play back where that user actually went, not just their latest dot.
+  // One person's latest location (Dashboard / Employee Tracking -> Under
+  // tracking list -> tap a person: TrackingPersonMap.tsx). Same module +
+  // Read layer + Tracking scope as the live board.
+  app.get("/api/tracking/latest", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
+    try {
+      const user_id = Number(req.query.user_id);
+      if (!user_id) return res.status(400).json({ error: "user_id is required" });
+      if (!inTrackingScope(await getTrackingScope(queryDB, req.user), user_id)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
+      const rows: any[] =
+        (await queryDB(
+          "SELECT user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock, TIMESTAMPDIFF(MINUTE, recorded_at, NOW()) AS minutes_ago FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1",
+          [user_id]
+        )) || [];
+      res.json(rows[0] || null);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/tracking/history", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;

@@ -17,6 +17,8 @@ import { BarChart3, CheckCircle2, Navigation, Search, Send, X } from 'lucide-rea
 import { retryImport } from '../lib/chunkReload';
 // The report (with its Excel / PDF export) is fetched when opened.
 const TrackingNoticeReport = lazy(retryImport(() => import('./TrackingNoticeReport').then((m) => ({ default: m.TrackingNoticeReport }))));
+// A person's location on a map (Leaflet), fetched when someone is tapped.
+const TrackingPersonMap = lazy(retryImport(() => import('./TrackingPersonMap').then((m) => ({ default: m.TrackingPersonMap }))));
 import { apiUrl } from '../lib/api';
 import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 
@@ -115,13 +117,17 @@ interface Props {
   // Open a list from outside; `at` changes on every request, `query` pre-fills
   // the search (e.g. a Department name).
   openRequest?: { which: 'tracked' | 'not_tracked'; query?: string; at: number } | null;
+  /** Inside Employee Tracking: "Full path" from a person's map selects them there. */
+  onFullPath?: (u: { id: number; name: string }) => void;
   reportRequest?: number;
 }
 
 // Admin Panel -> Employee Tracking (the live map).
 const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose, openRequest, reportRequest }) => {
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose, openRequest, reportRequest, onFullPath }) => {
+  // Tap a person in the list: their location on a map (TrackingPersonMap).
+  const [person, setPerson] = useState<{ userId: number; name: string; detail?: string } | null>(null);
   const own = useTrackingStatus(token, !external);
   const data = external ? status : own;
   const chooser = chooserOpen;
@@ -461,13 +467,27 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                   </div>
                   <div className="space-y-1">
                     {g.list.map((r) => (
-                      <div key={r.employee_pk ?? `u${r.user_id}`} className="flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg">
+                      <div
+                        key={r.employee_pk ?? `u${r.user_id}`}
+                        className={`flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg ${r.user_id && r.last_ping ? 'cursor-pointer hover:bg-emerald-50/60 hover:border-emerald-100' : ''}`}
+                        role={r.user_id && r.last_ping ? 'button' : undefined}
+                        tabIndex={r.user_id && r.last_ping ? 0 : undefined}
+                        title={r.user_id && r.last_ping ? `Show ${r.name}'s location on the map` : undefined}
+                        onClick={() => r.user_id && r.last_ping && setPerson({ userId: Number(r.user_id), name: r.name, detail: [r.employee_id, r.designation, r.department].filter(Boolean).join(' · ') })}
+                        onKeyDown={(e) => {
+                          if ((e.key === 'Enter' || e.key === ' ') && r.user_id && r.last_ping) {
+                            e.preventDefault();
+                            setPerson({ userId: Number(r.user_id), name: r.name, detail: [r.employee_id, r.designation, r.department].filter(Boolean).join(' · ') });
+                          }
+                        }}
+                      >
                         {canSend && (
                           <input
                             type="checkbox"
                             disabled={!r.user_id}
                             checked={!!r.user_id && picked.has(Number(r.user_id))}
                             onChange={(e) => r.user_id && togglePick([Number(r.user_id)], e.target.checked)}
+                            onClick={(e) => e.stopPropagation()}
                             title={r.user_id ? 'Select for notice' : 'No login account — a notice cannot reach them'}
                             className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 shrink-0 disabled:opacity-30"
                             aria-label={`Select ${r.name}`}
@@ -529,6 +549,23 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       {reportOpen && (
         <Suspense fallback={null}>
           <TrackingNoticeReport token={token} onClose={() => setReportOpen(false)} />
+        </Suspense>
+      )}
+      {person && (
+        <Suspense fallback={null}>
+          <TrackingPersonMap
+            token={token}
+            person={person}
+            onClose={() => setPerson(null)}
+            onFullPath={
+              onFullPath
+                ? () => {
+                    setOpen(null);
+                    onFullPath({ id: person.userId, name: person.name });
+                  }
+                : undefined
+            }
+          />
         </Suspense>
       )}
     </>
