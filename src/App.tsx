@@ -1044,8 +1044,12 @@ export default function App() {
       aria-label="Reloading CredenceHR"
       style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
     >
-      <img src={bootIconUrl} alt="" width={112} height={112} className="absolute left-1/2 top-1/2 -ml-14 -mt-14 w-28 h-28" />
-      <div className="absolute left-1/2 -ml-[60px] w-[120px] h-[3px] rounded-sm bg-white/25" style={{ bottom: 124 }} />
+      <img
+        src={bootIconUrl}
+        alt=""
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+        style={{ width: 'clamp(95.2px, 31.111vw, 140px)', height: 'clamp(95.2px, 31.111vw, 140px)' }}
+      />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
