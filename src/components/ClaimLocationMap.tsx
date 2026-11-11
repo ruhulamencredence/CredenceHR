@@ -111,21 +111,24 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
     // painted on top and covered this popup's Close button. Bumping this
     // popup above every z-50 element it can be opened over (My Claims list,
     // Claims review panel) fixes the overlap without touching the button.
-    <div className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
+    // z-[90]: also above the Admin Panel's phone bottom bar (Admin Panel ->
+    // Check In/Out opens it too). Liquid-glass house style (TrackingNoticeCard).
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-center justify-center p-4" onClick={onClose}>
+      <div className="liquid-glass liquid-glass-in rounded-[32px] max-w-lg w-full max-h-[92vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-white/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="bg-blue-50 text-blue-600 p-2 rounded-xl border border-blue-100 shrink-0">
+            <div className="liquid-glass-inset text-blue-600 p-2 rounded-2xl shrink-0">
               <MapPin className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-bold text-slate-900">Check In/Out Location</h3>
-              <p className="text-xs text-slate-500 truncate">{claim.purpose}</p>
+              <p className="text-xs text-slate-500 truncate">{[claim.user_name, claim.purpose].filter(Boolean).join(' · ')}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors shrink-0"
+            aria-label="Close"
+            className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600 shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -133,7 +136,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
 
         <div className="p-5 space-y-3 overflow-y-auto">
           <div className="relative">
-            <div ref={mapContainerRef} className="w-full h-72 sm:h-80 rounded-xl border border-slate-200 overflow-hidden" />
+            <div ref={mapContainerRef} className="w-full h-72 sm:h-80 rounded-2xl border border-white/70 overflow-hidden" />
             {!ready && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50 rounded-xl">
                 <MapPin className="w-5 h-5 text-slate-300 animate-pulse" />
@@ -168,11 +171,11 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
           </div>
         </div>
 
-        <div className="p-5 border-t border-slate-200 flex justify-end shrink-0">
+        <div className="p-5 border-t border-white/60 flex justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200 transition-colors"
+            className="liquid-glass-button rounded-full px-5 py-2.5 text-sm font-semibold"
           >
             Close
           </button>
