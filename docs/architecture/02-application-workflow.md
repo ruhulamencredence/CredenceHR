@@ -830,6 +830,13 @@ Deploy বা `pm2 restart`-এর সময় Node app কয়েক সে�
 
 পুরনো ডাটাবেস server চালু হওয়ার সময় নিজে বদলে যায় (`billClaimRename.ts`, base schema-র ঠিক পরে, বাকি migration-এর আগে): টেবিল / কলাম / index rename, ENUM-এর মান বদল, আর দেওয়া অনুমতি (module, layer, App access, Access Template) নতুন নামে সরানো — ডাটা হারায় না, আর আবার চালালে কিছু করে না। **Conveyance Bill** (`conveyance_bills`, `conveyance_bill_items`, `/api/conveyance-bills`, Disburser ধাপ) আলাদা জিনিস — claim approve হলে যে বিল তৈরি হয় — তার নাম আগের মতোই।
 
+## Admin Dashboard: Pending Attendance — একসাথে Approve
+
+Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে Check In/Out) আর **Pending Attendance Recon.** (হাজিরা সংশোধন) — দুটোতেই চাপলে একই popup খোলে (০ থাকলেও; "Nothing is waiting")। যে সারি এই অ্যাকাউন্ট approve করতে পারে, শুধু তার পাশে tick box; উপরে "Select all you can approve", নিচে **Approve selected (n)** — জিজ্ঞেস করে (`confirmDialog`) তারপর একটা একটা করে approve করে, আর তালিকা নতুন করে আনে। কে পারে তা সার্ভার ঠিক করে (`/api/admin-dashboard/extras`, প্রতিটা সারির `approve`), একক approve-এর একই নিয়মে:
+- Approval Workflow-এ থাকা অনুরোধ: Superadmin, বা যাঁর ধাপে এখন অপেক্ষা (`getCurrentStepApprovers`) → `POST /api/my-approvals/:id/act`।
+- Workflow-এর বাইরে হাজিরা সংশোধন: Attendance module থাকলে → `POST /api/attendance/corrections/:id/decision`।
+এই endpoint-গুলো প্রতিটা approve-এ আবার যাচাই করে, তাই tick box না থাকা সারি API দিয়েও approve হয় না (403)। কয়েক ধাপের workflow-এ এক ধাপ approve হলে বার্তায় আলাদা লেখা থাকে: "passed to the next approver"।
+
 ## Admin Dashboard ও PEPM: যা অনুমতি আছে শুধু তাই
 
 - **Admin Dashboard** (`AdminDashboard.tsx`, `AdminDashboardWatch.tsx`): প্রতিটা tile, card আর তার request নিজের module থাকলে তবেই — ছুটির tile / Leave Balance / Leave Calendar `leave_applications`, Quick View / Attendance Summary / Attendance Missed `attendance_reports`, Claim Amount `bill_claim`, Disburse ও Claim chart `bill_claim` বা `disbursement`, Advance `payroll`, Asset `asset_management`, Birthdays `employees`, Attendance Approval / Recon. `attendance`, Status / Document `hr_operations`; New Joiners, Offboarding, Loans & Mobile Bill, Recruitment-ও নিজের module-এ। Superadmin সব দেখেন। Task Status Overview-এর Bill Claim সারি এখন `bill_claim` module-এর (আগে ভুল করে "Check in/out" নামে Check In/Out module-এ ছিল)।
