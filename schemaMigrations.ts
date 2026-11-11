@@ -1183,6 +1183,34 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure location_pings table exists: " + err.message);
   }
+  // 1 = the phone said this fix came from a mock-location ("fake GPS") app
+  // (Android Location.isMock(); APK DutyTrackingService / LiveTrackingService).
+  try {
+    await dbPool.query("ALTER TABLE location_pings ADD COLUMN is_mock TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add location_pings.is_mock: " + err.message);
+  }
+  // Remote Attendance Check In / Out refused because the phone said the
+  // position came from a mock-location ("fake GPS") app (AttendanceRoutes.ts
+  // refuseMockFix). Nothing is recorded as attendance; this keeps who tried.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS attendance_mock_attempts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        kind ENUM('in','out') NOT NULL,
+        lat DECIMAL(10, 7) NULL,
+        lng DECIMAL(10, 7) NULL,
+        accuracy_m INT NULL,
+        project_id INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_attendance_mock_user_time (user_id, created_at)
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure attendance_mock_attempts table exists: " + err.message);
+  }
   // What the phone itself says about location, sent with every heartbeat of the
   // APK's tracking (POST /api/tracking/state) — one row per user. Lets Employee
   // Tracking tell "Phone Location is OFF" / "permission removed" / "app closed"

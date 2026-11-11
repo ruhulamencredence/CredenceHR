@@ -61,6 +61,52 @@ self.addEventListener('fetch', (event) => {
   if (isTile(url)) event.respondWith(tile(event.request));
 });
 
+// An incoming call (WebPushService webRing — iPhone / iPad Home Screen app,
+// Mac Safari): the server sends one every few seconds while it rings. Each
+// is shown as a NEW notification (the previous one for that call closes), so
+// the phone plays its notification sound and buzzes every time — the
+// nearest a web app can get to ringing (Apple allows no ringtone, no long
+// vibration, no call screen for web apps). With the app on screen the page
+// rings itself: then one quiet notification only.
+async function showCall(msg) {
+  const d = msg.data || {};
+  const base = 'call-ring-' + (d.callId || '');
+  const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const onScreen = wins.some((w) => w.visibilityState === 'visible');
+  let shown = [];
+  try {
+    shown = await self.registration.getNotifications();
+  } catch (e) {
+    shown = [];
+  }
+  const tag = onScreen ? base : base + '-' + Date.now();
+  for (const n of shown) if ((n.tag || '').startsWith(base) && n.tag !== tag) n.close();
+  await self.registration.showNotification(msg.title || 'Incoming call', {
+    body: msg.body || 'Tap to answer',
+    icon: '/favicon.png',
+    badge: '/favicon.png',
+    tag,
+    renotify: !onScreen,
+    silent: onScreen,
+    requireInteraction: true,
+    // Browsers that allow it (Android Chrome): a long buzz.
+    vibrate: [1000, 400, 1000, 400, 1000, 400, 1000],
+    data: d
+  });
+}
+
+// The call's own line in the chat (Missed call / call length) has come:
+// its ringing notifications go.
+async function clearCallRings(roomId) {
+  if (!roomId) return;
+  try {
+    const shown = await self.registration.getNotifications();
+    for (const n of shown) if ((n.tag || '').startsWith('call-ring-') && String((n.data || {}).roomId) === String(roomId)) n.close();
+  } catch (e) {
+    // nothing to clear
+  }
+}
+
 self.addEventListener('push', (event) => {
   let msg = {};
   try {
@@ -68,22 +114,32 @@ self.addEventListener('push', (event) => {
   } catch (e) {
     msg = { body: event.data ? event.data.text() : '' };
   }
+  if (msg.kind === 'call') {
+    event.waitUntil(showCall(msg));
+    return;
+  }
   const title = msg.title || 'CredenceHR';
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: msg.body || '',
-      icon: '/favicon.png',
-      badge: '/favicon.png',
-      tag: msg.tag || undefined,
-      renotify: !!msg.tag,
-      data: msg.data || {}
-    })
+    (async () => {
+      if (msg.data && msg.data.roomId) await clearCallRings(msg.data.roomId);
+      await self.registration.showNotification(title, {
+        body: msg.body || '',
+        icon: '/favicon.png',
+        badge: '/favicon.png',
+        tag: msg.tag || undefined,
+        renotify: !!msg.tag,
+        data: msg.data || {}
+      });
+    })()
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
+  // A call: its other ringing notifications go too; the chat opens, where
+  // the call rings (one-to-one) or shows "Join" (group).
+  if (data.type === 'call') event.waitUntil(clearCallRings(data.roomId));
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

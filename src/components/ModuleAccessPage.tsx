@@ -15,7 +15,8 @@
 // access audit log apply to every account individually.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle, Smartphone } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, Search, Copy, Users as UsersIcon, X, Check, ChevronDown, Building2, AlertTriangle, Smartphone, LayoutTemplate, Save } from 'lucide-react';
 import {
   ADMIN_MODULES,
   AdminModuleKey,
@@ -28,7 +29,7 @@ import {
   layersFor
 } from '../types';
 import { apiUrl } from '../lib/api';
-import { AccessViewer, canEditUserModules } from '../lib/accessTemplates';
+import { AccessViewer, AccessTemplate, TemplateAccess, TEMPLATE_FEATURES, canEditUserModules } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 
@@ -419,9 +420,13 @@ interface ModuleAccessPageProps {
   onClose: () => void;
   // After a save: reload the accounts and say how it went.
   onSaved: (text: string, ok: boolean) => void;
+  // Access Templates (Users module): "Apply template…" here, and — with the
+  // Users module's Edit / Add layer — "Save as template".
+  templatesAllowed?: boolean;
+  canSaveTemplate?: boolean;
 }
 
-export function ModuleAccessPage({ token, users, initialIds, departments, viewer, backTo = 'Users', onClose, onSaved }: ModuleAccessPageProps) {
+export function ModuleAccessPage({ token, users, initialIds, departments, viewer, backTo = 'Users', onClose, onSaved, templatesAllowed = false, canSaveTemplate = false }: ModuleAccessPageProps) {
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const editable = useMemo(() => users.filter((u) => canEditUserModules(u, viewer)), [users, viewer]);
 
@@ -671,6 +676,95 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
       keys.forEach((k) => (on ? s.add(k) : s.delete(k)));
       return { ...m, [single.id]: { ...cur, draft: { ...cur.draft, [kind]: s } } };
     });
+  };
+
+  // ---- Access Templates ----
+  const [templates, setTemplates] = useState<AccessTemplate[]>([]);
+  const [saveTpl, setSaveTpl] = useState<{ name: string; description: string; busy: boolean; error: string } | null>(null);
+  useEffect(() => {
+    if (!templatesAllowed) return;
+    fetch(apiUrl('/api/access-templates'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => Array.isArray(list) && setTemplates(list))
+      .catch(() => undefined);
+  }, [token, templatesAllowed]);
+
+  // "Apply template…": fills the form like "Copy access from…"; nothing is
+  // saved until Save. A template saved from here holds the whole access and
+  // is filled in exactly (switches it doesn't know — added later — stay as
+  // they are); an older one (switches + modules) only adds those.
+  const applyTemplate = (id: number) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    const full: TemplateAccess | null = t.access || null;
+    setDrafts((d) => {
+      const next = { ...d };
+      for (const u of selected) {
+        const cur = d[u.id];
+        if (!cur) continue;
+        let c: Access;
+        if (full) {
+          const layers: Record<string, Set<string>> = {};
+          for (const m of [...LAYER_MODULES, 'leave_manage']) layers[m] = new Set(full.layers?.[m] || []);
+          const flags = { ...cur.flags };
+          for (const [k, v] of Object.entries(full.flags || {})) if (k in FLAG) (flags as any)[k] = v;
+          c = { modules: new Set(full.modules), layers, flags };
+        } else {
+          c = cloneAccess(cur);
+          for (const m of t.modules) {
+            if (c.modules.has(m)) continue;
+            c.modules.add(m);
+            if (LAYER_MODULES.includes(m) && !(c.layers[m]?.size)) c.layers[m] = new Set(defaultLayers(m));
+          }
+          for (const f of t.features) if (f in FLAG) (c.flags as any)[f] = true;
+        }
+        if (u.role !== 'admin') c.flags.can_access_user_panel = false;
+        next[u.id] = c;
+      }
+      return next;
+    });
+    if (full?.app) {
+      const app = full.app;
+      setAppDrafts((d) => ({ ...d, ...Object.fromEntries(selected.map((u) => [u.id, { can: app.can, custom: app.custom, items: new Set(app.items) }])) }));
+    }
+    setNotice(`Template “${t.name}” filled in — check it, then Save.`);
+  };
+
+  // "Save as template": what is on the screen for this account, as it is now
+  // (not yet saved changes included) — modules, layers, switches, App access.
+  const saveAsTemplate = async () => {
+    if (!single || !saveTpl) return;
+    const name = saveTpl.name.trim();
+    if (!name) return setSaveTpl({ ...saveTpl, error: 'Give the template a name.' });
+    const a = drafts[single.id];
+    const app = appDrafts[single.id];
+    if (!a) return;
+    const access: TemplateAccess = {
+      modules: [...a.modules],
+      layers: Object.fromEntries(
+        Object.entries(a.layers)
+          .filter(([m, v]) => v.size > 0 && (m === 'leave_manage' ? !!(a.flags as any).can_manage_leave : a.modules.has(m)))
+          .map(([m, v]) => [m, [...v]])
+      ),
+      flags: { ...(a.flags as Record<string, boolean>) },
+      app: app ? { can: app.can, custom: app.custom, items: [...app.items] } : null
+    };
+    const features = TEMPLATE_FEATURES.map((f) => f.key).filter((k) => (a.flags as any)[k] === true);
+    setSaveTpl({ ...saveTpl, busy: true, error: '' });
+    try {
+      const res = await fetch(apiUrl('/api/access-templates'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, description: saveTpl.description.trim(), features, modules: access.modules, access })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Could not save the template.');
+      setTemplates((list) => [...list, { ...d, access }].sort((x, y) => x.name.localeCompare(y.name)));
+      setSaveTpl(null);
+      setNotice(`Saved as template “${name}” — pick it in “Apply template…” for anyone.`);
+    } catch (e: any) {
+      setSaveTpl((s0) => (s0 ? { ...s0, busy: false, error: e.message } : s0));
+    }
   };
 
   // "Copy access from…": fills the form; nothing is saved until Save.
@@ -1098,6 +1192,36 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
                   ))}
               </SearchSelect>
             </div>
+            {templatesAllowed && templates.length > 0 && (
+              <div className="relative sm:w-[210px]">
+                <LayoutTemplate className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none z-10" />
+                <SearchSelect
+                  value=""
+                  aria-label="Apply template"
+                  onChange={(e) => e.target.value && applyTemplate(Number(e.target.value))}
+                  className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600 cursor-pointer appearance-none"
+                >
+                  <option value="">Apply template…</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.access ? '' : ' · switches & modules'}
+                    </option>
+                  ))}
+                </SearchSelect>
+              </div>
+            )}
+            {canSaveTemplate && (
+              <button
+                type="button"
+                disabled={!single}
+                title={single ? 'Keep this access as a template' : 'Open one account to save its access as a template'}
+                onClick={() => setSaveTpl({ name: '', description: '', busy: false, error: '' })}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 disabled:opacity-50 whitespace-nowrap"
+              >
+                <Save className="w-4 h-4" /> Save as template
+              </button>
+            )}
           </div>
           <AppAccessCard
             agg={appCanAgg()}
@@ -1181,6 +1305,79 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
             )}
           </div>
         </div>
+
+        {saveTpl && single && createPortal(
+          <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center sm:p-4" onClick={() => !saveTpl.busy && setSaveTpl(null)}>
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Save as template"
+              onClick={(e) => e.stopPropagation()}
+              className="liquid-glass liquid-glass-in w-full sm:max-w-md rounded-t-[32px] sm:rounded-[32px] p-5 sm:p-6"
+              style={{ paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 1.25rem)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setSaveTpl(null)}
+                aria-label="Close"
+                className="liquid-glass-chip absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-3 pr-10">
+                <span className="liquid-glass-inset w-11 h-11 rounded-2xl flex items-center justify-center text-violet-600 shrink-0">
+                  <LayoutTemplate className="w-5 h-5" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Save as template</h3>
+                  <p className="text-xs text-slate-600">From {single.name}&rsquo;s access on this screen</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-700">Template name</span>
+                  <input
+                    autoFocus
+                    value={saveTpl.name}
+                    maxLength={100}
+                    onChange={(e) => setSaveTpl({ ...saveTpl, name: e.target.value, error: '' })}
+                    onKeyDown={(e) => e.key === 'Enter' && void saveAsTemplate()}
+                    placeholder="e.g. Site Engineer, HR Executive"
+                    className="mt-1 w-full px-3 py-2.5 text-sm bg-white/80 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-700">Description (optional)</span>
+                  <input
+                    value={saveTpl.description}
+                    maxLength={255}
+                    onChange={(e) => setSaveTpl({ ...saveTpl, description: e.target.value })}
+                    placeholder="Who it is for"
+                    className="mt-1 w-full px-3 py-2.5 text-sm bg-white/80 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-600"
+                  />
+                </label>
+                <div className="liquid-glass-inset rounded-2xl px-3.5 py-2.5 text-xs text-slate-600 leading-relaxed">
+                  Keeps the modules and what they may do in each, every switch, and the Mobile App access. Department limits and whom they see on Tracking stay with each person and are not part of a template.
+                </div>
+                {saveTpl.error && <p className="text-xs font-semibold text-rose-600">{saveTpl.error}</p>}
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button type="button" onClick={() => setSaveTpl(null)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saveTpl.busy}
+                  onClick={() => void saveAsTemplate()}
+                  className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-60"
+                >
+                  {saveTpl.busy ? 'Saving…' : 'Save template'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
         <div className="sticky bottom-0 z-20 bg-white rounded-b-2xl px-4 md:px-5 py-3.5 border-t border-slate-200 flex items-center justify-end gap-2">
           <span className="text-xs text-slate-500 mr-auto">

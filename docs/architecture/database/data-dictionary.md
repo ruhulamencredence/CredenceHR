@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৫টি টেবিল, ২৬৭১টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৬টি টেবিল, ২৬৮১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1030,6 +1030,19 @@ Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 | `out_distance_m` | int(11) | হ্যাঁ |  | |
 | `out_place` | varchar(255) | হ্যাঁ |  | |
 
+### `attendance_mock_attempts`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `kind` | enum('in','out') | না |  | |
+| `lat` | decimal(10,7) | হ্যাঁ |  | |
+| `lng` | decimal(10,7) | হ্যাঁ |  | |
+| `accuracy_m` | int(11) | হ্যাঁ |  | |
+| `project_id` | int(11) | হ্যাঁ |  | logical → `projects` |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `attendance_report_department_access`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1158,6 +1171,7 @@ Unique: `unique_employee_waiver_date`(employee_id,waiver_date)
 | `battery_pct` | int(11) | হ্যাঁ |  | |
 | `recorded_at` | timestamp | না |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `is_mock` | tinyint(1) | না | default 0 | |
 
 ### `site_attendance_entries`
 
@@ -1390,6 +1404,7 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `features_rev` | int(11) | না | default 1 | |
+| `access_json` | longtext | হ্যাঁ |  | |
 
 ### `admin_module_permission_layers`
 

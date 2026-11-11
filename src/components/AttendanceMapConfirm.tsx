@@ -9,6 +9,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
 import { X, MapPin, Check, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl } from '../lib/api';
@@ -21,7 +22,7 @@ interface AttendanceMapConfirmProps {
   // and a reason is required.
   offsite?: boolean;
   project: Project;
-  coords: { latitude: number; longitude: number };
+  coords: AttendanceFix;
   submitting: boolean;
   onCancel: () => void;
   onConfirm: (remarks: string) => void;
@@ -30,7 +31,7 @@ interface AttendanceMapConfirmProps {
   // the eventual check-in/out POST sends this refreshed point, not the
   // original snapshot taken before the modal opened. Optional so older
   // callers that don't pass it still work (falls back to the initial coords).
-  onCoordsChange?: (coords: { latitude: number; longitude: number }) => void;
+  onCoordsChange?: (coords: AttendanceFix) => void;
   // Lets this same map also plot every OTHER Project's set location circle
   // (muted/gray, purely for context) alongside the one being checked into —
   // fetched from GET /api/projects/all, which needs auth but nothing from
@@ -96,7 +97,7 @@ function formatDistance(m: number): string {
 // browser permission prompt inside the WebView), plain navigator.geolocation
 // on the web build. Kept as its own copy here (not imported) matching the
 // existing convention in this codebase of each file owning its own copy.
-async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+async function getCurrentCoords(): Promise<AttendanceFix> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {
@@ -114,6 +115,9 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
     if (status !== 'granted') {
       throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
     }
+    // The APK's own fix says whether it is fake GPS (mock location).
+    const fix = await nativeAttendanceFix();
+    if (fix) return fix;
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
   }
@@ -301,6 +305,7 @@ export default function AttendanceMapConfirm({
     setLocateError(null);
     try {
       const fresh = await getCurrentCoords();
+      if (fresh.mock) throw new Error(MOCK_LOCATION_MESSAGE);
       setLiveCoords(fresh);
       onCoordsChange?.(fresh);
       userMarkerRef.current?.setLatLng([fresh.latitude, fresh.longitude]);

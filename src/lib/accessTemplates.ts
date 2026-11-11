@@ -99,6 +99,16 @@ export interface AccessTemplate {
   modules: string[];
   // Given to every login Data Import -> Employee Details creates.
   is_default?: boolean;
+  // Saved from Module Access ("Save as template"): the whole access — modules
+  // with their layers, every switch, the Mobile App access. Applying it from
+  // Module Access fills in exactly that; the lists above follow it.
+  access?: TemplateAccess | null;
+}
+export interface TemplateAccess {
+  modules: string[];
+  layers: Record<string, string[]>;
+  flags: Record<string, boolean>;
+  app: { can: boolean; custom: boolean; items: string[] } | null;
 }
 
 export interface AccessViewer {

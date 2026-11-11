@@ -58,6 +58,11 @@ export function fetchPhoto(userId: number, token: string): Promise<string | null
   return p;
 }
 
+/** This person is known to have no photo (not just a failed request). */
+export function photoKnownMissing(userId: number): boolean {
+  return urlCache.has(userId) && urlCache.get(userId) === null;
+}
+
 /** Forget every cached photo and tell mounted avatars to load again (after an upload, sign-out or account switch). */
 export function refreshAvatars(): void {
   for (const u of urlCache.values()) if (u) URL.revokeObjectURL(u);

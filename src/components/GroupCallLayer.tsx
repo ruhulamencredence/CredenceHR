@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume2, Ear, SwitchCamera, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { callAudioAvailable, onCallHangup, setCallSpeaker, startCallAudio, stopCallAudio } from '../lib/callAudio';
+import { callAudioAvailable, onCallHangup, setCallSpeaker, startCallAudio, stopCallAudio, phoneRingFirst, takePendingGroupCall, onGroupCallAction, cancelIncomingCallScreen, onRingHandover, type PendingGroupCall } from '../lib/callAudio';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 
@@ -55,7 +55,13 @@ const clock = (s: number) => {
 };
 
 // Two soft beeps every 1.6 s while a group call rings here.
+// Incoming group call: the phone's own ringtone on the Android app, these
+// beeps on the website / an older APK (phoneRingFirst, lib/callAudio.ts).
 function makeRinger() {
+  return phoneRingFirst(makeWebRinger());
+}
+
+function makeWebRinger() {
   let ctx: AudioContext | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   const beep = (f: number, len: number) => {
@@ -300,11 +306,16 @@ export const GroupCallLayer: React.FC<{ token: string; userId: number; userName:
     const onIncoming = (d: Incoming) => {
       if (callRef.current || d.from?.id === userId) return;
       setIncoming(d);
+      // Rings here: the phone's call screen goes (not while the app is in the background).
+      cancelIncomingCallScreen(d.callId, true);
       ringer.current.start();
       if (ringTimer.current) clearTimeout(ringTimer.current);
       ringTimer.current = setTimeout(stopRinging, RING_FOR_MS);
     };
-    const onStopRing = ({ callId }: { callId: string }) => setIncoming((cur) => (cur && cur.callId === callId ? (ringer.current.stop(), null) : cur));
+    const onStopRing = ({ callId }: { callId: string }) => {
+      cancelIncomingCallScreen(callId);
+      setIncoming((cur) => (cur && cur.callId === callId ? (ringer.current.stop(), null) : cur));
+    };
     const onEnded = ({ callId }: { callId: string }) => {
       onStopRing({ callId });
       if (callRef.current?.callId === callId) cleanup('The call ended');
@@ -405,6 +416,32 @@ export const GroupCallLayer: React.FC<{ token: string; userId: number; userName:
       }),
     []
   );
+
+  // Answered (or opened) from the phone's call screen with the app closed:
+  // join that call, or show it ringing here.
+  const incomingRef = useRef(incoming);
+  incomingRef.current = incoming;
+  useEffect(() => {
+    const take = (d: PendingGroupCall | null) => {
+      if (!d || callRef.current) return;
+      const target = { callId: d.callId, roomId: d.roomId, title: d.title, kind: d.kind };
+      if (d.action === 'accept') return void joinRef.current(target);
+      setIncoming({ ...target, from: { id: 0, name: d.fromName || d.title } });
+      ringer.current.start();
+      if (ringTimer.current) clearTimeout(ringTimer.current);
+      ringTimer.current = setTimeout(stopRinging, RING_FOR_MS);
+    };
+    void takePendingGroupCall().then(take);
+    const offAction = onGroupCallAction(take);
+    // The app came on screen while the phone's call screen rang: ring here.
+    const offHandover = onRingHandover(() => {
+      if (incomingRef.current && !callRef.current) ringer.current.start();
+    });
+    return () => {
+      offAction();
+      offHandover();
+    };
+  }, [stopRinging]);
 
   // Leaving the page mid-call: tell the others.
   useEffect(() => {

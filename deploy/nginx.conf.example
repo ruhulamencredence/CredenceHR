@@ -78,6 +78,19 @@ server {
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }
+
+    # Our own "We'll be right back" page instead of nginx's 502 Bad Gateway
+    # while the app restarts — see deploy/error-pages/README.md.
+    error_page 502 503 504 @credence_down;
+    location @credence_down {
+        root /var/www/credencehr/deploy/error-pages;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        if ($uri ~ ^/(api|socket\.io)/) {
+            return 503 '{"error":"CredenceHR is restarting. Try again in a moment."}';
+        }
+        rewrite ^ /credence-down.html break;
+    }
 }
 
 # --- HTTPS ---

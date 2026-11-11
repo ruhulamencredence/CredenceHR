@@ -51,6 +51,11 @@ try {
   // storage unavailable — it loads when first drawn instead
 }
 const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
+// The Users page's "Photo approvals" count follows decisions made in that popup
+// (AdminPanel.tsx listens). Stable, so the popup doesn't reload on every render.
+const announcePhotoCount = (n: number) => window.dispatchEvent(new CustomEvent('credence:photo-requests-count', { detail: n }));
+// Profile photo approvals, opened straight from its alert over any page (Superadmin).
+const ProfilePhotoRequestsPopup = lazy(retryImport(() => import('./components/ProfilePhotoRequestsPopup').then(m => ({ default: m.ProfilePhotoRequestsPopup }))));
 // Welcome slides, once per account (WelcomeSlides.tsx) — its own small chunk.
 const WelcomeSlides = lazy(retryImport(() => import('./components/WelcomeSlides')));
 // Tutorials: the list and one guided tour (src/lib/tutorials.ts) — loaded when used.
@@ -109,6 +114,7 @@ import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
 import { GroupCallLayer } from './components/GroupCallLayer';
+import { CallSetupPrompt } from './components/CallSetupCard';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
 import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { requestQuickAccessTab } from './lib/quickAccess';
@@ -305,6 +311,13 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // A "new profile photo" alert: only the approvals popup, the page stays (Superadmin — the API is Superadmin-only).
+  const [showPhotoApprovals, setShowPhotoApprovals] = useState(false);
+  useEffect(() => {
+    const open = () => setShowPhotoApprovals(true);
+    window.addEventListener('credence:photo-approvals-popup', open);
+    return () => window.removeEventListener('credence:photo-approvals-popup', open);
+  }, []);
   // Module Access -> Chat (on unless turned off for this account).
   const chatOn = chatAllowed(user);
   // Docked FloatingChatButton's own popup — a New-Leave-Application-sized
@@ -1976,6 +1989,16 @@ export default function App() {
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
       {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <GroupCallLayer token={token} userId={user.id} userName={user.name} />}
+      {token && user && chatOn && (user.role === 'superadmin' || user.can_use_calls) && <CallSetupPrompt />}
+      {token && user?.role === 'superadmin' && showPhotoApprovals && (
+        <Suspense fallback={null}>
+          <ProfilePhotoRequestsPopup
+            token={token}
+            onClose={() => setShowPhotoApprovals(false)}
+            onChanged={announcePhotoCount}
+          />
+        </Suspense>
+      )}
 
       {/* Android app: a newer APK is on the server (AppUpdatePrompt.tsx). */}
       <AppUpdatePrompt />

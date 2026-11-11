@@ -56,6 +56,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       const accuracy_m = req.body.accuracy_m != null && Number.isFinite(Number(req.body.accuracy_m)) ? Math.round(Number(req.body.accuracy_m)) : null;
       const battery_pct = req.body.battery_pct != null && Number.isFinite(Number(req.body.battery_pct)) ? Math.round(Number(req.body.battery_pct)) : null;
       const recorded_at = req.body.recorded_at ? new Date(req.body.recorded_at) : new Date();
+      // The phone's own word that a fix came from a mock-location app.
+      const is_mock = req.body.mock === true ? 1 : 0;
       // A phone standing still re-sends its last fix as a heartbeat: nothing new
       // to store (that only added duplicate rows), but it still answers
       // "should I go live?".
@@ -69,22 +71,23 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
           const pat = pt?.recorded_at ? new Date(pt.recorded_at) : null;
           if (!Number.isFinite(plat) || !Number.isFinite(plng) || !pat || Number.isNaN(pat.getTime())) continue;
           if (pat.getTime() >= recorded_at.getTime()) continue;
-          await queryDB("INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)", [
+          await queryDB("INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)", [
             req.user.id,
             plat,
             plng,
             pt?.accuracy_m != null && Number.isFinite(Number(pt.accuracy_m)) ? Math.round(Number(pt.accuracy_m)) : null,
             battery_pct,
-            pat
+            pat,
+            pt?.mock === true ? 1 : 0
           ]);
         }
         await queryDB(
-          "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
+          "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at, is_mock]
         );
       }
       await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
-      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat });
+      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat, mock: !!is_mock });
       res.json({ success: true, live_until });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -160,7 +163,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         []
       ).catch(() => [])) || [];
     const stateByUser = new Map<number, any>(states.map((x) => [Number(x.user_id), x]));
-    return employees.map((e) => {
+    const rows = employees.map((e) => {
       const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
       const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
       const enabled = !!e.user_id && !!Number(e.can_use_tracking);
@@ -178,7 +181,12 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       // tracked (battery saver / weak signal), whatever its heartbeat says.
       const gpsOn = stateFresh && !locOff && !noPerm && st.location_on !== null && !!Number(st.location_on);
       const alive = gpsOn && minutesAgo != null && minutesAgo <= 120;
-      const tracked = enabled && !locOff && !noPerm && (pingFresh || alive);
+      // A location received in the last TRACKING_LIVE_MIN minutes always
+      // counts — the same rule as the green dot on the map and in "Reporting
+      // now" (before, a fresh location could still be left out here when
+      // the phone's last heartbeat said otherwise or the switch was off, so
+      // the two disagreed).
+      const tracked = pingFresh || (enabled && !locOff && !noPerm && alive);
       const reason = tracked
         ? null
         : !e.user_id
@@ -212,6 +220,35 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         reason
       };
     });
+    // Accounts sending locations with no active employee record linked to
+    // them (all_employees.user_id) — they are on the map too, so count them
+    // here, under "No employee record". Only for a viewer who sees everyone.
+    if (!scope) {
+      const linked = new Set<number>(allEmployees.filter((e) => e.user_id).map((e) => Number(e.user_id)));
+      const loose = pings.filter((p) => !linked.has(Number(p.user_id)) && p.minutes_ago != null && Number(p.minutes_ago) <= TRACKING_LIVE_MIN);
+      if (loose.length) {
+        const ids = loose.map((p) => Number(p.user_id));
+        const users: any[] = (await queryDB(`SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
+        const nameOf = new Map<number, string>(users.map((u) => [Number(u.id), String(u.name || "")]));
+        for (const p of loose) {
+          rows.push({
+            employee_pk: null,
+            employee_id: "",
+            name: nameOf.get(Number(p.user_id)) || "User",
+            designation: "",
+            department: "No employee record",
+            user_id: Number(p.user_id),
+            tracking_enabled: true,
+            tracked: true,
+            last_ping: p.last_ping,
+            minutes_ago: Number(p.minutes_ago),
+            standing_still: false,
+            reason: null
+          });
+        }
+      }
+    }
+    return rows;
   };
   // Sending a notice from the Not Tracked list needs the Notices module too.
   const canSendTrackingNotice = async (user: any) =>
