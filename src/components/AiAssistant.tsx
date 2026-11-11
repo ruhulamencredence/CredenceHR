@@ -853,7 +853,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
 
       {/* .liquid-glass-button sets position: relative, so the wrapper is what's fixed. */}
       {!open && !hidden && !isPhone && (
-        <div className="assistant-fab fixed z-50 right-4 md:right-7 bottom-[calc(88px+env(safe-area-inset-bottom,0px))] md:bottom-[100px]">
+        <div className="assistant-fab fixed z-50 right-4 md:right-7 bottom-[calc(88px+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:bottom-[100px]">
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -1261,7 +1261,7 @@ const EdgeTab: React.FC<{ count: number; onOpen: () => void }> = ({ count, onOpe
   return (
     <div
       className="assistant-fab assistant-edge-tab fixed z-50 right-0 transition-transform duration-300 ease-out"
-      style={{ bottom: `calc(${bottom}px + env(safe-area-inset-bottom, 0px))`, transform: scrolling && !drag.current ? 'translateX(110%)' : 'translateX(0)' }}
+      style={{ bottom: `calc(${bottom}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))`, transform: scrolling && !drag.current ? 'translateX(110%)' : 'translateX(0)' }}
     >
       <button
         type="button"

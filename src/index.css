@@ -1157,7 +1157,8 @@ html.kb-open .fixed.inset-0:not([data-kb-self]) > * {
 :root {
   --nav-room: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
-html:not(.kb-open) .fixed.inset-0:not([data-nav-self]) {
+html:not(.kb-open) .fixed.inset-0:not([data-nav-self]),
+html:not(.kb-open) .fixed.top-0.bottom-0:not([data-nav-self]) {
   border-bottom: var(--nav-room) solid transparent !important;
   --native-safe-area-inset-bottom: 0px;
 }
