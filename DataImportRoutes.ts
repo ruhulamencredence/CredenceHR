@@ -421,6 +421,14 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     prepare?: (ctx: Ctx) => Promise<any>;
     row: (v: any, ctx: Ctx, prep: any) => Promise<Omit<RowResult, "row">>;
   };
+  // Loosely the same person's name ("Md. Abdul Karim" ~ "Abdul Karim").
+  const NAME_FILLER = new Set(["md", "mohammad", "mohammed", "muhammad", "mohd", "mst", "mosammat", "mosamat", "most", "sree", "sri", "shri", "engr", "dr", "mr", "mrs", "ms", "sk", "sheikh"]);
+  const nameWords = (s: string) => String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !NAME_FILLER.has(w));
+  const sameName = (a: string, b: string) => {
+    const x = nameWords(a), y = new Set(nameWords(b));
+    if (!x.length || !y.size) return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    return x.some((w) => y.has(w));
+  };
   const fail = (message: string): never => {
     throw new Error(message);
   };
@@ -468,6 +476,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         }
         const defaultTemplate = canGrant ? await ensureDefaultAccessTemplate(queryDB).catch(() => null) : null;
         // Salary payment accounts already on file (Employees -> Payment), by employee.
+        // Logins with no employee record (their employee was deleted, the
+        // login kept): an employee imported again under that Employee ID —
+        // which is that login's Login ID — is linked back to it instead of
+        // failing "already the Login ID of …".
+        const linkedUserIds = new Set<number>(
+          (((await queryDB("/*unscoped*/ SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []) as any[]).map((r) => Number(r.user_id))
+        );
+        const orphanLogins = new Map<string, { id: number; name: string }>();
+        for (const u of ((await queryDB("/*unscoped*/ SELECT id, name, username, email FROM users").catch(() => [])) || []) as any[]) {
+          if (linkedUserIds.has(Number(u.id))) continue;
+          for (const k of [u.username, u.email]) if (k) orphanLogins.set(String(k).trim().toLowerCase(), { id: Number(u.id), name: String(u.name || "") });
+        }
         const accountRows: any[] = (await queryDB("SELECT employee_id, account_type, account_number, percentage, is_active FROM employee_payment_accounts").catch(() => [])) || [];
         const accounts = new Map<number, any[]>();
         for (const a of accountRows) accounts.set(Number(a.employee_id), [...(accounts.get(Number(a.employee_id)) || []), a]);
@@ -478,6 +498,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           branch: new Map(branches.map((b) => [norm(String(b.branch_name)), b])),
           pinOwner: new Map(pins.map((p) => [String(p.zk_device_pin), p])),
           seenCodes: new Set<string>(),
+          orphanLogins,
+          claimedUsers: new Set<number>(),
           accounts
         };
       },
@@ -489,9 +511,21 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         prep.seenCodes.add(codeKey);
         const existing = ctx.byCode.get(codeKey);
         // The Employee ID is also the Login ID (EmployeeLoginId.ts): a new one
-        // can't match another company's employee or another account's login.
+        // can't match another company's employee or another account's login —
+        // except the login that is this same person's, left without an
+        // employee record (relink below).
+        let relink: { id: number; name: string } | null = null;
         if (!existing && code) {
-          const clash = await employeeIdConflict(queryDB, code);
+          const orphan = prep.orphanLogins.get(codeKey);
+          if (orphan && !prep.claimedUsers.has(orphan.id)) {
+            if (!sameName(orphan.name, str(v.name)))
+              fail(
+                `${code} is the Login ID of "${orphan.name}", a login with no employee record, but this row's name is "${str(v.name)}". If it is the same person, write the name as in Users; otherwise use another Employee ID.`
+              );
+            relink = orphan;
+            prep.claimedUsers.add(orphan.id);
+          }
+          const clash = await employeeIdConflict(queryDB, code, relink ? { userId: relink.id } : {});
           if (clash) fail(clash);
         }
         const set: Record<string, any> = { name: str(v.name) };
@@ -563,7 +597,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           if (!password) fail("Login ID given without a Password.");
           const pwBad = passwordProblem(password, { email: loginId });
           if (pwBad) fail(pwBad);
-          if (existing?.user_id) {
+          if (existing?.user_id || relink) {
             notes.push("Already has a login — Login ID / Password ignored");
           } else {
             const isEmail = loginId.includes("@");
@@ -690,12 +724,20 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const cols = ["employee_id", ...Object.keys(set)];
           if (!("is_active" in set)) cols.push("is_active");
           const vals = cols.map((c) => (c === "employee_id" ? code : c === "is_active" && !("is_active" in set) ? 1 : set[c]));
+          if (relink) {
+            cols.push("user_id");
+            vals.push(relink.id);
+          }
           const r = await queryDB(`INSERT INTO all_employees (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, vals);
-          ctx.byCode.set(codeKey, { id: r.insertId, employee_id: code, ...set });
+          ctx.byCode.set(codeKey, { id: r.insertId, employee_id: code, ...set, ...(relink ? { user_id: relink.id } : {}) });
           await createLogin(Number(r.insertId));
           await addPayment(Number(r.insertId));
         }
-        return { status: "create", message: [login ? "New employee with login" : "New employee", ...notes].join(". "), employee: `${set.name} (${code})` };
+        return {
+          status: "create",
+          message: [relink ? `New employee — linked to the existing login of ${relink.name} (Login ID ${code})` : login ? "New employee with login" : "New employee", ...notes].join(". "),
+          employee: `${set.name} (${code})`
+        };
       }
     },
 
