@@ -784,6 +784,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     window.addEventListener('credence:photo-requests', open);
     return () => window.removeEventListener('credence:photo-requests', open);
   }, []);
+  // Decided in the popup opened from an alert (App.tsx): the count follows.
+  useEffect(() => {
+    const set = (e: Event) => setPhotoRequestCount(Number((e as CustomEvent).detail) || 0);
+    window.addEventListener('credence:photo-requests-count', set);
+    return () => window.removeEventListener('credence:photo-requests-count', set);
+  }, []);
   useEffect(() => {
     if (pendingModuleAccessUser == null || activeTab !== 'users') return;
     const u = users.find((x) => x.id === pendingModuleAccessUser);
