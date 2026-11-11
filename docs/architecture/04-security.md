@@ -91,6 +91,7 @@
 
 ## ৫. ডাটা সুরক্ষা
 
+- **Data Import কারও Admin login দখল করতে পারে না:** মোছা employee আবার import করলে তাঁর রেখে দেওয়া login-এ আবার যুক্ত হয় (Employee ID = Login ID, নাম মিলতে হয়)। এটা শুধু এই group-এর সাধারণ (`role = 'user'`) login-এ হয়। Admin বা Superadmin-এর login কখনো নয় — নইলে Data Import-এর অনুমতিওয়ালা HR ওই ID আর নাম দিয়ে একটা সারি বানিয়ে Superadmin-এর login-কে নিজের হাতে থাকা employee record-এর নিচে আনতে পারত (`DataImportRoutes.ts`, পরীক্ষা: `docs/test-logs/2026-11-11/scripts/relink-probe.mjs`, ঠিক করার আগে 2/4, পরে 4/4)।
 - **নিজের profile ছবি cache হয় না:** `/api/profile/photo` সব অ্যাকাউন্টের জন্য একই URL, তাই `Cache-Control: no-store` (আর `Vary: Authorization`)। আগে ৫ মিনিট cache থাকত বলে একই ফোনে account বদলালে আগের জনের ছবি দেখাত। অন্যের ছবি id দিয়ে (`/api/profile/photo/:userId`) আগের মতো কয়েক মিনিট রাখা হয়।
 
 | বিষয় | ব্যবস্থা | প্রমাণ |

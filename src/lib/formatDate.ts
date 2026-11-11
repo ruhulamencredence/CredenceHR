@@ -103,3 +103,30 @@ export function latestDateStr(...dates: (string | null | undefined)[]): string |
 export function isDateBlockedByLeadTime(date: string, earliestAllowedDate: string | null): boolean {
   return !!earliestAllowedDate && date < earliestAllowedDate;
 }
+/**
+ * A date typed by hand -> "YYYY-MM-DD", or null. Takes dd-mmm-yyyy
+ * ("02-Mar-1970", "2 mar 1970"), dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy and
+ * yyyy-mm-dd; a 2-digit year is 19xx / 20xx (whichever is not in the future).
+ */
+export function parseDateInput(text: string): string | null {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  let y: number, m: number, d: number;
+  let r = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (r) [y, m, d] = [Number(r[1]), Number(r[2]), Number(r[3])];
+  else if ((r = t.match(/^(\d{1,2})[\s\-/.]+([A-Za-z]{3,})[\s\-/.,]+(\d{2}|\d{4})$/))) {
+    const mi = MONTHS.indexOf(r[2].slice(0, 3).toLowerCase());
+    if (mi < 0) return null;
+    [d, m, y] = [Number(r[1]), mi + 1, Number(r[3])];
+  } else if ((r = t.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/))) [d, m, y] = [Number(r[1]), Number(r[2]), Number(r[3])];
+  else return null;
+  if (y < 100) {
+    const now = new Date().getFullYear();
+    y += 2000;
+    if (y > now) y -= 100;
+  }
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}

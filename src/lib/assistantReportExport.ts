@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// PDF / Excel of a Credence Assistant list answer (AiAssistantRoutes.ts
+// PDF / Excel of a CredenceHR AI Assistant list answer (AiAssistantRoutes.ts
 // AssistantReport). The server sends the table only to accounts with
 // users.can_export_assistant_reports, so having one is the permission.
 // PDF uses the company's standard report layout (pdfStandard.ts).

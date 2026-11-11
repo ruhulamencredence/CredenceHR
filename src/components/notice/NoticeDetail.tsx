@@ -146,7 +146,7 @@ export const NoticeDetail: React.FC<{
   const hero = !!n.cover;
   return createPortal(
     <div className="liquid-glass-backdrop fixed inset-0 z-[95] flex items-end md:items-center justify-center md:p-6" onClick={onClose}>
-      <div className="w-full md:max-w-lg h-[100dvh] md:h-auto md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full md:max-w-lg h-full md:h-auto md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div role="dialog" aria-label={n.title} className="liquid-glass liquid-glass-in rounded-none md:rounded-[32px] h-full md:max-h-[90vh] flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto overscroll-contain bg-[#fbfaff]/90">
             <NoticeArticle notice={n} token={token} />

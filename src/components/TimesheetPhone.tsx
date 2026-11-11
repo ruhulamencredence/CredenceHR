@@ -219,7 +219,7 @@ export const PeriodSheet: React.FC<{
 
   return createPortal(
     <div className="fixed inset-0 z-[90] liquid-glass-backdrop" onClick={onClose}>
-      <div className="fixed left-2 right-2 bottom-2 pb-[env(safe-area-inset-bottom)]" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed left-2 right-2 bottom-2 pb-[var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))]" onClick={(e) => e.stopPropagation()}>
         <div
           role="dialog"
           aria-modal="true"

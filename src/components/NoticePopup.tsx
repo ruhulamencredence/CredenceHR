@@ -152,7 +152,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
   return (
     <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end justify-center">
       {/* Bottom sheet: slides up from the bottom edge. */}
-      <div className="w-full max-w-md px-2.5" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+      <div className="w-full max-w-md px-2.5" style={{ paddingBottom: 'max(0.75rem, var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
         <NoticeSheet
           notice={current}
           token={token}

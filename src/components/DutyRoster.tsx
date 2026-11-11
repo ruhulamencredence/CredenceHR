@@ -805,7 +805,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
       )}
 
       {canManage && pending.size > 0 && tab === 'roster' && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60]" style={{ paddingBottom: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))' }}>
           <div className="liquid-glass liquid-glass-in rounded-full flex items-center gap-2 pl-4 pr-1.5 py-1.5">
             <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">
               {pending.size} unsaved change{pending.size === 1 ? '' : 's'}

@@ -14,6 +14,7 @@ import { LoadingBlock } from './LoadingBlock';
 import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 import { useMyCompanies } from '../lib/company';
 
+import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -28,7 +29,7 @@ type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' |
 const FORM_TABS: { key: EmployeeFormTab; label: string; short: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', short: 'Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', short: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
-  { key: 'contact', label: 'Contact', short: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
+  { key: 'contact', label: 'Personal Contact', short: 'Personal', icon: <MapPin className="w-3.5 h-3.5" /> },
   { key: 'career', label: 'Experience & Education', short: 'Career', icon: <GraduationCap className="w-3.5 h-3.5" /> },
   { key: 'supervisor', label: 'Supervisor', short: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
   { key: 'payment', label: 'Payment', short: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
@@ -179,6 +180,15 @@ const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
 const MARITAL_STATUS_OPTIONS = ['Single', 'Married', 'Divorced', 'Widowed'];
 const BLOOD_GROUP_OPTIONS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const JOB_STATUS_OPTIONS = ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'];
+// The Department / Branch with this name (letters and digits only, any
+// case) — for a record imported as text.
+const nameKey = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function matchByName<T extends { id: number }>(list: T[], nameOf: (x: T) => string, name: unknown): number | null {
+  const k = nameKey(name);
+  if (!k) return null;
+  const hit = list.find((x) => nameKey(nameOf(x)) === k);
+  return hit ? Number(hit.id) : null;
+}
 const JOB_BASE_OPTIONS = ['Permanent', 'Probation', 'Contractual', 'Intern'];
 const EMPLOYMENT_CATEGORY_OPTIONS = ['Management', 'Non-Management'];
 const REVIEW_MONTH_OPTIONS = [
@@ -256,7 +266,7 @@ const emptyTransferForm: TransferFormState = {
 
 // Loading placeholder for the directory: the same white card, header row
 // and columns as the real table, so nothing jumps when the list arrives.
-const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Contact', 'Status', 'Login', 'Actions'];
+const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Duty Location / Branch', 'Contact', 'Status', 'Login', 'Actions'];
 const EmployeesTableSkeleton: React.FC = () => {
   const bar = (w: string, tone = 'bg-slate-200/80') => <div className={`h-3 rounded ${tone} ${w}`} />;
   return (
@@ -599,8 +609,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       name: e.name || '',
       designation: e.designation || '',
       department: e.department || '',
-      department_id: e.department_id ?? null,
-      branch_id: e.branch_id ?? null,
+      // Imported as text only (the name isn't exactly in Departments /
+      // Branches): pick the one with the same name if there is one.
+      department_id: e.department_id ?? matchByName(departments, (d) => d.name, e.department),
+      branch_id: e.branch_id ?? matchByName(branches, (b) => b.branch_name, e.branch),
       email: e.email || '',
       phone: e.phone || '',
       zk_device_pin: e.zk_device_pin || '',
@@ -885,6 +897,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         designation: form.designation.trim() || null,
         department_id: form.department_id || null,
         branch_id: form.branch_id || null,
+        // Not in Departments / Branches (e.g. imported as text): keep the
+        // text instead of wiping it on Save.
+        ...(form.department_id ? {} : { department: form.department.trim() || null }),
+        ...(form.branch_id ? {} : { branch: form.branch.trim() || null }),
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         zk_device_pin: form.zk_device_pin.trim() || null,
@@ -1297,7 +1313,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search employees"
-              placeholder="Search by name, ID, designation, department, email, phone…"
+              placeholder="Search by name, ID, designation, department, branch, email, phone…"
               className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
@@ -1346,6 +1362,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location / Branch</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
@@ -1379,6 +1396,25 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           <Building2 className="w-3 h-3 text-slate-400" />{emp.department}
                         </span>
                       ) : '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
+                      {(() => {
+                        // The linked Branch (Admin Panel -> Branches), else the imported text.
+                        const b = emp.branch_id ? branches.find((x) => x.id === Number(emp.branch_id)) : undefined;
+                        const label = b?.branch_name || emp.branch || '';
+                        if (!label) return '—';
+                        return (
+                          <span className="inline-flex items-center gap-1" title={b ? undefined : 'Not in Admin Panel -> Branches'}>
+                            <MapPin className="w-3 h-3 text-slate-400" />
+                            {label}
+                            {b && (
+                              <span className={`ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
+                                {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {emp.email && (
@@ -1599,7 +1635,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
                   <SearchSelect
                     value={form.department_id ?? ''}
-                    onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null }))}
+                    onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null, department: '' }))}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">— None —</option>
@@ -1610,6 +1646,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   {departments.length === 0 && (
                     <p className="mt-1 text-[11px] text-slate-400">
                       No Departments set up yet — add one from Admin Panel -&gt; Departments.
+                    </p>
+                  )}
+                  {!form.department_id && form.department.trim() && (
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      On file: <b>{form.department}</b> — not in Admin Panel -&gt; Departments. It stays as it is; pick one above to link it.
                     </p>
                   )}
                 </div>
@@ -1627,7 +1668,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Phone</label>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Contact No.</label>
                   <input
                     type="text"
                     value={form.phone}
@@ -1823,7 +1864,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
                         <SearchSelect
                           value={form.branch_id ?? ''}
-                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null }))}
+                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null, branch: '' }))}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >
                           <option value="">— None —</option>
@@ -1836,6 +1877,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         {branches.length === 0 && (
                           <p className="mt-1 text-[11px] text-slate-400">
                             No Branches set up yet — add one from Admin Panel -&gt; Branches.
+                          </p>
+                        )}
+                        {!form.branch_id && form.branch.trim() && (
+                          <p className="mt-1 text-[11px] text-amber-700">
+                            On file: <b>{form.branch}</b> — not in Admin Panel -&gt; Branches. It stays as it is; pick one above to link it.
                           </p>
                         )}
                       </div>
@@ -1873,9 +1919,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               {formTab === 'contact' && (
                 <div className="space-y-4">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Contact</p>
+                    {/* The person's own numbers / email / addresses; the office email
+                        and phone are on Employee Info. */}
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Personal Contact</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <TextField label="Mobile" value={form.mobile} onChange={(v) => setForm((f) => ({ ...f, mobile: v }))} placeholder="e.g. 01896055404" />
+                      <TextField label="Personal Mobile" value={form.mobile} onChange={(v) => setForm((f) => ({ ...f, mobile: v }))} placeholder="e.g. 01896055404" />
                       <TextField label="Telephone" value={form.telephone} onChange={(v) => setForm((f) => ({ ...f, telephone: v }))} placeholder="Landline" />
                       <TextField label="Personal Email" value={form.personal_email} onChange={(v) => setForm((f) => ({ ...f, personal_email: v }))} placeholder="name@gmail.com" type="email" />
                     </div>
@@ -2656,7 +2704,7 @@ const TextField: React.FC<{ label: string; value: string; onChange: (v: string) 
 const DateField: React.FC<{ label: string; value: string; onChange: (v: string) => void }> = ({ label, value, onChange }) => (
   <div>
     <label className={fieldLabelClass}>{label}</label>
-    <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className={fieldInputClass} />
+    <DateInput value={value} onChange={onChange} className={fieldInputClass} aria-label={label} />
   </div>
 );
 
@@ -2667,6 +2715,8 @@ const SelectField: React.FC<{ label: string; value: string; onChange: (v: string
     <label className={fieldLabelClass}>{label}</label>
     <select value={value} onChange={(e) => onChange(e.target.value)} className={fieldInputClass}>
       <option value="">Select</option>
+      {/* A value saved before / imported that isn't in this list still shows. */}
+      {value && !options.includes(value) && <option value={value}>{value}</option>}
       {options.map((o) => (
         <option key={o} value={o}>{o}</option>
       ))}

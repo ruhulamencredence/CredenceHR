@@ -139,7 +139,7 @@
 `xlsx`, `jspdf` / `jspdf-autotable`, `pdfjs-dist`, `leaflet`, `lottie-web` আর বড় অ্যানিমেশন JSON অ্যাপের প্রথম download-এ থাকে না; যে বোতাম বা পাতা সেগুলো ব্যবহার করে, প্রথম ব্যবহারের সময় নামে (`import()`):
 
 - Admin Panel-এর প্রতিটা module-এর পাতা আলাদা ফাইল (`lazyPanel` in `AdminPanel.tsx`) — সব module-ওয়ালা account (Superadmin) আর সব পাতা একসাথে download করে না।
-- Profile, Credence Assistant, Profile → Service Book / My Asset, মানচিত্রের popup, Tracking report: খুললে তবেই।
+- Profile, CredenceHR AI Assistant, Profile → Service Book / My Asset, মানচিত্রের popup, Tracking report: খুললে তবেই।
 - Excel / PDF export: বোতাম চাপলে লাইব্রেরি নামে; PDF দেখা `src/lib/pdfjs.ts` দিয়ে।
 - অ্যানিমেশন JSON: `useLottieJson` (`LazyLottie.tsx`)।
 - খুব ছোট টুকরো (২০ KB-র কম) `vite.config.ts`-এর `experimentalMinChunkSize`-এ জুড়ে যায়, যাতে ফোনে অনেকগুলো ছোট request না যায়।

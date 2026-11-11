@@ -1044,8 +1044,12 @@ export default function App() {
       aria-label="Reloading CredenceHR"
       style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
     >
-      <img src={bootIconUrl} alt="" width={112} height={112} className="absolute left-1/2 top-1/2 -ml-14 -mt-14 w-28 h-28" />
-      <div className="absolute left-1/2 -ml-[60px] w-[120px] h-[3px] rounded-sm bg-white/25" style={{ bottom: 124 }} />
+      <img
+        src={bootIconUrl}
+        alt=""
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+        style={{ width: 'clamp(95.2px, 31.111vw, 140px)', height: 'clamp(95.2px, 31.111vw, 140px)' }}
+      />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
@@ -1326,7 +1330,11 @@ export default function App() {
   // behavior.
   const openChat = () => {
     if (!chatOn) return;
-    if (Capacitor.isNativePlatform()) {
+    // A phone (the app, a phone browser, an iPhone Home Screen app) opens
+    // Chat full screen inside the app — a new tab there is awkward, and from
+    // a Home Screen app it would leave for Safari. A computer keeps its own tab.
+    const phone = window.matchMedia?.('(max-width: 767px)').matches || document.documentElement.dataset.appShell === '1';
+    if (Capacitor.isNativePlatform() || phone) {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setShowChat(true);
@@ -1944,7 +1952,7 @@ export default function App() {
           is already open. */}
       {chatOn && <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />}
 
-      {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
+      {/* CredenceHR AI Assistant (AiAssistant.tsx) — every account unless switched
           off in Module Access; its buttons open the page an answer is about. */}
       <Suspense fallback={null}>
       <AiAssistant

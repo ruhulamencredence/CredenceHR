@@ -448,7 +448,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                 is longer than the viewport and Update needs to stay in reach.
                 On desktop it goes back into the flow (md:static): floating
                 there, it sat on top of the form and covered the City field. */}
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white/95 to-transparent md:static md:col-span-2 md:p-0 md:pt-2 md:bg-none">
+            <div className="fixed bottom-0 left-0 right-0 p-4 pb-[calc(1rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] bg-gradient-to-t from-white via-white/95 to-transparent md:static md:col-span-2 md:p-0 md:pt-2 md:bg-none">
               <div className="max-w-lg mx-auto md:max-w-none md:flex md:justify-end">
                 <button
                   type="submit"

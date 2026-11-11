@@ -579,7 +579,7 @@ export const GroupCallLayer: React.FC<{ token: string; userId: number; userName:
       {remotes.length === 0 && !joining && <div className="text-center text-sm text-white/70 py-2">Waiting for others to join…</div>}
       {notice && <div className="mx-auto mt-2 text-xs text-white/85 bg-black/40 rounded-full px-3 py-1">{notice}</div>}
 
-      <div className="pt-4 px-2 flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-6" style={{ paddingBottom: 'max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))' }}>
+      <div className="pt-4 px-2 flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-6" style={{ paddingBottom: 'max(2.5rem, calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 1.5rem))' }}>
         {control(muted ? 'Unmute' : 'Mute', muted, toggleMute, muted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />)}
         {callAudioAvailable() && control(speaker ? 'Speaker' : 'Earpiece', speaker, () => void toggleSpeaker(), speaker ? <Volume2 className="w-6 h-6" /> : <Ear className="w-6 h-6" />)}
         {video && control(cameraOff ? 'Camera on' : 'Camera off', cameraOff, toggleCamera, cameraOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />)}

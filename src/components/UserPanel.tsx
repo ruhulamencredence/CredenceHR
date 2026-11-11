@@ -1254,10 +1254,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
   const tutorialsOn = useTutorialsState().enabled;
   const mobileMoreItems: MoreItem[] = [
-    // Credence Assistant (AiAssistant.tsx) lives here on phones instead of a
+    // CredenceHR AI Assistant (AiAssistant.tsx) lives here on phones instead of a
     // floating button; same access rule as the Assistant itself.
     ...(!user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false)
-      ? [{ key: 'assistant', label: 'Credence Assistant', icon: Sparkles, iconBg: 'from-violet-400 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.4)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-assistant')) }]
+      ? [{ key: 'assistant', label: 'CredenceHR AI Assistant', icon: Sparkles, iconBg: 'from-violet-400 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.4)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-assistant')) }]
       : []),
     // Tutorials (TutorialsSheet.tsx) — only while a Superadmin has them on.
     ...(tutorialsOn
@@ -5667,6 +5667,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewTimesheet={canSeeTimesheet}
         canViewLeave={canSeeLeave}
         moreItems={bottomNavMoreItems}
+        chat={chatAllowed(user) ? { token, user } : null}
       />
     </div>
   );
