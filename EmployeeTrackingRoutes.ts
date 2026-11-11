@@ -6,6 +6,7 @@
 // Employee Tracking routes (phone pings and heartbeat, live board, status, notices, history),
 // moved out of server.ts unchanged. The shared helpers they use are passed in by startServer().
 
+import { autoLinkByEmployeeId } from "./EmployeeLoginId";
 import { wallMinutes } from "./TrackingStayReport";
 import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 import type { Express } from "express";
@@ -143,6 +144,9 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   const TRACKING_STATE_MIN = 8;
   // Only the people `user` may track (TrackingScope.ts).
   const trackingStatusRows = async (user: any) => {
+    // A login whose Login ID is an unlinked employee's Employee ID is linked
+    // first, so it shows under its Department, not "No employee record".
+    await autoLinkByEmployeeId(queryDB);
     const scope = await getTrackingScope(queryDB, user);
     const allEmployees: any[] = (await queryDB(
       `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
