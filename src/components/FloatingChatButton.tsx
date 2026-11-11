@@ -17,7 +17,7 @@ interface FloatingChatButtonProps {
 // A plain speech bubble (with its tail) in the theme colour and three white
 // dots inside — the simple, familiar "chat" sign. (It used to hold the app's
 // house + people glyph, which read as busy at this size.)
-const ChatBubbleLogo: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
+export const ChatBubbleLogo: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
   <svg viewBox="0 0 100 100" className={className} style={style} fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <path
       d="M52 6C29.36 6 11 22.66 11 43.2c0 11.1 5.36 21.06 13.86 27.9-.46 5.9-2.2 10.86-5.4 15.2-.86 1.16.1 2.8 1.54 2.6 7.1-1 13.06-3.86 17.9-7.36 4 1.06 8.24 1.66 12.68 1.66C74.64 82.6 93 65.94 93 45.4S74.64 6 52 6Z"

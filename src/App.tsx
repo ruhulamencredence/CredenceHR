@@ -1326,7 +1326,11 @@ export default function App() {
   // behavior.
   const openChat = () => {
     if (!chatOn) return;
-    if (Capacitor.isNativePlatform()) {
+    // A phone (the app, a phone browser, an iPhone Home Screen app) opens
+    // Chat full screen inside the app — a new tab there is awkward, and from
+    // a Home Screen app it would leave for Safari. A computer keeps its own tab.
+    const phone = window.matchMedia?.('(max-width: 767px)').matches || document.documentElement.dataset.appShell === '1';
+    if (Capacitor.isNativePlatform() || phone) {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setShowChat(true);
