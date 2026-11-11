@@ -9,7 +9,8 @@ import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubm
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AdminDashboard } from './AdminDashboard';
-import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserAvatar } from './UserAvatar';
 import { UserBulkBar } from './UserBulkBar';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
@@ -6810,9 +6811,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
-                            {userInitials(u.name)}
-                          </div>
+                          <UserAvatar userId={u.id} name={u.name} token={token} className="w-9 h-9 text-xs" color="var(--g-gradient)" />
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900 truncate">{u.name}</div>
                             <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
@@ -6888,9 +6887,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       onClick={(e) => e.stopPropagation()}
                       onChange={() => toggleUserSelected(u.id)}
                     />
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
-                      {userInitials(u.name)}
-                    </div>
+                    <UserAvatar userId={u.id} name={u.name} token={token} className="w-9 h-9 text-xs" color="var(--g-gradient)" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-sm text-slate-900 truncate">{u.name}</span>

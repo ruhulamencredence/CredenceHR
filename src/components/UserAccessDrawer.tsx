@@ -23,6 +23,7 @@ import { AccessTemplate } from '../lib/accessTemplates';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
+import { UserAvatar } from './UserAvatar';
 import { AttendanceProjectsEditor } from './AttendanceProjectsEditor';
 export type UserFeatureField =
   | 'can_edit_delivery_date'
@@ -421,9 +422,7 @@ export function UserAccessDrawer({
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
-            {userInitials(u.name)}
-          </div>
+          <UserAvatar userId={u.id} name={u.name} className="w-11 h-11 text-sm" color="var(--g-gradient)" />
           <div className="flex-1 min-w-0">
             <h2 className="text-base md:text-lg font-bold text-slate-900 truncate">{u.name}</h2>
             <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
