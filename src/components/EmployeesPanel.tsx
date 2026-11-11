@@ -266,7 +266,7 @@ const emptyTransferForm: TransferFormState = {
 
 // Loading placeholder for the directory: the same white card, header row
 // and columns as the real table, so nothing jumps when the list arrives.
-const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Contact', 'Status', 'Login', 'Actions'];
+const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Duty Location / Branch', 'Contact', 'Status', 'Login', 'Actions'];
 const EmployeesTableSkeleton: React.FC = () => {
   const bar = (w: string, tone = 'bg-slate-200/80') => <div className={`h-3 rounded ${tone} ${w}`} />;
   return (
@@ -1313,7 +1313,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search employees"
-              placeholder="Search by name, ID, designation, department, email, phone…"
+              placeholder="Search by name, ID, designation, department, branch, email, phone…"
               className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
@@ -1362,6 +1362,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location / Branch</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
@@ -1395,6 +1396,25 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           <Building2 className="w-3 h-3 text-slate-400" />{emp.department}
                         </span>
                       ) : '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
+                      {(() => {
+                        // The linked Branch (Admin Panel -> Branches), else the imported text.
+                        const b = emp.branch_id ? branches.find((x) => x.id === Number(emp.branch_id)) : undefined;
+                        const label = b?.branch_name || emp.branch || '';
+                        if (!label) return '—';
+                        return (
+                          <span className="inline-flex items-center gap-1" title={b ? undefined : 'Not in Admin Panel -> Branches'}>
+                            <MapPin className="w-3 h-3 text-slate-400" />
+                            {label}
+                            {b && (
+                              <span className={`ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
+                                {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {emp.email && (

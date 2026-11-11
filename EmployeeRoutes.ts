@@ -88,7 +88,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
               if (departmentFilter === "__none__" ? d !== "" : d !== departmentFilter) return false;
             }
             if (!q) return true;
-            return [e.name, e.employee_id, e.designation, e.department, e.email, e.phone].some((v) => String(v || "").toLowerCase().includes(q));
+            return [e.name, e.employee_id, e.designation, e.department, e.branch, e.email, e.phone].some((v) => String(v || "").toLowerCase().includes(q));
           })
         : allSorted;
       const sorted = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : allSorted;
