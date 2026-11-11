@@ -33,6 +33,11 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- Android 12+ draws its own splash (the launcher icon on this
+             colour) instead of @drawable/splash. Same orange as the splash
+             and the in-app open animation (BootIntroAnimation.tsx), so the
+             hand-off never flashes white. -->
+        <item name="windowSplashScreenBackground">#F47920</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
     </style>
 </resources>

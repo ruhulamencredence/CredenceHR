@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
-import { useScrolling } from '../lib/useScrolling';
+import { ChatHead } from './ChatHead';
+import type { User } from '../types';
 
 export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'billClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
 
@@ -16,6 +17,9 @@ interface BottomNavProps {
   canViewLeave?: boolean;
   // Self Service modules shown in the More popup (Dashboard only).
   moreItems?: MoreItem[];
+  // The Dashboard's chat head (ChatHead.tsx). Passed only for an account
+  // that may use Chat (chatAllowed).
+  chat?: { token: string; user: User } | null;
 }
 
 // One tile in the More popup — same look as the mobile Dashboard's tile menu.
@@ -45,7 +49,7 @@ const CORNER_BUFFER = 6;
 // the rounded corners. Expressed as a % of BAR_W so it applies identically
 // to the SVG dip math below and the CSS-positioned icon row, keeping the
 // floating circle and its cutout aligned.
-const EDGE_PAD = 34;
+const EDGE_PAD = 14; // narrower edges: five slots with More
 const EDGE_PAD_PCT = `${(EDGE_PAD / BAR_W) * 100}%`;
 
 // The white circle that rides in the dip: its top edge, in px above the bar
@@ -88,7 +92,7 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
   return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
 }
 
-export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [] }: BottomNavProps) {
+export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [], chat = null }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Check In/Out', icon: Route }] : []),
@@ -98,11 +102,19 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
       : { key: 'employeeDirectory' as MobileSection, label: 'Directory', icon: Contact }
   ];
 
-  const activeIndex = items.findIndex((item) => item.key === active);
+  // "More" — the bar's last tab, on every page, behaving like the others:
+  // while its sheet (Self Service modules, just above the bar) is open the
+  // white circle rides to it. Changing page closes the sheet.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const tabs: { label: string; icon: NavItem['icon'] }[] = [...items, { label: 'More', icon: LayoutGrid }];
+  const moreIndex = items.length;
+  const activeIndex = moreOpen ? moreIndex : items.findIndex((item) => item.key === active);
   // Items are laid out only within the padded region (BAR_W minus the two
   // edge pads), so each of the 4 columns is the same width and the gaps
   // between icon centers come out equal — only the outer margins grow.
-  const itemWidth = (BAR_W - 2 * EDGE_PAD) / items.length;
+  // The More slot (last, always there) takes a column like the tabs.
+  const columns = items.length + 1;
+  const itemWidth = (BAR_W - 2 * EDGE_PAD) / columns;
   const centerOf = (index: number) => EDGE_PAD + itemWidth * (index + 0.5);
   // Slightly wider flare (0.82 -> 0.92) and shallower depth (50 -> 36,
   // ~45% of bar height instead of ~62%) to match image 1's low, wide
@@ -179,24 +191,13 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pair, activeIndex, items.length]);
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
-  const OutIcon = items[pair.out]?.icon;
-  const InIcon = items[pair.in]?.icon;
-  // "More" popup — a liquid glass sheet opened from the round button that
-  // sits on the bar's top-right edge. Empty for now; items get added later.
-  // Only on the Dashboard (Home); any other page closes it.
-  const [moreOpen, setMoreOpen] = useState(false);
-  const scrollingAway = useScrolling() && !moreOpen;
+  const OutIcon = tabs[pair.out]?.icon;
+  const InIcon = tabs[pair.in]?.icon;
+  // Dashboard (Home): the chat head floats above the bar's right end.
   const showMore = active === null;
   useEffect(() => {
-    if (!showMore) setMoreOpen(false);
-  }, [showMore]);
-  // While the More button is on screen, the Credence Assistant is reached
-  // from inside it, so its floating button steps aside (index.css).
-  useEffect(() => {
-    if (!showMore) return;
-    document.body.setAttribute('data-more-menu', '');
-    return () => document.body.removeAttribute('data-more-menu');
-  }, [showMore]);
+    setMoreOpen(false);
+  }, [active]);
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);
@@ -205,51 +206,42 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   }, [moreOpen]);
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40">
+    <nav className={`md:hidden fixed bottom-0 left-0 right-0 ${moreOpen ? 'z-[61]' : 'z-40'}`}>
       <div className="relative" style={{ height: BAR_H }}>
-        {/* Floats on its own just above the bar's right side, not touching it. */}
-        {showMore && (
-        <button
-          type="button"
-          onClick={() => setMoreOpen((v) => !v)}
-          data-tour="nav-more"
-          aria-label="More"
-          aria-expanded={moreOpen}
-          // Steps aside while the page scrolls, so it doesn't sit on the
-          // tiles / rows passing under it.
-          style={{ bottom: BAR_H + 14, transform: scrollingAway ? 'translateX(calc(100% + 1.5rem))' : undefined, transition: 'transform 0.3s ease-out' }}
-          className="absolute right-4 z-10 flex flex-col items-center justify-center w-11 h-11 rounded-full bg-white/45 backdrop-blur-xl border border-white/70 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
-        >
-          {moreOpen ? (
-            <X className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
-          ) : (
-            <LayoutGrid className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
-          )}
-          <span className="sr-only">More</span>
-        </button>
-        )}
-        {showMore && moreOpen &&
+        {/* Chat head (ChatHead.tsx): draggable, opens Chat in a window;
+            Dashboard only, hidden while More's sheet is open. */}
+        {chat && <ChatHead token={chat.token} user={chat.user} hidden={!showMore || moreOpen} />}
+        {moreOpen &&
           createPortal(
             <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
               {/* Same liquid-glass sheet as the "Turn on location tracking"
                   notice (TrackingNoticeCard.tsx, .liquid-glass* in
-                  index.css) — the house style for popups. Anchored to the
-                  round More button: three rounded corners, the bottom-right
-                  one square where the button sits. The wrapper does the
-                  positioning since .liquid-glass sets position: relative. */}
+                  index.css) — the house style for popups — just above the
+                  bar, which stays on top of the backdrop (More there is
+                  now Close). The wrapper does the positioning since
+                  .liquid-glass sets position: relative. */}
               <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => setMoreOpen(false)} />
               <div
-                className="absolute left-4"
-                style={{
-                  right: 16 + 44 - 8,
-                  bottom: `calc(${BAR_H + 14 + 44 - 8}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))`
-                }}
+                className="absolute left-4 right-4"
+                style={{ bottom: `calc(${BAR_H + 12}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
               >
-                <div className="liquid-glass liquid-glass-in rounded-[32px] rounded-br-md max-h-[64vh] overflow-y-auto overscroll-contain">
+                <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[64vh] flex flex-col">
+                  <div className="shrink-0 flex items-center justify-between pl-5 pr-3 pt-3">
+                    <span className="text-sm font-semibold text-slate-800">More</span>
+                    <button
+                      type="button"
+                      onClick={() => setMoreOpen(false)}
+                      aria-label="Close"
+                      className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+                    >
+                      <X className="w-4 h-4" style={{ color: 'var(--g-accent)' }} />
+                    </button>
+                  </div>
+                  <div className="min-h-0 overflow-y-auto overscroll-contain">
                   {moreItems.length === 0 ? (
                     <p className="px-5 py-6 text-xs text-slate-500 text-center">Nothing else to show here.</p>
                   ) : (
-                    <div className="grid grid-cols-3 gap-x-1 gap-y-3.5 px-3 pt-5 pb-4">
+                    <div className="grid grid-cols-3 gap-x-1 gap-y-3.5 px-3 pt-2 pb-4">
                       {moreItems.map(({ key, label, icon: Icon, iconBg, badge, onClick }) => (
                         <button
                           key={key}
@@ -275,18 +267,9 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                       ))}
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
-              {/* The round button stays on top of the backdrop, now as Close. */}
-              <button
-                type="button"
-                onClick={() => setMoreOpen(false)}
-                aria-label="Close"
-                className="liquid-glass-chip absolute right-4 flex items-center justify-center w-11 h-11 rounded-full active:scale-95 transition-transform"
-                style={{ bottom: `calc(${BAR_H + 14}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
-              >
-                <X className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
-              </button>
             </div>,
             document.body
           )}
@@ -315,7 +298,10 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
               <button
                 key={label}
                 type="button"
-                onClick={() => onChange(key)}
+                onClick={() => {
+                  setMoreOpen(false);
+                  onChange(key);
+                }}
                 aria-current={isActive ? 'page' : undefined}
                 className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1"
                 style={{
@@ -342,7 +328,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                   <Icon className="w-5 h-5 text-white/55" />
                 </span>
                 <span
-                  className={`text-[10.5px] leading-tight truncate max-w-[68px] transition-colors duration-200 ${
+                  className={`text-[10px] leading-tight truncate max-w-full transition-colors duration-200 ${
                     isActive ? 'text-white font-bold' : 'text-white/55 font-medium'
                   }`}
                 >
@@ -351,6 +337,29 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
               </button>
             );
           })}
+          {(() => {
+            const isActive = moreOpen;
+            const distance = activeIndex >= 0 ? moreIndex - activeIndex : 0;
+            const pushPx = distance === 0 ? 0 : Math.sign(distance) * Math.max(0, 9 - Math.abs(distance) * 5);
+            return (
+              <button
+                type="button"
+                onClick={() => setMoreOpen((v) => !v)}
+                data-tour="nav-more"
+                aria-label="More"
+                aria-expanded={moreOpen}
+                className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1"
+                style={{ transform: `translateX(${pushPx}px)`, transition: 'transform 280ms cubic-bezier(0.4, 0, 0.2, 1)' }}
+              >
+                <span className={`relative inline-flex items-center justify-center w-11 h-11 rounded-2xl transition-opacity duration-200 ${isActive ? 'opacity-0' : ''}`}>
+                  <LayoutGrid className="w-5 h-5 text-white/55" />
+                </span>
+                <span className={`text-[10px] leading-tight truncate max-w-full transition-colors duration-200 ${isActive ? 'text-white font-bold' : 'text-white/55 font-medium'}`}>
+                  More
+                </span>
+              </button>
+            );
+          })()}
         </div>
 
         {/* The one white circle riding the dip (moved by the effect above);

@@ -65,7 +65,7 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
     <div
       role="dialog"
       aria-label="Desktop notifications"
-      className="fixed z-[60] left-5 w-[340px] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-slate-200 bg-white shadow-xl p-4 bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] md:bottom-5"
+      className="fixed z-[60] left-5 w-[340px] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-slate-200 bg-white shadow-xl p-4 bottom-[calc(6rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:bottom-5"
     >
       <button type="button" onClick={later} aria-label="Not now" className="absolute top-2.5 right-2.5 p-1 text-slate-400 hover:text-slate-700">
         <X className="w-4 h-4" />

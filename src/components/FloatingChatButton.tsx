@@ -14,29 +14,18 @@ interface FloatingChatButtonProps {
   hidden?: boolean;
 }
 
-// The app's own house/people glyph (see chr-logo.svg's Roof_Glyph +
-// People_Glyph) redrawn inside a speech-bubble outline, per the hand-drawn
-// reference: one shape reads as "Chat" (the bubble + tail) AND "CredenceHR"
-// (the glyph inside it) at once, instead of a generic chat icon plus a
-// separate app-icon badge bolted on next to it.
-const ChatBubbleLogo: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
-  <svg viewBox="0 0 100 100" className={className} style={style} fill="none" xmlns="http://www.w3.org/2000/svg">
+// A plain speech bubble (with its tail) in the theme colour and three white
+// dots inside — the simple, familiar "chat" sign. (It used to hold the app's
+// house + people glyph, which read as busy at this size.)
+export const ChatBubbleLogo: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
+  <svg viewBox="0 0 100 100" className={className} style={style} fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <path
-      d="M52 6C29.36 6 11 22.66 11 43.2c0 11.1 5.36 21.06 13.86 27.9-.46 5.9-2.2 10.86-5.4 15.2-.86 1.16.1 2.8 1.54 2.6 7.1-1 13.06-3.86 17.9-7.36 4 1.06 8.24 1.66 12.68 1.66C74.64 82.6 93 65.94 93 45.4S74.64 6 52 6C52.34 6 52 6 52 6Z"
+      d="M52 6C29.36 6 11 22.66 11 43.2c0 11.1 5.36 21.06 13.86 27.9-.46 5.9-2.2 10.86-5.4 15.2-.86 1.16.1 2.8 1.54 2.6 7.1-1 13.06-3.86 17.9-7.36 4 1.06 8.24 1.66 12.68 1.66C74.64 82.6 93 65.94 93 45.4S74.64 6 52 6Z"
       fill="currentColor"
     />
-    <path
-      d="M35 38 L52 24 L69 38"
-      stroke="#FFFFFF"
-      strokeWidth="7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      fill="none"
-    />
-    <circle cx="41" cy="50" r="7.5" fill="#FFFFFF" />
-    <path d="M27 72a13 13 0 0 1 26 0z" fill="#FFFFFF" />
-    <circle cx="61" cy="54" r="6" fill="#FFFFFF" />
-    <path d="M51 72a11 11 0 0 1 22 0z" fill="#FFFFFF" />
+    <circle cx="35" cy="45" r="6" fill="#FFFFFF" />
+    <circle cx="52" cy="45" r="6" fill="#FFFFFF" />
+    <circle cx="69" cy="45" r="6" fill="#FFFFFF" />
   </svg>
 );
 
@@ -121,7 +110,7 @@ export const FloatingChatButton: React.FC<FloatingChatButtonProps> = ({ token, o
       >
         <ChatBubbleLogo
           className="w-full h-full"
-          style={{ filter: 'drop-shadow(0 0 8px currentColor) drop-shadow(0 2px 10px rgba(0,0,0,0.25))' }}
+          style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.22))' }}
         />
 
         {unreadCount > 0 && (

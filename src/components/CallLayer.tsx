@@ -899,7 +899,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
         <div className={`text-sm drop-shadow ${reconnecting ? 'text-amber-300 animate-pulse' : 'text-white/70'}`}>{status}</div>
         {notice && <div className="text-xs text-white/80 bg-black/40 rounded-full px-3 py-1">{notice}</div>}
       </div>
-      <div className="relative pt-4 px-2 flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-6" style={{ paddingBottom: 'max(3rem, calc(env(safe-area-inset-bottom) + 2rem))' }}>
+      <div className="relative pt-4 px-2 flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-6" style={{ paddingBottom: 'max(3rem, calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 2rem))' }}>
         {phase === 'incoming' ? (
           <>
             <button type="button" onClick={decline} className={`${roundBtn} bg-rose-600 hover:bg-rose-500`} aria-label="Decline">

@@ -1216,7 +1216,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = await queryDB(`SELECT * FROM assets ${where} ORDER BY created_at DESC`, params);
       // ?with_holder=1: who holds each assigned asset now (its open
-      // assignment) — the Credence Assistant's "who has LAP-0042".
+      // assignment) — the CredenceHR AI Assistant's "who has LAP-0042".
       if (String(req.query.with_holder || "") === "1") {
         const open: any[] = await queryDB(
           `SELECT aa.asset_id, aa.employee_user_id, aa.assigned_date, aa.acknowledged_at, u.name AS holder_name

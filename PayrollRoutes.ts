@@ -2435,7 +2435,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // by the same late policy, holiday calendars, office punches and waivers
   // payroll uses. Needs the "Late list" layer of Attendance Reports
   // (explicit-only) and keeps to that account's Departments. Read by the
-  // Credence Assistant ("aj ke ke late").
+  // CredenceHR AI Assistant ("aj ke ke late").
   // Monthly Attendance Report -> Department Summary: per department, how many
   // were Present / Absent / on Leave / Delay / Extreme Delay — on one day
   // (?mode=day&date=) or added up over a month (?mode=month&year=&month=,

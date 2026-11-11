@@ -139,7 +139,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
             </div>
           </section>
 
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white/95 to-transparent">
+          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white/95 to-transparent" style={{ paddingBottom: 'calc(1rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
             <div className="max-w-lg mx-auto">
               <button
                 type="submit"

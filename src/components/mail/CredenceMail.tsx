@@ -1451,7 +1451,7 @@ export const CredenceMail: React.FC<{
           <div className="hidden md:block">{header}</div>
           {roBanner}
         </div>
-        <div className="flex h-[calc(100dvh-4.5rem)] md:h-[calc(100vh-10.5rem)] min-h-[28rem] md:rounded-3xl overflow-hidden md:border border-slate-200/70 bg-white/40">
+        <div className="flex h-[calc(100dvh-4.5rem-var(--nav-room,0px))] md:h-[calc(100vh-10.5rem)] min-h-[28rem] md:rounded-3xl overflow-hidden md:border border-slate-200/70 bg-white/40">
           {/* Folders (desktop) */}
           <aside className="hidden md:flex flex-col w-56 shrink-0 p-3 gap-3 overflow-y-auto">
             {!ro && composeButton}
@@ -1470,7 +1470,7 @@ export const CredenceMail: React.FC<{
           Above the assistant's edge tab (AiAssistant.tsx: 48px tall, 132px up by default),
           measured the same way so the two never sit on top of each other. */}
       {!selectedId && !ro && (
-        <div className="md:hidden fixed right-4 z-40" style={{ bottom: 'calc(196px + env(safe-area-inset-bottom, 0px))' }}>
+        <div className="md:hidden fixed right-4 z-40" style={{ bottom: 'calc(196px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
           <button
             type="button"
             onClick={() => setCompose({ accountId: accountFilter || undefined })}
@@ -1613,7 +1613,7 @@ export const CredenceMail: React.FC<{
       {tool?.kind === 'groups' && <MyGroupsPopup token={token} onClose={() => setTool(null)} />}
 
       {toast && (
-        <div className="fixed left-1/2 -translate-x-1/2 z-[95] px-4 w-full max-w-sm pointer-events-none" style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom))' }}>
+        <div className="fixed left-1/2 -translate-x-1/2 z-[95] px-4 w-full max-w-sm pointer-events-none" style={{ bottom: 'calc(6rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
           <div className={`pointer-events-auto rounded-2xl px-4 py-2.5 text-sm shadow-lg text-center ${toast.tone === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-900 text-white'}`}>{toast.text}</div>
         </div>
       )}

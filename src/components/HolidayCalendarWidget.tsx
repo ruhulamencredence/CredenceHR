@@ -18,6 +18,7 @@ import {
   toBengaliDigits,
   toHijriDate
 } from '../lib/altCalendars';
+import { usableHeight } from '../lib/navRoom';
 
 const CALENDAR_SYSTEMS: { id: CalendarSystem; label: string }[] = [
   { id: 'english', label: 'English' },
@@ -584,7 +585,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
               className="fixed z-[91] w-[260px]"
               style={{
                 left: Math.max(12, Math.min(openDay.rect.left + openDay.rect.width / 2 - 130, window.innerWidth - 272)),
-                ...(openDay.rect.bottom + 260 > window.innerHeight
+                ...(openDay.rect.bottom + 260 > usableHeight()
                   ? { bottom: window.innerHeight - openDay.rect.top + 6 }
                   : { top: openDay.rect.bottom + 6 })
               }}

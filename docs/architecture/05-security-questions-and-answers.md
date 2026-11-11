@@ -181,5 +181,8 @@
 **প্রশ্ন: Check In/Out দ্রুত করতে ফোন আগের অবস্থান মনে রাখে — তাহলে কি পুরোনো জায়গা থেকে check-in করা যায়?**
 উত্তর: না। শেষ অবস্থান (`credence_last_fix`) শুধু map কোথায় খুলবে তা ঠিক করে; Check In / Check Out-এ পাঠানো অবস্থান সবসময় নতুন GPS fix (ফোনের নিজের, সর্বোচ্চ ৩০ সেকেন্ড পুরোনো)। শেষ অবস্থান ১২ ঘণ্টা পর বাদ, logout-এ মুছে যায়, তাই একই ফোনে অন্য কেউ login করলে আগের জনের জায়গা দেখে না। Map-এর ছবি (tile) ফোনে জমা থাকে, কিন্তু তাতে কারও তথ্য নেই।
 
+**প্রশ্ন: Data Import দিয়ে কি কোনো employee-কে Superadmin বা Admin-এর login-এর সাথে জুড়ে দেওয়া যায়?**
+উত্তর: না। মোছা employee আবার import করলে শুধু এই group-এর সাধারণ (`user`) login-এ, আর নাম মিললে, আবার যুক্ত হয়। Admin বা Superadmin-এর login ID দিয়ে সারি দিলে আটকায় ("already the Login ID of …")। এমন জোড়া লাগাতে হলে Users থেকে হাতে করতে হয়।
+
 **প্রশ্ন: কর্মী কি নিজের Login ID (username) বদলে ফেলতে পারেন?**
 উত্তর: শুরুতে না — Profile-এ Change Username দেখায় না, আর server-ও (`PUT /api/profile/username`) ফিরিয়ে দেয়। Superadmin চাইলে Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করতে পারেন; তখন বর্তমান password দিয়ে বদলানো যায়। বন্ধ থাকলে দরকারে HR Users থেকে বদলে দেয় (Users module-এর Edit/Add layer লাগে)।

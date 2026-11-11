@@ -27,7 +27,7 @@ export const TutorialsSheet: React.FC<{ user: User; onClose: () => void }> = ({ 
       {/* Positioned by this wrapper — .liquid-glass sets position: relative. */}
       <div
         className="absolute inset-x-0 bottom-0 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[420px] px-2 md:px-0"
-        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+        style={{ paddingBottom: 'max(0.5rem, var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
       >
         <div className="liquid-glass liquid-glass-in rounded-[32px] p-4">
           <div className="flex items-start gap-2">

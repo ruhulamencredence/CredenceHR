@@ -6,6 +6,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { usableHeight } from '../lib/navRoom';
 
 // One field to type in and pick from a list, used across the app in two ways:
 //
@@ -64,7 +65,7 @@ function ComboList({ anchor, options, active, setActive, selected, onPick, empty
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const below = window.innerHeight - r.bottom;
+      const below = usableHeight() - r.bottom;
       const up = below < 240 && r.top > below;
       const width = Math.min(Math.max(r.width, 180), window.innerWidth - 16);
       setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), top: up ? r.top : r.bottom, width, up });
