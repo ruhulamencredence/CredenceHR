@@ -5667,7 +5667,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewTimesheet={canSeeTimesheet}
         canViewLeave={canSeeLeave}
         moreItems={bottomNavMoreItems}
-        chat={chatAllowed(user) ? { token, onOpen: () => openSelfService('chat') } : null}
+        chat={chatAllowed(user) ? { token, user } : null}
       />
     </div>
   );
