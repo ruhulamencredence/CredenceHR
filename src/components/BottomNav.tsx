@@ -59,35 +59,40 @@ const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2
 const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 function buildBarPath(dip: { center: number; halfWidth: number; depth: number } | null): string {
-  const r = CORNER_R;
-  const topLeft = `M0 ${r} C0 ${r * 0.45} ${r * 0.45} 0 ${r} 0`;
-  const topRight = `H${BAR_W - r} C${BAR_W - r * 0.45} 0 ${BAR_W} ${r * 0.45} ${BAR_W} ${r}`;
+  const corners = (rl: number, rr: number) => ({
+    topLeft: `M0 ${rl} C0 ${rl * 0.45} ${rl * 0.45} 0 ${rl} 0`,
+    topRight: `H${BAR_W - rr} C${BAR_W - rr * 0.45} 0 ${BAR_W} ${rr * 0.45} ${BAR_W} ${rr}`
+  });
   const bottom = `V${BAR_H} H0 Z`;
 
   if (!dip) {
+    const { topLeft, topRight } = corners(CORNER_R, CORNER_R);
     return `${topLeft} ${topRight} ${bottom}`;
   }
 
+  // Each side of the dip gets its own width. Next to the bar's end (Home,
+  // More) there isn't room for the full wave plus the 26-unit corner, so
+  // that side's shoulder narrows and the corner shrinks into it (down to
+  // EDGE_MIN) — the edge tabs still get a curve instead of a flat bar.
   const { center, depth } = dip;
-  const maxHalfWidth = Math.min(center - (r + CORNER_BUFFER), BAR_W - r - CORNER_BUFFER - center);
-  const halfWidth = Math.min(dip.halfWidth, maxHalfWidth);
+  const EDGE_MIN = 8;
+  const side = (room: number) => {
+    const half = Math.max(16, Math.min(dip.halfWidth, room - EDGE_MIN));
+    const corner = Math.max(EDGE_MIN, Math.min(CORNER_R, room - half - CORNER_BUFFER));
+    return { half, corner };
+  };
+  const L = side(center);
+  const R = side(BAR_W - center);
+  const { topLeft, topRight } = corners(L.corner, R.corner);
 
-  if (halfWidth < 16) {
-    return `${topLeft} ${topRight} ${bottom}`;
-  }
-
-  const left = center - halfWidth;
-  const right = center + halfWidth;
-  // Wider, gentler shoulders (was 0.62) and a rounder trough floor (was 0.4)
-  // so the dip reads as one smooth, shallow wave like image 1, instead of a
-  // tighter U with straighter side-walls.
-  const outerT = halfWidth * 0.78;
-  const innerT = halfWidth * 0.26;
-
+  const left = center - L.half;
+  const right = center + R.half;
+  // Wide, gentle shoulders and a round trough floor so the dip reads as
+  // one smooth, shallow wave instead of a tight U.
   const dipPath =
     `H${left} ` +
-    `C${left + outerT} 0 ${center - innerT} ${depth} ${center} ${depth} ` +
-    `C${center + innerT} ${depth} ${right - outerT} 0 ${right} 0`;
+    `C${left + L.half * 0.78} 0 ${center - L.half * 0.26} ${depth} ${center} ${depth} ` +
+    `C${center + R.half * 0.26} ${depth} ${right - R.half * 0.78} 0 ${right} 0`;
 
   return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
 }

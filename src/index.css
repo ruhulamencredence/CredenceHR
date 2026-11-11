@@ -658,61 +658,61 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
   blue / indigo and the green / amber / red status colours stay.
 */
 html[data-ui="orange"] {
-  --or-50: #fff6ef;
-  --or-100: #ffebdb;
-  --or-200: #ffd4b3;
-  --or-300: #ffb580;
-  --or-400: #ff9238;
-  --or-500: #f47920;
-  --or-600: #e2600e;
-  --or-700: #bf4d0a;
-  --or-800: #983d0c;
-  --or-900: #7a330e;
-  --or-950: #421805;
+  --or-50: #fff5ee;
+  --or-100: #ffe8d6;
+  --or-200: #ffcfae;
+  --or-300: #ffa162;
+  --or-400: #fd8f45;
+  --or-500: #fb7216;
+  --or-600: #ff6700;
+  --or-700: #e05a00;
+  --or-800: #b34700;
+  --or-900: #7f3300;
+  --or-950: #4a1d00;
 
   --g-bg: #fff8f3;
   --g-bg-gradient: linear-gradient(180deg, #fffaf6 0%, #fff4ec 55%, #ffeee2 100%);
-  --g-accent: #e8650f;
-  --g-accent-rgb: 232, 101, 15;
-  --g-accent-hover: #c95409;
+  --g-accent: #ff6700;
+  --g-accent-rgb: 255, 103, 0;
+  --g-accent-hover: #e05a00;
   --g-accent-soft: #fff1e6;
-  --g-accent-100: #ffebdb;
-  --g-accent-200: #ffd4b3;
-  --g-accent-300: #ffb580;
-  --g-accent-400: #ff9238;
-  --g-accent-500: #f47920;
-  --g-accent-600: #e2600e;
-  --g-accent-700: #bf4d0a;
-  --g-accent-800: #983d0c;
-  --g-accent-900: #7a330e;
-  --g-accent-950: #5a2509;
-  --g-accent-975: #421805;
-  --g-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+  --g-accent-100: #ffe8d6;
+  --g-accent-200: #ffcfae;
+  --g-accent-300: #ffa162;
+  --g-accent-400: #fd8f45;
+  --g-accent-500: #fb7216;
+  --g-accent-600: #ff6700;
+  --g-accent-700: #e05a00;
+  --g-accent-800: #b34700;
+  --g-accent-900: #7f3300;
+  --g-accent-950: #4a1d00;
+  --g-accent-975: #2e1200;
+  --g-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
 
   /* Phone header + the welcome banner under it (white text). Left to right,
      like the banner's own gradient (WelcomeBanner.tsx), so the two read as
      one piece — a diagonal here left a seam where the banner starts. */
-  --g-header-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
-  --g-banner-1: #ff9238;
-  --g-banner-2: #f47920;
-  --g-banner-3: #e2600e;
-  --g-sidebar-bg: linear-gradient(165deg, rgba(244, 121, 32, 0.97) 0%, rgba(226, 96, 14, 0.97) 55%, rgba(191, 77, 10, 0.98) 100%);
+  --g-header-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
+  --g-banner-1: #ff8532;
+  --g-banner-2: #fb7216;
+  --g-banner-3: #ff6700;
+  --g-sidebar-bg: linear-gradient(165deg, rgba(255, 133, 50, 0.97) 0%, rgba(251, 114, 22, 0.97) 55%, rgba(255, 103, 0, 0.98) 100%);
 
-  --g-avatar-1: #f47920;
-  --g-avatar-2: #ff9238;
-  --g-avatar-3: #ffb580;
-  --g-avatar-4: #bf4d0a;
-  --g-avatar-5: #e2600e;
-  --g-badge-check: #ffb580;
+  --g-avatar-1: #ff6700;
+  --g-avatar-2: #fb7216;
+  --g-avatar-3: #ffa162;
+  --g-avatar-4: #e05a00;
+  --g-avatar-5: #fd8f45;
+  --g-badge-check: #ffa162;
   --g-boot-bg: #f47920;
-  --g-chart-5: #f47920;
+  --g-chart-5: #fb7216;
 
   /* Welcome slides, tutorials, Management Dashboard buttons. */
-  --g-cta-1: #e8650f;
-  --g-cta-2: #ff9a4d;
-  --g-cta-dark-1: #983d0c;
-  --g-cta-dark-2: #e2600e;
-  --g-cta-text: #c95409;
+  --g-cta-1: #ff6700;
+  --g-cta-2: #ff8532;
+  --g-cta-dark-1: #b34700;
+  --g-cta-dark-2: #fb7216;
+  --g-cta-text: #e05a00;
   --g-cta-soft: #fff4ec;
   --g-cta-ring: #ffd9bd;
   --g-cta-track: #f6d6c0;
@@ -720,7 +720,7 @@ html[data-ui="orange"] {
   --g-slides-blob: radial-gradient(circle at 35% 30%, #fff0e3, #ffd9bd 55%, #ffc39a);
 
   /* The phone pages' top glow (.page-glow): warm orange + peach. */
-  --glow-a: 255, 190, 140;
+  --glow-a: 255, 161, 98;
   --glow-b: 255, 214, 190;
   --page-flat: #fcf8f5;
 }
