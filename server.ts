@@ -3740,6 +3740,7 @@ async function startServer() {
     requireModule,
     getAdminModules,
     requireModuleLayer,
+    hasModuleLayer,
     requireBudgetModuleAccess,
     requireBudgetRead,
     queryDB,

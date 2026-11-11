@@ -234,6 +234,8 @@
 
 ৭ নভেম্বরের টেস্টে ধরা এবং **ঠিক হওয়া**: PEPM Budget / item / MPR No / Job-এর API Budget switch দেখত না (এখন `requireBudgetRead`), Admin Dashboard অনুমতি-ছাড়া module-এর tile দেখাত ও আটকানো request পাঠাত।
 
+১১ নভেম্বর **ঠিক হওয়া**: PEPM entries-এ যেকোনো Admin role-এর account Self Service পাতাতেও সবার entry পেত, আর অন্যের entry (Final Submit হয়ে যাওয়াগুলোও) edit / split / delete করতে পারত — কোনো module যাচাই ছাড়াই। এখন `GET /api/entries` সবাইকে (Admin, Superadmin-ও) শুধু নিজের entry দেয়; সবারটা শুধু `?scope=all` + Reports module-এর Read layer-এ (Superadmin সবসময়)। অন্যের entry বা Job-এ edit / split / Add MPR লাগে Reports-এর `edit_add`, delete লাগে `delete_trash` layer (`EntriesRoutes.ts`, server-এর `hasModuleLayer`)। Owner নিজের entry-তে আগের মতোই।
+
 ২৫ অক্টোবরের আগে ধরা এবং এখন **ঠিক হওয়া** জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।
 
 ---

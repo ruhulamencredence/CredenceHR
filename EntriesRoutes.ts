@@ -27,6 +27,8 @@ interface EntriesRouteDeps {
   // Per-module action layers (server.ts) — PEPM Reports: read / edit_add /
   // delete_trash / permanent_delete.
   requireModuleLayer: (moduleKey: any, layer: any) => any;
+  // The same check as a yes/no (server.ts) — Superadmin always yes.
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   requireBudgetModuleAccess: any;
   requireBudgetRead: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
@@ -38,11 +40,11 @@ interface EntriesRouteDeps {
 export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   const {
     requireModuleLayer,
+    hasModuleLayer,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
     requireModule,
-    getAdminModules,
     requireBudgetModuleAccess,
     requireBudgetRead,
     queryDB,
@@ -193,13 +195,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         WHERE e.deleted_at IS NULL
       `;
       const params: any[] = [];
-      // A plain User sees only their own entries — except in the Admin Panel
-      // (?scope=all) when the Superadmin granted them the Reports module, who
-      // otherwise got "0 matching records" in PEPM Reports.
-      let seesAll = req.user.role === "admin" || req.user.role === "superadmin";
-      if (!seesAll && req.query.scope === "all") {
-        seesAll = (await getAdminModules(Number(req.user.id))).includes("reports");
-      }
+      // Everyone — Admins and the Superadmin too — sees only the entries they
+      // made themselves (Self Service). Other people's entries come only with
+      // ?scope=all (Admin Panel -> PEPM Reports) and only for an account
+      // given the Reports module with its Read layer (Superadmin always).
+      const seesAll = req.query.scope === "all" && (await hasModuleLayer(req.user, "reports", "read"));
       if (!seesAll) {
         sql += ` AND e.created_by = ?`;
         params.push(req.user.id);
@@ -645,7 +645,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // right before the insert loop.
       let queueForApproval = false;
 
-      if (req.user.role !== "admin" && req.user.role !== "superadmin" && job.created_by !== req.user.id) {
+      // Only the Job's owner — or an account given PEPM Reports' Edit layer
+      // (Superadmin always); being an Admin alone is not enough.
+      if (Number(job.created_by) !== Number(req.user.id) && !(await hasModuleLayer(req.user, "reports", "edit_add"))) {
         return res.status(403).json({ error: "You can only edit your own Jobs." });
       }
       if (req.user.role !== "admin" && req.user.role !== "superadmin") {
@@ -1140,8 +1142,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       if (rows.length === 0) return res.status(404).json({ error: "Entry not found" });
       const entry = rows[0];
 
-      // Only the owner (or an Admin) can edit — an Admin can edit any entry.
-      if (req.user.role !== "admin" && req.user.role !== "superadmin" && entry.created_by !== req.user.id) {
+      // Only the owner — or an account given PEPM Reports' Edit layer
+      // (Superadmin always); being an Admin alone is not enough.
+      if (Number(entry.created_by) !== Number(req.user.id) && !(await hasModuleLayer(req.user, "reports", "edit_add"))) {
         return res.status(403).json({ error: "You can only edit your own entries." });
       }
 
@@ -1478,7 +1481,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       const entry = rows[0];
 
       // Only the owner (or an Admin) can split — an Admin can split any entry.
-      if (req.user.role !== "admin" && req.user.role !== "superadmin" && entry.created_by !== req.user.id) {
+      if (Number(entry.created_by) !== Number(req.user.id) && !(await hasModuleLayer(req.user, "reports", "edit_add"))) {
         return res.status(403).json({ error: "You can only edit your own entries." });
       }
 
@@ -1779,8 +1782,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       }
       const entry = rows[0];
 
-      // Only the owner (or an Admin) can delete — an Admin can delete any entry.
-      if (req.user.role !== "admin" && req.user.role !== "superadmin" && entry.created_by !== req.user.id) {
+      // Only the owner — or an account given PEPM Reports' Delete layer
+      // (Superadmin always); being an Admin alone is not enough.
+      if (Number(entry.created_by) !== Number(req.user.id) && !(await hasModuleLayer(req.user, "reports", "delete_trash"))) {
         return res.status(403).json({ error: "You can only delete your own entries." });
       }
 
