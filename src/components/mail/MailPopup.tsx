@@ -43,7 +43,13 @@ export const MailPopup: React.FC<{
             </button>
           </div>
           {head}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-4" onFocusCapture={scrollFocusedFieldIntoView}>
+          <div
+            className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-4"
+            // No footer: the last buttons clear the phone's navigation bar
+            // (APKs before the app stopped drawing under it).
+            style={footer ? undefined : { paddingBottom: 'max(1rem, calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.75rem))' }}
+            onFocusCapture={scrollFocusedFieldIntoView}
+          >
             {children}
           </div>
           {footer && (
