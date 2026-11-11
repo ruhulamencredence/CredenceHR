@@ -204,6 +204,15 @@ const st = (s: any) => STATUS_BN[String(s || "").toLowerCase()] || String(s || "
 
 const isSuper = (c: Ctx) => c.role === "superadmin";
 const hasMod = (c: Ctx, k: string) => isSuper(c) || c.modules.includes(k);
+// Payroll answers come back with amounts as "*****" for an account without
+// Payroll's "See salary amounts" layer (payrollAmountMask.ts): say so rather
+// than add up hidden figures.
+const payrollAmountsHidden = (body: any) => JSON.stringify(body ?? null).includes('"*****"');
+const AMOUNTS_HIDDEN = {
+  ok: false,
+  text: "আপনার account-এ বেতনের অঙ্ক দেখার অনুমতি (Payroll → \"See salary amounts\") নেই, তাই অঙ্কগুলো দেখাতে পারছি না। দরকার হলে Superadmin-কে বলুন।",
+  data: { amounts_hidden: true }
+};
 
 // The asker's login has no Employee record, so there is nothing of "their
 // own" (attendance, late days, loans…). Someone who manages Employees — a
@@ -1495,6 +1504,7 @@ const TOOLS: Tool[] = [
     run: async (c, args) => {
       const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const r = await callApi(c.req, `/api/payroll/approval/${month}/salary-sheet`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return fail(r.status);
       const q = String(args?.name || "").trim().toLowerCase();
       const rows: any[] = (r.body?.rows || []).filter((x: any) => !q || [x.employee_name, x.employee_code, x.department, x.designation].some((v) => String(v || "").toLowerCase().includes(q)));
@@ -1525,6 +1535,7 @@ const TOOLS: Tool[] = [
       const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const vs = /^\d{4}-\d{2}$/.test(String(args?.vs || "")) ? `?vs=${args.vs}` : "";
       const r = await callApi(c.req, `/api/payroll/approval/${month}/compare${vs}`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
       const b = r.body;
       const tk = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}৳${bn(Math.abs(Math.round(v)).toLocaleString("en-IN"))}`;
@@ -1569,7 +1580,7 @@ const TOOLS: Tool[] = [
         (groups.length && !dept ? groups.slice(0, 12).map((g) => `• ${g.key}: ${bn(g.count)} জন`).join("\n") + "\n" : "") +
         rows.slice(0, 15).map((x) => "• " + cols.slice(0, 4).map((col) => val(x[col.key])).filter((v) => v !== "").join(" · ")).join("\n") +
         (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)} জন (পুরোটা PDF / Excel-এ)` : "") +
-        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো আপনার account-এ Payroll না থাকায় দেখানো হয়নি।)");
+        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো দেখানো হয়নি — এর জন্য Payroll আর তার \"See salary amounts\" অনুমতি লাগে।)");
       return {
         ok: true, text, data: { preset: key, total: rows.length, groups: groups.slice(0, 20), rows: rows.slice(0, 40).map((x) => Object.fromEntries(cols.map((col) => [col.label, val(x[col.key])]))) },
         actions: [{ label: "HR Operations → Reports খুলুন", nav: "hrops:reports" }],
@@ -2318,6 +2329,7 @@ const TOOLS: Tool[] = [
     run: async (c, args) => {
       const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const r = await callApi(c.req, `/api/payroll/approval/${ym}`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return fail(r.status);
       const b = r.body || {};
       const sm = b.summary || {};

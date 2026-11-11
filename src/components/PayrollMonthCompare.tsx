@@ -4,6 +4,7 @@
 // (new joiners, people who left, and each salary part that moved for
 // everyone else), departments side by side, and per person what changed
 // and why. Excel of all of it. GET /api/payroll/approval/:month/compare.
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, FileSpreadsheet, GitCompare, Search } from 'lucide-react';
@@ -64,7 +65,7 @@ interface Compare {
   people: PersonRow[];
 }
 
-const n2 = (v: number) => (Number(v) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const n2 = maskMoney((v: number) => (Number(v) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${n2(Math.abs(v))}`;
 const tone = (v: number) => (v > 0 ? 'text-emerald-700' : v < 0 ? 'text-rose-700' : 'text-slate-500');
 const monthName = (m: string) => {

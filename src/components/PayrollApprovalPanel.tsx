@@ -12,6 +12,7 @@
 // signed copies, the corrections, the history, the print / payment sheets
 // and — once with Accounts — Bank / MFS wise payment vouchers.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
@@ -125,7 +126,7 @@ interface ApprovalState {
   conflict?: string | null;
 }
 
-const tk = (n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tk = maskMoney((n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const when = (v: string | null) => {
   if (!v) return '';
   const d = new Date(String(v).replace(' ', 'T'));

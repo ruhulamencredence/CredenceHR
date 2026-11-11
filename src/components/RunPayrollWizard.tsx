@@ -18,6 +18,7 @@
 // styling, Spinner, money()) so it drops in as a full-screen modal over
 // PayrollModule.tsx.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2, Search, Paperclip } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -109,8 +110,8 @@ interface SubmitResult {
 
 const STEPS = ['Select Month', 'Attendance & Leave', 'Adjustments', 'Preview & Calculate', 'Submit'];
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);

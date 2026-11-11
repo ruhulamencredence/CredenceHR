@@ -832,6 +832,17 @@ Deploy বা `pm2 restart`-এর সময় Node app কয়েক সে�
 
 পুরনো ডাটাবেস server চালু হওয়ার সময় নিজে বদলে যায় (`billClaimRename.ts`, base schema-র ঠিক পরে, বাকি migration-এর আগে): টেবিল / কলাম / index rename, ENUM-এর মান বদল, আর দেওয়া অনুমতি (module, layer, App access, Access Template) নতুন নামে সরানো — ডাটা হারায় না, আর আবার চালালে কিছু করে না। **Conveyance Bill** (`conveyance_bills`, `conveyance_bill_items`, `/api/conveyance-bills`, Disburser ধাপ) আলাদা জিনিস — claim approve হলে যে বিল তৈরি হয় — তার নাম আগের মতোই।
 
+## Payroll: বেতনের অঙ্ক দেখার আলাদা অনুমতি
+
+Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amounts`, Module Access → Payroll)। এটা না থাকলে:
+- Payroll-এর প্রতিটা পাতায় (Dashboard, Payroll List, Approval-এর Salary sheet / Top Sheet / Month comparison, Loans, Bonus, Adjustment, Salary Setup…) সব টাকার অঙ্ক `*****` দেখায়; নাম, বিভাগ, মাস, দিন, status, কতজন — এসব দেখা যায়।
+- সার্ভারই লুকায় (`payrollAmountMask.ts`, `/api/payroll`-এর সব উত্তরে): তাই Excel / PDF, Assistant বা সরাসরি API — কোথাও আসল অঙ্ক যায় না। Approval-এর সংযুক্ত ফাইল (scan) খোলা যায় না।
+- Payroll-এ কিছু বদলানো যায় না (salary বানানো, edit, approve, pay…) — লুকানো অঙ্কসহ ফর্ম save হলে আসল বেতন ০ হয়ে যেত। পাতার ভেতরের এডিট বোতামও লুকায়।
+- HR Operations → Reports-এর Salary / loan কলামও এই layer চায় (scheduled report-এ মালিকের অনুমতি দেখা হয়)।
+- কর্মীর নিজের payslip, My Loan — এগুলো আলাদা, কখনো লুকায় না।
+
+নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker `payroll_salary_amounts_grant`), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।
+
 ## Admin Dashboard: Pending Attendance — একসাথে Approve
 
 Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে Check In/Out) আর **Pending Attendance Recon.** (হাজিরা সংশোধন) — দুটোতেই চাপলে একই popup খোলে (০ থাকলেও; "Nothing is waiting")। যে সারি এই অ্যাকাউন্ট approve করতে পারে, শুধু তার পাশে tick box; উপরে "Select all you can approve", নিচে **Approve selected (n)** — জিজ্ঞেস করে (`confirmDialog`) তারপর একটা একটা করে approve করে, আর তালিকা নতুন করে আনে। কে পারে তা সার্ভার ঠিক করে (`/api/admin-dashboard/extras`, প্রতিটা সারির `approve`), একক approve-এর একই নিয়মে:

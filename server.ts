@@ -94,6 +94,7 @@ import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequ
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { payrollAmountGuard } from "./payrollAmountMask";
 import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
@@ -436,7 +437,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "top_sheet" = Payroll -> Approval -> Top Sheet: the month's salary by
 // Branch / site (Accounts' top sheet, with each site's own sheet), Excel /
 // PDF. Plain reading too, so also in that default.
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review"] as const;
+// "salary_amounts" = See salary amounts: without it every Payroll answer has
+// its amounts shown as ***** and nothing in Payroll can be changed
+// (payrollAmountMask.ts). Explicit-only — never part of the default below.
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review", "salary_amounts"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -3078,7 +3082,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3441,6 +3445,9 @@ async function startServer() {
     if (reading && (await hasModuleLayer(req.user, k, "payroll_view").catch(() => false))) return next();
     return requireModuleLayer(k, "read")(req, res, next);
   };
+  // "See salary amounts": without it every Payroll answer is masked and no
+  // change is allowed (payrollAmountMask.ts) — before every Payroll route.
+  app.use("/api/payroll", payrollAmountGuard({ authenticateToken, canSeeAmounts: (u) => hasModuleLayer(u, "payroll", "salary_amounts") }));
   registerPayrollApprovalRoutes(app, {
     authenticateToken,
     requireAdmin,
@@ -3578,7 +3585,7 @@ async function startServer() {
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
-  registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });
   // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
   // reports in one place (ReportsInsightsRoutes.ts).
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,

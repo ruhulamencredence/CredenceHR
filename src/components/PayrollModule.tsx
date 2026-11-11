@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { maskMoney, usePayrollAmounts } from '../lib/payrollAmounts';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import jsPDF from '../lib/jspdf';
@@ -128,15 +129,15 @@ const DEPT_COLORS = [
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
-const compactMoney = (n: number | null | undefined) => {
+const compactMoney = maskMoney((n: number | null | undefined) => {
   const v = Number(n) || 0;
   if (Math.abs(v) >= 100000) return `৳${(v / 100000).toFixed(1)}L`;
   if (Math.abs(v) >= 1000) return `৳${(v / 1000).toFixed(1)}k`;
   return `৳${v.toFixed(0)}`;
-};
+});
 
 const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);
@@ -578,6 +579,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   // Phone: the blended app header with "Payroll", no breadcrumb (lib/adminPhone.ts).
   const adminPhone = useAdminPhonePage('Payroll');
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // "See salary amounts": without it every amount on these pages is *****.
+  usePayrollAmounts(token);
 
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'approval' | 'activity'

@@ -27,6 +27,7 @@
 //   DELETE /api/payroll/pending-bonuses/:id        (un-stage a bonus)
 //   PUT    /api/payroll/:id                        (writes bonus_amount)
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Gift, RefreshCw, AlertTriangle, CheckCircle2, Sparkles, Clock3, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -97,8 +98,8 @@ type BonusType = 'festival' | 'performance' | 'commission';
 type BasisType = 'flat' | 'pct_basic' | 'pct_gross';
 type ApplyMode = 'replace' | 'add';
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
 

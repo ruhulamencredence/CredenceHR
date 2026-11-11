@@ -51,8 +51,10 @@ export const PAY_METHODS: { value: string; label: string }[] = [
   { value: 'other', label: 'Other' }
 ];
 export const methodLabel = (m: string | null | undefined) => PAY_METHODS.find((x) => x.value === m)?.label || m || '';
+// A Payroll amount the server hid ("See salary amounts", payrollAmountMask.ts)
+// stays hidden; an employee's own figures are never hidden.
 export const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  (n as unknown) === '*****' ? '*****' : `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const today = () => new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
 export const shiftMonth = (ym: string, n: number) => {
   const [y, m] = ym.split('-').map(Number);

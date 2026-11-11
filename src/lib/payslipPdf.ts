@@ -47,8 +47,10 @@ export interface PayrollRecord {
   remarks: string | null;
 }
 
+// A Payroll amount the server hid ("See salary amounts", payrollAmountMask.ts)
+// stays hidden; an employee's own figures are never hidden.
 export const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  (n as unknown) === '*****' ? '*****' : `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);

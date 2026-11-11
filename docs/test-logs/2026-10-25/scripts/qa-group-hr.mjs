@@ -36,6 +36,10 @@ const hid = (await api(SA, 'POST', '/api/users', { name: 'Group HR', email: 'gro
 const acc = await api(SA, 'PUT', `/api/system/company-access/${hid}`, { company_ids: [1, B], default_company_id: 1 });
 await api(SA, 'PUT', `/api/users/${hid}/module-permissions`, { modules: MODS }, 1);
 const modB = await api(SA, 'PUT', `/api/users/${hid}/module-permissions`, { modules: MODS }, B);
+// Payroll's "See salary amounts" is ticked only (without it amounts show as
+// ***** and Payroll can't be changed): this HR runs salaries, so tick it —
+// in each company, like the modules above.
+for (const co of [1, B]) await api(SA, 'PUT', `/api/users/${hid}/module-permission-layers`, { module: 'payroll', layers: ['read', 'approval_sheet', 'month_compare', 'top_sheet', 'salary_amounts'] }, co);
 const HR = await login('group.hr@credence.test', 'easy');
 const mine = await api(HR, 'GET', '/api/companies/mine');
 T('GH-01', ok(acc) && ok(modB) && has(mine.body, 'Credence Builders'), 'Group HR has the sister company in the company switcher', `access ${acc.status}; modules ${modB.status}; ${JSON.stringify(mine.body).slice(0, 160)}`);

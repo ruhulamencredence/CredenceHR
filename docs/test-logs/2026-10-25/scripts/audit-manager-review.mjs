@@ -212,11 +212,11 @@ area = 'Audit trail';
   T('LOG-09', /designation/i.test(edLog), 'Employee master edits (designation) are recorded old → new', `${ed.status}; ${edLog}`);
   // Permission changes.
   const pa0 = Number(sql(`SELECT COUNT(*) FROM user_access_audit WHERE target_user_id=${HR.id}`));
-  await api(SA, 'PUT', `/api/users/${HR.id}/module-permission-layers`, { module: 'payroll', layers: ['read', 'salary_hold', 'audit_approve'] });
+  await api(SA, 'PUT', `/api/users/${HR.id}/module-permission-layers`, { module: 'payroll', layers: ['read', 'salary_hold', 'audit_approve', 'salary_amounts'] });
   await api(SA, 'PUT', `/api/users/${HR.id}/module-permissions`, { modules: ['payroll', 'employees', 'reports'] });
   const pa1 = Number(sql(`SELECT COUNT(*) FROM user_access_audit WHERE target_user_id=${HR.id}`));
   T('LOG-10', pa1 > pa0, 'Granting someone more access is recorded (who gave what to whom)', `user_access_audit rows ${pa0}→${pa1}`);
-  await api(SA, 'PUT', `/api/users/${HR.id}/module-permission-layers`, { module: 'payroll', layers: ['read', 'salary_hold'] });
+  await api(SA, 'PUT', `/api/users/${HR.id}/module-permission-layers`, { module: 'payroll', layers: ['read', 'salary_hold', 'salary_amounts'] });
   T('LOG-11', Number(sql("SELECT COUNT(*) FROM login_attempts")) >= 0 && /login_attempts/.test(sql("SHOW TABLES LIKE 'login_attempts'")), 'Failed sign-ins are kept (login_attempts)', '');
 }
 

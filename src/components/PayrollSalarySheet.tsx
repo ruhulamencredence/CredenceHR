@@ -5,6 +5,7 @@
 // (big change from last month, new this month, on hold, deductions), a
 // totals row, a row's full breakdown on click, and Excel of exactly what is
 // shown. GET /api/payroll/approval/:month/salary-sheet.
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { ChevronDown, ChevronRight, FileSpreadsheet, Search, Table2 } from 'lucide-react';
@@ -61,7 +62,7 @@ const SHOW: { key: Show; label: string }[] = [
   { key: 'held', label: 'On hold' },
   { key: 'deducted', label: 'Absent / late cut' }
 ];
-const n2 = (v: number) => (Number(v) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const n2 = maskMoney((v: number) => (Number(v) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const changePct = (r: SheetRow) => (r.last_net && r.last_net > 0 ? ((r.net - r.last_net) / r.last_net) * 100 : null);
 const matches = (r: SheetRow, show: Show) => {
   if (show === 'held') return r.status === 'held';

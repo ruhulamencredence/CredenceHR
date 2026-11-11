@@ -8,6 +8,7 @@
 // payable … Total withdraw" block). Excel: the top sheet plus one sheet per
 // site; PDF the same; Email sends the PDF.
 // GET /api/payroll/approval/:month/top-sheet?by=branch|department.
+import { maskMoney, amountsHidden, AMOUNT_MASK } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from '../lib/jspdf';
@@ -51,7 +52,7 @@ interface TopSheet {
   held: { count: number; net: number; people: { name: string; code: string; net: number; reason: string | null }[] };
 }
 
-const n0 = (v: number) => (Number(v) ? Math.round(Number(v)).toLocaleString('en-US') : '–');
+const n0 = maskMoney((v: number) => (Number(v) ? Math.round(Number(v)).toLocaleString('en-US') : '–'));
 const monthTitle = (m: string) => {
   const [y, mo] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }).toUpperCase() + `-${y}`;
@@ -285,7 +286,7 @@ export const PayrollTopSheet: React.FC<{ token: string; month: string }> = ({ to
   const kpi = (label: string, v: number, money = true) => (
     <div className="rounded-xl border border-slate-200 px-3 py-2 min-w-0">
       <p className="text-[10px] text-slate-500">{label}</p>
-      <p className="text-sm font-bold text-slate-800 tabular-nums truncate">{money ? `৳ ${Math.round(v).toLocaleString('en-US')}` : v}</p>
+      <p className="text-sm font-bold text-slate-800 tabular-nums truncate">{money ? (amountsHidden(v) ? AMOUNT_MASK : `৳ ${Math.round(v).toLocaleString('en-US')}`) : v}</p>
     </div>
   );
   const SignBlock: React.FC<{ s: TopSheet['signatures'] }> = ({ s }) => (
