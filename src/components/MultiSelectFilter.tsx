@@ -5,6 +5,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { usableHeight } from '../lib/navRoom';
 
 export interface MultiOption {
   value: string;
@@ -33,7 +34,7 @@ export const MultiSelectFilter: React.FC<{
     const place = () => {
       const r = box.current!.getBoundingClientRect();
       const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - width - 8));
-      const below = window.innerHeight - r.bottom - 12;
+      const below = usableHeight() - r.bottom - 12;
       const above = r.top - 12;
       const listH = Math.min(256, Math.max(below, above) - 96);
       if (below >= 220 || below >= above) setPos({ top: r.bottom + 6, left, maxH: Math.max(120, Math.min(256, below - 96)) });

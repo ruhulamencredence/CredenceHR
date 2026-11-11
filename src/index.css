@@ -1140,3 +1140,25 @@ html.kb-open .fixed.bottom-0:not([data-kb-self]):has(input:not([type="checkbox"]
 html.kb-open .fixed.inset-0:not([data-kb-self]) > * {
   max-height: 100% !important;
 }
+
+/*
+  The phone's own navigation bar (3 buttons / gesture line) or the iPhone's
+  home indicator: no full-screen popup / bottom sheet puts anything under it.
+  The older Android APKs (and the iPhone) draw the page behind that bar and
+  each popup had to leave room itself, which many didn't (Employee Tracking,
+  Credence Assistant…). Every `fixed inset-0` layer now gets a transparent
+  bottom border as tall as the bar: its content (the card) stops above it,
+  while its backdrop (dim + blur) still reaches the bottom of the screen.
+  Inside, --native-safe-area-inset-bottom is 0, so a popup that already left
+  the room itself doesn't leave it twice. The newer APK ends the page above
+  the bar (MainActivity) and reports 0, so nothing changes there; neither
+  on a computer. While the keyboard is up the rule above takes over.
+*/
+:root {
+  --nav-room: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+}
+html:not(.kb-open) .fixed.inset-0:not([data-nav-self]),
+html:not(.kb-open) .fixed.top-0.bottom-0:not([data-nav-self]) {
+  border-bottom: var(--nav-room) solid transparent !important;
+  --native-safe-area-inset-bottom: 0px;
+}

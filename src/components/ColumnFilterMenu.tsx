@@ -18,6 +18,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDownAZ, ArrowDownZA, ArrowUpDown, Check, Columns3, Filter, Search, X } from 'lucide-react';
+import { usableHeight } from '../lib/navRoom';
 
 export type SortDir = 'asc' | 'desc';
 export const BLANK_LABEL = '(Blank)';
@@ -31,7 +32,7 @@ function useAnchoredPosition(open: boolean, anchor: React.RefObject<HTMLElement 
       const r = anchor.current!.getBoundingClientRect();
       const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - width - 8));
       const top = r.bottom + 6;
-      setPos({ top, left, maxH: Math.max(240, window.innerHeight - top - 12) });
+      setPos({ top, left, maxH: Math.max(240, usableHeight() - top - 12) });
     };
     place();
     window.addEventListener('resize', place);
