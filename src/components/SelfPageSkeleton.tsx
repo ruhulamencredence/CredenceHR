@@ -194,7 +194,7 @@ const SELF_PAGES: Record<string, { title?: string; shape: SkeletonShape }> = {
   myLetters: { title: 'My Letters & Service Record', shape: 'list' },
   teamAttendance: { shape: 'list' },
   myTasks: { title: 'My Tasks', shape: 'list' },
-  myMobileSim: { title: 'My Mobile SIM', shape: 'list' },
+  myMobileSim: { title: 'My SIM & Bill', shape: 'list' },
   myLoans: { title: 'My Loan / Advance', shape: 'list' },
   myTargets: { title: 'My Targets', shape: 'list' },
   credenceMail: { title: 'Credence Mail', shape: 'list' },
@@ -203,7 +203,7 @@ const SELF_PAGES: Record<string, { title?: string; shape: SkeletonShape }> = {
   mySignatures: { title: 'Documents to Sign', shape: 'list' },
   myPayslips: { title: 'My Payslip', shape: 'list' },
   materialReceive: { shape: 'list' },
-  myRequisitions: { title: 'SIM & ID Card', shape: 'list' }
+  myRequisitions: { title: 'Request SIM / ID Card', shape: 'list' }
 };
 
 /** A whole Self Service page while its code downloads (App.tsx's Suspense). */

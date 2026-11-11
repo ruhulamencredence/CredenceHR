@@ -17,7 +17,7 @@
 //
 //   Every SIM is postpaid; the bill is paid by the company up to the limit.
 //
-//   An employee (Self Service -> My Mobile SIM, users.can_view_mobile_bill —
+//   An employee (Self Service -> My SIM & Bill, users.can_view_mobile_bill —
 //   off until turned on in Module Access) sees their SIMs, limits and bills
 //   and applies for a higher limit — for one month or from a month onwards.
 //   The application rides the Dynamic Approval Engine (request_type 'mobile',
@@ -319,7 +319,7 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
   };
   const selfOnly = async (req: any, res: any, next: any) => {
     try {
-      if (!(await hasSelf(req.user))) return res.status(403).json({ error: "My Mobile SIM isn't turned on for your account." });
+      if (!(await hasSelf(req.user))) return res.status(403).json({ error: "My SIM & Bill isn't turned on for your account." });
       next();
     } catch (err: any) {
       res.status(500).json({ error: err.message });

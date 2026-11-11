@@ -1231,7 +1231,7 @@ export default function App() {
     return () => window.removeEventListener('credence:open-target', onOpen);
   }, [user]);
   // A Mobile Bill alert (MobileBillRoutes.ts): a new limit request with no
-  // approval chain opens HR's Mobile Bill; anything else opens My Mobile SIM.
+  // approval chain opens HR's Mobile Bill; anything else opens My SIM & Bill.
   useEffect(() => {
     const onOpen = (e: Event) => {
       if (!user) return;
