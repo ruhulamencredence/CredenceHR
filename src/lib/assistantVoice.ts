@@ -282,8 +282,61 @@ let playId = 0;
 // <audio> element (every later clip plays on that same, now allowed,
 // element) and an empty sentence on the device's voice. Harmless elsewhere.
 let player: HTMLAudioElement | null = null;
+
+// Gemini pieces are played on ONE running Web Audio context, one after the
+// other, instead of swapping the <audio> element's src for every piece:
+// each swap made the phone close and reopen its sound output, heard as a
+// short radio-like crackle between lines. Here the output stays open, every
+// piece gets a few ms fade in / out (no click where it was cut), and the
+// gap between pieces is plain silence.
+let ctx: AudioContext | null = null;
+let sources: AudioBufferSourceNode[] = [];
+const FADE_S = 0.012;
+const GAP_S = 0.12;
+function audioCtx(): AudioContext | null {
+  if (ctx) return ctx;
+  try {
+    const Ctx: typeof AudioContext | undefined = (window as any).AudioContext || (window as any).webkitAudioContext;
+    ctx = Ctx ? new Ctx() : null;
+  } catch {
+    ctx = null;
+  }
+  return ctx;
+}
+async function decodeClip(c: AudioContext, blob: Blob): Promise<AudioBuffer> {
+  const raw = await blob.arrayBuffer();
+  const buf = await new Promise<AudioBuffer>((resolve, reject) => {
+    // Old Safari: callback form only.
+    const p = c.decodeAudioData(raw, resolve, reject) as unknown as Promise<AudioBuffer> | undefined;
+    p?.then?.(resolve, reject);
+  });
+  const n = Math.min(Math.floor(buf.sampleRate * FADE_S), Math.floor(buf.length / 2));
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) {
+      const g = i / n;
+      d[i] *= g;
+      d[d.length - 1 - i] *= g;
+    }
+  }
+  return buf;
+}
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
 export function unlockAudio() {
+  try {
+    const c = audioCtx();
+    if (c) {
+      void c.resume().catch(() => undefined);
+      // iPhone: a silent sound started from the tap unlocks the context.
+      const b = c.createBuffer(1, 1, 22050);
+      const src = c.createBufferSource();
+      src.buffer = b;
+      src.connect(c.destination);
+      src.start(0);
+    }
+  } catch {
+    /* no Web Audio here */
+  }
   try {
     if (!player) {
       player = new Audio();
@@ -317,6 +370,15 @@ export function stopSpeaking() {
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
+  }
+  const playing = sources;
+  sources = [];
+  for (const src of playing) {
+    try {
+      src.stop(); // its onended still fires, so speak() returns
+    } catch {
+      /* already over */
+    }
   }
 }
 
@@ -387,6 +449,44 @@ export async function speak(text: string, token: string, onPlaying?: () => void,
   // Ask for the first two pieces at once; each later one while the one
   // before it plays.
   const clips = parts.map((_, i) => (i < 2 ? fetchClip(parts[i], token, gemini) : null));
+  const c = audioCtx();
+  if (c && c.state !== 'running') await c.resume().catch(() => undefined);
+  if (c && c.state === 'running') {
+    let at = 0;
+    let begun = false;
+    let last: Promise<void> = Promise.resolve();
+    for (let i = 0; i < parts.length; i++) {
+      if (id !== playId) return;
+      let buf: AudioBuffer;
+      try {
+        buf = await decodeClip(c, await (clips[i] || fetchClip(parts[i], token, gemini)));
+      } catch {
+        continue; // a piece that failed: go on with the rest
+      }
+      if (id !== playId) return;
+      if (i + 2 < parts.length && !clips[i + 2]) clips[i + 2] = fetchClip(parts[i + 2], token, gemini);
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      at = Math.max(at, c.currentTime + 0.05);
+      src.start(at);
+      at += buf.duration + GAP_S;
+      sources.push(src);
+      last = new Promise<void>((resolve) => {
+        src.onended = () => {
+          sources = sources.filter((x) => x !== src);
+          resolve();
+        };
+      });
+      if (!begun) {
+        begun = true;
+        onPlaying?.();
+      }
+    }
+    await last;
+    return;
+  }
+  // No Web Audio (or it stays locked): one <audio> piece after another.
   for (let i = 0; i < parts.length; i++) {
     if (id !== playId) return;
     const blob = await (clips[i] || fetchClip(parts[i], token, gemini));
