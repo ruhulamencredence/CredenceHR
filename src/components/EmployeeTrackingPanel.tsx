@@ -24,6 +24,7 @@ import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/repor
 import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { fetchPhoto, photoKnownMissing } from './UserAvatar';
 // "18-Aug-2026, 02:19 PM" — same dd-MMM-yyyy date as formatDate, plus a local
 // 12-hour time, for report rows where the exact moment (not just the day)
 // matters. Reads local (not UTC) components, same reasoning as
@@ -308,47 +309,27 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     return () => clearInterval(interval);
   }, [fetchLive]);
 
-  // Fetch each reporting user's Personal Data profile photo once (GET
-  // /api/profile/photo/:userId — Admin/Superadmin can read anyone's, see
-  // profileRoutes.ts), then cache it as an object URL keyed by user_id.
-  // Skips ids we've already resolved (whether that resolved to a real photo
-  // or to `null` = no photo on file), so this doesn't re-fetch every 60s poll.
+  // Each reporting user's profile photo (GET /api/profile/photo/:userId),
+  // through the app's shared photo cache (UserAvatar.tsx fetchPhoto — one
+  // request per person, shared with every other avatar). Each photo shows
+  // as soon as it arrives. Before, they were fetched one by one and only
+  // shown once ALL had arrived — the map's refresh every minute cut that
+  // short, and with many people the photos never appeared.
   useEffect(() => {
     const missing = Array.from(new Set(live.map(p => p.user_id))).filter(
       id => !(id in photoUrlsRef.current)
     );
     if (missing.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      for (const userId of missing) {
-        try {
-          const res = await fetch(apiUrl(`/api/profile/photo/${userId}`), {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (cancelled) return;
-          if (!res.ok || res.status === 204) {
-            photoUrlsRef.current[userId] = null;
-          } else {
-            const blob = await res.blob();
-            photoUrlsRef.current[userId] = URL.createObjectURL(blob);
-          }
-        } catch {
-          photoUrlsRef.current[userId] = null;
-        }
-      }
-      if (!cancelled) setPhotoUrls({ ...photoUrlsRef.current });
-    })();
-    return () => { cancelled = true; };
+    for (const userId of missing) {
+      void fetchPhoto(userId, token).then(url => {
+        // A failed request (offline, server error) is tried again next refresh.
+        if (url === null && !photoKnownMissing(userId)) return;
+        if (photoUrlsRef.current[userId] === url) return;
+        photoUrlsRef.current[userId] = url;
+        setPhotoUrls(prev => ({ ...prev, [userId]: url }));
+      });
+    }
   }, [live, token]);
-
-  // Revoke every cached object URL on unmount only (not per-render — the
-  // effect above never overwrites an already-resolved id, so there's nothing
-  // to revoke mid-life).
-  useEffect(() => {
-    return () => {
-      Object.values(photoUrlsRef.current).forEach(url => { if (url) URL.revokeObjectURL(url); });
-    };
-  }, []);
 
   // Employee filter (Live board only) — narrows both the "Reporting now" list
   // and the map markers to names matching the search box, so an Admin can
