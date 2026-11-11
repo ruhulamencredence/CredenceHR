@@ -1239,105 +1239,54 @@ html[data-dark] {
   --color-red-50: color-mix(in oklab, var(--color-red-500) 13%, #2f3237);
   --color-red-100: color-mix(in oklab, var(--color-red-500) 20%, #2f3237);
   --color-red-200: color-mix(in oklab, var(--color-red-500) 34%, #2f3237);
-  --color-red-700: var(--color-red-300);
-  --color-red-800: var(--color-red-300);
-  --color-red-900: var(--color-red-300);
   --color-rose-50: color-mix(in oklab, var(--color-rose-500) 13%, #2f3237);
   --color-rose-100: color-mix(in oklab, var(--color-rose-500) 20%, #2f3237);
   --color-rose-200: color-mix(in oklab, var(--color-rose-500) 34%, #2f3237);
-  --color-rose-700: var(--color-rose-300);
-  --color-rose-800: var(--color-rose-300);
-  --color-rose-900: var(--color-rose-300);
   --color-orange-50: color-mix(in oklab, var(--color-orange-500) 13%, #2f3237);
   --color-orange-100: color-mix(in oklab, var(--color-orange-500) 20%, #2f3237);
   --color-orange-200: color-mix(in oklab, var(--color-orange-500) 34%, #2f3237);
-  --color-orange-700: var(--color-orange-300);
-  --color-orange-800: var(--color-orange-300);
-  --color-orange-900: var(--color-orange-300);
   --color-amber-50: color-mix(in oklab, var(--color-amber-500) 13%, #2f3237);
   --color-amber-100: color-mix(in oklab, var(--color-amber-500) 20%, #2f3237);
   --color-amber-200: color-mix(in oklab, var(--color-amber-500) 34%, #2f3237);
-  --color-amber-700: var(--color-amber-300);
-  --color-amber-800: var(--color-amber-300);
-  --color-amber-900: var(--color-amber-300);
   --color-yellow-50: color-mix(in oklab, var(--color-yellow-500) 13%, #2f3237);
   --color-yellow-100: color-mix(in oklab, var(--color-yellow-500) 20%, #2f3237);
   --color-yellow-200: color-mix(in oklab, var(--color-yellow-500) 34%, #2f3237);
-  --color-yellow-700: var(--color-yellow-300);
-  --color-yellow-800: var(--color-yellow-300);
-  --color-yellow-900: var(--color-yellow-300);
   --color-lime-50: color-mix(in oklab, var(--color-lime-500) 13%, #2f3237);
   --color-lime-100: color-mix(in oklab, var(--color-lime-500) 20%, #2f3237);
   --color-lime-200: color-mix(in oklab, var(--color-lime-500) 34%, #2f3237);
-  --color-lime-700: var(--color-lime-300);
-  --color-lime-800: var(--color-lime-300);
-  --color-lime-900: var(--color-lime-300);
   --color-green-50: color-mix(in oklab, var(--color-green-500) 13%, #2f3237);
   --color-green-100: color-mix(in oklab, var(--color-green-500) 20%, #2f3237);
   --color-green-200: color-mix(in oklab, var(--color-green-500) 34%, #2f3237);
-  --color-green-700: var(--color-green-300);
-  --color-green-800: var(--color-green-300);
-  --color-green-900: var(--color-green-300);
   --color-emerald-50: color-mix(in oklab, var(--color-emerald-500) 13%, #2f3237);
   --color-emerald-100: color-mix(in oklab, var(--color-emerald-500) 20%, #2f3237);
   --color-emerald-200: color-mix(in oklab, var(--color-emerald-500) 34%, #2f3237);
-  --color-emerald-700: var(--color-emerald-300);
-  --color-emerald-800: var(--color-emerald-300);
-  --color-emerald-900: var(--color-emerald-300);
   --color-teal-50: color-mix(in oklab, var(--color-teal-500) 13%, #2f3237);
   --color-teal-100: color-mix(in oklab, var(--color-teal-500) 20%, #2f3237);
   --color-teal-200: color-mix(in oklab, var(--color-teal-500) 34%, #2f3237);
-  --color-teal-700: var(--color-teal-300);
-  --color-teal-800: var(--color-teal-300);
-  --color-teal-900: var(--color-teal-300);
   --color-cyan-50: color-mix(in oklab, var(--color-cyan-500) 13%, #2f3237);
   --color-cyan-100: color-mix(in oklab, var(--color-cyan-500) 20%, #2f3237);
   --color-cyan-200: color-mix(in oklab, var(--color-cyan-500) 34%, #2f3237);
-  --color-cyan-700: var(--color-cyan-300);
-  --color-cyan-800: var(--color-cyan-300);
-  --color-cyan-900: var(--color-cyan-300);
   --color-sky-50: color-mix(in oklab, var(--color-sky-500) 13%, #2f3237);
   --color-sky-100: color-mix(in oklab, var(--color-sky-500) 20%, #2f3237);
   --color-sky-200: color-mix(in oklab, var(--color-sky-500) 34%, #2f3237);
-  --color-sky-700: var(--color-sky-300);
-  --color-sky-800: var(--color-sky-300);
-  --color-sky-900: var(--color-sky-300);
   --color-blue-50: color-mix(in oklab, var(--color-blue-500) 13%, #2f3237);
   --color-blue-100: color-mix(in oklab, var(--color-blue-500) 20%, #2f3237);
   --color-blue-200: color-mix(in oklab, var(--color-blue-500) 34%, #2f3237);
-  --color-blue-700: var(--color-blue-300);
-  --color-blue-800: var(--color-blue-300);
-  --color-blue-900: var(--color-blue-300);
   --color-indigo-50: color-mix(in oklab, var(--color-indigo-500) 13%, #2f3237);
   --color-indigo-100: color-mix(in oklab, var(--color-indigo-500) 20%, #2f3237);
   --color-indigo-200: color-mix(in oklab, var(--color-indigo-500) 34%, #2f3237);
-  --color-indigo-700: var(--color-indigo-300);
-  --color-indigo-800: var(--color-indigo-300);
-  --color-indigo-900: var(--color-indigo-300);
   --color-violet-50: color-mix(in oklab, var(--color-violet-500) 13%, #2f3237);
   --color-violet-100: color-mix(in oklab, var(--color-violet-500) 20%, #2f3237);
   --color-violet-200: color-mix(in oklab, var(--color-violet-500) 34%, #2f3237);
-  --color-violet-700: var(--color-violet-300);
-  --color-violet-800: var(--color-violet-300);
-  --color-violet-900: var(--color-violet-300);
   --color-purple-50: color-mix(in oklab, var(--color-purple-500) 13%, #2f3237);
   --color-purple-100: color-mix(in oklab, var(--color-purple-500) 20%, #2f3237);
   --color-purple-200: color-mix(in oklab, var(--color-purple-500) 34%, #2f3237);
-  --color-purple-700: var(--color-purple-300);
-  --color-purple-800: var(--color-purple-300);
-  --color-purple-900: var(--color-purple-300);
   --color-fuchsia-50: color-mix(in oklab, var(--color-fuchsia-500) 13%, #2f3237);
   --color-fuchsia-100: color-mix(in oklab, var(--color-fuchsia-500) 20%, #2f3237);
   --color-fuchsia-200: color-mix(in oklab, var(--color-fuchsia-500) 34%, #2f3237);
-  --color-fuchsia-700: var(--color-fuchsia-300);
-  --color-fuchsia-800: var(--color-fuchsia-300);
-  --color-fuchsia-900: var(--color-fuchsia-300);
   --color-pink-50: color-mix(in oklab, var(--color-pink-500) 13%, #2f3237);
   --color-pink-100: color-mix(in oklab, var(--color-pink-500) 20%, #2f3237);
   --color-pink-200: color-mix(in oklab, var(--color-pink-500) 34%, #2f3237);
-  --color-pink-700: var(--color-pink-300);
-  --color-pink-800: var(--color-pink-300);
-  --color-pink-900: var(--color-pink-300);
 }
 html[data-dark] body { background: var(--g-bg-gradient) fixed, var(--g-bg); color: var(--g-text); }
 html[data-dark] .bg-white, html[data-dark] [class*="bg-white/"]:not(.gsidebar *):not(button[class*="liquid"]) { background-color: #2f3237 !important; }
@@ -1432,3 +1381,46 @@ html[data-dark] [style*="background: rgba(255, 255, 255"], html[data-dark] [styl
 html[data-dark] [style*="background: rgb(255, 255, 255)"], html[data-dark] [style*="background-color: rgb(255, 255, 255)"] { background: rgba(255, 255, 255, 0.05) !important; }
 html[data-dark] [style*="border-color: rgba(255, 255, 255"] { border-color: rgba(255, 255, 255, 0.08) !important; }
 html[data-dark] :is([style*="color: rgb(63, 63, 70)"], [style*="color: rgb(39, 39, 42)"], [style*="color: rgb(51, 65, 85)"], [style*="color: rgb(30, 41, 59)"]) { color: #dcdfe3 !important; }
+/* --- Dark mode: fixes from the page-by-page check --- */
+/* Dark buttons / pills (bg-slate-800/900, zinc, gray, black) would turn light with the
+   neutral scale: they stay a dark raised grey with white text. */
+html[data-dark] :is(.bg-slate-700, .bg-slate-800, .bg-slate-900, .bg-zinc-800, .bg-zinc-900, .bg-gray-800, .bg-gray-900, .bg-neutral-900, .bg-black):not(.gsidebar *) { background-color: #4a4f56 !important; color: #ffffff !important; }
+html[data-dark] :is([class*="hover:bg-slate-900"], [class*="hover:bg-slate-800"], [class*="hover:bg-zinc-900"], [class*="hover:bg-gray-900"]):hover { background-color: #565c64 !important; }
+/* Faint text (text-slate-200/300 …) used for "not here / off": still faint, but readable. */
+html[data-dark] :is(.text-slate-200, .text-slate-300, .text-gray-200, .text-gray-300, .text-zinc-200, .text-zinc-300, .text-neutral-300) { color: #7a8088 !important; }
+/* sm: / md: / lg: whites (cards that are flat on a phone and white from a tablet up). */
+@media (min-width: 640px) { html[data-dark] [class*="sm:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 768px) { html[data-dark] [class*="md:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 1024px) { html[data-dark] [class*="lg:bg-white"] { background-color: #2f3237 !important; } }
+html[data-dark] [class*="bg-gradient-to"][class*="from-violet-100"], html[data-dark] [class*="bg-gradient-to"][class*="via-white"] { background: linear-gradient(160deg, #31353a, #2c2f34) !important; }
+/* Inline pastel badges (the Superadmin / Admin avatar and role badge in the header…). */
+html[data-dark] [style*="background: rgb(253, 232, 232)"] { background: rgba(239, 68, 68, 0.18) !important; color: #fca5a5 !important; }
+html[data-dark] [style*="background: rgb(254, 247, 224)"] { background: rgba(245, 158, 11, 0.18) !important; color: #fcd34d !important; }
+/* Inline dark colour text (trend lines, status words): their light counterparts. */
+html[data-dark] [style*="color: rgb(185, 28, 28)"], html[data-dark] [style*="color: rgb(155, 28, 28)"], html[data-dark] [style*="color: rgb(190, 18, 60)"], html[data-dark] [style*="color: rgb(220, 38, 38)"] { color: #f87171 !important; }
+html[data-dark] [style*="color: rgb(4, 120, 87)"], html[data-dark] [style*="color: rgb(21, 128, 61)"], html[data-dark] [style*="color: rgb(5, 150, 105)"] { color: #34d399 !important; }
+html[data-dark] [style*="color: rgb(180, 83, 9)"], html[data-dark] [style*="color: rgb(152, 100, 0)"] { color: #fbbf24 !important; }
+html[data-dark] [style*="color: rgb(29, 78, 216)"], html[data-dark] [style*="color: rgb(37, 99, 235)"] { color: #93c5fd !important; }
+html[data-dark] :is([style*="color: rgb(91, 85, 112)"], [style*="color: rgb(107, 101, 133)"], [style*="color: rgb(100, 116, 139)"], [style*="color: rgb(71, 85, 105)"], [style*="color: rgb(95, 99, 104)"]) { color: #a3a8ae !important; }
+/* Phone Admin Panel tab pills (html[data-admin-phone]). */
+html[data-dark][data-admin-phone] main :is(.flex.gap-1.border-b, .flex.border-b.overflow-x-auto, [role="tablist"].border-b) > button:not([class*="border-blue-600"]):not([class*="text-blue-600"]):not([aria-selected="true"]) { background: #2f3237 !important; color: #c6cad0 !important; box-shadow: none !important; }
+
+/* Dark coloured text (-700/-800/-900) reads as its light -300 on charcoal. Text only:
+   a bg-violet-700 button keeps its colour. */
+html[data-dark] :is(.text-red-700, .text-red-800, .text-red-900, .hover\:text-red-700:hover, .hover\:text-red-800:hover) { color: var(--color-red-300) !important; }
+html[data-dark] :is(.text-rose-700, .text-rose-800, .text-rose-900, .hover\:text-rose-700:hover, .hover\:text-rose-800:hover) { color: var(--color-rose-300) !important; }
+html[data-dark] :is(.text-orange-700, .text-orange-800, .text-orange-900, .hover\:text-orange-700:hover, .hover\:text-orange-800:hover) { color: var(--color-orange-300) !important; }
+html[data-dark] :is(.text-amber-700, .text-amber-800, .text-amber-900, .hover\:text-amber-700:hover, .hover\:text-amber-800:hover) { color: var(--color-amber-300) !important; }
+html[data-dark] :is(.text-yellow-700, .text-yellow-800, .text-yellow-900, .hover\:text-yellow-700:hover, .hover\:text-yellow-800:hover) { color: var(--color-yellow-300) !important; }
+html[data-dark] :is(.text-lime-700, .text-lime-800, .text-lime-900, .hover\:text-lime-700:hover, .hover\:text-lime-800:hover) { color: var(--color-lime-300) !important; }
+html[data-dark] :is(.text-green-700, .text-green-800, .text-green-900, .hover\:text-green-700:hover, .hover\:text-green-800:hover) { color: var(--color-green-300) !important; }
+html[data-dark] :is(.text-emerald-700, .text-emerald-800, .text-emerald-900, .hover\:text-emerald-700:hover, .hover\:text-emerald-800:hover) { color: var(--color-emerald-300) !important; }
+html[data-dark] :is(.text-teal-700, .text-teal-800, .text-teal-900, .hover\:text-teal-700:hover, .hover\:text-teal-800:hover) { color: var(--color-teal-300) !important; }
+html[data-dark] :is(.text-cyan-700, .text-cyan-800, .text-cyan-900, .hover\:text-cyan-700:hover, .hover\:text-cyan-800:hover) { color: var(--color-cyan-300) !important; }
+html[data-dark] :is(.text-sky-700, .text-sky-800, .text-sky-900, .hover\:text-sky-700:hover, .hover\:text-sky-800:hover) { color: var(--color-sky-300) !important; }
+html[data-dark] :is(.text-blue-700, .text-blue-800, .text-blue-900, .hover\:text-blue-700:hover, .hover\:text-blue-800:hover) { color: var(--color-blue-300) !important; }
+html[data-dark] :is(.text-indigo-700, .text-indigo-800, .text-indigo-900, .hover\:text-indigo-700:hover, .hover\:text-indigo-800:hover) { color: var(--color-indigo-300) !important; }
+html[data-dark] :is(.text-violet-700, .text-violet-800, .text-violet-900, .hover\:text-violet-700:hover, .hover\:text-violet-800:hover) { color: var(--color-violet-300) !important; }
+html[data-dark] :is(.text-purple-700, .text-purple-800, .text-purple-900, .hover\:text-purple-700:hover, .hover\:text-purple-800:hover) { color: var(--color-purple-300) !important; }
+html[data-dark] :is(.text-fuchsia-700, .text-fuchsia-800, .text-fuchsia-900, .hover\:text-fuchsia-700:hover, .hover\:text-fuchsia-800:hover) { color: var(--color-fuchsia-300) !important; }
+html[data-dark] :is(.text-pink-700, .text-pink-800, .text-pink-900, .hover\:text-pink-700:hover, .hover\:text-pink-800:hover) { color: var(--color-pink-300) !important; }
