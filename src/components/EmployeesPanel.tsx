@@ -179,6 +179,15 @@ const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
 const MARITAL_STATUS_OPTIONS = ['Single', 'Married', 'Divorced', 'Widowed'];
 const BLOOD_GROUP_OPTIONS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const JOB_STATUS_OPTIONS = ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'];
+// The Department / Branch with this name (letters and digits only, any
+// case) — for a record imported as text.
+const nameKey = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function matchByName<T extends { id: number }>(list: T[], nameOf: (x: T) => string, name: unknown): number | null {
+  const k = nameKey(name);
+  if (!k) return null;
+  const hit = list.find((x) => nameKey(nameOf(x)) === k);
+  return hit ? Number(hit.id) : null;
+}
 const JOB_BASE_OPTIONS = ['Permanent', 'Probation', 'Contractual', 'Intern'];
 const EMPLOYMENT_CATEGORY_OPTIONS = ['Management', 'Non-Management'];
 const REVIEW_MONTH_OPTIONS = [
@@ -599,8 +608,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       name: e.name || '',
       designation: e.designation || '',
       department: e.department || '',
-      department_id: e.department_id ?? null,
-      branch_id: e.branch_id ?? null,
+      // Imported as text only (the name isn't exactly in Departments /
+      // Branches): pick the one with the same name if there is one.
+      department_id: e.department_id ?? matchByName(departments, (d) => d.name, e.department),
+      branch_id: e.branch_id ?? matchByName(branches, (b) => b.branch_name, e.branch),
       email: e.email || '',
       phone: e.phone || '',
       zk_device_pin: e.zk_device_pin || '',
@@ -885,6 +896,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         designation: form.designation.trim() || null,
         department_id: form.department_id || null,
         branch_id: form.branch_id || null,
+        // Not in Departments / Branches (e.g. imported as text): keep the
+        // text instead of wiping it on Save.
+        ...(form.department_id ? {} : { department: form.department.trim() || null }),
+        ...(form.branch_id ? {} : { branch: form.branch.trim() || null }),
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         zk_device_pin: form.zk_device_pin.trim() || null,
@@ -1599,7 +1614,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
                   <SearchSelect
                     value={form.department_id ?? ''}
-                    onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null }))}
+                    onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value ? Number(e.target.value) : null, department: '' }))}
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">— None —</option>
@@ -1610,6 +1625,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   {departments.length === 0 && (
                     <p className="mt-1 text-[11px] text-slate-400">
                       No Departments set up yet — add one from Admin Panel -&gt; Departments.
+                    </p>
+                  )}
+                  {!form.department_id && form.department.trim() && (
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      On file: <b>{form.department}</b> — not in Admin Panel -&gt; Departments. It stays as it is; pick one above to link it.
                     </p>
                   )}
                 </div>
@@ -1823,7 +1843,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
                         <SearchSelect
                           value={form.branch_id ?? ''}
-                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null }))}
+                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null, branch: '' }))}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >
                           <option value="">— None —</option>
@@ -1836,6 +1856,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                         {branches.length === 0 && (
                           <p className="mt-1 text-[11px] text-slate-400">
                             No Branches set up yet — add one from Admin Panel -&gt; Branches.
+                          </p>
+                        )}
+                        {!form.branch_id && form.branch.trim() && (
+                          <p className="mt-1 text-[11px] text-amber-700">
+                            On file: <b>{form.branch}</b> — not in Admin Panel -&gt; Branches. It stays as it is; pick one above to link it.
                           </p>
                         )}
                       </div>
@@ -2667,6 +2692,8 @@ const SelectField: React.FC<{ label: string; value: string; onChange: (v: string
     <label className={fieldLabelClass}>{label}</label>
     <select value={value} onChange={(e) => onChange(e.target.value)} className={fieldInputClass}>
       <option value="">Select</option>
+      {/* A value saved before / imported that isn't in this list still shows. */}
+      {value && !options.includes(value) && <option value={value}>{value}</option>}
       {options.map((o) => (
         <option key={o} value={o}>{o}</option>
       ))}
