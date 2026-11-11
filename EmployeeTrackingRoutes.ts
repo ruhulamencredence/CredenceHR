@@ -163,7 +163,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         []
       ).catch(() => [])) || [];
     const stateByUser = new Map<number, any>(states.map((x) => [Number(x.user_id), x]));
-    return employees.map((e) => {
+    const rows = employees.map((e) => {
       const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
       const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
       const enabled = !!e.user_id && !!Number(e.can_use_tracking);
@@ -181,7 +181,12 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       // tracked (battery saver / weak signal), whatever its heartbeat says.
       const gpsOn = stateFresh && !locOff && !noPerm && st.location_on !== null && !!Number(st.location_on);
       const alive = gpsOn && minutesAgo != null && minutesAgo <= 120;
-      const tracked = enabled && !locOff && !noPerm && (pingFresh || alive);
+      // A location received in the last TRACKING_LIVE_MIN minutes always
+      // counts — the same rule as the green dot on the map and in "Reporting
+      // now" (before, a fresh location could still be left out here when
+      // the phone's last heartbeat said otherwise or the switch was off, so
+      // the two disagreed).
+      const tracked = pingFresh || (enabled && !locOff && !noPerm && alive);
       const reason = tracked
         ? null
         : !e.user_id
@@ -215,6 +220,35 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         reason
       };
     });
+    // Accounts sending locations with no active employee record linked to
+    // them (all_employees.user_id) — they are on the map too, so count them
+    // here, under "No employee record". Only for a viewer who sees everyone.
+    if (!scope) {
+      const linked = new Set<number>(allEmployees.filter((e) => e.user_id).map((e) => Number(e.user_id)));
+      const loose = pings.filter((p) => !linked.has(Number(p.user_id)) && p.minutes_ago != null && Number(p.minutes_ago) <= TRACKING_LIVE_MIN);
+      if (loose.length) {
+        const ids = loose.map((p) => Number(p.user_id));
+        const users: any[] = (await queryDB(`SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
+        const nameOf = new Map<number, string>(users.map((u) => [Number(u.id), String(u.name || "")]));
+        for (const p of loose) {
+          rows.push({
+            employee_pk: null,
+            employee_id: "",
+            name: nameOf.get(Number(p.user_id)) || "User",
+            designation: "",
+            department: "No employee record",
+            user_id: Number(p.user_id),
+            tracking_enabled: true,
+            tracked: true,
+            last_ping: p.last_ping,
+            minutes_ago: Number(p.minutes_ago),
+            standing_still: false,
+            reason: null
+          });
+        }
+      }
+    }
+    return rows;
   };
   // Sending a notice from the Not Tracked list needs the Notices module too.
   const canSendTrackingNotice = async (user: any) =>
