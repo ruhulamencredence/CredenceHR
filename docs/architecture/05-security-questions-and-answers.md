@@ -185,7 +185,11 @@
 উত্তর: না। যে সারি তিনি একা approve করতে পারতেন না, সেখানে tick box-ই আসে না; আর "Approve selected" প্রতিটা সারির জন্য আগের একক approve-এর API ডাকে, যা প্রতিবার যাচাই করে — Approval Workflow-এ শুধু যাঁর ধাপ বা Superadmin, workflow-এর বাইরের সংশোধনে Attendance module। কেউ API সরাসরি ডাকলেও 403।
 
 **প্রশ্ন: Data Import দিয়ে কি কোনো employee-কে Superadmin বা Admin-এর login-এর সাথে জুড়ে দেওয়া যায়?**
-উত্তর: না। মোছা employee আবার import করলে শুধু এই group-এর সাধারণ (`user`) login-এ, আর নাম মিললে, আবার যুক্ত হয়। Admin বা Superadmin-এর login ID দিয়ে সারি দিলে আটকায় ("already the Login ID of …")। এমন জোড়া লাগাতে হলে Users থেকে হাতে করতে হয়।
+উত্তর: না। মোছা employee আবার import করলে শুধু এই group-এর সাধারণ (`user`) login-এ, Employee ID হুবহু Login ID হলে, আবার যুক্ত হয় (Employees তালিকা বা Tracking খুললেও একই নিয়মে নিজে থেকে জোড়ে)। email বা নাম মিললে নিজে থেকে নয়, Employees → Unlinked logins-এ মানুষ নিশ্চিত করে। Admin বা Superadmin-এর login ID দিয়ে সারি দিলে আটকায় ("already the Login ID of …")। এমন জোড়া লাগাতে হলে Users থেকে হাতে করতে হয়।
+
+**প্রশ্ন: Management Dashboard দিলে কি সে বেতনের মোট খরচও দেখে?**
+
+উত্তর: না, যদি আলাদা করে "Money" layer টিক না দেওয়া হয়। Dashboard-এর প্রতিটা অংশ (People, Attendance, Money, Approvals, Projects & Targets, Recruitment, Fleet & assets) Module Access-এ আলাদা টিক; যেটা নেই server সেই সংখ্যা পাঠায়ই না, AI Assistant-ও বলে না। Money শুধু টিক দিলে।
 
 **প্রশ্ন: কর্মী কি নিজের Login ID (username) বদলে ফেলতে পারেন?**
 উত্তর: শুরুতে না — Profile-এ Change Username দেখায় না, আর server-ও (`PUT /api/profile/username`) ফিরিয়ে দেয়। Superadmin চাইলে Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করতে পারেন; তখন বর্তমান password দিয়ে বদলানো যায়। বন্ধ থাকলে দরকারে HR Users থেকে বদলে দেয় (Users module-এর Edit/Add layer লাগে)।

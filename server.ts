@@ -13,7 +13,7 @@ import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
 import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
-import { backfillEmployeeLoginIds } from "./EmployeeLoginId";
+import { autoLinkByEmployeeId, backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
@@ -353,6 +353,7 @@ async function initDB() {
     await ensureEmployeeRecordsGuard(dbPool);
     // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
     await backfillEmployeeLoginIds(queryDB);
+    await autoLinkByEmployeeId(queryDB);
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
@@ -399,7 +400,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -498,6 +499,12 @@ const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const BREAK_LAYER_KEYS = ["read", "break_manage"] as const;
+// Management Dashboard: one layer per part of the page, so an account sees
+// only the parts it is given (ManagementDashboardRoutes.ts leaves the rest
+// out of the reply). "md_money" (Salary cost, Money out) is explicit-only;
+// an account with the module and no saved layers gets every other part.
+const MANAGEMENT_DASHBOARD_LAYER_KEYS = ["md_people", "md_attendance", "md_money", "md_approvals", "md_projects", "md_recruitment", "md_fleet"] as const;
+const MANAGEMENT_DASHBOARD_DEFAULT_LAYERS = MANAGEMENT_DASHBOARD_LAYER_KEYS.filter((k) => k !== "md_money");
 // Recruitment (ATS, RecruitmentRoutes.ts): "read" = everything the module did
 // before; "email_candidates" = email a candidate about their interview (set,
 // moved, cancelled), an offer or a regret; "edit_candidates" = correct a
@@ -571,6 +578,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
   break_time: BREAK_LAYER_KEYS,
+  management_dashboard: MANAGEMENT_DASHBOARD_LAYER_KEYS,
   recruitment: RECRUITMENT_LAYER_KEYS,
   vehicle_management: VEHICLE_LAYER_KEYS,
   employees: EMPLOYEE_LAYER_KEYS,
@@ -3091,6 +3099,8 @@ async function startServer() {
             ? ["read", "dept_summary", "custom_report"]
           : moduleKey === "payroll"
             ? ["read", "approval_sheet", "month_compare", "top_sheet"]
+          : moduleKey === "management_dashboard"
+            ? [...MANAGEMENT_DASHBOARD_DEFAULT_LAYERS]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
             : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
@@ -3125,6 +3135,8 @@ async function startServer() {
         ? ["read", "dept_summary", "custom_report"]
       : moduleKey === "payroll"
         ? ["read", "approval_sheet", "month_compare", "top_sheet"]
+      : moduleKey === "management_dashboard"
+        ? MANAGEMENT_DASHBOARD_DEFAULT_LAYERS
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
         : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
@@ -3548,7 +3560,7 @@ async function startServer() {
   registerLoanPlanRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, createAlert });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   // Management Dashboard: the whole company for one month vs the month before.
-  registerManagementDashboardRoutes(app, { authenticateToken, requireModule, queryDB, todayInDhaka });
+  registerManagementDashboardRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, todayInDhaka });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   // E-Signature: signers in order, signature images, signed PDF, public /verify (ESignRoutes.ts).
   registerESignRoutes(app, { authenticateToken, requireAdmin, requireModule, hasModuleLayer, getAdminModules, queryDB, createAlert });

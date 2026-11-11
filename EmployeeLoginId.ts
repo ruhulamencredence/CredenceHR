@@ -82,3 +82,75 @@ export async function backfillEmployeeLoginIds(queryDB: QueryDB): Promise<void> 
     console.warn("⚠️ Could not give employee logins their Employee ID: " + err.message);
   }
 }
+
+/**
+ * Employee ID = Login ID, so an employee with no login linked whose Employee
+ * ID is exactly the username of a login that has no employee record is that
+ * person: link them (e.g. after the employees were deleted and imported
+ * again, or added by hand). Only ordinary ('user') logins of the same group —
+ * an Admin's or the Superadmin's login is linked by hand. Skipped when the
+ * Employee ID appears on more than one employee. Never throws. Returns how
+ * many were linked. employeeRowId: just that employee.
+ *
+ * Run at start-up, when the Employees list or Employee Tracking loads (at most
+ * once a minute), and right after an employee is added or saved.
+ */
+let lastAutoLink = 0;
+export async function autoLinkByEmployeeId(queryDB: QueryDB, employeeRowId?: number): Promise<number> {
+  if (!employeeRowId) {
+    if (Date.now() - lastAutoLink < 60_000) return 0;
+    lastAutoLink = Date.now();
+  }
+  try {
+    const all: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT e.id, e.employee_id, e.user_id, c.group_id
+           FROM all_employees e LEFT JOIN companies c ON c.id = e.company_id`
+      )) || [];
+    const codeCount = new Map<string, number>();
+    const linked = new Set<number>();
+    for (const e of all) {
+      const k = clean(e.employee_id).toLowerCase();
+      if (k) codeCount.set(k, (codeCount.get(k) || 0) + 1);
+      if (e.user_id) linked.add(Number(e.user_id));
+    }
+    const todo = all.filter((e) => !e.user_id && clean(e.employee_id) && (!employeeRowId || Number(e.id) === Number(employeeRowId)));
+    if (!todo.length) return 0;
+    const users: any[] =
+      (await queryDB("SELECT id, username, group_id FROM users WHERE role = 'user' AND username IS NOT NULL AND TRIM(username) <> ''")) || [];
+    const byName = new Map<string, any>();
+    for (const u of users) if (!linked.has(Number(u.id))) byName.set(clean(u.username).toLowerCase(), u);
+    let n = 0;
+    for (const e of todo) {
+      const k = clean(e.employee_id).toLowerCase();
+      if (codeCount.get(k) !== 1) continue;
+      const u = byName.get(k);
+      if (!u) continue;
+      if (e.group_id != null && u.group_id != null && Number(e.group_id) !== Number(u.group_id)) continue;
+      await queryDB("/*unscoped*/ UPDATE all_employees SET user_id = ? WHERE id = ? AND user_id IS NULL", [Number(u.id), Number(e.id)]);
+      byName.delete(k);
+      n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+/** The ordinary login whose username is this Employee ID and that has no employee record yet, or null. */
+export async function orphanLoginForEmployeeId(queryDB: QueryDB, code: unknown): Promise<number | null> {
+  const c = clean(code);
+  if (!c) return null;
+  try {
+    const rows: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT u.id FROM users u
+          WHERE u.role = 'user' AND LOWER(u.username) = LOWER(?)
+            AND u.id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`,
+        [c]
+      )) || [];
+    return rows.length === 1 ? Number(rows[0].id) : null;
+  } catch {
+    return null;
+  }
+}
