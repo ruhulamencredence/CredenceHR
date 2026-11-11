@@ -108,7 +108,10 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
           rows("SELECT id, user_id, doc_type, expiry_date FROM employee_documents"),
           // Only what's waiting — every check-in/out has an approval request,
           // so the full table grows by the day.
-          rows("SELECT id, source_type, requested_by, status, created_at FROM approval_requests WHERE status = 'pending'"),
+          // Whole rows: the attendance ones are checked against their current
+          // step's approvers (getCurrentStepApprovers) for the Dashboard's
+          // "Approve selected".
+          rows("SELECT * FROM approval_requests WHERE status = 'pending'"),
           rows("SELECT id, user_id, attendance_date, status, created_at FROM attendance_corrections WHERE status = 'pending'"),
           rows("SELECT id, employee_id, user_id, letter_type, status, created_at FROM hr_letter_requests"),
           rows("SELECT id, employee_id, user_id, item_type, doc_type, status, submitted_at FROM hr_info_requests"),
@@ -157,12 +160,45 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
 
       // Only this company's people (users is scoped to the company).
       const here = new Set(users.map((u: any) => Number(u.id)));
-      const pendingAttendance = approvals
-        .filter((a: any) => a.status === "pending" && a.source_type === "attendance" && here.has(Number(a.requested_by)))
-        .map((a: any) => ({ id: Number(a.id), ...person(null, a.requested_by), date: dateOnly(a.created_at) }));
-      const pendingCorrections = corrections
-        .filter((c: any) => c.status === "pending")
-        .map((c: any) => ({ id: Number(c.id), ...person(null, c.user_id), date: dateOnly(c.attendance_date) }));
+      // `approve`: how THIS account may approve the item from the Dashboard
+      // (null = it may not), using the same rules as the endpoints that do it:
+      //   chain      POST /api/my-approvals/:id/act — the Superadmin, or someone
+      //              on the request's current step (performApprovalAction);
+      //   correction POST /api/attendance/corrections/:id/decision — the
+      //              Attendance module, for a correction not in the Approval
+      //              Workflow. Those endpoints check again on every approve.
+      const me = Number(req.user.id);
+      const onCurrentStep = async (ar: any) => isSuper || (await getCurrentStepApprovers(ar).catch(() => [])).some((a) => Number(a.user_id) === me);
+      type Approve = { via: "chain"; request_id: number } | { via: "correction"; id: number } | null;
+      const pendingAttendance = await Promise.all(
+        approvals
+          .filter((a: any) => a.status === "pending" && a.source_type === "attendance" && here.has(Number(a.requested_by)))
+          .map(async (a: any) => ({
+            id: Number(a.id),
+            ...person(null, a.requested_by),
+            date: dateOnly(a.created_at),
+            approve: ((await onCurrentStep(a)) ? { via: "chain", request_id: Number(a.id) } : null) as Approve
+          }))
+      );
+      const correctionChain = new Map<number, any>(
+        approvals.filter((a: any) => a.source_type === "attendance_correction").map((a: any) => [Number(a.source_id), a])
+      );
+      const canDecideCorrections = isSuper || mods.includes("attendance");
+      const pendingCorrections = await Promise.all(
+        corrections
+          .filter((c: any) => c.status === "pending")
+          .map(async (c: any) => {
+            const ar = correctionChain.get(Number(c.id));
+            const approve: Approve = ar
+              ? (await onCurrentStep(ar))
+                ? { via: "chain", request_id: Number(ar.id) }
+                : null
+              : canDecideCorrections
+                ? { via: "correction", id: Number(c.id) }
+                : null;
+            return { id: Number(c.id), ...person(null, c.user_id), date: dateOnly(c.attendance_date), approve };
+          })
+      );
 
       const documents = [
         ...letters

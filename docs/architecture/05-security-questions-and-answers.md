@@ -181,6 +181,9 @@
 **প্রশ্ন: Check In/Out দ্রুত করতে ফোন আগের অবস্থান মনে রাখে — তাহলে কি পুরোনো জায়গা থেকে check-in করা যায়?**
 উত্তর: না। শেষ অবস্থান (`credence_last_fix`) শুধু map কোথায় খুলবে তা ঠিক করে; Check In / Check Out-এ পাঠানো অবস্থান সবসময় নতুন GPS fix (ফোনের নিজের, সর্বোচ্চ ৩০ সেকেন্ড পুরোনো)। শেষ অবস্থান ১২ ঘণ্টা পর বাদ, logout-এ মুছে যায়, তাই একই ফোনে অন্য কেউ login করলে আগের জনের জায়গা দেখে না। Map-এর ছবি (tile) ফোনে জমা থাকে, কিন্তু তাতে কারও তথ্য নেই।
 
+**প্রশ্ন: Admin Dashboard থেকে একসাথে অনেক হাজিরা approve করলে কি কেউ এমন কিছু approve করতে পারে যা তাঁর approve করার কথা নয়?**
+উত্তর: না। যে সারি তিনি একা approve করতে পারতেন না, সেখানে tick box-ই আসে না; আর "Approve selected" প্রতিটা সারির জন্য আগের একক approve-এর API ডাকে, যা প্রতিবার যাচাই করে — Approval Workflow-এ শুধু যাঁর ধাপ বা Superadmin, workflow-এর বাইরের সংশোধনে Attendance module। কেউ API সরাসরি ডাকলেও 403।
+
 **প্রশ্ন: Data Import দিয়ে কি কোনো employee-কে Superadmin বা Admin-এর login-এর সাথে জুড়ে দেওয়া যায়?**
 উত্তর: না। মোছা employee আবার import করলে শুধু এই group-এর সাধারণ (`user`) login-এ, Employee ID হুবহু Login ID হলে, আবার যুক্ত হয় (Employees তালিকা বা Tracking খুললেও একই নিয়মে নিজে থেকে জোড়ে)। email বা নাম মিললে নিজে থেকে নয়, Employees → Unlinked logins-এ মানুষ নিশ্চিত করে। Admin বা Superadmin-এর login ID দিয়ে সারি দিলে আটকায় ("already the Login ID of …")। এমন জোড়া লাগাতে হলে Users থেকে হাতে করতে হয়।
 
