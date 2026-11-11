@@ -518,6 +518,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         // except the login that is this same person's, left without an
         // employee record (relink below).
         let relink: { id: number; name: string } | null = null;
+        // Already imported but not linked to a login, while that person's old
+        // login (Login ID = this Employee ID) is still there: link it now.
+        let relinkExisting: { id: number; name: string } | null = null;
+        if (existing && !existing.user_id && code) {
+          const orphan = prep.orphanLogins.get(codeKey);
+          if (orphan && !prep.claimedUsers.has(orphan.id) && sameName(orphan.name, str(v.name) || String(existing.name || ""))) {
+            relinkExisting = orphan;
+            prep.claimedUsers.add(orphan.id);
+          }
+        }
         if (!existing && code) {
           const orphan = prep.orphanLogins.get(codeKey);
           if (orphan && !prep.claimedUsers.has(orphan.id)) {
@@ -600,7 +610,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           if (!password) fail("Login ID given without a Password.");
           const pwBad = passwordProblem(password, { email: loginId });
           if (pwBad) fail(pwBad);
-          if (existing?.user_id || relink) {
+          if (existing?.user_id || relink || relinkExisting) {
             notes.push("Already has a login — Login ID / Password ignored");
           } else {
             const isEmail = loginId.includes("@");
@@ -693,8 +703,13 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         };
 
         if (existing) {
+          if (relinkExisting) {
+            if (!ctx.dryRun) await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ? AND user_id IS NULL", [relinkExisting.id, Number(existing.id)]);
+            existing.user_id = relinkExisting.id;
+            notes.unshift(`Linked to the existing login of ${relinkExisting.name} (Login ID ${code})`);
+          }
           const changed = Object.keys(set).filter((k) => str(existing[k]) !== str(set[k]));
-          if (changed.length === 0 && !login && !pay) return { status: "skip", message: ["Already up to date", ...notes].join(". "), employee: `${set.name} (${code})` };
+          if (changed.length === 0 && !login && !pay && !relinkExisting) return { status: "skip", message: ["Already up to date", ...notes].join(". "), employee: `${set.name} (${code})` };
           if (!ctx.dryRun && changed.length > 0) {
             await recordEmployeeEditHistory(queryDB, {
               employeeId: Number(existing.id),
@@ -709,6 +724,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           await createLogin(Number(existing.id));
           await addPayment(Number(existing.id));
           const what = [changed.length ? `Changes: ${changed.join(", ")}` : null, login ? "New login" : null, pay ? "Payment account added" : null].filter(Boolean) as string[];
+          if (relinkExisting && !what.length) what.push("Login linked");
           return { status: "update", message: [...what, ...notes].join(". "), employee: `${set.name} (${code})` };
         }
         // New employee with no Device PIN: the Employee ID is the PIN (the
