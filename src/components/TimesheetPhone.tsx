@@ -446,7 +446,12 @@ export const AttendanceGauge: React.FC<{
   const aria = `${pct(attended)}% attended: ${counts.ontime} on time, ${counts.delay} delay, ${counts.extreme} extreme delay, ${counts.absent} absent, ${counts.leave} on leave`;
 
   return (
-    <div className="liquid-glass rounded-[28px] px-4 pt-4 pb-3.5 flex flex-col items-center gap-2.5">
+    // The same soft, short shadow as Leave's chart card (LeavePhone.tsx
+    // LeaveGauge) instead of .liquid-glass's own heavier one.
+    <div
+      className="liquid-glass rounded-[28px] px-4 pt-4 pb-3.5 flex flex-col items-center gap-2.5"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.35), 0 10px 30px -16px rgba(var(--g-accent-rgb,127,0,255),.3)' }}
+    >
       <div className="relative w-[220px] h-[118px]">
         <svg width="220" height="118" viewBox="0 0 200 108" role="img" aria-label={aria}>
           <path d={ARC} fill="none" stroke="rgba(99,0,198,.10)" strokeWidth="14" strokeLinecap="round" />
