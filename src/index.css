@@ -1159,3 +1159,276 @@ html:not(.kb-open) .fixed.top-0.bottom-0:not([data-nav-self]) {
    room on the right for the popup's round close button. */
 .desktop-edit-popup > .bg-white { background: transparent; border-color: transparent; box-shadow: none; }
 .desktop-edit-popup > .bg-white > h3 { padding-right: 3rem; }
+
+
+/* ================================================================
+   Dark mode (Profile -> Settings -> Appearance -> Dark / Like this
+   device; src/lib/colorMode.ts sets <html data-dark>). Charcoal, not
+   black: page #25282c, cards #2f3237, hairlines #3a3e44, light grey text.
+   Works over any background theme: the neutral Tailwind scales are
+   turned round (slate/gray/zinc 50 = dark … 900 = light), coloured tints
+   (-50/-100/-200) become dim washes of their colour and dark coloured
+   text (-700/-800/-900) the lighter -300, so badges and chips keep their
+   meaning. The accent (buttons, the open menu item, icons) stays.
+   ================================================================ */
+html[data-dark] {
+  color-scheme: dark;
+  --g-bg: #25282c !important;
+  --g-bg-gradient: linear-gradient(180deg, #282b30 0%, #25282c 60%, #222529 100%) !important;
+  --g-surface: #2f3237 !important;
+  --g-surface-muted: #2c2f34 !important;
+  --g-border: #3a3e44 !important;
+  --g-text: #e4e6ea !important;
+  --g-text-muted: #8d939a !important;
+  --g-accent-soft: color-mix(in oklab, var(--g-accent) 18%, #2f3237) !important;
+  --color-slate-50: #2b2e33;
+  --color-slate-100: #31353a;
+  --color-slate-200: #3a3e44;
+  --color-slate-300: #4a4f56;
+  --color-slate-400: #6b7178;
+  --color-slate-500: #8d939a;
+  --color-slate-600: #a9aeb4;
+  --color-slate-700: #c6cad0;
+  --color-slate-800: #dcdfe3;
+  --color-slate-900: #e9ebee;
+  --color-slate-950: #f4f5f7;
+  --color-gray-50: #2b2e33;
+  --color-gray-100: #31353a;
+  --color-gray-200: #3a3e44;
+  --color-gray-300: #4a4f56;
+  --color-gray-400: #6b7178;
+  --color-gray-500: #8d939a;
+  --color-gray-600: #a9aeb4;
+  --color-gray-700: #c6cad0;
+  --color-gray-800: #dcdfe3;
+  --color-gray-900: #e9ebee;
+  --color-gray-950: #f4f5f7;
+  --color-zinc-50: #2b2e33;
+  --color-zinc-100: #31353a;
+  --color-zinc-200: #3a3e44;
+  --color-zinc-300: #4a4f56;
+  --color-zinc-400: #6b7178;
+  --color-zinc-500: #8d939a;
+  --color-zinc-600: #a9aeb4;
+  --color-zinc-700: #c6cad0;
+  --color-zinc-800: #dcdfe3;
+  --color-zinc-900: #e9ebee;
+  --color-zinc-950: #f4f5f7;
+  --color-neutral-50: #2b2e33;
+  --color-neutral-100: #31353a;
+  --color-neutral-200: #3a3e44;
+  --color-neutral-300: #4a4f56;
+  --color-neutral-400: #6b7178;
+  --color-neutral-500: #8d939a;
+  --color-neutral-600: #a9aeb4;
+  --color-neutral-700: #c6cad0;
+  --color-neutral-800: #dcdfe3;
+  --color-neutral-900: #e9ebee;
+  --color-neutral-950: #f4f5f7;
+  --color-stone-50: #2b2e33;
+  --color-stone-100: #31353a;
+  --color-stone-200: #3a3e44;
+  --color-stone-300: #4a4f56;
+  --color-stone-400: #6b7178;
+  --color-stone-500: #8d939a;
+  --color-stone-600: #a9aeb4;
+  --color-stone-700: #c6cad0;
+  --color-stone-800: #dcdfe3;
+  --color-stone-900: #e9ebee;
+  --color-stone-950: #f4f5f7;
+  --color-red-50: color-mix(in oklab, var(--color-red-500) 13%, #2f3237);
+  --color-red-100: color-mix(in oklab, var(--color-red-500) 20%, #2f3237);
+  --color-red-200: color-mix(in oklab, var(--color-red-500) 34%, #2f3237);
+  --color-red-700: var(--color-red-300);
+  --color-red-800: var(--color-red-300);
+  --color-red-900: var(--color-red-300);
+  --color-rose-50: color-mix(in oklab, var(--color-rose-500) 13%, #2f3237);
+  --color-rose-100: color-mix(in oklab, var(--color-rose-500) 20%, #2f3237);
+  --color-rose-200: color-mix(in oklab, var(--color-rose-500) 34%, #2f3237);
+  --color-rose-700: var(--color-rose-300);
+  --color-rose-800: var(--color-rose-300);
+  --color-rose-900: var(--color-rose-300);
+  --color-orange-50: color-mix(in oklab, var(--color-orange-500) 13%, #2f3237);
+  --color-orange-100: color-mix(in oklab, var(--color-orange-500) 20%, #2f3237);
+  --color-orange-200: color-mix(in oklab, var(--color-orange-500) 34%, #2f3237);
+  --color-orange-700: var(--color-orange-300);
+  --color-orange-800: var(--color-orange-300);
+  --color-orange-900: var(--color-orange-300);
+  --color-amber-50: color-mix(in oklab, var(--color-amber-500) 13%, #2f3237);
+  --color-amber-100: color-mix(in oklab, var(--color-amber-500) 20%, #2f3237);
+  --color-amber-200: color-mix(in oklab, var(--color-amber-500) 34%, #2f3237);
+  --color-amber-700: var(--color-amber-300);
+  --color-amber-800: var(--color-amber-300);
+  --color-amber-900: var(--color-amber-300);
+  --color-yellow-50: color-mix(in oklab, var(--color-yellow-500) 13%, #2f3237);
+  --color-yellow-100: color-mix(in oklab, var(--color-yellow-500) 20%, #2f3237);
+  --color-yellow-200: color-mix(in oklab, var(--color-yellow-500) 34%, #2f3237);
+  --color-yellow-700: var(--color-yellow-300);
+  --color-yellow-800: var(--color-yellow-300);
+  --color-yellow-900: var(--color-yellow-300);
+  --color-lime-50: color-mix(in oklab, var(--color-lime-500) 13%, #2f3237);
+  --color-lime-100: color-mix(in oklab, var(--color-lime-500) 20%, #2f3237);
+  --color-lime-200: color-mix(in oklab, var(--color-lime-500) 34%, #2f3237);
+  --color-lime-700: var(--color-lime-300);
+  --color-lime-800: var(--color-lime-300);
+  --color-lime-900: var(--color-lime-300);
+  --color-green-50: color-mix(in oklab, var(--color-green-500) 13%, #2f3237);
+  --color-green-100: color-mix(in oklab, var(--color-green-500) 20%, #2f3237);
+  --color-green-200: color-mix(in oklab, var(--color-green-500) 34%, #2f3237);
+  --color-green-700: var(--color-green-300);
+  --color-green-800: var(--color-green-300);
+  --color-green-900: var(--color-green-300);
+  --color-emerald-50: color-mix(in oklab, var(--color-emerald-500) 13%, #2f3237);
+  --color-emerald-100: color-mix(in oklab, var(--color-emerald-500) 20%, #2f3237);
+  --color-emerald-200: color-mix(in oklab, var(--color-emerald-500) 34%, #2f3237);
+  --color-emerald-700: var(--color-emerald-300);
+  --color-emerald-800: var(--color-emerald-300);
+  --color-emerald-900: var(--color-emerald-300);
+  --color-teal-50: color-mix(in oklab, var(--color-teal-500) 13%, #2f3237);
+  --color-teal-100: color-mix(in oklab, var(--color-teal-500) 20%, #2f3237);
+  --color-teal-200: color-mix(in oklab, var(--color-teal-500) 34%, #2f3237);
+  --color-teal-700: var(--color-teal-300);
+  --color-teal-800: var(--color-teal-300);
+  --color-teal-900: var(--color-teal-300);
+  --color-cyan-50: color-mix(in oklab, var(--color-cyan-500) 13%, #2f3237);
+  --color-cyan-100: color-mix(in oklab, var(--color-cyan-500) 20%, #2f3237);
+  --color-cyan-200: color-mix(in oklab, var(--color-cyan-500) 34%, #2f3237);
+  --color-cyan-700: var(--color-cyan-300);
+  --color-cyan-800: var(--color-cyan-300);
+  --color-cyan-900: var(--color-cyan-300);
+  --color-sky-50: color-mix(in oklab, var(--color-sky-500) 13%, #2f3237);
+  --color-sky-100: color-mix(in oklab, var(--color-sky-500) 20%, #2f3237);
+  --color-sky-200: color-mix(in oklab, var(--color-sky-500) 34%, #2f3237);
+  --color-sky-700: var(--color-sky-300);
+  --color-sky-800: var(--color-sky-300);
+  --color-sky-900: var(--color-sky-300);
+  --color-blue-50: color-mix(in oklab, var(--color-blue-500) 13%, #2f3237);
+  --color-blue-100: color-mix(in oklab, var(--color-blue-500) 20%, #2f3237);
+  --color-blue-200: color-mix(in oklab, var(--color-blue-500) 34%, #2f3237);
+  --color-blue-700: var(--color-blue-300);
+  --color-blue-800: var(--color-blue-300);
+  --color-blue-900: var(--color-blue-300);
+  --color-indigo-50: color-mix(in oklab, var(--color-indigo-500) 13%, #2f3237);
+  --color-indigo-100: color-mix(in oklab, var(--color-indigo-500) 20%, #2f3237);
+  --color-indigo-200: color-mix(in oklab, var(--color-indigo-500) 34%, #2f3237);
+  --color-indigo-700: var(--color-indigo-300);
+  --color-indigo-800: var(--color-indigo-300);
+  --color-indigo-900: var(--color-indigo-300);
+  --color-violet-50: color-mix(in oklab, var(--color-violet-500) 13%, #2f3237);
+  --color-violet-100: color-mix(in oklab, var(--color-violet-500) 20%, #2f3237);
+  --color-violet-200: color-mix(in oklab, var(--color-violet-500) 34%, #2f3237);
+  --color-violet-700: var(--color-violet-300);
+  --color-violet-800: var(--color-violet-300);
+  --color-violet-900: var(--color-violet-300);
+  --color-purple-50: color-mix(in oklab, var(--color-purple-500) 13%, #2f3237);
+  --color-purple-100: color-mix(in oklab, var(--color-purple-500) 20%, #2f3237);
+  --color-purple-200: color-mix(in oklab, var(--color-purple-500) 34%, #2f3237);
+  --color-purple-700: var(--color-purple-300);
+  --color-purple-800: var(--color-purple-300);
+  --color-purple-900: var(--color-purple-300);
+  --color-fuchsia-50: color-mix(in oklab, var(--color-fuchsia-500) 13%, #2f3237);
+  --color-fuchsia-100: color-mix(in oklab, var(--color-fuchsia-500) 20%, #2f3237);
+  --color-fuchsia-200: color-mix(in oklab, var(--color-fuchsia-500) 34%, #2f3237);
+  --color-fuchsia-700: var(--color-fuchsia-300);
+  --color-fuchsia-800: var(--color-fuchsia-300);
+  --color-fuchsia-900: var(--color-fuchsia-300);
+  --color-pink-50: color-mix(in oklab, var(--color-pink-500) 13%, #2f3237);
+  --color-pink-100: color-mix(in oklab, var(--color-pink-500) 20%, #2f3237);
+  --color-pink-200: color-mix(in oklab, var(--color-pink-500) 34%, #2f3237);
+  --color-pink-700: var(--color-pink-300);
+  --color-pink-800: var(--color-pink-300);
+  --color-pink-900: var(--color-pink-300);
+}
+html[data-dark] body { background: var(--g-bg-gradient) fixed, var(--g-bg); color: var(--g-text); }
+html[data-dark] .bg-white, html[data-dark] [class*="bg-white/"]:not(.gsidebar *):not(button[class*="liquid"]) { background-color: #2f3237 !important; }
+html[data-dark] [class*="bg-white/9"], html[data-dark] [class*="bg-white/8"], html[data-dark] [class*="bg-white/7"] { background-color: rgba(47,50,55,.85) !important; }
+html[data-dark] [class*="bg-white/6"], html[data-dark] [class*="bg-white/5"], html[data-dark] [class*="bg-white/4"] { background-color: rgba(47,50,55,.6) !important; }
+html[data-dark] .text-black, html[data-dark] [class*="text-[#1e1b2e]"], html[data-dark] [class*="text-[#18181b]"] { color: #e4e6ea !important; }
+html[data-dark] [class*="border-white"] { border-color: rgba(255,255,255,.08) !important; }
+html[data-dark] input, html[data-dark] select, html[data-dark] textarea { background-color: #2c2f34; color: #e4e6ea; border-color: #3a3e44; }
+html[data-dark] input::placeholder, html[data-dark] textarea::placeholder { color: #6b7178; }
+html[data-dark] [class*="from-white"] { --tw-gradient-from: #2f3237 !important; }
+html[data-dark] [class*="via-white"] { --tw-gradient-via: #2f3237 !important; }
+html[data-dark] [class*="shadow"] { --tw-shadow-color: rgba(0,0,0,.5); }
+/* Liquid glass in dark */
+html[data-dark] .liquid-glass-backdrop { background: rgba(0,0,0,.5); }
+html[data-dark] .liquid-glass {
+  background: linear-gradient(160deg, rgba(52,55,61,.92) 0%, rgba(45,48,53,.9) 55%, rgba(48,51,57,.92) 100%);
+  border-color: rgba(255,255,255,.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 30px 70px -20px rgba(0,0,0,.7), 0 8px 24px -12px rgba(0,0,0,.5) !important;
+  color: #e4e6ea;
+}
+html[data-dark] .liquid-glass::before { background: radial-gradient(120% 60% at 15% -10%, rgba(255,255,255,.06), transparent 55%), radial-gradient(90% 50% at 110% 110%, rgba(var(--g-accent-rgb),.12), transparent 60%); }
+html[data-dark] .liquid-glass-inset { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.07); box-shadow: inset 0 1px 2px rgba(0,0,0,.3); }
+html[data-dark] .liquid-glass-chip { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.1); box-shadow: none; color: #c6cad0; }
+html[data-dark] .liquid-glass-button { border-color: rgba(255,255,255,.15); }
+
+/* page backgrounds painted with the light theme's own gradient / pastel colours */
+html[data-dark] [class*="from-[#f"], html[data-dark] [class*="from-orange-50"], html[data-dark] [class*="from-violet-50"] { --tw-gradient-from: #282b30 !important; }
+html[data-dark] [class*="to-[#f"], html[data-dark] [class*="to-orange-50"], html[data-dark] [class*="to-white"] { --tw-gradient-to: #25282c !important; }
+html[data-dark] main, html[data-dark] .min-h-screen { background-color: transparent; }
+html[data-dark] h1, html[data-dark] h2, html[data-dark] h3 { color: #e4e6ea; }
+html[data-dark] :is([class*="text-[#0"], [class*="text-[#1"], [class*="text-[#2"], [class*="text-[#3"], [class*="text-[#4"]) { color: #e4e6ea !important; }
+html[data-dark] :is([class*="text-[#5"], [class*="text-[#6"]) { color: #a3a8ae !important; }
+
+html[data-dark] .glass-mask-fix, html[data-dark] [class*="bg-[radial-gradient"], html[data-dark] [class*="bg-[linear-gradient"]:not(button) { background: linear-gradient(160deg, #2c2f34, #2f3237) !important; }
+html[data-dark] [class*="bg-gradient-to"][class*="from-white"], html[data-dark] [class*="bg-gradient-to"][class*="from-slate-50"] { background: #2f3237 !important; }
+/* the soft colour glow behind phone pages: a faint accent glow on dark */
+html[data-dark] .page-glow { background: radial-gradient(120% 70% at 10% 0%, rgba(var(--g-accent-rgb),.16) 0%, transparent 60%), radial-gradient(90% 60% at 100% 10%, rgba(var(--g-accent-rgb),.08) 0%, transparent 60%) !important; }
+/* dimming layers stay dark */
+html[data-dark] [class*="bg-slate-900/"], html[data-dark] [class*="bg-black/"] { background-color: rgba(0,0,0,.55) !important; }
+html[data-dark] { background: #25282c !important; }
+html[data-dark] body { background: #25282c !important; }
+html[data-dark] body * { --page-flat: #25282c; }
+html[data-dark] body::before { background: #25282c !important; }
+/* phone page header: round white chips, title */
+html[data-dark] .hdr-blend .hdr-round, html[data-dark] .hdr-blend .hdr-chip > button { background: rgba(255,255,255,.08) !important; color: #e4e6ea !important; border-color: rgba(255,255,255,.1) !important; }
+html[data-dark] .hdr-blend, html[data-dark] .hdr-blend * { color: #e4e6ea; }
+html[data-dark] .hdr-blend.hdr-blend-scrolled { background: rgba(37,40,44,.85) !important; }
+html[data-dark] [style*="color: rgb(24, 24, 27)"], html[data-dark] [style*="color: rgb(30, 27, 46)"], html[data-dark] [style*="color: rgb(15, 23, 42)"] { color: #e4e6ea !important; }
+html[data-dark] .liquid-glass [class*="bg-white"], html[data-dark] .liquid-glass [class*="bg-slate-50"] { background-color: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.07) !important; }
+
+/* Sidebar, header and the phone bars: charcoal too; the open page marked with an accent line. */
+html[data-dark] { --g-sidebar-bg: #2b2e33 !important; --g-header-gradient: #2b2e33 !important; }
+html[data-dark] .gsidebar { background: #2b2e33 !important; border-right: 1px solid #353940 !important; box-shadow: none !important; }
+html[data-dark] .gsidebar [class*="text-white"] { color: #a3a8ae !important; }
+html[data-dark] .gsidebar [class*="text-white/4"], html[data-dark] .gsidebar [class*="text-white/5"] { color: #6b7178 !important; }
+html[data-dark] .gsidebar [class*="hover:text-white"]:hover { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] { background-color: #353940 !important; color: #e4e6ea !important; box-shadow: inset 3px 0 0 var(--g-accent) !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] svg { color: var(--g-accent) !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] [class*="text-white"] { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="bg-white/10"]:not(input), html[data-dark] .gsidebar [class*="bg-white/5"]:not(input) { background-color: transparent !important; }
+html[data-dark] .gsidebar input[class*="bg-white/10"], html[data-dark] .gsidebar [class*="bg-black/15"] { background-color: #22252a !important; }
+html[data-dark] .gsidebar [class*="hover:bg-white/10"]:hover, html[data-dark] .gsidebar [class*="hover:bg-white/5"]:hover { background-color: #31353a !important; }
+html[data-dark] .gsidebar input { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="border-white"] { border-color: #353940 !important; }
+html[data-dark] .gsidebar button.bg-white { background-color: #22252a !important; color: #c6cad0 !important; border: 1px solid #3a3e44 !important; }
+/* favourite tiles: flat wells */
+
+/* top header bar */
+html[data-dark] header.sticky { background: #2b2e33 !important; border-bottom-color: #353940 !important; }
+/* phone: Home banner and bottom bar */
+html[data-dark] path[fill="url(#welcomeBannerGradient)"] { fill: #2b2e33 !important; }
+html[data-dark] nav path[fill="var(--g-accent)"] { fill: #2b2e33 !important; }
+html[data-dark] nav [style*="background: var(--g-accent)"] { background: #2b2e33 !important; }
+html[data-dark] nav.fixed.bottom-0 svg[class*="drop-shadow"] { filter: drop-shadow(0 -6px 18px rgba(0,0,0,.45)) !important; }
+html[data-dark] nav.fixed.bottom-0 [class*="text-white"] { color: #8d939a !important; }
+/* muted accent: icons in accent, cards flat charcoal, hairline borders */
+html[data-dark] .shadow-sm, html[data-dark] [class*="shadow-["] { box-shadow: 0 1px 2px rgba(0,0,0,.25) !important; }
+html[data-dark] [class*="border-[#"] { border-color: #3a3e44 !important; }
+
+html[data-dark] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: #2b2e33 !important; border-bottom: 1px solid #353940; }
+html[data-dark] .gsidebar a[class*="rounded-xl"], html[data-dark] .gsidebar button[class*="rounded-xl"]:not(.bg-white) { background-color: transparent; }
+html[data-dark] .gsidebar [aria-current="page"], html[data-dark] .gsidebar [data-active="true"] { background-color: #353940 !important; }
+/* Variant / arbitrary whites the plain .bg-white rule above doesn't reach. */
+html[data-dark] [class*="odd:bg-white"]:nth-child(odd),
+html[data-dark] [class*="even:bg-white"]:nth-child(even),
+html[data-dark] [class*="hover:bg-white"]:hover,
+html[data-dark] [class*="focus:bg-white"]:focus { background-color: #2f3237 !important; }
+html[data-dark] :is([class*="bg-[#f"], [class*="bg-[#e"]):not([class*="bg-[#f6c"]):not([class*="bg-[#e8"]):not([class*="bg-[#e2"]):not([class*="bg-[#ef4"]) { background-color: #2c2f34 !important; }
+html[data-dark] [class*="bg-[#f6c58f]"] { background-color: #8a5a2b !important; }
+/* Inline whites (style={{ background: 'rgba(255,255,255,.45)' }} chips and wells) and dark inline text. */
+html[data-dark] [style*="background: rgba(255, 255, 255"], html[data-dark] [style*="background-color: rgba(255, 255, 255"],
+html[data-dark] [style*="background: rgb(255, 255, 255)"], html[data-dark] [style*="background-color: rgb(255, 255, 255)"] { background: rgba(255, 255, 255, 0.05) !important; }
+html[data-dark] [style*="border-color: rgba(255, 255, 255"] { border-color: rgba(255, 255, 255, 0.08) !important; }
+html[data-dark] :is([style*="color: rgb(63, 63, 70)"], [style*="color: rgb(39, 39, 42)"], [style*="color: rgb(51, 65, 85)"], [style*="color: rgb(30, 41, 59)"]) { color: #dcdfe3 !important; }

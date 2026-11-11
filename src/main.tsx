@@ -11,6 +11,7 @@ import { applyBackgroundTheme, applyHeaderGlow, getSavedBackgroundTheme, getSave
 import { Capacitor } from '@capacitor/core';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
+import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
 import { installChunkReload } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
 import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
@@ -32,6 +33,8 @@ try {
   // not available — website look
 }
 applyBackgroundTheme(getSavedBackgroundTheme());
+// Light / Dark / Like this device (colorMode.ts; index.html already set it before the first paint).
+applyColorMode(getSavedColorMode());
 applyHeaderGlow(getSavedHeaderGlow());
 
 // /chat is Chat's own standalone tab (see App.tsx's openChat, which
