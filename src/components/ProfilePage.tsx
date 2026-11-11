@@ -633,14 +633,14 @@ const HeaderGlowPicker: React.FC<{ selected: HeaderGlowId | null; onPick: (id: H
   </div>
 );
 
-// Light / Dark / Like this device (colorMode.ts) — a three-way switch on
+// Light / Dark / Dark Glass / Like this device (colorMode.ts) — a switch on
 // top of Appearance; per device, applied on tap.
 const ColorModePicker: React.FC<{ selected: ColorMode; onPick: (m: ColorMode) => void; padded?: boolean }> = ({ selected, onPick, padded }) => (
   <div className={`${padded ? 'px-5' : 'px-4'} pt-3.5 pb-1`}>
     <p className="text-[11px] mb-2" style={{ color: 'var(--g-text-muted)' }}>
-      Mode — Dark is easy on the eyes at night; "Like this device" follows your phone or computer.
+      Mode — Dark is easy on the eyes at night; Dark Glass adds see-through frosted cards; "Like this device" follows your phone or computer.
     </p>
-    <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl" style={{ background: 'var(--g-surface-muted)', border: '1px solid var(--g-border)' }} role="radiogroup" aria-label="Light or dark mode">
+    <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl" style={{ background: 'var(--g-surface-muted)', border: '1px solid var(--g-border)' }} role="radiogroup" aria-label="Light or dark mode">
       {COLOR_MODES.map((m) => {
         const on = m.id === selected;
         return (
@@ -650,7 +650,7 @@ const ColorModePicker: React.FC<{ selected: ColorMode; onPick: (m: ColorMode) =>
             role="radio"
             aria-checked={on}
             onClick={() => onPick(m.id)}
-            className="h-9 rounded-xl text-xs font-semibold transition-colors"
+            className="min-h-9 py-1 px-1 rounded-xl text-[11px] leading-tight font-semibold transition-colors"
             style={on ? { background: 'var(--g-accent)', color: '#fff' } : { color: 'var(--g-text-muted)' }}
           >
             {m.label}
