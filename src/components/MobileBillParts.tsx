@@ -5,7 +5,7 @@
 
 // Shared bits of Mobile Bill (MobileBillRoutes.ts): types, the API helper,
 // money/month formatting, reading an Excel sheet's columns, and the limit
-// request form used by My Mobile SIM.
+// request form used by My SIM & Bill.
 
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';

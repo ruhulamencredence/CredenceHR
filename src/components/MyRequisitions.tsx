@@ -313,13 +313,13 @@ export const RequisitionPanel: React.FC<{ token: string; joiner?: boolean; defau
 
 /** Self Service -> SIM & ID Card (users.can_request_items). */
 export const MyRequisitions: React.FC<{ token: string; userName?: string; onBack?: () => void }> = ({ token, userName, onBack }) => {
-  usePhoneHeaderTitle('SIM & ID Card');
+  usePhoneHeaderTitle('Request SIM / ID Card');
   const isNativeApp = Capacitor.isNativePlatform();
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl">
         {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
-        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'SIM & ID Card']} /></div>}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Request SIM / ID Card']} /></div>}
         <div className="hidden md:flex items-center gap-2 mb-3">
           {onBack && (
             <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
@@ -327,7 +327,7 @@ export const MyRequisitions: React.FC<{ token: string; userName?: string; onBack
             </button>
           )}
           <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
-            <CreditCard className="w-5 h-5 text-violet-600 shrink-0" /> SIM & ID Card
+            <CreditCard className="w-5 h-5 text-violet-600 shrink-0" /> Request SIM / ID Card
           </h1>
         </div>
         <p className="text-xs text-slate-500 mb-3">Ask HR for a company SIM or an ID card. You'll get an alert when it's ready.</p>

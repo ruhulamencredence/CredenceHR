@@ -81,7 +81,7 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-        <Smartphone className="w-5 h-5 text-teal-600" /> Mobile Bill
+        <Smartphone className="w-5 h-5 text-teal-600" /> SIM & Mobile Bill
       </h2>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {tabs.map((t) => (

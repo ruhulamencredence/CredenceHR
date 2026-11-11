@@ -396,10 +396,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_tasks || canSeeModule('task_management')) {
     selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks'), href: selfHref('myTasks') });
   }
-  // My Mobile SIM (MyMobileSim.tsx) — company SIMs, limits, bills, limit
+  // My SIM & Bill (MyMobileSim.tsx) — company SIMs, limits, bills, limit
   // requests. Off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_mobile_bill || canSeeModule('mobile_bill')) {
-    selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim'), href: selfHref('myMobileSim') });
+    selfServiceItems.push({ key: 'myMobileSim', label: 'My SIM & Bill', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim'), href: selfHref('myMobileSim') });
   }
   // My Loan / Advance (MyLoans.tsx) — apply for a loan or salary advance.
   // users.can_view_loan_request.
@@ -429,7 +429,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // SIM & ID Card (MyRequisitions.tsx) — ask HR for a SIM or an ID card.
   // users.can_request_items, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_request_items) {
-    selfServiceItems.push({ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions'), href: selfHref('myRequisitions') });
+    selfServiceItems.push({ key: 'myRequisitions', label: 'Request SIM / ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions'), href: selfHref('myRequisitions') });
   }
   // My Payslip (MyPayslips.tsx) — this account's approved / paid payslips.
   // users.can_view_payslip, off until turned on in Module Access.
@@ -557,7 +557,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices'), href: adminHref('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays'), href: adminHref('holidays') },
     { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management'), href: adminHref('task_management') },
-    { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill'), href: adminHref('mobile_bill') },
+    { key: 'mobile_bill', label: 'SIM & Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill'), href: adminHref('mobile_bill') },
     { key: 'target_reports', label: 'Target Reports', icon: Target, onClick: () => onGoToAdminModule('target_reports'), href: adminHref('target_reports') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
@@ -733,10 +733,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       // Grouped by what they are: money, things the office gives you, HR papers.
       entries: pick(
         { heading: 'Claims & Money' }, 'userMovementClaims', 'userBillClaims', 'myLoans', 'myPayslips',
-        { heading: 'Office Items' }, 'assetManagement', 'myMobileSim', 'myRequisitions', 'vehicleManagement',
+        { heading: 'Office Items' }, 'assetManagement', 'vehicleManagement',
         { heading: 'HR Documents' }, 'myLetters'
       )
     },
+    // SIM & ID Card: the company SIM given to you (limit, bills) and asking HR for a SIM / ID card.
+    { key: 'g_sim_self', label: 'SIM & ID Card', icon: Smartphone, entries: pick('myMobileSim', 'myRequisitions') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
@@ -768,12 +770,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Briefcase,
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
-        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments', 'hr_operations_requisitions',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments',
         { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
-        { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
+        { heading: 'Facilities' }, 'asset_management', 'vehicle_management',
         { heading: 'Settings' }, 'hr_operations_settings'
       )
     },
+    // SIM Management: company SIMs, limits and bills, and the SIM / ID card requests.
+    { key: 'g_sim_admin', label: 'SIM Management', icon: Smartphone, entries: pick('mobile_bill', 'hr_operations_requisitions') },
     {
       key: 'g_settings',
       label: 'Settings & Administration',

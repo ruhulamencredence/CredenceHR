@@ -292,7 +292,7 @@ const HELP: HelpEntry[] = [
   { id: "target_reports", title: "Target Reports", keys: ["target report", "টার্গেট রিপোর্ট", "target status", "department target"],
     steps: "মেনু → HR Operations → Reports → **Target Reports**। বছর, মাস, department, employee আর status দিয়ে filter করুন; By department / By employee / Targets দেখুন।", nav: "admin:target_reports", can: (c) => isSuper(c) || c.modules.includes("target_reports") },
   { id: "sim", title: "Mobile SIM / বিল", keys: ["sim", "সিম", "mobile bill", "মোবাইল বিল", "phone bill", "limit"],
-    steps: "মেনু → Requests & Claims → **My Mobile SIM**। আপনার SIM, মাসিক limit আর বিল দেখা যায়; limit বাড়াতে request দিন।", nav: "self:myMobileSim", can: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill") },
+    steps: "মেনু → SIM & ID Card → **My SIM & Bill**। আপনার SIM, মাসিক limit আর বিল দেখা যায়; limit বাড়াতে request দিন।", nav: "self:myMobileSim", can: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill") },
   { id: "tasks", title: "My Tasks", keys: ["task", "টাস্ক"],
     steps: "মেনু → Work & Approvals → **My Tasks**।", nav: "self:myTasks", can: (c) => isSuper(c) || c.flags.can_view_tasks || c.modules.includes("task_management") },
   { id: "approve", title: "আবেদন অনুমোদন", keys: ["approve", "অনুমোদন", "approval", "এপ্রুভ", "approve korbo"],
@@ -391,7 +391,7 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → HR Operations → Facilities → **Vehicle Management**:\n• **Requests** — ride অনুমোদন, গাড়ি ও চালক দেওয়া, সময় বাড়ানোর আবেদন (Approve Extension)।\n• **Emergency** — HR সরাসরি ride দিতে পারে।\n• **Inventory** — গাড়ি যোগ (\"Add\")।",
     nav: "admin:vehicle_management", can: (c) => hasMod(c, "vehicle_management") },
   { id: "mobile_bill_admin", title: "Mobile Bill — SIM ও বিল (HR)", keys: ["give a sim", "sim dibo", "সিম দেওয়া", "sim add", "import bill", "bill import", "বিল ইমপোর্ট", "mobile limit set", "limit policy", "payment sheet"],
-    steps: "মেনু → HR Operations → Facilities → **Mobile Bill**:\n• **\"Give a SIM\"** — নম্বর, অপারেটর, কর্মী, limit (policy অনুযায়ী বা নিজের মতো)।\n• **\"Add limit\"** — পদবি/ধরন অনুযায়ী limit policy।\n• **\"Import bill\"** — অপারেটরের Excel (\"Download template\" দেখে)। limit-এর বেশি হলে কর্মীর বেতন থেকে কাটা যায়।\n• **\"Payment sheet PDF\"** — মাসের পরিশোধ।",
+    steps: "মেনু → Admin Panel → SIM Management → **SIM & Mobile Bill**:\n• **\"Give a SIM\"** — নম্বর, অপারেটর, কর্মী, limit (policy অনুযায়ী বা নিজের মতো)।\n• **\"Add limit\"** — পদবি/ধরন অনুযায়ী limit policy।\n• **\"Import bill\"** — অপারেটরের Excel (\"Download template\" দেখে)। limit-এর বেশি হলে কর্মীর বেতন থেকে কাটা যায়।\n• **\"Payment sheet PDF\"** — মাসের পরিশোধ।",
     nav: "admin:mobile_bill", can: (c) => hasMod(c, "mobile_bill") },
   { id: "exit_admin", title: "Exit / Offboarding (HR)", keys: ["exit request", "new exit", "exit add", "offboarding kivabe", "clearance start", "start clearance", "settlement", "সেটেলমেন্ট", "final settlement", "mark paid", "clearance department", "experience certificate", "release letter"],
     steps: "মেনু → Employee Management → **Exit / Offboarding**:\n১. **\"New Exit Request\"** (কর্মী resignation দিলে নিজেও আসে) → কর্মী, ধরন, notice ও শেষ কর্মদিবস।\n২. **\"Start Clearance\"** → প্রতিটা department-এর clearance তার approver-এর কাছে যায় (কোন department, ঠিক করতে **\"Clearance Departments\"**)।\n৩. Settlement (Gratuity, ছুটির টাকা, কাটা loan) তৈরি → সব clearance আর বকেয়া শেষ হলে **\"Mark Paid & Settle\"**।\n৪. Clearance Certificate / Settlement Sheet PDF, আর HR Operations → Letters থেকে Release / Experience Letter।",
@@ -1609,7 +1609,7 @@ const TOOLS: Tool[] = [
         (over.length ? `\nসীমার বেশি:\n` + over.slice(0, 10).map((b) => `• ${who(b)} (${b.month}) — ${tk(b.amount)}, সীমা ${tk(b.limit_amount)}, বেশি ${tk(b.amount - b.limit_amount)}`).join("\n") : "\nকেউ সীমার বেশি নয়।");
       return {
         ok: true, text, data: { from, to, sims: sims.length, bills: bills.length, total, over_limit: over.slice(0, 30).map((b) => ({ who: who(b), month: b.month, amount: b.amount, limit: b.limit_amount })) },
-        actions: [{ label: "Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
+        actions: [{ label: "SIM & Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
         report: report("Mobile Bill Report", `Mobile-Bill-${from}-${to}`, ["Month", "Phone", "Employee", "Department", "Operator", "Limit", "Bill", "Over limit", "Paid"],
           bills.map((b) => { const sm = simById.get(b.sim_id) || {}; return [b.month, sm.phone_number || "", sm.employee?.name || "", sm.employee?.department || "", sm.operator || "", b.limit_amount, b.amount, Math.max(0, b.amount - b.limit_amount), b.paid ? "Yes" : "No"]; }),
           [["From", from], ["To", to]])
@@ -1990,12 +1990,12 @@ const TOOLS: Tool[] = [
       if (!r.ok) return fail(r.status);
       const sims: any[] = r.body?.sims || [];
       const reqs: any[] = (r.body?.requests || []).filter((x: any) => x.status === "pending");
-      if (!sims.length) return { ok: true, text: "আপনার নামে কোনো অফিস SIM নেই।", data: { sims: [] }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+      if (!sims.length) return { ok: true, text: "আপনার নামে কোনো অফিস SIM নেই।", data: { sims: [] }, actions: [{ label: "My SIM & Bill খুলুন", nav: "self:myMobileSim" }] };
       const text = sims.map((s) => {
         const b = (s.bills || [])[0];
         return `• **${s.phone_number}** (${s.operator || ""}) — limit ${money(s.limit_amount)}` + (b ? `\n  ${bnMonth(String(b.month))}-এর bill ${money(b.amount)}${Number(b.amount) > Number(b.limit_amount) ? ` — ⚠️ ${money(Number(b.amount) - Number(b.limit_amount))} বেশি (কাটা যেতে পারে)` : " — limit-এর মধ্যে"}` : "\n  এখনো কোনো bill আসেনি");
       }).join("\n") + (reqs.length ? `\nLimit বাড়ানোর অনুরোধ অপেক্ষায়: ${reqs.map((x) => `${money(x.current_limit)} → ${money(x.requested_limit)}`).join(", ")}` : "");
-      return { ok: true, text, data: { sims: sims.map((s) => ({ phone: s.phone_number, limit: s.limit_amount, last_bills: (s.bills || []).slice(0, 3) })), pending_requests: reqs.map((x) => ({ from: x.current_limit, to: x.requested_limit })) }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+      return { ok: true, text, data: { sims: sims.map((s) => ({ phone: s.phone_number, limit: s.limit_amount, last_bills: (s.bills || []).slice(0, 3) })), pending_requests: reqs.map((x) => ({ from: x.current_limit, to: x.requested_limit })) }, actions: [{ label: "My SIM & Bill খুলুন", nav: "self:myMobileSim" }] };
     }
   },
   {

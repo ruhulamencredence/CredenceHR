@@ -1277,7 +1277,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ? [{ key: 'myTasks', label: 'My Tasks', icon: ListChecks, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('myTasks') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_mobile_bill || (user.module_permissions || []).includes('mobile_bill')
-            ? [{ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, iconBg: 'from-teal-300 to-teal-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => openSelfService('myMobileSim') }]
+            ? [{ key: 'myMobileSim', label: 'My SIM & Bill', icon: Smartphone, iconBg: 'from-teal-300 to-teal-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => openSelfService('myMobileSim') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_payslip
             ? [{ key: 'myPayslips', label: 'My Payslip', icon: ReceiptText, iconBg: 'from-sky-300 to-sky-600 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('myPayslips') }]
@@ -1286,7 +1286,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ? [{ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('myLoans') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_request_items
-            ? [{ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, iconBg: 'from-violet-300 to-violet-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRequisitions') }]
+            ? [{ key: 'myRequisitions', label: 'Request SIM / ID Card', icon: CreditCard, iconBg: 'from-violet-300 to-violet-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRequisitions') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_sign_documents
             ? [{ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, iconBg: 'from-blue-300 to-blue-600 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('mySignatures') }]

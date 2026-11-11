@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Self Service -> My Mobile SIM (MobileBillRoutes.ts): the company SIMs given
+// Self Service -> My SIM & Bill (MobileBillRoutes.ts): the company SIMs given
 // to me, each one's monthly limit and bills, and my requests for a higher
 // limit (through the approval chain to HR). Shown only to accounts with
 // users.can_view_mobile_bill (Module Access) or the mobile_bill module.
@@ -23,7 +23,7 @@ import { LoadingBlock } from './LoadingBlock';
 type MySim = MbSim & { bills: { month: string; amount: number; limit_amount: number }[] };
 
 export const MyMobileSim: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
-  usePhoneHeaderTitle('My Mobile SIM');
+  usePhoneHeaderTitle('My SIM & Bill');
   const isPhone = useIsPhone();
   const isNativeApp = Capacitor.isNativePlatform();
   const [data, setData] = useState<{ sims: MySim[]; requests: MbRequest[] } | null>(null);
@@ -110,7 +110,7 @@ useLiveRefresh(() => load());
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
         {/* Phone: the title is in the header (usePhoneHeaderTitle) — no path or title row here. */}
-        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My Mobile SIM']} /></div>}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'My SIM & Bill']} /></div>}
         <div className="flex items-center justify-end md:justify-between gap-3 mb-3 flex-wrap">
           <div className="hidden md:flex items-center gap-2">
             {onBack && (
@@ -119,7 +119,7 @@ useLiveRefresh(() => load());
               </button>
             )}
             <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
-              <Smartphone className="w-5 h-5 text-teal-600 shrink-0" /> My Mobile SIM
+              <Smartphone className="w-5 h-5 text-teal-600 shrink-0" /> My SIM & Bill
             </h1>
           </div>
           {!!data?.sims.some((s) => s.status === 'active') && (

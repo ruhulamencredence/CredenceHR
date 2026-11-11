@@ -51,7 +51,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   document_vault: [...HRM, 'HR Advanced', 'Document Vault'],
   hr_operations: [...HRM, 'HR Operations'],
   task_management: [...HRM, 'Task Management'],
-  mobile_bill: [...HRM, 'Mobile Bill'],
+  mobile_bill: ['Admin Panel', 'SIM Management', 'SIM & Mobile Bill'],
   target_reports: [...HRM, 'Target Reports'],
 
   users: ['Admin Panel', 'MIS', 'Users'],

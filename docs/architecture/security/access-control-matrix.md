@@ -41,7 +41,7 @@
 | Document Vault | `document_vault` | `read` Documents (upload, view, own signature)<br>🔒`sign_request` Request signatures from others<br>🔒`esign_settings` E-Signature settings (OTP, read to the end) |
 | HR Operations | `hr_operations` | `read` HR Operations<br>🔒`onboarding_create` Onboarding — Create login<br>🔒`onboarding_review` Onboarding — Review / Reject<br>🔒`onboarding_approve` Onboarding — Approve<br>🔒`reminders_receive` Reminders — receive & view<br>🔒`requisitions` SIM & ID card requisitions — issue / reject |
 | Task Management | `task_management` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Mobile Bill | `mobile_bill` | `read` Mobile Bill<br>`limit_history` Limit Change History |
+| SIM & Mobile Bill | `mobile_bill` | `read` SIM & Mobile Bill<br>`limit_history` Limit Change History |
 | Target Reports | `target_reports` | `read` Target Reports<br>🔒`target_export` Targets — Excel / PDF<br>🔒`target_cancel` Targets — Cancel / Close |
 | Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups |
 | Duty Roster | `duty_roster` | `read` See shifts and roster<br>🔒`roster_manage` Set shifts and roster |

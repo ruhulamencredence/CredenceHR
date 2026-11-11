@@ -77,7 +77,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'task_management', label: 'Task Management' },
   // Mobile Bill (MobileBillAdmin.tsx): company SIMs, limits by employee type,
   // the operators' monthly bills, payment sheet and reports.
-  { key: 'mobile_bill', label: 'Mobile Bill' },
+  { key: 'mobile_bill', label: 'SIM & Mobile Bill' },
   // Target Reports (TargetReports.tsx): every Employee's monthly / yearly
   // targets and how far each task got, by department / employee.
   { key: 'target_reports', label: 'Target Reports' },
@@ -165,7 +165,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   ],
   // Mobile Bill -> Reports -> Limit changes (a second report, plain reading).
   mobile_bill: [
-    { key: 'read', label: 'Mobile Bill' },
+    { key: 'read', label: 'SIM & Mobile Bill' },
     { key: 'limit_history', label: 'Limit Change History' }
   ],
   // Office Attendance -> Unlinked PINs (edits Employees: explicit only).
@@ -890,7 +890,7 @@ export interface User {
   can_view_group_dashboard?: boolean;
   // Self Service -> My Tasks (MyTasks.tsx) — off until turned on in Module Access.
   can_view_tasks?: boolean;
-  // Self Service -> My Mobile SIM (MyMobileSim.tsx) — off until turned on in Module Access.
+  // Self Service -> My SIM & Bill (MyMobileSim.tsx) — off until turned on in Module Access.
   can_view_mobile_bill?: boolean;
   // Profile -> My Service Book (own Employee 360).
   can_view_service_book?: boolean;
@@ -1951,7 +1951,7 @@ export type AlertType =
   // request to HR — opens the task in My Tasks or Task Management.
   | 'task'
   // Mobile Bill (MobileBillRoutes.ts): a SIM given to me / my limit request
-  // decided -> My Mobile SIM; a new request with no approval chain -> HR's
+  // decided -> My SIM & Bill; a new request with no approval chain -> HR's
   // Mobile Bill. 'mobile_limit_approval' = a request waiting on this account
   // -> Approve Application.
   | 'mobile_bill'

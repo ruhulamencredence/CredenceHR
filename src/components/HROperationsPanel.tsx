@@ -39,7 +39,7 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
   { key: 'increments', label: 'Increments', icon: TrendingUp },
   { key: 'reports', label: 'Employee Reports', icon: FileSpreadsheet },
-  { key: 'requisitions', label: 'SIM & ID Card', icon: CreditCard },
+  { key: 'requisitions', label: 'SIM & ID Card Requests', icon: CreditCard },
   { key: 'settings', label: 'Settings', icon: Settings }
 ];
 
