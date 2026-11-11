@@ -1432,3 +1432,26 @@ html[data-dark] [style*="background: rgba(255, 255, 255"], html[data-dark] [styl
 html[data-dark] [style*="background: rgb(255, 255, 255)"], html[data-dark] [style*="background-color: rgb(255, 255, 255)"] { background: rgba(255, 255, 255, 0.05) !important; }
 html[data-dark] [style*="border-color: rgba(255, 255, 255"] { border-color: rgba(255, 255, 255, 0.08) !important; }
 html[data-dark] :is([style*="color: rgb(63, 63, 70)"], [style*="color: rgb(39, 39, 42)"], [style*="color: rgb(51, 65, 85)"], [style*="color: rgb(30, 41, 59)"]) { color: #dcdfe3 !important; }
+/* --- Dark mode: fixes from the page-by-page check --- */
+/* Dark buttons / pills (bg-slate-800/900, zinc, gray, black) would turn light with the
+   neutral scale: they stay a dark raised grey with white text. */
+html[data-dark] :is(.bg-slate-700, .bg-slate-800, .bg-slate-900, .bg-zinc-800, .bg-zinc-900, .bg-gray-800, .bg-gray-900, .bg-neutral-900, .bg-black):not(.gsidebar *) { background-color: #4a4f56 !important; color: #ffffff !important; }
+html[data-dark] :is([class*="hover:bg-slate-900"], [class*="hover:bg-slate-800"], [class*="hover:bg-zinc-900"], [class*="hover:bg-gray-900"]):hover { background-color: #565c64 !important; }
+/* Faint text (text-slate-200/300 …) used for "not here / off": still faint, but readable. */
+html[data-dark] :is(.text-slate-200, .text-slate-300, .text-gray-200, .text-gray-300, .text-zinc-200, .text-zinc-300, .text-neutral-300) { color: #7a8088 !important; }
+/* sm: / md: / lg: whites (cards that are flat on a phone and white from a tablet up). */
+@media (min-width: 640px) { html[data-dark] [class*="sm:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 768px) { html[data-dark] [class*="md:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 1024px) { html[data-dark] [class*="lg:bg-white"] { background-color: #2f3237 !important; } }
+html[data-dark] [class*="bg-gradient-to"][class*="from-violet-100"], html[data-dark] [class*="bg-gradient-to"][class*="via-white"] { background: linear-gradient(160deg, #31353a, #2c2f34) !important; }
+/* Inline pastel badges (the Superadmin / Admin avatar and role badge in the header…). */
+html[data-dark] [style*="background: rgb(253, 232, 232)"] { background: rgba(239, 68, 68, 0.18) !important; color: #fca5a5 !important; }
+html[data-dark] [style*="background: rgb(254, 247, 224)"] { background: rgba(245, 158, 11, 0.18) !important; color: #fcd34d !important; }
+/* Inline dark colour text (trend lines, status words): their light counterparts. */
+html[data-dark] [style*="color: rgb(185, 28, 28)"], html[data-dark] [style*="color: rgb(155, 28, 28)"], html[data-dark] [style*="color: rgb(190, 18, 60)"], html[data-dark] [style*="color: rgb(220, 38, 38)"] { color: #f87171 !important; }
+html[data-dark] [style*="color: rgb(4, 120, 87)"], html[data-dark] [style*="color: rgb(21, 128, 61)"], html[data-dark] [style*="color: rgb(5, 150, 105)"] { color: #34d399 !important; }
+html[data-dark] [style*="color: rgb(180, 83, 9)"], html[data-dark] [style*="color: rgb(152, 100, 0)"] { color: #fbbf24 !important; }
+html[data-dark] [style*="color: rgb(29, 78, 216)"], html[data-dark] [style*="color: rgb(37, 99, 235)"] { color: #93c5fd !important; }
+html[data-dark] :is([style*="color: rgb(91, 85, 112)"], [style*="color: rgb(107, 101, 133)"], [style*="color: rgb(100, 116, 139)"], [style*="color: rgb(71, 85, 105)"], [style*="color: rgb(95, 99, 104)"]) { color: #a3a8ae !important; }
+/* Phone Admin Panel tab pills (html[data-admin-phone]). */
+html[data-dark][data-admin-phone] main :is(.flex.gap-1.border-b, .flex.border-b.overflow-x-auto, [role="tablist"].border-b) > button:not([class*="border-blue-600"]):not([class*="text-blue-600"]):not([aria-selected="true"]) { background: #2f3237 !important; color: #c6cad0 !important; box-shadow: none !important; }
