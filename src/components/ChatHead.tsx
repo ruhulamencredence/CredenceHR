@@ -27,8 +27,11 @@ const ChatPanel = lazy(retryImport(() => import('./ChatPanel').then((m) => ({ de
 const SIZE = 44;
 const EDGE = 16; // gap to the side edge once it has snapped
 const POS_KEY = 'chr_chat_head_pos';
-// Above the bottom bar (80 px) by default, like More was.
-const DEFAULT_BOTTOM = 94;
+// By default on the right, just above the Assistant's side tab (its
+// default place: 132 px up, 48 px tall — AiAssistant.tsx), so they don't sit
+// on each other. The lowest it can go: just above the bottom bar (80 px).
+const DEFAULT_BOTTOM = 194;
+const MIN_BOTTOM = 86;
 const TOP_LIMIT = 84; // stays below the app header
 
 type Side = 'left' | 'right';
@@ -47,7 +50,7 @@ function readPos(): Pos {
   }
   return { side: 'right', bottom: DEFAULT_BOTTOM };
 }
-const clampBottom = (b: number) => Math.max(DEFAULT_BOTTOM - 8, Math.min(window.innerHeight - TOP_LIMIT - SIZE, b));
+const clampBottom = (b: number) => Math.max(MIN_BOTTOM, Math.min(window.innerHeight - TOP_LIMIT - SIZE, b));
 
 export const ChatHead: React.FC<{ token: string; user: User; hidden?: boolean }> = ({ token, user, hidden }) => {
   const unread = useChatUnread(token);

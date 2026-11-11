@@ -198,13 +198,6 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   useEffect(() => {
     setMoreOpen(false);
   }, [active]);
-  // On the Dashboard the CredenceHR AI Assistant is reached from More, so its
-  // floating button steps aside (index.css).
-  useEffect(() => {
-    if (!showMore) return;
-    document.body.setAttribute('data-more-menu', '');
-    return () => document.body.removeAttribute('data-more-menu');
-  }, [showMore]);
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);

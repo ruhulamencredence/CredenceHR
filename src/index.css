@@ -428,15 +428,6 @@ body::before {
 }
 .liquid-glass-pop { animation: liquid-glass-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
 
-/* Credence Assistant's floating button (AiAssistant.tsx): on phones, while the
-   bottom bar's More button is showing (BottomNav.tsx sets data-more-menu), the
-   Assistant opens from the More menu instead, so the button steps aside. */
-@media (max-width: 767px) {
-  body[data-more-menu] .assistant-fab {
-    display: none;
-  }
-}
-
 /*
   Minimal Mono theme (Profile -> Appearance -> "Minimal Mono";
   lib/backgroundTheme.ts sets <html data-ui="mono">): a light-grey
