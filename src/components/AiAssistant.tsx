@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// "Credence Assistant" — the floating AI helper (AiAssistantRoutes.ts).
+// "CredenceHR AI Assistant" — the floating AI helper (AiAssistantRoutes.ts).
 // A round sparkle button sits above the Chat button on the website and above
 // the bottom bar on phones; it opens a liquid-glass chat card. Answers can
 // carry buttons that open the page they talk about (onNavigate).
@@ -605,7 +605,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     return () => window.removeEventListener('credence:open-assistant-support', onOpen);
   }, [isAgent, refreshSupport]);
 
-  // The phone More menu's "Credence Assistant" tile (UserPanel.tsx).
+  // The phone More menu's "CredenceHR AI Assistant" tile (UserPanel.tsx).
   useEffect(() => {
     const onOpen = () => setOpen(true);
     window.addEventListener('credence:open-assistant', onOpen);
@@ -857,8 +857,8 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
           <button
             type="button"
             onClick={() => setOpen(true)}
-            title="Credence Assistant"
-            aria-label="Open Credence Assistant"
+            title="CredenceHR AI Assistant"
+            aria-label="Open CredenceHR AI Assistant"
             className="w-12 h-12 rounded-full liquid-glass-button flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-transform"
           >
             <Sparkles className="w-5 h-5" />
@@ -896,7 +896,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
         >
           <div
             role="dialog"
-            aria-label="Credence Assistant"
+            aria-label="CredenceHR AI Assistant"
             className="pointer-events-auto liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md flex flex-col overflow-hidden shadow-2xl"
             style={{
               height: keyboardInset
@@ -909,7 +909,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 <Sparkles className="w-5 h-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <h3 className="text-base font-bold text-slate-900 leading-tight">{view === 'bot' ? 'Credence Assistant' : view === 'live' ? 'Live support' : 'Support inbox'}</h3>
+                <h3 className="text-base font-bold text-slate-900 leading-tight">{view === 'bot' ? 'CredenceHR AI Assistant' : view === 'live' ? 'Live support' : 'Support inbox'}</h3>
               </div>
               {view === 'bot' && voice && (
                 <button
@@ -1265,8 +1265,8 @@ const EdgeTab: React.FC<{ count: number; onOpen: () => void }> = ({ count, onOpe
     >
       <button
         type="button"
-        title="Credence Assistant — drag to move"
-        aria-label="Open Credence Assistant"
+        title="CredenceHR AI Assistant — drag to move"
+        aria-label="Open CredenceHR AI Assistant"
         onPointerDown={(e) => {
           drag.current = { startY: e.clientY, startBottom: bottom, moved: false };
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);

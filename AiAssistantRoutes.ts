@@ -1,4 +1,4 @@
-// AI Assistant ("Credence Assistant") — a chat helper every account can open
+// AI Assistant ("CredenceHR AI Assistant") — a chat helper every account can open
 // from the floating button (unless HR switches it off for them in Module
 // Access: users.can_use_ai_assistant).
 //
@@ -3559,7 +3559,7 @@ async function localAnswer(c: Ctx, message: string, history: { role: string; tex
   if (matched) return matched;
   if (hasAny(t, THANKS)) return { reply: "আপনাকেও ধন্যবাদ! আর কিছু লাগলে জিজ্ঞেস করুন। 🙂", actions: [] };
   if (hasAny(t, GREET) && t.trim().split(" ").length <= 4) {
-    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
+    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি CredenceHR AI Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
   }
   // A question Gemini answered before (this or a close wording of it).
   const hit = closestLearned(message) || closestLearned(fixSpelling(message));
@@ -3577,7 +3577,7 @@ async function localAnswer(c: Ctx, message: string, history: { role: string; tex
     if (both) return both;
   }
   if (hasAny(t, GREET)) {
-    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
+    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি CredenceHR AI Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
   }
   return {
     reply: "দুঃখিত, প্রশ্নটা বুঝতে পারিনি। এভাবে জিজ্ঞেস করে দেখুন:\n" + suggestionsFor(c).map((s) => `• ${s}`).join("\n") + "\n\nঅথবা একজন মানুষের সাথে সরাসরি কথা বলুন।",
@@ -3941,7 +3941,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     parametersJsonSchema: { type: "object", properties: t.params || {} }
   }));
   const system =
-    `You are "Credence Assistant", the helper inside CredenceHR, an HR app used by Credence Housing Limited in Bangladesh.\n` +
+    `You are "CredenceHR AI Assistant", the helper inside CredenceHR, an HR app used by Credence Housing Limited in Bangladesh.\n` +
     `Today is ${c.today}. You are talking to ${c.name} (role: ${c.role}).\n` +
     salaryMonthNote(c) +
     `Rules:\n` +

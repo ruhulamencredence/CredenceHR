@@ -1948,7 +1948,7 @@ export default function App() {
           is already open. */}
       {chatOn && <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />}
 
-      {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
+      {/* CredenceHR AI Assistant (AiAssistant.tsx) — every account unless switched
           off in Module Access; its buttons open the page an answer is about. */}
       <Suspense fallback={null}>
       <AiAssistant
