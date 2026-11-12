@@ -55,8 +55,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   probation: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Joined', get: (r) => dShort(r.joining_date) },
     { label: 'Probation ends', get: (r) => `${dShort(r.probation_end_date)}${r.days != null ? ` (${daysText(r.days)})` : ''}` },
     { label: 'Status', get: (r) => (r.state === 'confirmed' ? `Confirmed ${dShort(r.confirmation_date)}` : STATE_TEXT[r.state] || r.state) }
@@ -64,8 +64,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   joiners: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Joined', get: (r) => dShort(r.joining_date) },
     { label: 'Probation ends', get: (r) => dShort(r.probation_end_date) },
     { label: 'Onboarding', get: (r) => (r.onboarding_total ? `${r.onboarding_done} of ${r.onboarding_total} done` : 'Not started') }
@@ -73,8 +73,10 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   transfers: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'From → To (department)', get: (r) => (r.from_department || r.to_department ? `${r.from_department || '—'} → ${r.to_department || '—'}` : '—') },
-    { label: 'Designation', get: (r) => (r.to_designation && r.to_designation !== r.from_designation ? `${r.from_designation || '—'} → ${r.to_designation}` : `${r.from_designation || r.to_designation || '—'} (same)`) },
+    { label: 'Designation change', get: (r) => (r.to_designation && r.to_designation !== r.from_designation ? `${r.from_designation || '—'} → ${r.to_designation}` : `${r.from_designation || r.to_designation || '—'} (same)`) },
     { label: 'Effective', get: (r) => dShort(r.effective_date) },
     { label: 'Reason', get: (r) => r.reason || '' },
     { label: 'State', get: (r) => (r.scheduled ? `From ${dShort(r.effective_date)}` : 'Done') }
@@ -83,6 +85,7 @@ const COLUMNS: Record<QuickKind, Col[]> = {
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Type', get: (r) => (r.type === 'termination' ? 'Termination' : 'Resign') },
     { label: 'Submitted', get: (r) => dShort(r.submitted) },
     { label: 'Last working day', get: (r) => (r.last_working_day ? `${dShort(r.last_working_day)}${r.in_notice ? ` (${daysText(r.days_left)})` : r.days_left != null && r.days_left < 0 ? ' (left)' : ''}` : '—') },
@@ -92,15 +95,15 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   religion: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Religion', get: (r) => r.religion || 'Not recorded' }
   ],
   attendance: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Present / working days', get: (r) => `${r.present} / ${r.working}` },
     { label: 'Absent', get: (r) => String(r.absent) },
     { label: 'Leave', get: (r) => String(r.leave) },
@@ -110,8 +113,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   leave: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Casual (taken / left)', get: (r) => `${r.casual_taken} / ${r.casual_balance ?? '—'}` },
     { label: 'Sick (taken / left)', get: (r) => `${r.sick_taken} / ${r.sick_balance ?? '—'}` },
     { label: 'Without pay', get: (r) => (r.lwp ? `${r.lwp} day${r.lwp === 1 ? '' : 's'}` : '—') },
@@ -120,8 +123,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   contracts: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Category', get: (r) => r.employment_category || '' },
     { label: 'Joined', get: (r) => dShort(r.joining_date) },
     { label: 'Contract ends', get: (r) => `${dShort(r.contract_end_date)} (${daysText(r.days)})` }
@@ -129,8 +132,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   headcount: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Gender', get: (r) => r.gender || 'Not recorded' },
     { label: 'Branch', get: (r) => r.branch || '—' },
     { label: 'Project', get: (r) => r.project || '—' },
@@ -139,8 +142,8 @@ const COLUMNS: Record<QuickKind, Col[]> = {
   records: [
     { label: 'Employee', get: (r) => r.name },
     { label: 'Employee ID', get: (r) => r.employee_code || '' },
-    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Expired documents', get: (r) => (r.expired.length ? r.expired.join(', ') : '—') },
     { label: 'Awaiting signature', get: (r) => (r.unsigned ? String(r.unsigned) : '—') },
     { label: 'App login', get: (r) => (r.no_login ? 'None' : 'Yes') }
@@ -400,7 +403,7 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 text-left">
                   {COLUMNS[kind]
-                    .filter((c) => c.label !== 'Employee ID' && c.label !== 'Designation')
+                    .filter((c) => c.label !== 'Employee ID')
                     .map((c) => (
                       <th key={c.label} className="px-4 py-2 font-bold whitespace-nowrap">
                         {c.label}
@@ -434,11 +437,17 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
   );
 };
 
+// The first three columns of every quick report: Employee (name, ID under
+// it), Department, Designation.
 const who = (r: any) => (
-  <td className="px-4 py-2.5">
-    <b className="text-slate-800">{r.name}</b>
-    <div className="text-[11px] text-slate-500">{[r.employee_code, r.designation].filter(Boolean).join(' · ')}</div>
-  </td>
+  <>
+    <td className="px-4 py-2.5">
+      <b className="text-slate-800">{r.name}</b>
+      {r.employee_code && <div className="text-[11px] text-slate-500">{r.employee_code}</div>}
+    </td>
+    <td className="px-4 py-2.5">{r.department || '—'}</td>
+    <td className="px-4 py-2.5">{r.designation || '—'}</td>
+  </>
 );
 const td = (v: React.ReactNode, cls = '') => <td className={`px-4 py-2.5 ${cls}`}>{v}</td>;
 
@@ -447,7 +456,6 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
     return (
       <>
         {who(r)}
-        {td(r.department || '—')}
         {td(dShort(r.joining_date), 'whitespace-nowrap')}
         {td(
           <>
@@ -463,7 +471,6 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
     return (
       <>
         {who(r)}
-        {td(r.department || '—')}
         {td(dShort(r.joining_date), 'whitespace-nowrap')}
         {td(dShort(r.probation_end_date), 'whitespace-nowrap')}
         {td(
@@ -488,12 +495,16 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
         {td(
           <>
             {r.from_department || '—'} → <b>{r.to_department || '—'}</b>
-            {r.to_designation && r.to_designation !== r.from_designation && (
-              <span className="block text-[11px] text-slate-500">
-                {r.from_designation || '—'} → {r.to_designation}
-              </span>
-            )}
           </>
+        )}
+        {td(
+          r.to_designation && r.to_designation !== r.from_designation ? (
+            <>
+              {r.from_designation || '—'} → <b>{r.to_designation}</b>
+            </>
+          ) : (
+            <span className="text-slate-400">Same</span>
+          )
         )}
         {td(r.effective_date ? dShort(r.effective_date) : '—', 'whitespace-nowrap')}
         {td(r.reason || '—', 'text-slate-600')}
@@ -504,7 +515,6 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
     return (
       <>
         {who(r)}
-        {td(r.department || '—')}
         {td(r.type === 'termination' ? 'Termination' : 'Resign')}
         {td(dShort(r.submitted), 'whitespace-nowrap')}
         {td(
@@ -540,7 +550,7 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
       <>
         {who(r)}
         {COLUMNS[kind]
-          .filter((c) => !['Employee', 'Employee ID', 'Designation'].includes(c.label))
+          .filter((c) => !['Employee', 'Employee ID', 'Department', 'Designation'].includes(c.label))
           .map((c) => (
             <React.Fragment key={c.label}>
               {td(c.get(r), `whitespace-nowrap ${(kind === 'attendance' && c.label === 'Attendance' && r.low) || (kind === 'contracts' && r.state === 'ended' && c.label === 'Contract ends') ? 'font-bold text-rose-700' : ''}`)}
@@ -551,7 +561,6 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
   return (
     <>
       {who(r)}
-      {td(r.department || '—')}
       {td(r.religion || <span className="text-rose-700 font-semibold">Not recorded</span>)}
     </>
   );
