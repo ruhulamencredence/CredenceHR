@@ -223,6 +223,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>না। অনুরোধ শুধু কর্মীর নিজের টিমের Supervisor-এর কাছে যায় (Direct Supervisor থাকলে তাঁর), তারপর Head of Department, তারপর Template; অন্য টিমের Supervisor তালিকায় পান না আর API দিয়ে approve করলে 403। টিমে নেই এমন কর্মীর অনুরোধ Head-এর কাছে, তারপর workflow। টিম / Head ঠিক করতে Departments module-এর Edit অনুমতি লাগে (<code>DepartmentTeams.ts</code>)।</td>
 <td>✅</td>
 </tr>
+<tr>
+<td>নতুন কর্মী কি নিজে থেকেই Mobile App পেয়ে যান? কে সবার জন্য চালু করতে পারেন?</td>
+<td>Workspace-এর "New accounts get the Mobile App" চালু থাকলে (শুরুতে চালু, শুধু Superadmin বদলাতে পারেন) নতুন login app-এ ঢুকতে পারে — website-এ যা অনুমতি ঠিক তাই, বেশি নয়। একসাথে অনেকের চালু / বন্ধ করতে Module Access দেওয়ার অনুমতি লাগে; delegated Admin শুধু সাধারণ User-দের; প্রতিটা বদল access log-এ (<code>AppAccess.ts</code>)।</td>
+<td>✅</td>
+</tr>
 </tbody>
 </table>
 <h2 id="_3">গ. ডাটা সুরক্ষা</h2>

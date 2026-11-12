@@ -21,6 +21,7 @@ import type { Express } from "express";
 import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
+import { appOn } from "./AppAccess";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
@@ -519,8 +520,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
           }))
         );
       }
+      // Mobile App on (AppAccess.ts): the account's own switch, or the
+      // workspace's "New accounts get the Mobile App" when it has none.
+      const appRows: any[] = (await queryDB("SELECT id, can_use_app, group_id, role, is_platform_admin FROM users").catch(() => [])) || [];
+      const appOnById = new Map<number, boolean>();
+      for (const r of appRows) appOnById.set(Number(r.id), r.role === "superadmin" || Number(r.is_platform_admin || 0) === 1 ? true : await appOn(queryDB, r));
       res.json(visibleUsers.map((u: any) => ({
         ...u,
+        app_on: appOnById.get(Number(u.id)) ?? true,
         employee_active: !inactiveUsers.has(Number(u.id)),
         // From the linked Employee record (Users page department filter).
         department: departmentByUser.get(Number(u.id)) || null,

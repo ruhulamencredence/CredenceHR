@@ -870,6 +870,9 @@ export interface User {
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   can_view_my_ot?: boolean;
+  // Mobile App (APK) on for this account (its own switch, or the workspace's
+  // "New accounts get the Mobile App" — AppAccess.ts). Users list only.
+  app_on?: boolean;
   can_approve_team_ot?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.
   can_take_break?: boolean;

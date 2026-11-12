@@ -12,6 +12,7 @@ import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserAvatar } from './UserAvatar';
 import { UserBulkBar } from './UserBulkBar';
+import { AppAccessBanner } from './AppAccessBanner';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
@@ -463,7 +464,9 @@ const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boo
   { key: 'tracking', label: 'Tracking on', match: (u) => u.role !== 'superadmin' && !!u.can_use_tracking },
   { key: 'leave_summary', label: 'Leave Summary on', match: (u) => u.role !== 'superadmin' && !!u.can_view_leave_summary },
   { key: 'job_edit', label: 'Job Edit on', match: (u) => u.role !== 'superadmin' && !!u.can_job_edit },
-  { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null }
+  { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null },
+  // Mobile App (APK) off — turn it on for them from the bar above (AppAccessBanner).
+  { key: 'app_off', label: 'Mobile App off', match: (u) => u.role !== 'superadmin' && u.app_on === false }
 ];
 
 const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = ({ lat, lng, asOf }) => {
@@ -6753,6 +6756,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             )}
           </div>
 
+          <AppAccessBanner
+            token={token}
+            users={users}
+            viewer={{ isSuperAdmin, canGrantModuleAccess }}
+            showingOff={userAccessFilter === 'app_off'}
+            onShowOff={() => setUserAccessFilter('app_off')}
+            onDone={() => fetchAllData()}
+          />
+
           {selectedUserIds.size > 0 && (
             <UserBulkBar
               token={token}
@@ -6837,6 +6849,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             Blocked
                           </span>
                         )}
+                        {u.role !== 'superadmin' && u.app_on === false && (
+                          <span className="ml-1 inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border border-orange-200 bg-orange-50 text-orange-700" title="Can't sign in to the Mobile App">
+                            No app
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
@@ -6906,6 +6923,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <span className="flex items-center gap-1 shrink-0">
                           {!!u.is_blocked && (
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700">Blocked</span>
+                          )}
+                          {u.role !== 'superadmin' && u.app_on === false && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-orange-200 bg-orange-50 text-orange-700">No app</span>
                           )}
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
                         </span>

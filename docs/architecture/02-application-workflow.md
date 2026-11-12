@@ -859,6 +859,15 @@ Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amoun
 
 নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker `payroll_salary_amounts_grant`), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।
 
+## Mobile App (APK) চালু: একসাথে অনেকের, আর নতুন account-এ নিজে থেকেই
+
+আগে নতুন account-এ Mobile App বন্ধ থাকত, আর Module Access-এ একজন একজন করে চালু করতে হতো। এখন (`AppAccess.ts`, `AppAccessBanner.tsx`):
+- **Users পাতার উপরে**: "N accounts can't use the Mobile App yet" — **Show them** (শুধু তাঁদের তালিকা) আর **Turn on for all N** (একবার জিজ্ঞেস করে সবার চালু)। তালিকায় তাঁদের নামের পাশে "No app"; ফিল্টার "Mobile App off"।
+- **কয়েকজন টিক দিয়ে**: উপরের বারে **Mobile App: Turn on / Turn off** — Department ফিল্টার করে "সবাই" টিক দিলে পুরো Department একবারে।
+- **"New accounts get the Mobile App"** (Superadmin, workspace ধরে; শুরুতে চালু): যে account-এ নিজের কিছু ঠিক করা নেই (`users.can_use_app` = NULL, নতুন সব login — Users, Employees, Data Import) সে এই setting মানে; তাই নতুন কর্মী প্রথম দিন থেকেই app-এ ঢুকতে পারেন, website-এর সমান অনুমতি নিয়ে। বন্ধ করলে নতুনরা শুধু website; যাঁদের হাতে চালু / বন্ধ করা আছে তাঁরা যেমন আছেন।
+
+পরীক্ষা: `docs/test-logs/2026-11-12/scripts/app-access-*.mjs` — API ১৮/১৮, browser ৯/৯।
+
 ## Department: Head of Department আর টিম ধরে Supervisor
 
 Admin Panel → Departments → Edit (`DepartmentTeams.ts`, `DepartmentTeamsEditor.tsx`):

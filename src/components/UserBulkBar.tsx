@@ -27,6 +27,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
 import { BulkAttendanceProjectsPopup } from './AttendanceProjectsEditor';
+import { setAppForUsers } from './AppAccessBanner';
 interface UserBulkBarProps {
   token: string;
   selected: User[];
@@ -55,6 +56,23 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
     const r = await runBulk(selected, canChange, change, (done, total) => setProgress({ done, total }));
     setProgress(null);
     setResult({ title, r });
+    onDone();
+  };
+
+  // Mobile App (APK) on / off for the ticked accounts, in one request.
+  const appEligible = selected.filter((u) => canEditUserModules(u, viewer));
+  const setApp = async (on: boolean) => {
+    if (!appEligible.length) return;
+    if (!(await confirmDialog(`Turn ${on ? 'on' : 'off'} the Mobile App for ${appEligible.length} account${appEligible.length === 1 ? '' : 's'}?`, { confirmLabel: on ? 'Turn on' : 'Turn off', tone: on ? undefined : 'danger' }))) return;
+    setResult(null);
+    setProgress({ done: 0, total: appEligible.length });
+    try {
+      const r = await setAppForUsers(token, appEligible.map((u) => u.id), on);
+      setResult({ title: `Mobile App ${on ? 'on' : 'off'}`, r: { done: r.done, skipped: [...r.skipped, ...selected.filter((u) => !canEditUserModules(u, viewer)).map((u) => u.name)], failed: [] } as BulkResult });
+    } catch (e: any) {
+      setResult({ title: `Mobile App ${on ? 'on' : 'off'}`, r: { done: 0, skipped: [], failed: [{ name: 'All', error: e.message }] } as BulkResult });
+    }
+    setProgress(null);
     onDone();
   };
 
@@ -90,6 +108,18 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
           </span>
         ) : (
           <>
+            {appEligible.length > 0 && (
+              <>
+                <span className="text-xs font-semibold text-blue-900">Mobile App:</span>
+                <button type="button" onClick={() => void setApp(true)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white">
+                  Turn on
+                </button>
+                <button type="button" onClick={() => void setApp(false)} className="text-xs font-semibold px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-slate-700 hover:bg-blue-50">
+                  Turn off
+                </button>
+                <span className="w-px h-5 bg-blue-200 mx-1" />
+              </>
+            )}
             <select value="" onChange={(e) => onFeature(e.target.value, true)} className={selectClass}>
               <option value="">Turn on…</option>
               {bulkFeatures.map((f) => (

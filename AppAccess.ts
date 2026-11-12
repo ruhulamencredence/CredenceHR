@@ -7,9 +7,12 @@
 // Module Access: a "Mobile App (APK) access" switch, and an App tick next to
 // every module and Self Service switch).
 //
-//   users.can_use_app       0 = this account can't sign in to the app at all
-//                           (accounts that existed before this feature: 1;
-//                           new accounts: 0).
+//   users.can_use_app       0 = this account can't sign in to the app at all,
+//                           1 = it can; NULL = not set for this account: the
+//                           workspace's "New accounts get the Mobile App"
+//                           setting decides (app_access_settings, on unless
+//                           turned off) — so a login made anywhere (Users,
+//                           Employees, Data Import…) needs no switch of its own.
 //   users.app_access_custom 0 = the app gets exactly what the website has;
 //                           1 = only the items in user_app_access.
 //   user_app_access         (user_id, company_id, item_key): the App ticks —
@@ -95,12 +98,41 @@ export async function ensureAppAccessSchema(queryDB: QueryDB) {
   if (!have.has("app_access_custom")) {
     await queryDB("ALTER TABLE users ADD COLUMN app_access_custom TINYINT(1) NOT NULL DEFAULT 0");
   }
+  // New accounts follow the workspace setting (NULL), instead of starting off.
+  const nullable: any[] = await queryDB(
+    "SELECT IS_NULLABLE AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'can_use_app'"
+  );
+  if (nullable?.[0] && String(nullable[0].n).toUpperCase() !== "YES") {
+    await queryDB("ALTER TABLE users MODIFY COLUMN can_use_app TINYINT(1) NULL DEFAULT NULL");
+  }
+  await queryDB(`CREATE TABLE IF NOT EXISTS app_access_settings (
+    group_id INT NOT NULL PRIMARY KEY,
+    new_accounts_app TINYINT(1) NOT NULL DEFAULT 1,
+    updated_by INT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`);
   await queryDB(`CREATE TABLE IF NOT EXISTS user_app_access (
     user_id INT NOT NULL,
     company_id INT NOT NULL DEFAULT 0,
     item_key VARCHAR(64) NOT NULL,
     PRIMARY KEY (user_id, company_id, item_key)
   )`);
+}
+
+// "New accounts get the Mobile App" of a workspace (group) — on unless turned off.
+const settingCache = new Map<number, { at: number; on: boolean }>();
+export async function newAccountsGetApp(queryDB: QueryDB, groupId: number): Promise<boolean> {
+  const hit = settingCache.get(groupId);
+  if (hit && Date.now() - hit.at < 15_000) return hit.on;
+  const rows: any[] = (await queryDB("/*unscoped*/ SELECT new_accounts_app FROM app_access_settings WHERE group_id = ?", [groupId]).catch(() => [])) || [];
+  const on = rows.length ? Number(rows[0].new_accounts_app) === 1 : true;
+  settingCache.set(groupId, { at: Date.now(), on });
+  return on;
+}
+// Whether an account (users row with can_use_app, group_id) can use the app.
+export async function appOn(queryDB: QueryDB, u: any): Promise<boolean> {
+  if (u?.can_use_app === null || u?.can_use_app === undefined) return newAccountsGetApp(queryDB, Number(u?.group_id) || 1);
+  return Number(u.can_use_app) === 1;
 }
 
 const exempt = (u: any) => u?.role === "superadmin" || Number(u?.is_platform_admin || 0) === 1;
@@ -116,14 +148,14 @@ export async function appAccessFor(queryDB: QueryDB, userId: number, companyId: 
   const key = `${userId}:${companyId}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 15_000) return hit.v;
-  const rows: any[] = await queryDB("/*unscoped*/ SELECT role, is_platform_admin, is_onboarding, can_use_app, app_access_custom FROM users WHERE id = ?", [userId]);
+  const rows: any[] = await queryDB("/*unscoped*/ SELECT role, is_platform_admin, is_onboarding, can_use_app, app_access_custom, group_id FROM users WHERE id = ?", [userId]);
   const u = rows?.[0];
   let v: { canUse: boolean; mask: AppMask | null };
   if (!u) v = { canUse: false, mask: null };
   // A new joiner's temporary login only reaches My Onboarding anyway — it
   // works in the app as before.
   else if (exempt(u) || Number(u.is_onboarding || 0) === 1) v = { canUse: true, mask: null };
-  else if (!Number(u.can_use_app ?? 1)) v = { canUse: false, mask: null };
+  else if (!(await appOn(queryDB, u))) v = { canUse: false, mask: null };
   else if (!Number(u.app_access_custom || 0)) v = { canUse: true, mask: null };
   else {
     const items: any[] = await queryDB("/*unscoped*/ SELECT company_id, item_key FROM user_app_access WHERE user_id = ? AND company_id IN (0, ?)", [userId, companyId]);
@@ -141,13 +173,75 @@ export const APP_OFF_MESSAGE = "The mobile app isn't turned on for your account.
 interface Deps {
   authenticateToken: any;
   requireModuleGrantAccess: any;
+  activeGroupId: () => number;
   queryDB: QueryDB;
   adminModuleKeys: readonly string[];
   activeCompanyId: () => number;
 }
 
 export function registerAppAccessRoutes(app: Express, deps: Deps) {
-  const { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys, activeCompanyId } = deps;
+  const { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys, activeCompanyId, activeGroupId } = deps;
+  const audit = (targetId: number, actorId: number, action: string, detail: any) =>
+    queryDB("INSERT INTO user_access_audit (target_user_id, actor_user_id, action, detail) VALUES (?, ?, ?, ?)", [targetId, actorId, action, JSON.stringify(detail).slice(0, 4000)]).catch(() => {});
+
+  // "New accounts get the Mobile App" — every account that has nothing set
+  // for itself follows it. Read by anyone who grants access; changed by a
+  // Superadmin only.
+  app.get("/api/app-access/settings", authenticateToken, requireModuleGrantAccess, async (req: any, res: any) => {
+    try {
+      res.json({ new_accounts_app: await newAccountsGetApp(queryDB, activeGroupId()), can_change: req.user?.role === "superadmin" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.put("/api/app-access/settings", authenticateToken, requireModuleGrantAccess, async (req: any, res: any) => {
+    try {
+      if (req.user?.role !== "superadmin") return res.status(403).json({ error: "Only the Superadmin can change this." });
+      const on = !!req.body?.new_accounts_app;
+      const gid = activeGroupId();
+      await queryDB(
+        "/*unscoped*/ INSERT INTO app_access_settings (group_id, new_accounts_app, updated_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE new_accounts_app = VALUES(new_accounts_app), updated_by = VALUES(updated_by)",
+        [gid, on ? 1 : 0, req.user.id]
+      );
+      settingCache.delete(gid);
+      cache.clear();
+      res.json({ success: true, new_accounts_app: on });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Turn the app on / off for many accounts at once (Users -> ticked rows,
+  // or "Turn on for all"). Body: { user_ids: number[], can_use_app }. The
+  // same rule as one at a time: a Superadmin any account, an Admin who can
+  // grant Module Access plain Users only; others are skipped. What the app
+  // gets stays as set (same as the website unless given its own ticks).
+  app.put("/api/app-access/bulk", authenticateToken, requireModuleGrantAccess, async (req: any, res: any) => {
+    try {
+      const on = !!req.body?.can_use_app;
+      const ids: number[] = [...new Set<number>((Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0))].slice(0, 5000);
+      if (!ids.length) return res.status(400).json({ error: "Pick the accounts." });
+      const rows: any[] = [];
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        rows.push(...(((await queryDB(`SELECT id, name, role FROM users WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk)) || []) as any[]));
+      }
+      const sa = req.user?.role === "superadmin";
+      const ok = rows.filter((u) => u.role !== "superadmin" && (sa || u.role === "user") && Number(u.id) !== Number(req.user.id));
+      const skipped = rows.filter((u) => !ok.includes(u)).map((u) => u.name);
+      for (let i = 0; i < ok.length; i += 500) {
+        const chunk = ok.slice(i, i + 500).map((u) => Number(u.id));
+        await queryDB(`UPDATE users SET can_use_app = ? WHERE id IN (${chunk.map(() => "?").join(",")})`, [on ? 1 : 0, ...chunk]);
+      }
+      for (const u of ok) {
+        forgetAppAccess(Number(u.id));
+        await audit(Number(u.id), Number(req.user.id), "app-access-bulk", { can_use_app: on });
+      }
+      res.json({ success: true, done: ok.length, skipped });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // A Superadmin may set anyone; an Admin with "can grant Module Access"
   // only a plain User (same rule as the module and Self Service switches).
@@ -171,7 +265,8 @@ export function registerAppAccessRoutes(app: Express, deps: Deps) {
         .slice(0, 200);
       if (!ids.length) return res.json({ items: [] });
       const marks = ids.map(() => "?").join(",");
-      const users: any[] = await queryDB(`SELECT id, can_use_app, app_access_custom FROM users WHERE id IN (${marks})`, ids);
+      const users: any[] = await queryDB(`SELECT id, can_use_app, app_access_custom, group_id FROM users WHERE id IN (${marks})`, ids);
+      for (const u of users) u.can_use_app = (await appOn(queryDB, u)) ? 1 : 0;
       const rows: any[] = await queryDB(`/*unscoped*/ SELECT user_id, company_id, item_key FROM user_app_access WHERE user_id IN (${marks}) AND company_id IN (0, ?)`, [...ids, activeCompanyId()]);
       res.json({
         items: users.map((u) => ({

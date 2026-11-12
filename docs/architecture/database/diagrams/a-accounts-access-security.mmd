@@ -39,6 +39,10 @@ erDiagram
     varchar allowed_routes
     int rate_per_minute
   }
+  app_access_settings {
+    int group_id PK
+    tinyint new_accounts_app
+  }
   employee_template_assignments {
     int id PK
     int employee_user_id FK

@@ -107,6 +107,7 @@
   "admin_module_permissions",
   "api_access_logs",
   "api_clients",
+  "app_access_settings",
   "employee_template_assignments",
   "fingerprint_logins",
   "login_attempts",

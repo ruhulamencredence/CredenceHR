@@ -781,6 +781,12 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 - HR Operations → Reports-এর Salary / loan কলামও এই layer চায় (scheduled report-এ মালিকের অনুমতি দেখা হয়)।
 - কর্মীর নিজের payslip, My Loan — এগুলো আলাদা, কখনো লুকায় না।</p>
 <p>নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker <code>payroll_salary_amounts_grant</code>), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।</p>
+<h2 id="mobile-app-apk-account-">Mobile App (APK) চালু: একসাথে অনেকের, আর নতুন account-এ নিজে থেকেই</h2>
+<p>আগে নতুন account-এ Mobile App বন্ধ থাকত, আর Module Access-এ একজন একজন করে চালু করতে হতো। এখন (<code>AppAccess.ts</code>, <code>AppAccessBanner.tsx</code>):
+- <strong>Users পাতার উপরে</strong>: "N accounts can't use the Mobile App yet" — <strong>Show them</strong> (শুধু তাঁদের তালিকা) আর <strong>Turn on for all N</strong> (একবার জিজ্ঞেস করে সবার চালু)। তালিকায় তাঁদের নামের পাশে "No app"; ফিল্টার "Mobile App off"।
+- <strong>কয়েকজন টিক দিয়ে</strong>: উপরের বারে <strong>Mobile App: Turn on / Turn off</strong> — Department ফিল্টার করে "সবাই" টিক দিলে পুরো Department একবারে।
+- <strong>"New accounts get the Mobile App"</strong> (Superadmin, workspace ধরে; শুরুতে চালু): যে account-এ নিজের কিছু ঠিক করা নেই (<code>users.can_use_app</code> = NULL, নতুন সব login — Users, Employees, Data Import) সে এই setting মানে; তাই নতুন কর্মী প্রথম দিন থেকেই app-এ ঢুকতে পারেন, website-এর সমান অনুমতি নিয়ে। বন্ধ করলে নতুনরা শুধু website; যাঁদের হাতে চালু / বন্ধ করা আছে তাঁরা যেমন আছেন।</p>
+<p>পরীক্ষা: <code>docs/test-logs/2026-11-12/scripts/app-access-*.mjs</code> — API ১৮/১৮, browser ৯/৯।</p>
 <h2 id="department-head-of-department-supervisor">Department: Head of Department আর টিম ধরে Supervisor</h2>
 <p>Admin Panel → Departments → Edit (<code>DepartmentTeams.ts</code>, <code>DepartmentTeamsEditor.tsx</code>):
 - <strong>Head of Department</strong> — একজন (<code>departments.head_user_id</code>)।
