@@ -1506,4 +1506,14 @@ html[data-dark] .ride-map { --rm-land: #262b33; --rm-water: #1f3447; --rm-park: 
 
 /* My Attendance card's background clock (AttendanceCard.tsx, web only). */
 .att-clock { --ac-face: #fff3e8; --ac-rim: #e2e8f0; --ac-tick: #cbd5e1; --ac-accent: #f97316; }
-html[data-dark] .att-clock { --ac-face: #2c2622; --ac-rim: #323843; --ac-tick: #3d4450; --ac-accent: #fb923c; }
+html[data-dark] .att-clock { --ac-face: rgba(255,255,255,.04); --ac-rim: rgba(255,255,255,.10); --ac-tick: rgba(255,255,255,.18); --ac-accent: #fb923c; }
+/* Dark Glass: My Attendance draws its own background (a tinted gradient on
+   phones, md:bg-white on the web), so the theme's glass rule for .bg-white
+   cards misses it. Same glass here, and its In / Out tiles as inner wells. */
+html[data-dark][data-glass] .att-card {
+  background: linear-gradient(160deg, rgba(255,255,255,.10), rgba(255,255,255,.04)) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  border-color: rgba(255,255,255,.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.04), 0 18px 40px -18px rgba(0,0,0,.7) !important;
+}
+html[data-dark][data-glass] .att-card [class*="bg-white/"], html[data-dark][data-glass] .att-card [class*="bg-blue-100/"] { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.10) !important; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none !important; }
