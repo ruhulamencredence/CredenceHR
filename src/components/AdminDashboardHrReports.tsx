@@ -23,11 +23,12 @@ const TONE: Record<QuickKind, string> = {
   leave: 'bg-sky-50 border-sky-200 text-sky-800',
   contracts: 'bg-orange-50 border-orange-200 text-orange-800',
   headcount: 'bg-slate-50 border-slate-200 text-slate-800',
-  records: 'bg-rose-50 border-rose-200 text-rose-800'
+  records: 'bg-rose-50 border-rose-200 text-rose-800',
+  overtime: 'bg-indigo-50 border-indigo-200 text-indigo-800'
 };
-const ORDER: QuickKind[] = ['probation', 'joiners', 'transfers', 'resignations', 'religion', 'attendance', 'leave', 'contracts', 'headcount', 'records'];
+const ORDER: QuickKind[] = ['probation', 'joiners', 'transfers', 'resignations', 'religion', 'attendance', 'leave', 'contracts', 'headcount', 'records', 'overtime'];
 // The cards added later show their own card text (quickCardText).
-const NEWER = new Set<QuickKind>(['attendance', 'leave', 'contracts', 'headcount', 'records']);
+const NEWER = new Set<QuickKind>(['attendance', 'leave', 'contracts', 'headcount', 'records', 'overtime']);
 
 export const AdminDashboardHrReports: React.FC<{ token: string; onNavigate?: (tab: string) => void }> = ({ token, onNavigate }) => {
   const [s, setS] = useState<QuickSummary | null>(null);
