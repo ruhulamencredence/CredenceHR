@@ -4,7 +4,7 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
-import { RequestDetailsButton } from './RequestDetails';
+import { RequestDetailsInline } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus } from 'lucide-react';
@@ -582,8 +582,6 @@ useLiveRefresh(() => load(true));
                                   ? `${item.hr_action_details.action_label} — ${item.hr_action_details.employee_name || ''}`
                                   : sourceTitle(item.source_type)}
                           </span>
-                          {/* The whole request, for whoever decides it (RequestDetails.tsx). */}
-                          <RequestDetailsButton token={token} type={item.source_type} id={item.source_id} />
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {item.hr_action_details
@@ -620,6 +618,19 @@ useLiveRefresh(() => load(true));
                           ) : null}
                           {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                         </p>
+                        {/* The request itself, right on the card — nothing to open
+                            (RequestDetails.tsx). HR actions already list their
+                            changes below; a bill claim draws its own lines;
+                            a ride's When / Purpose show above. */}
+                        {!item.hr_action_details && (
+                          <RequestDetailsInline
+                            token={token}
+                            type={item.source_type}
+                            id={item.source_id}
+                            noTable={item.source_type === 'bill_claim'}
+                            hide={item.vehicle_requisition_details ? ['Purpose', 'Date', 'Start time', 'Estimated time'] : []}
+                          />
+                        )}
                         {item.adhoc && (
                           <div className="mt-2 max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
                             <span className="font-semibold">{item.adhoc.added_by_name || 'An approver'} asks for your approval</span>

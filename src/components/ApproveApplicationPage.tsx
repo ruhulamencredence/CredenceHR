@@ -4,7 +4,7 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
-import { RequestDetailsButton } from './RequestDetails';
+import { RequestDetailsInline } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ShieldCheck, CheckCircle2, XCircle, AlertCircle, Inbox, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -175,7 +175,7 @@ useLiveRefresh(() => load(true));
                     {item.source_label}
                     {item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
                   </div>
-                  <RequestDetailsButton token={token} type={item.source_type} id={item.source_id} className="mt-1.5" />
+                  <RequestDetailsInline token={token} type={item.source_type} id={item.source_id} />
                   <div className="text-[11px] text-slate-400 mt-1">
                     From {item.requested_by_name || `User #${item.requested_by}`} &middot; Layer {item.current_step} of {item.total_steps}
                     {item.created_at && <> &middot; {formatDate(item.created_at)}</>}
