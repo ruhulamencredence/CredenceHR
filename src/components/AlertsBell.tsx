@@ -258,6 +258,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
               // HR: Employee Reports -> Requests.
               try {
                 sessionStorage.setItem('hr_ops_tab', 'reports');
+                sessionStorage.setItem('hr_ops_reports_view', 'build');
                 sessionStorage.setItem('hr_reports_view', 'requests');
               } catch {
                 // storage unavailable
@@ -281,6 +282,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             // HR Operations -> Employee Reports -> Received.
             try {
               sessionStorage.setItem('hr_ops_tab', 'reports');
+              sessionStorage.setItem('hr_ops_reports_view', 'build');
               sessionStorage.setItem('hr_reports_view', 'received');
             } catch {
               // storage unavailable — opens on the default tab

@@ -94,6 +94,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>HR Operations-এর Quick reports (probation, joiner, transfer, resignation, ধর্ম) আর Admin Dashboard-এর "HR reports" কার্ড কে দেখতে পারেন?</td>
+<td>শুধু যাঁর HR Operations module আর তার <code>quick_reports</code> layer আছে (Superadmin সবসময়)। Layer-টা শুধু দেখার, তাই HR Operations-এ কোনো layer টিক না থাকলে default-এ পান; layer টিক করা থাকলে এটাও টিক থাকতে হয়। না থাকলে কার্ড, tab, menu লুকানো আর <code>/api/hr-ops/quick/*</code> 403 দেয়। এই রিপোর্টে কোনো টাকার অঙ্ক নেই। টেস্ট: <code>docs/test-logs/2026-11-12/scripts/quick-api.mjs</code>, <code>quick-ui.mjs</code>।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়?</td>
 <td>তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)।</td>
 <td>✅</td>

@@ -25,6 +25,7 @@ import { ensureHROperationsSchema } from "./HROperationsRoutes";
 import { ensureEmployee360Schema } from "./HrOps360Routes";
 import { ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { ensureHrQuickReportsSchema } from "./HrQuickReports";
 import { ensureLoanRequestSchema } from "./LoanRequestRoutes";
 import { ensureLoanPlanSchema } from "./LoanPlan";
 import { ensureProfilePhotoRequestSchema } from "./profileRoutes";
@@ -143,6 +144,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureHROperationsSchema(dbPool);
   await ensureEmployee360Schema(dbPool);
   await ensureHrReportsSchema(dbPool);
+  await ensureHrQuickReportsSchema(dbPool);
   await ensureInfoRequestsSchema(dbPool);
   await ensureSiteAttendanceSchema(dbPool);
   // Chat (Direct/Group/Community messaging) — table + schema owned by

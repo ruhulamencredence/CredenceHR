@@ -97,7 +97,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -197,7 +197,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'onboarding_review', label: 'Onboarding — Review / Reject' },
     { key: 'onboarding_approve', label: 'Onboarding — Approve' },
     { key: 'reminders_receive', label: 'Reminders — receive & view' },
-    { key: 'requisitions', label: 'SIM & ID card requisitions — issue / reject' }
+    { key: 'requisitions', label: 'SIM & ID card requisitions — issue / reject' },
+    // Reports -> Quick reports (probation, joiners, transfers, religion,
+    // resignations) and the Admin Dashboard's "HR reports" card. Reading
+    // only, so not explicit-only: on by default for HR Operations.
+    { key: 'quick_reports', label: 'Quick reports (probation, joiners, transfers, religion, resignations)' }
   ],
   // Exit / Offboarding -> the exiting Employee's dues from other modules
   // (assets, SIM, loans / advances, claims) and adding them to the

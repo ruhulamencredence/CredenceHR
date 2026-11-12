@@ -608,9 +608,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // "HR Operations" (HROperationsPanel.tsx) — one 'hr_operations' module
   // grant; each item opens that page on its own tab (the panel listens for
   // the tab event, and reads the stored tab when it mounts fresh).
-  const openHrOps = (tab: string) => {
+  const openHrOps = (tab: string, reportsView?: 'quick' | 'build') => {
     try {
       sessionStorage.setItem('hr_ops_tab', tab);
+      if (reportsView) sessionStorage.setItem('hr_ops_reports_view', reportsView);
     } catch {
       // storage unavailable — the panel just opens on its default tab
     }
@@ -628,7 +629,15 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { key: 'hr_operations_letters', label: 'Letters', icon: FileText, onClick: () => openHrOps('letters') },
         { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
         { key: 'hr_operations_increments', label: 'Increments', icon: TrendingUp, onClick: () => openHrOps('increments') },
-        { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports') },
+        // Ready reports (probation, joiners, transfers, resignations,
+        // religion) — with the "quick_reports" layer (on by default).
+        ...(isSuperAdmin ||
+        ((user.module_permission_layers?.hr_operations || []).length > 0
+          ? (user.module_permission_layers?.hr_operations || []).includes('quick_reports')
+          : true)
+          ? [{ key: 'hr_operations_quick_reports', label: 'Quick Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports', 'quick') }]
+          : []),
+        { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports', 'build') },
         // SIM & ID card requests — only with the explicit "requisitions" layer.
         ...(isSuperAdmin || (user.module_permission_layers?.hr_operations || []).includes('requisitions')
           ? [{ key: 'hr_operations_requisitions', label: 'SIM & ID Card Requests', icon: CreditCard, onClick: () => openHrOps('requisitions') }]
@@ -781,7 +790,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
         { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments',
-        { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
+        { heading: 'Reports' }, 'hr_operations_quick_reports', 'hr_operations_reports', 'hr_operations', 'target_reports',
         { heading: 'Facilities' }, 'asset_management', 'vehicle_management',
         { heading: 'Settings' }, 'hr_operations_settings'
       )

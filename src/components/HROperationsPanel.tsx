@@ -25,6 +25,7 @@ import { HrOpsOnboarding } from './HrOpsOnboarding';
 import { HrOpsIncrements } from './HrOpsIncrements';
 import { HrOpsSettings } from './HrOpsSettings';
 import { HrOpsReports } from './HrOpsReports';
+import { HrQuickReports } from './HrQuickReports';
 import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 import { HrRequisitions } from './HrRequisitions';
 
@@ -38,7 +39,7 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'letters', label: 'Letters', icon: FileText },
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
   { key: 'increments', label: 'Increments', icon: TrendingUp },
-  { key: 'reports', label: 'Employee Reports', icon: FileSpreadsheet },
+  { key: 'reports', label: 'Reports', icon: FileSpreadsheet },
   { key: 'requisitions', label: 'SIM & ID Card Requests', icon: CreditCard },
   { key: 'settings', label: 'Settings', icon: Settings }
 ];
@@ -47,10 +48,18 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
 // event (the Admin Panel itself only knows the module, not its tabs).
 export const HR_OPS_TAB_EVENT = 'credence:hr-ops-tab';
 const TAB_STORAGE_KEY = 'hr_ops_tab';
+// Reports tab: "quick" (ready reports, with the quick_reports layer) or
+// "build" (Employee Reports — build your own).
+export const REPORTS_VIEW_STORAGE_KEY = 'hr_ops_reports_view';
 // Fired with the open tab, so the sidebar can highlight its own item for it.
 export const HR_OPS_ACTIVE_EVENT = 'credence:hr-ops-active';
 
-export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean }> = ({ token, canGrievance = false, canRequisitions = false }) => {
+export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean; canQuickReports?: boolean }> = ({
+  token,
+  canGrievance = false,
+  canRequisitions = false,
+  canQuickReports = false
+}) => {
   const api = useHrApi(token);
   // A tab only for an account with its permission (grievance module / "requisitions" layer).
   const allowed = (t: HrOpsTab) => (t !== 'grievance' || canGrievance) && (t !== 'requisitions' || canRequisitions);
@@ -70,6 +79,15 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
   const [bookEmployee, setBookEmployee] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [settingsSection, setSettingsSection] = useState<'increments' | undefined>(undefined);
+  const [reportsView, setReportsView] = useState<'quick' | 'build'>(() => {
+    try {
+      return sessionStorage.getItem(REPORTS_VIEW_STORAGE_KEY) === 'build' ? 'build' : 'quick';
+    } catch {
+      return 'quick';
+    }
+  });
+  const showQuick = canQuickReports && reportsView === 'quick';
+  const [reportsOpened, setReportsOpened] = useState(0);
 
   const loadMeta = useCallback(() => api.get<HrOpsMeta>('/api/hr-ops/meta').then(setMeta), [api]);
   const loadEmployees = useCallback(() => api.get<HrOpsEmployee[]>('/api/hr-ops/employees').then(setEmployees), [api]);
@@ -86,9 +104,28 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
     window.dispatchEvent(new CustomEvent(HR_OPS_ACTIVE_EVENT, { detail: tab }));
   }, [tab]);
   useEffect(() => {
+    try {
+      sessionStorage.setItem(REPORTS_VIEW_STORAGE_KEY, reportsView);
+    } catch {
+      // ignore
+    }
+  }, [reportsView]);
+  useEffect(() => {
     const onTab = (e: Event) => {
       const t = (e as CustomEvent).detail as HrOpsTab;
-      if (TABS.some((x) => x.key === t) && allowed(t)) setTab(t);
+      if (TABS.some((x) => x.key === t) && allowed(t)) {
+        setTab(t);
+        // Opened on Reports from elsewhere: which view, and (Quick reports)
+        // which report — HrQuickReports re-reads it when it mounts again.
+        if (t === 'reports') {
+          try {
+            setReportsView(sessionStorage.getItem(REPORTS_VIEW_STORAGE_KEY) === 'build' ? 'build' : 'quick');
+          } catch {
+            // storage unavailable
+          }
+          setReportsOpened((n) => n + 1);
+        }
+      }
     };
     window.addEventListener(HR_OPS_TAB_EVENT, onTab);
     return () => window.removeEventListener(HR_OPS_TAB_EVENT, onTab);
@@ -154,7 +191,32 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
         ) : tab === 'requisitions' && canRequisitions ? (
           <HrRequisitions token={token} />
         ) : tab === 'reports' ? (
-          <HrOpsReports token={token} onOpenEmployee={openEmployee} />
+          <div className="space-y-4">
+            {canQuickReports && (
+              <div className="flex gap-2" role="tablist" aria-label="Reports">
+                {(
+                  [
+                    ['quick', 'Quick reports'],
+                    ['build', 'Build your own']
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={reportsView === k}
+                    onClick={() => setReportsView(k)}
+                    className={`text-xs font-semibold px-3.5 py-1.5 rounded-full border transition-colors ${
+                      reportsView === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {showQuick ? <HrQuickReports key={reportsOpened} token={token} onOpenEmployee={openEmployee} /> : <HrOpsReports token={token} onOpenEmployee={openEmployee} />}
+          </div>
         ) : tab === 'increments' ? (
           <HrOpsIncrements
             token={token}

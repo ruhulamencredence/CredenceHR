@@ -23,3 +23,18 @@ picker is now the Head of Department (it checked the old Supervisor field).
 
 Note: existing accounts keep their own value (on or off); accounts that were
 off stay off until turned on — the banner shows them.
+
+# HR Quick reports (probation, joiners, transfers, resignations, religion)
+
+Test server :3200 on the test database (`scripts/quick-setup.sql`, dates
+relative to today): Tanvir probation ends in 9 days, Rafiq 11 days overdue,
+Imran in 60 days, Sadia confirmed today; Rumana and Jahid joined this month;
+two transfers this month (one later in the month, not yet applied) and one in
+2025; exits — Tanvir (clearance 3/5, 8 days left), Imran (22 days), Sadia
+termination (45 days), Nasrin settled last month, Kamal cancelled; religions
+incl. "muslim" spelling, one inactive, Rumana not recorded.
+
+| Check | Result |
+|---|---|
+| API (`quick-api.mjs`): the five summary numbers; each report's rows, order, filters (Department, Period, type), onboarding and clearance progress, reasons, turnover (only those already gone), no money fields; unknown report 404; bad dates fall back to this month; no token 401; no HR Operations 403; HR Operations with no layers ticked → allowed (default); layers ticked without Quick reports → 403 on all six routes while HR Operations still opens; ticked → allowed; existing "read" holders get the layer once (`quick-grant.ts`), unticking sticks | 42/42 |
+| Screen (`quick-ui.mjs`): Admin Dashboard "HR reports" card (2 probation, Islam 6); tap Resignations → HR Operations → Reports → Quick reports with Resignations open; Probation (overdue / due soon / Confirmed in period); Religion → Not recorded → Rumana; Transfers + Excel + PDF downloads + This year; New joiners → row → Service Book; Build your own still opens Employee Reports; phone fits; no page errors; an account without the layer sees no card, no Quick reports tab, no menu item; ticked → card shows | 22/22 |
