@@ -600,10 +600,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}
           </button>
 
-          {/* Logout — hidden on mobile (md:flex) since the mobile drawer
-              (AdminSidebar.tsx / GlobalSidebar.tsx) already has its own
-              Logout button; kept here for the desktop header where there's
-              no such drawer. */}
+          {/* Logout — the only one on a computer (the sidebar has none
+              there). Hidden on mobile (md:flex): the phone menu
+              (GlobalSidebar.tsx) has its own Logout button. */}
           <button
             onClick={onLogout}
             className="hidden md:flex w-9 h-9 rounded-full items-center justify-center transition-colors hover:opacity-70"
