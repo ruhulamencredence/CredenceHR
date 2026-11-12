@@ -36,6 +36,86 @@ interface TrackingRow {
   standing_still?: boolean;
   reason: string | null;
 }
+// Dashboard card background: a faint street map (blocks, a park, a river)
+// with people on it — green pins for those sending their location, with the
+// dashed trail each came along, the newest one pulsing; a grey pin for one
+// who isn't. It sits in the bottom-right corner and fades out to the left so
+// the text stays clear. Colours from .ride-map / .trk-map in index.css
+// (light and dark). Decorative only.
+const TrkPin: React.FC<{ x: number; y: number; s?: number; on?: boolean }> = ({ x, y, s = 1, on = true }) => (
+  <g transform={`translate(${x},${y}) scale(${s})`}>
+    <ellipse cx="0" cy="2" rx="9" ry="3" fill="var(--trk-shadow)" />
+    <path d="M0 0 C-8 -8 -13 -14 -13 -22 A13 13 0 0 1 13 -22 C13 -14 8 -8 0 0 Z" fill={on ? 'url(#trk-pin-on)' : 'var(--trk-off)'} stroke="#fff" strokeWidth="2" />
+    <circle cy="-22" r="5" fill="#fff" />
+  </g>
+);
+const TrackingMapBg: React.FC = () => (
+  <svg
+    className="ride-map trk-map absolute inset-0 w-full h-full pointer-events-none"
+    viewBox="0 0 420 262"
+    preserveAspectRatio="xMaxYMax slice"
+    aria-hidden="true"
+    style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent 22%, #000 72%)', maskImage: 'linear-gradient(90deg, transparent 22%, #000 72%)' }}
+  >
+    <defs>
+      <linearGradient id="trk-pin-on" x1="0" y1="-36" x2="0" y2="0" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="var(--trk-on-hi)" />
+        <stop offset="1" stopColor="var(--trk-on)" />
+      </linearGradient>
+      <linearGradient id="trk-trail-a" x1="230" y1="200" x2="384" y2="234" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="var(--trk-on)" stopOpacity="0" />
+        <stop offset="1" stopColor="var(--trk-on)" stopOpacity=".9" />
+      </linearGradient>
+      <linearGradient id="trk-trail-b" x1="440" y1="10" x2="398" y2="94" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="var(--trk-on)" stopOpacity="0" />
+        <stop offset="1" stopColor="var(--trk-on)" stopOpacity=".85" />
+      </linearGradient>
+    </defs>
+    <rect width="420" height="262" fill="var(--rm-land)" />
+    {/* River across the bottom */}
+    <path d="M120 238 C 200 214, 250 252, 320 236 S 400 210, 440 222 L440 270 L120 270 Z" fill="var(--rm-water)" />
+    {/* Blocks and a park */}
+    <g fill="var(--rm-block)">
+      <rect x="176" y="10" width="68" height="46" rx="7" />
+      <rect x="262" y="10" width="68" height="46" rx="7" />
+      <rect x="348" y="10" width="74" height="46" rx="7" />
+      <rect x="176" y="84" width="68" height="62" rx="7" />
+      <rect x="348" y="84" width="74" height="62" rx="7" />
+      <rect x="176" y="174" width="68" height="44" rx="7" />
+      <rect x="348" y="174" width="74" height="40" rx="7" />
+    </g>
+    <rect x="262" y="84" width="68" height="62" rx="9" fill="var(--rm-park)" />
+    <g fill="var(--trk-tree)">
+      <circle cx="280" cy="102" r="6" />
+      <circle cx="296" cy="124" r="7" />
+      <circle cx="314" cy="100" r="5" />
+    </g>
+    {/* Roads */}
+    <g stroke="var(--rm-road)" strokeWidth="10" fill="none" strokeLinecap="round">
+      <path d="M140 70 H440" />
+      <path d="M140 160 H440" />
+      <path d="M253 -10 V232" />
+      <path d="M339 -10 V226" />
+      <path d="M150 262 C 180 220, 214 190, 253 160" strokeWidth="8" />
+    </g>
+    <g stroke="var(--trk-lane)" strokeWidth="1.2" strokeDasharray="6 7" fill="none">
+      <path d="M140 70 H440" />
+      <path d="M140 160 H440" />
+    </g>
+    {/* Trails to where each person is now */}
+    <path d="M230 200 C 270 196, 300 214, 330 226 S 368 232, 384 234" stroke="url(#trk-trail-a)" strokeWidth="3.5" fill="none" strokeDasharray="7 6" strokeLinecap="round" />
+    <path d="M440 10 C 424 34, 410 58, 398 94" stroke="url(#trk-trail-b)" strokeWidth="3.5" fill="none" strokeDasharray="7 6" strokeLinecap="round" />
+    {/* Newest location: a soft pulse under the pin */}
+    <circle cx="384" cy="236" r="10" fill="var(--trk-fill)" />
+    <circle className="trk-pulse" cx="384" cy="236" r="10" fill="none" stroke="var(--trk-on)" strokeWidth="2" />
+    <TrkPin x={384} y={234} />
+    <TrkPin x={398} y={94} s={0.82} />
+    <g opacity=".85">
+      <TrkPin x={306} y={250} s={0.78} on={false} />
+    </g>
+  </svg>
+);
+
 export interface TrackingStatus {
   live_minutes: number;
   tracked: number;
@@ -286,8 +366,9 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
           </div>
         </div>
       ) : variant === 'card' ? (
-        <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
-          <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200 flex items-start justify-between gap-3">
+        <div className={`relative bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
+          <TrackingMapBg />
+          <div className="relative px-5 pt-5 pb-4 sm:px-6 flex items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-blue-600" /> Employee Tracking
@@ -298,13 +379,13 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
               Open map
             </button>
           </div>
-          <div className="p-5 sm:px-6 flex-1">
+          <div className="relative p-5 pt-1 sm:px-6 flex-1">
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => openList('tracked')} className="rounded-xl border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 transition-colors">
+              <button type="button" onClick={() => openList('tracked')} className="rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200 px-2 py-2.5 text-center hover:bg-white transition-colors">
                 <div className="text-lg font-bold text-emerald-600">{data.tracked}</div>
                 <div className="text-[11px] text-slate-500 leading-tight">Currently Under Tracking</div>
               </button>
-              <button type="button" onClick={() => openList('not_tracked')} className="rounded-xl border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 transition-colors">
+              <button type="button" onClick={() => openList('not_tracked')} className="rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200 px-2 py-2.5 text-center hover:bg-white transition-colors">
                 <div className="text-lg font-bold text-slate-900">{data.not_tracked}</div>
                 <div className="text-[11px] text-slate-500 leading-tight">Currently Not Tracked</div>
               </button>
