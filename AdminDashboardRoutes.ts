@@ -175,6 +175,8 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
           .filter((a: any) => a.status === "pending" && a.source_type === "attendance" && here.has(Number(a.requested_by)))
           .map(async (a: any) => ({
             id: Number(a.id),
+            // The check-in / out itself, for its details on the card.
+            source_id: Number(a.source_id),
             ...person(null, a.requested_by),
             date: dateOnly(a.created_at),
             approve: ((await onCurrentStep(a)) ? { via: "chain", request_id: Number(a.id) } : null) as Approve

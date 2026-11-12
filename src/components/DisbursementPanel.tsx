@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import jsPDF from '../lib/jspdf';
 import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import autoTable from 'jspdf-autotable';
-import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';
+import { Banknote, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText, Search } from 'lucide-react';
 import { ConveyanceBill, ConveyanceBillItem, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -16,6 +16,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 
 import { SearchSelect } from './Combobox';
 import { personLabel } from '../lib/personLabel';
+import { PhoneSheet } from './PhoneSheet';
 // ---- Voucher sections ----
 // The Payment Voucher groups a Bill's lines by category, each with the
 // columns it needs: travel categories (and Check In/Out / manual items,
@@ -78,6 +79,65 @@ function voucherSections(items: ConveyanceBillItem[]): VoucherSection[] {
   const order = (sec: VoucherSection) => (sec.kind === 'travel' ? 0 : sec.kind === 'other' ? 1 : 2);
   return [...byCategory.values()].sort((a, b) => order(a) - order(b));
 }
+
+// ---- Toolbar filters ----
+interface FilterOptions {
+  departments: string[];
+  designations: string[];
+  branches: string[];
+  disbursers: { id: number; name: string }[];
+  categories: string[];
+}
+interface BillSummary {
+  bills: number;
+  total: number;
+  pending: number;
+  pending_total: number;
+  disbursed: number;
+  disbursed_total: number;
+}
+const SOURCE_LABEL: Record<string, string> = { bill_claim: 'Bill Claim', checkin: 'Check In/Out', manual: 'Typed in (manual)' };
+const LBL = 'block text-[10px] font-semibold text-slate-500 mb-1';
+const INPUT = 'w-full text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none';
+const money = (n: number) => Number(n || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+type PeriodKey = 'any' | 'this_month' | 'last_month' | 'this_year' | 'custom';
+const PERIOD_LABEL: Record<PeriodKey, string> = { any: 'Any time', this_month: 'This month', last_month: 'Last month', this_year: 'This year', custom: 'Pick dates…' };
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function periodRange(p: PeriodKey, custom: { from: string; to: string }): { from: string; to: string } {
+  const now = new Date();
+  if (p === 'this_month') return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+  if (p === 'last_month') return { from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)) };
+  if (p === 'this_year') return { from: `${now.getFullYear()}-01-01`, to: `${now.getFullYear()}-12-31` };
+  if (p === 'custom') return custom;
+  return { from: '', to: '' };
+}
+const periodText = (p: PeriodKey, r: { from: string; to: string }) =>
+  p === 'custom' ? `${r.from ? formatDate(r.from) : '…'} – ${r.to ? formatDate(r.to) : '…'}` : PERIOD_LABEL[p];
+
+const PeriodField: React.FC<{
+  id: string;
+  label: string;
+  value: PeriodKey;
+  onChange: (p: PeriodKey) => void;
+  range: { from: string; to: string };
+  onRange: (r: { from: string; to: string }) => void;
+}> = ({ id, label, value, onChange, range, onRange }) => (
+  <div className="min-w-0">
+    <label htmlFor={id} className={LBL}>{label}</label>
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value as PeriodKey)} className={INPUT}>
+      {(Object.keys(PERIOD_LABEL) as PeriodKey[]).map((k) => (
+        <option key={k} value={k}>{PERIOD_LABEL[k]}</option>
+      ))}
+    </select>
+    {value === 'custom' && (
+      <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+        <input type="date" aria-label={`${label} from`} value={range.from} onChange={(e) => onRange({ ...range, from: e.target.value })} className={INPUT} />
+        <input type="date" aria-label={`${label} to`} value={range.to} onChange={(e) => onRange({ ...range, to: e.target.value })} className={INPUT} />
+      </div>
+    )}
+  </div>
+);
 
 interface DisbursementPanelProps {
   token: string;
@@ -169,29 +229,79 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   };
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  // ---- Filters (all in the toolbar; the server does the filtering) ----
   const [userFilter, setUserFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'disbursed'>('pending');
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState(''); // `search`, a moment after typing stops
+  const [department, setDepartment] = useState('');
+  const [designation, setDesignation] = useState('');
+  const [branch, setBranch] = useState('');
+  const [billPeriod, setBillPeriod] = useState<PeriodKey>('any');
+  const [billRange, setBillRange] = useState({ from: '', to: '' });
+  const [paidPeriod, setPaidPeriod] = useState<PeriodKey>('any');
+  const [paidRange, setPaidRange] = useState({ from: '', to: '' });
+  const [disbursedBy, setDisbursedBy] = useState('');
+  const [category, setCategory] = useState('');
+  const [source, setSource] = useState('');
+  const [minAmt, setMinAmt] = useState('');
+  const [maxAmt, setMaxAmt] = useState('');
+  const [options, setOptions] = useState<FilterOptions>({ departments: [], designations: [], branches: [], disbursers: [], categories: [] });
+  const [summary, setSummary] = useState<BillSummary | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => {
+    fetch(apiUrl('/api/conveyance-bills/filter-options'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setOptions(d))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+  const billDates = periodRange(billPeriod, billRange);
+  const paidDates = periodRange(paidPeriod, paidRange);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  // One page of bills at a time; User and Status filter on the server.
+  // One page of bills at a time; every filter is applied on the server.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
   const listReq = useRef(0);
+  const filterParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (userFilter) p.set('user_id', userFilter);
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (q) p.set('q', q);
+    if (department) p.set('department', department);
+    if (designation) p.set('designation', designation);
+    if (branch) p.set('branch', branch);
+    if (billDates.from) p.set('from', billDates.from);
+    if (billDates.to) p.set('to', billDates.to);
+    if (paidDates.from) p.set('dfrom', paidDates.from);
+    if (paidDates.to) p.set('dto', paidDates.to);
+    if (disbursedBy) p.set('disbursed_by', disbursedBy);
+    if (category) p.set('category', category);
+    if (source) p.set('source', source);
+    if (minAmt !== '') p.set('min', minAmt);
+    if (maxAmt !== '') p.set('max', maxAmt);
+    return p.toString();
+  }, [userFilter, statusFilter, q, department, designation, branch, billDates.from, billDates.to, paidDates.from, paidDates.to, disbursedBy, category, source, minAmt, maxAmt]);
 
   const fetchBills = async () => {
     const req = ++listReq.current;
     setLoading(true);
     setLoadError('');
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
-      if (userFilter) params.set('user_id', userFilter);
-      if (statusFilter !== 'all') params.set('status', statusFilter);
+      const params = new URLSearchParams(filterParams);
+      params.set('page', String(page));
+      params.set('limit', String(pageSize));
       const res = await fetch(apiUrl(`/api/conveyance-bills?${params.toString()}`), { headers: authHeaders });
       if (req !== listReq.current) return; // a newer request is on its way
       if (res.ok) {
         const data = await res.json();
         setBills(Array.isArray(data) ? data : data.rows || []);
         setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+        setSummary(Array.isArray(data) ? null : data.summary || null);
       } else {
         setLoadError('Failed to load conveyance bills.');
       }
@@ -203,28 +313,91 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     }
   };
 
+  // Any filter change starts again from page 1.
+  const firstFilters = useRef(true);
+  useEffect(() => {
+    if (firstFilters.current) {
+      firstFilters.current = false;
+      return;
+    }
+    if (page !== 1) setPage(1);
+    else void fetchBills();
+    setSelected(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterParams]);
   useEffect(() => {
     fetchBills();
     // Selection is per page — what's ticked is always on screen.
     setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, statusFilter]);
+  }, [page, pageSize]);
 
-  // Applying the User filter always starts again from page 1.
-  const applyFilters = () => {
-    if (page !== 1) setPage(1);
-    else fetchBills();
+  const visibleBills = bills;
+
+  // The Employee list follows the Department (and Designation / Branch) picked.
+  const pickableUsers = plainUsers.filter(
+    (u: any) => (!department || u.department === department) && (!designation || u.designation === designation) && (!branch || u.branch === branch)
+  );
+  useEffect(() => {
+    if (userFilter && !pickableUsers.some((u) => String(u.id) === userFilter)) setUserFilter('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [department, designation, branch]);
+
+  // What is switched on, as chips (each with its own ×).
+  const userName = plainUsers.find((u) => String(u.id) === userFilter)?.name;
+  const chips: { label: string; clear: () => void }[] = [
+    ...(search.trim() ? [{ label: `Search: ${search.trim()}`, clear: () => setSearch('') }] : []),
+    ...(department ? [{ label: `Department: ${department}`, clear: () => setDepartment('') }] : []),
+    ...(userFilter ? [{ label: `Employee: ${userName || userFilter}`, clear: () => setUserFilter('') }] : []),
+    ...(designation ? [{ label: `Designation: ${designation}`, clear: () => setDesignation('') }] : []),
+    ...(branch ? [{ label: `Branch: ${branch}`, clear: () => setBranch('') }] : []),
+    ...(billPeriod !== 'any' && (billDates.from || billDates.to) ? [{ label: `Bill date: ${periodText(billPeriod, billDates)}`, clear: () => setBillPeriod('any') }] : []),
+    ...(paidPeriod !== 'any' && (paidDates.from || paidDates.to) ? [{ label: `Disbursed: ${periodText(paidPeriod, paidDates)}`, clear: () => setPaidPeriod('any') }] : []),
+    ...(disbursedBy ? [{ label: `Disbursed by: ${options.disbursers.find((d) => String(d.id) === disbursedBy)?.name || disbursedBy}`, clear: () => setDisbursedBy('') }] : []),
+    ...(category ? [{ label: `Category: ${category}`, clear: () => setCategory('') }] : []),
+    ...(source ? [{ label: `Source: ${SOURCE_LABEL[source] || source}`, clear: () => setSource('') }] : []),
+    ...(minAmt !== '' ? [{ label: `Amount ≥ ৳${minAmt}`, clear: () => setMinAmt('') }] : []),
+    ...(maxAmt !== '' ? [{ label: `Amount ≤ ৳${maxAmt}`, clear: () => setMaxAmt('') }] : [])
+  ];
+  const clearAll = () => {
+    setSearch('');
+    setDepartment('');
+    setUserFilter('');
+    setDesignation('');
+    setBranch('');
+    setBillPeriod('any');
+    setPaidPeriod('any');
+    setDisbursedBy('');
+    setCategory('');
+    setSource('');
+    setMinAmt('');
+    setMaxAmt('');
   };
 
-  const visibleBills = useMemo(
-    () =>
-      bills.filter((b) => {
-        if (statusFilter === 'pending') return !b.is_disbursed;
-        if (statusFilter === 'disbursed') return !!b.is_disbursed;
-        return true;
-      }),
-    [bills, statusFilter]
-  );
+  // "Claims waiting to be paid out" follows the same filters (they are
+  // approved Bill Claims with no Bill yet, so disbursed-only filters hide them).
+  const awaitingShown = awaiting.filter((c) => {
+    if (paidDates.from || paidDates.to || disbursedBy) return false;
+    if (source && source !== 'bill_claim') return false;
+    if (userFilter && String(c.user_id) !== userFilter) return false;
+    if (department && c.department !== department) return false;
+    if (designation && c.designation !== designation) return false;
+    if (branch) {
+      const u: any = plainUsers.find((x) => x.id === c.user_id);
+      if (!u || u.branch !== branch) return false;
+    }
+    const d = String(c.claim_date || '').slice(0, 10);
+    if (billDates.from && d < billDates.from) return false;
+    if (billDates.to && d > billDates.to) return false;
+    if (category && c.category !== category) return false;
+    if (minAmt !== '' && c.approved_amount < Number(minAmt)) return false;
+    if (maxAmt !== '' && c.approved_amount > Number(maxAmt)) return false;
+    if (q) {
+      const t = q.toLowerCase();
+      if (![c.user_name, c.employee_code, `#${c.bill_claim_id}`].some((v) => String(v || '').toLowerCase().includes(t))) return false;
+    }
+    return true;
+  });
 
   // A Bill with no line items yet can't be disbursed (the server refuses it),
   // so it gets no checkbox or Disburse button until items are added.
@@ -486,64 +659,153 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
             </p>
           </div>
 
-          <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
-              <div className="min-w-0">
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">User</label>
-                <SearchSelect
-                  value={userFilter}
-                  onChange={(e) => setUserFilter(e.target.value)}
-                  className="w-full sm:w-auto text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                >
-                  <option value="">All Users</option>
-                  {plainUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{personLabel(u)}</option>
-                  ))}
-                </SearchSelect>
+          <div className="flex flex-col gap-3" data-testid="disb-toolbar">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+              <div className="min-w-0 flex-1">
+                <label htmlFor="disb-search" className={LBL}>Search</label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    id="disb-search"
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Name, Employee ID, Bill No (CB-12) or Voucher No"
+                    className={`${INPUT} pl-8`}
+                  />
+                </div>
               </div>
-              <div className="min-w-0">
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>
-                <div className="flex bg-slate-100 rounded-lg p-0.5">
-                  {(['pending', 'disbursed', 'all'] as const).map((s) => (
+              <div className="min-w-0 sm:w-64">
+                <span className={LBL}>Status</span>
+                <div className="flex bg-slate-100 rounded-lg p-0.5" role="group" aria-label="Status">
+                  {(['pending', 'disbursed', 'all'] as const).map((st) => (
                     <button
-                      key={s}
+                      key={st}
                       type="button"
-                      onClick={() => {
-                        setStatusFilter(s);
-                        setPage(1);
-                      }}
+                      aria-pressed={statusFilter === st}
+                      onClick={() => setStatusFilter(st)}
                       className={`flex-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold capitalize transition-colors ${
-                        statusFilter === s ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                        statusFilter === st ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                       }`}
                     >
-                      {s}
+                      {st}
                     </button>
                   ))}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={applyFilters}
-                className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap transition-colors"
-              >
-                <Filter className="w-3.5 h-3.5" /> Apply
-              </button>
             </div>
 
-            {selected.size > 0 && (
-              <button
-                type="button"
-                onClick={() => openDisburseConfirm(Array.from(selected))}
-                className="sm:ml-auto flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold whitespace-nowrap transition-colors"
-              >
-                <Banknote className="w-3.5 h-3.5" />
-                Disburse Selected ({selected.size}) — {selectedTotal.toFixed(2)}
-              </button>
+            <PhoneSheet label="Filters" kind="filter" title="Filter bills" activeCount={chips.filter((c) => !c.label.startsWith('Search:')).length}>
+              <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-2 items-end">
+                <div className="min-w-0">
+                  <span className={LBL}>Department</span>
+                  <SearchSelect value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Department" className={INPUT}>
+                    <option value="">All departments</option>
+                    {options.departments.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </SearchSelect>
+                </div>
+                <div className="min-w-0">
+                  <span className={LBL}>Employee</span>
+                  <SearchSelect value={userFilter} onChange={(e) => setUserFilter(e.target.value)} aria-label="Employee" className={INPUT}>
+                    <option value="">{department ? `All in ${department} (${pickableUsers.length})` : 'All employees'}</option>
+                    {pickableUsers.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+                  </SearchSelect>
+                </div>
+                <div className="min-w-0">
+                  <span className={LBL}>Designation</span>
+                  <SearchSelect value={designation} onChange={(e) => setDesignation(e.target.value)} aria-label="Designation" className={INPUT}>
+                    <option value="">All designations</option>
+                    {options.designations.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </SearchSelect>
+                </div>
+                <div className="min-w-0">
+                  <span className={LBL}>Branch</span>
+                  <SearchSelect value={branch} onChange={(e) => setBranch(e.target.value)} aria-label="Branch" className={INPUT}>
+                    <option value="">All branches</option>
+                    {options.branches.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </SearchSelect>
+                </div>
+                <PeriodField id="disb-bill" label="Bill date" value={billPeriod} onChange={setBillPeriod} range={billRange} onRange={setBillRange} />
+                <PeriodField id="disb-paid" label="Disbursed date" value={paidPeriod} onChange={setPaidPeriod} range={paidRange} onRange={setPaidRange} />
+                <div className="min-w-0">
+                  <span className={LBL}>Disbursed by</span>
+                  <SearchSelect value={disbursedBy} onChange={(e) => setDisbursedBy(e.target.value)} aria-label="Disbursed by" className={INPUT}>
+                    <option value="">Anyone</option>
+                    {options.disbursers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </SearchSelect>
+                </div>
+                <div className="min-w-0">
+                  <span className={LBL}>Category</span>
+                  <SearchSelect value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" className={INPUT}>
+                    <option value="">Any category</option>
+                    {options.categories.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </SearchSelect>
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor="disb-source" className={LBL}>Source</label>
+                  <select id="disb-source" value={source} onChange={(e) => setSource(e.target.value)} className={INPUT}>
+                    <option value="">Any source</option>
+                    {Object.entries(SOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </div>
+                <div className="min-w-0 col-span-2 sm:col-span-1">
+                  <span className={LBL}>Amount (৳)</span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input type="number" min={0} inputMode="decimal" aria-label="Amount from" placeholder="from" value={minAmt} onChange={(e) => setMinAmt(e.target.value)} className={INPUT} />
+                    <input type="number" min={0} inputMode="decimal" aria-label="Amount to" placeholder="to" value={maxAmt} onChange={(e) => setMaxAmt(e.target.value)} className={INPUT} />
+                  </div>
+                </div>
+              </div>
+            </PhoneSheet>
+
+            {(chips.length > 0 || selected.size > 0) && (
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="disb-chips">
+                {chips.map((c) => (
+                  <span key={c.label} className="inline-flex items-center gap-1 text-[11px] font-semibold pl-2.5 pr-1 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    {c.label}
+                    <button type="button" onClick={c.clear} aria-label={`Remove ${c.label}`} className="w-4 h-4 rounded-full grid place-items-center hover:bg-emerald-100">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {chips.length > 1 && (
+                  <button type="button" onClick={clearAll} className="text-[11px] font-semibold text-slate-500 underline hover:text-slate-800 px-1">
+                    Clear all
+                  </button>
+                )}
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openDisburseConfirm(Array.from(selected))}
+                    className="sm:ml-auto flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold whitespace-nowrap transition-colors"
+                  >
+                    <Banknote className="w-3.5 h-3.5" />
+                    Disburse Selected ({selected.size}) — {selectedTotal.toFixed(2)}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {statusFilter !== 'disbursed' && awaiting.filter((c) => !userFilter || String(c.user_id) === userFilter).length > 0 && (
+        {summary && (
+          <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 sm:px-6 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500 tabular-nums" data-testid="disb-summary">
+            <span>
+              <b className="text-slate-900">{summary.bills}</b> bill{summary.bills === 1 ? '' : 's'}
+            </span>
+            <span>
+              Total <b className="text-slate-900">৳{money(summary.total)}</b>
+            </span>
+            <span>
+              Pending <b className="text-amber-700">৳{money(summary.pending_total)}</b> ({summary.pending})
+            </span>
+            <span>
+              Disbursed <b className="text-emerald-700">৳{money(summary.disbursed_total)}</b> ({summary.disbursed})
+            </span>
+          </div>
+        )}
+
+        {statusFilter !== 'disbursed' && awaitingShown.length > 0 && (
           <div className="px-4 sm:px-6 pt-4">
             <div className="rounded-xl border border-amber-200 bg-amber-50/60">
               <div className="px-4 py-2.5 border-b border-amber-200 flex items-center gap-2">
@@ -556,8 +818,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
               </p>
               {awaitMsg && <p className={`px-4 pt-2 text-xs font-medium ${awaitMsg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{awaitMsg.text}</p>}
               <div className="divide-y divide-amber-100">
-                {awaiting
-                  .filter((c) => !userFilter || String(c.user_id) === userFilter)
+                {awaitingShown
                   .map((c) => (
                     <div key={c.approval_id} className="px-4 py-3 flex flex-col md:flex-row md:items-center gap-2.5">
                       <div className="min-w-0 flex-1">
@@ -607,7 +868,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
         ) : visibleBills.length === 0 ? (
           <div className="text-center text-xs text-slate-400 py-12 flex flex-col items-center gap-2">
             <Banknote className="w-6 h-6 text-slate-300" />
-            {statusFilter === 'pending' ? 'No bills waiting on disbursement.' : 'No conveyance bills found.'}
+            {chips.length ? 'No bills match these filters.' : statusFilter === 'pending' ? 'No bills waiting on disbursement.' : 'No conveyance bills found.'}
           </div>
         ) : (
           <>
@@ -624,7 +885,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                       )}
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900 text-sm">CB-{b.id}</p>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate">{b.user_name || '—'}</p>
+                        <p className="text-xs text-slate-700 mt-0.5 truncate">{b.user_name || '—'}</p>
+                        {(b.designation || b.department) && (
+                          <p className="text-[11px] text-slate-500 truncate">{[b.employee_code, b.designation, b.department].filter(Boolean).join(' · ')}</p>
+                        )}
                       </div>
                     </div>
                     <span className="shrink-0 text-xs font-semibold text-slate-900">{Number(b.total_amount || 0).toFixed(2)}</span>
@@ -697,7 +961,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                       </button>
                     </th>
                     <th className="px-4 py-2.5 text-left">Bill No</th>
-                    <th className="px-4 py-2.5 text-left">User</th>
+                    <th className="px-4 py-2.5 text-left">Employee</th>
+                    <th className="px-4 py-2.5 text-left">Department</th>
                     <th className="px-4 py-2.5 text-left">Bill Date</th>
                     <th className="px-4 py-2.5 text-left">Items</th>
                     <th className="px-4 py-2.5 text-left">Total Amount</th>
@@ -716,7 +981,13 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">CB-{b.id}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">{b.user_name || '—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-xs">
+                        <span className="font-medium text-slate-800">{b.user_name || '—'}</span>
+                        {(b.employee_code || b.designation) && (
+                          <span className="block text-[11px] text-slate-500">{[b.employee_code, b.designation].filter(Boolean).join(' · ')}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{b.department || '—'}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{formatDate(b.bill_date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{b.item_count ?? 0}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-900 font-semibold text-xs">{Number(b.total_amount || 0).toFixed(2)}</td>

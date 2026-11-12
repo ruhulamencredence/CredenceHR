@@ -88,6 +88,11 @@ export default function ChatStandalone() {
             // falling back to the main app is still one click away via the
             // link a failed close would leave on screen.
             window.close();
+            // An installed app's window (PC taskbar) ended up on /chat and
+            // can't close itself: go back to the app instead.
+            window.setTimeout(() => {
+              if (!window.closed) window.location.assign('/');
+            }, 150);
           }}
         />
       </Suspense>

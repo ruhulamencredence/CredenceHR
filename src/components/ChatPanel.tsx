@@ -1059,7 +1059,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       {/* Sidebar: room list */}
       <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
-          <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
+          {/* Phones always; on a computer only in the installed app (no
+              browser Back there) — a browser tab has its own. */}
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            title="Back"
+            className={`p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg ${variant === 'fullscreen' && isStandalone() ? '' : 'md:hidden'}`}
+          >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
@@ -1517,7 +1525,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 picked. */}
             <div
               ref={messagesContainerRef}
-              className="flex-1 overflow-y-auto p-4 space-y-2"
+              className="chat-thread flex-1 overflow-y-auto p-4 space-y-2"
               style={{ background: wallpaperCss(activeRoom.wallpaper) }}
             >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
@@ -1618,8 +1626,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         onTouchMove={cancelPress}
                         className={`group relative px-3 py-2 rounded-[18px] text-sm text-slate-800 border select-none md:select-text ${
                           isMe
-                            ? 'border-[rgba(var(--g-accent-rgb,127,0,255),0.12)] rounded-br-[4px] shadow-[0_2px_8px_-5px_rgba(31,38,135,0.2)]'
-                            : 'bg-white/90 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
+                            ? 'chat-bubble-me border-[rgba(var(--g-accent-rgb,127,0,255),0.12)] rounded-br-[4px] shadow-[0_2px_8px_-5px_rgba(31,38,135,0.2)]'
+                            : 'chat-bubble-them bg-white/90 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
                         // Own bubbles: the accent tint over white, so a patterned wallpaper doesn't show through.
                         style={isMe ? { background: 'linear-gradient(rgba(var(--g-accent-rgb,127,0,255),0.11), rgba(var(--g-accent-rgb,127,0,255),0.11)), rgba(255,255,255,0.94)' } : undefined}

@@ -225,46 +225,120 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         );
         return res.json(slim.map((r: any) => ({ ...r, is_disbursed: true, total_amount: Number(r.total_amount) })));
       }
-      // ?page=&limit= : one page, filtered in SQL (user_id, status=pending|disbursed, from, to)
-      // — { rows, total, page, limit }. The Disbursement tab reads it this way.
+      // ?page=&limit= : one page, filtered in SQL — { rows, total, page, limit, summary }.
+      // The Disbursement tab reads it this way. Filters (all optional):
+      //   user_id, status=pending|disbursed, from/to (bill date),
+      //   q (name, Employee ID, CB-no, voucher no), department, designation,
+      //   branch, dfrom/dto (disbursed date), disbursed_by, category, source
+      //   (bill_claim | checkin = movement_claim | manual), min/max (bill total).
       if (req.query.limit !== undefined) {
         const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
         const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
         const where: string[] = [];
         const params: any[] = [];
+        const qs = (k: string) => String(req.query[k] ?? "").trim();
+        const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+        const TOTAL = "(SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id)";
+        const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
         if (req.query.user_id) {
           where.push("b.user_id = ?");
           params.push(Number(req.query.user_id));
         }
         if (req.query.status === "pending") where.push("COALESCE(b.is_disbursed, 0) = 0");
         if (req.query.status === "disbursed") where.push("b.is_disbursed = 1");
-        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+        if (isDate(qs("from"))) {
           where.push("b.bill_date >= ?");
-          params.push(String(req.query.from));
+          params.push(qs("from"));
         }
-        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+        if (isDate(qs("to"))) {
           where.push("b.bill_date <= ?");
-          params.push(String(req.query.to));
+          params.push(qs("to"));
+        }
+        if (isDate(qs("dfrom"))) {
+          where.push("b.is_disbursed = 1 AND DATE(b.disbursed_at) >= ?");
+          params.push(qs("dfrom"));
+        }
+        if (isDate(qs("dto"))) {
+          where.push("b.is_disbursed = 1 AND DATE(b.disbursed_at) <= ?");
+          params.push(qs("dto"));
+        }
+        if (Number(req.query.disbursed_by) > 0) {
+          where.push("b.disbursed_by = ?");
+          params.push(Number(req.query.disbursed_by));
+        }
+        for (const col of ["department", "designation", "branch"]) {
+          if (qs(col)) {
+            where.push(`${EMP(col)} = ?`);
+            params.push(qs(col));
+          }
+        }
+        if (qs("q")) {
+          const raw = qs("q").slice(0, 80);
+          const like = `%${raw.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
+          const cb = /^cb-?(\d+)$/i.exec(raw);
+          where.push(`(u.name LIKE ? OR ${EMP("employee_id")} LIKE ? OR b.voucher_no LIKE ?${cb ? " OR b.id = ?" : ""})`);
+          params.push(like, like, like, ...(cb ? [Number(cb[1])] : []));
+        }
+        if (qs("source") === "bill_claim") where.push("EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.bill_id = b.id AND i.source = 'bill_claim')");
+        else if (qs("source") === "checkin") where.push("EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.bill_id = b.id AND i.source = 'movement_claim')");
+        else if (qs("source") === "manual") where.push("EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.bill_id = b.id AND i.source = 'manual')");
+        if (qs("category")) {
+          // A Check In/Out or manual line is "Conveyance"; a Bill Claim line
+          // has its claim's own categories.
+          where.push(`EXISTS (SELECT 1 FROM conveyance_bill_items i WHERE i.bill_id = b.id AND (
+              (i.source <> 'bill_claim' AND ? = 'Conveyance')
+              OR (i.source = 'bill_claim' AND (
+                EXISTS (SELECT 1 FROM bill_claim_items ci WHERE ci.bill_claim_id = i.bill_claim_id AND ci.category_name = ?)
+                OR EXISTS (SELECT 1 FROM bill_claims bc WHERE bc.id = i.bill_claim_id AND bc.category = ?
+                           AND NOT EXISTS (SELECT 1 FROM bill_claim_items cx WHERE cx.bill_claim_id = bc.id))))))`);
+          params.push(qs("category"), qs("category"), qs("category"));
+        }
+        if (qs("min") !== "" && Number.isFinite(Number(qs("min")))) {
+          where.push(`${TOTAL} >= ?`);
+          params.push(Number(qs("min")));
+        }
+        if (qs("max") !== "" && Number.isFinite(Number(qs("max")))) {
+          where.push(`${TOTAL} <= ?`);
+          params.push(Number(qs("max")));
         }
         const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
-        const [totalRows, pageRows]: any[] = await Promise.all([
-          queryDB(`SELECT COUNT(*) AS n FROM conveyance_bills b ${w}`, params),
+        const FROM = "FROM conveyance_bills b LEFT JOIN users u ON u.id = b.user_id";
+        const [sumRows, pageRows]: any[] = await Promise.all([
+          queryDB(
+            `SELECT COUNT(*) AS n, COALESCE(SUM(t.total), 0) AS total,
+                COALESCE(SUM(CASE WHEN t.d = 1 THEN 0 ELSE 1 END), 0) AS pending_n,
+                COALESCE(SUM(CASE WHEN t.d = 1 THEN 0 ELSE t.total END), 0) AS pending_total,
+                COALESCE(SUM(CASE WHEN t.d = 1 THEN t.total ELSE 0 END), 0) AS disbursed_total
+             FROM (SELECT COALESCE(b.is_disbursed, 0) AS d, ${TOTAL} AS total ${FROM} ${w}) t`,
+            params
+          ),
           queryDB(
             `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
+                ${EMP("employee_id")} AS employee_code, ${EMP("designation")} AS designation,
+                ${EMP("department")} AS department, ${EMP("branch")} AS branch,
                 (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
-                (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
-             FROM conveyance_bills b
-             LEFT JOIN users u ON u.id = b.user_id
+                ${TOTAL} AS total_amount
+             ${FROM}
              LEFT JOIN users du ON du.id = b.disbursed_by
              ${w}
              ORDER BY b.id DESC LIMIT ? OFFSET ?`,
             [...params, limit, (page - 1) * limit]
           )
         ]);
+        const sm = sumRows[0] || {};
+        const n = Number(sm.n || 0);
         return res.json({
-          total: Number(totalRows[0]?.n || 0),
+          total: n,
           page,
           limit,
+          summary: {
+            bills: n,
+            total: Number(sm.total || 0),
+            pending: Number(sm.pending_n || 0),
+            pending_total: Number(sm.pending_total || 0),
+            disbursed: n - Number(sm.pending_n || 0),
+            disbursed_total: Number(sm.disbursed_total || 0)
+          },
           rows: pageRows.map((r: any) => ({ ...r, is_disbursed: !!Number(r.is_disbursed), item_count: Number(r.item_count), total_amount: Number(r.total_amount) }))
         });
       }
@@ -306,6 +380,37 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
   // Claims are included only for an account with the "bill_claim" module and inside its
   // Department scope, like GET /api/bill-claims; Bills follow GET /api/conveyance-bills.
   // Registered before /api/conveyance-bills/:id so "combined" is not taken for an id.
+  // The choices for the Disbursement tab's filters: only what the bills
+  // actually have (departments, designations, branches of their claimants,
+  // who disbursed, claim categories). Same access as the list.
+  app.get("/api/conveyance-bills/filter-options", authenticateToken, requireAdmin, requireAnyModule(["bill_claim", "disbursement"]), async (_req: any, res) => {
+    try {
+      const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+      const [emp, disb, cats, plain]: any[] = await Promise.all([
+        queryDB(`SELECT DISTINCT ${EMP("department")} AS department, ${EMP("designation")} AS designation, ${EMP("branch")} AS branch FROM conveyance_bills b`),
+        queryDB("SELECT DISTINCT u.id, u.name FROM conveyance_bills b JOIN users u ON u.id = b.disbursed_by ORDER BY u.name"),
+        queryDB(
+          `SELECT DISTINCT COALESCE(ci.category_name, bc.category) AS category
+           FROM conveyance_bill_items i
+           LEFT JOIN bill_claims bc ON bc.id = i.bill_claim_id
+           LEFT JOIN bill_claim_items ci ON ci.bill_claim_id = i.bill_claim_id
+           WHERE i.source = 'bill_claim'`
+        ),
+        queryDB("SELECT COUNT(*) AS n FROM conveyance_bill_items WHERE source <> 'bill_claim'")
+      ]);
+      const uniq = (xs: any[]) => [...new Set(xs.map((x) => (x == null ? "" : String(x).trim())).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      res.json({
+        departments: uniq(emp.map((r: any) => r.department)),
+        designations: uniq(emp.map((r: any) => r.designation)),
+        branches: uniq(emp.map((r: any) => r.branch)),
+        disbursers: disb.map((r: any) => ({ id: Number(r.id), name: r.name })),
+        categories: uniq([...(Number(plain[0]?.n) > 0 ? ["Conveyance"] : []), ...cats.map((r: any) => r.category)])
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/conveyance-bills/combined/list", authenticateToken, requireAdmin, requireAnyModule(["bill_claim", "disbursement"]), async (req: any, res) => {
     try {
       const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));

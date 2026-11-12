@@ -2137,10 +2137,12 @@ export interface ConveyanceBill {
   disbursed_at?: string | null;
   disbursed_by?: number | null;
   disbursed_by_name?: string | null;
-  // GET /api/conveyance-bills/:id only — the claimant's Employee record.
+  // The claimant's Employee record (GET /api/conveyance-bills/:id, and the
+  // paged list, which also has branch).
   employee_code?: string | null;
   designation?: string | null;
   department?: string | null;
+  branch?: string | null;
 }
 
 // Fired by the Navbar's web-only "Claims" header menu (Check In/Out /

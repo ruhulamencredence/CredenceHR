@@ -223,6 +223,7 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
               name: p.name,
               employee_code: p.employee_code,
               department: p.department,
+              designation: p.designation,
               from_department: t.from_department_name || null,
               to_department: t.to_department_name || null,
               from_designation: t.from_designation || null,

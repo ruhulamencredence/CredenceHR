@@ -143,6 +143,7 @@ import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSi
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
+import { isStandalone } from './components/AddToHomeScreen';
 import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
 export default function App() {
@@ -1339,7 +1340,10 @@ export default function App() {
     // Chat full screen inside the app — a new tab there is awkward, and from
     // a Home Screen app it would leave for Safari. A computer keeps its own tab.
     const phone = window.matchMedia?.('(max-width: 767px)').matches || document.documentElement.dataset.appShell === '1';
-    if (Capacitor.isNativePlatform() || phone) {
+    // Installed from the browser (PC taskbar / Start menu app): its window
+    // has no browser Back button, so Chat opens inside the app too, with its
+    // own Back (ChatPanel) — a /chat window there had no way back.
+    if (Capacitor.isNativePlatform() || phone || isStandalone()) {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setShowChat(true);
@@ -1941,9 +1945,11 @@ export default function App() {
           and on phone-width web (mobile browser, iPhone Home Screen) so a
           phone looks the same everywhere. */}
       {!Capacitor.isNativePlatform() && (
-        <footer className="hidden md:block py-6 text-center text-xs" style={{ background: 'var(--g-accent)', color: 'rgba(255,255,255,0.85)' }}>
+        // No band of its own: small, quiet text on the page's own background,
+        // right at the bottom.
+        <footer className="hidden md:block mt-auto pt-2 pb-1.5 text-center text-[10px] leading-tight text-slate-400">
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
-          <p className="mt-1" style={{ color: 'rgba(255,255,255,0.65)' }}>&copy; 2026 Credence Housing Limited. All rights reserved.</p>
+          <p className="opacity-80">&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>
       )}
         </div>
@@ -2050,11 +2056,11 @@ export default function App() {
           this needs its own close button + backdrop-click-to-close. */}
       {showChatPopup && chatOn && user && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+          className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-2 sm:p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
             style={{ height: '85vh', maxHeight: '720px' }}
           >
             <button
