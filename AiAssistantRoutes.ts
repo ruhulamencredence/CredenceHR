@@ -4075,13 +4075,70 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
       canExport: row.role === "superadmin" || !!Number(row.can_export_assistant_reports || 0), salaryStarts };
   };
 
-  const recent = new Map<number, number[]>();
-  const limited = (userId: number) => {
+  // Rate limits — keep one account (or everyone together) from running up
+  // the Gemini bill or tying the server up. Counted in memory (a restart
+  // starts the count again), for every account, Superadmin too:
+  //   - chat: ASSISTANT_RATE_PER_MIN (20) a minute and ASSISTANT_RATE_PER_HOUR
+  //     (200) an hour per account;
+  //   - voice question (transcribe): ASSISTANT_AUDIO_PER_MIN (10) a minute per account;
+  //   - reading an answer aloud (speak, one call per piece — a long answer is
+  //     5-8 pieces; replays from the cache are free): ASSISTANT_SPEAK_PER_MIN
+  //     (30) a minute per account;
+  //   - all accounts together: ASSISTANT_GLOBAL_PER_MIN (120) a minute.
+  // A refused call isn't counted. Answer: 429, code ASSISTANT_RATE_LIMIT,
+  // retryAfter (seconds) and a Retry-After header.
+  const envLimit = (key: string, dflt: number) => {
+    const n = Number(process.env[key]);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : dflt;
+  };
+  const RATE = {
+    chatMin: envLimit("ASSISTANT_RATE_PER_MIN", 20),
+    chatHour: envLimit("ASSISTANT_RATE_PER_HOUR", 200),
+    audioMin: envLimit("ASSISTANT_AUDIO_PER_MIN", 10),
+    speakMin: envLimit("ASSISTANT_SPEAK_PER_MIN", 30),
+    globalMin: envLimit("ASSISTANT_GLOBAL_PER_MIN", 120)
+  };
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const recent = new Map<string, number[]>(); // "chat:<id>" / "audio:<id>" / "speak:<id>" -> call times (last hour)
+  let everyone: number[] = []; // every account's calls, last minute
+  // Seconds to wait before the next call is allowed under `max` per `windowMs`, 0 = allowed.
+  const waitFor = (times: number[], max: number, windowMs: number, now: number) => {
+    const inWindow = times.filter((t) => now - t < windowMs);
+    return inWindow.length < max ? 0 : Math.max(1, Math.ceil((inWindow[inWindow.length - max] + windowMs - now) / 1000));
+  };
+  const limited = (userId: number, kind: "chat" | "audio" | "speak" = "chat"): number => {
     const now = Date.now();
-    const list = (recent.get(userId) || []).filter((t) => now - t < 5 * 60_000);
-    list.push(now);
-    recent.set(userId, list);
-    return list.length > 30;
+    const key = `${kind}:${userId}`;
+    const mine = (recent.get(key) || []).filter((t) => now - t < HOUR);
+    everyone = everyone.filter((t) => now - t < MIN);
+    const wait = Math.max(
+      waitFor(mine, kind === "chat" ? RATE.chatMin : kind === "audio" ? RATE.audioMin : RATE.speakMin, MIN, now),
+      kind === "chat" ? waitFor(mine, RATE.chatHour, HOUR, now) : 0,
+      waitFor(everyone, RATE.globalMin, MIN, now)
+    );
+    if (wait) {
+      recent.set(key, mine);
+      return wait;
+    }
+    mine.push(now);
+    everyone.push(now);
+    recent.set(key, mine);
+    return 0;
+  };
+  // Accounts gone quiet for an hour are dropped, so the map doesn't grow.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of recent) if (!v.length || now - v[v.length - 1] >= HOUR) recent.delete(k);
+  }, 10 * MIN).unref?.();
+  const tooMany = (res: any, wait: number) => {
+    res.setHeader("Retry-After", String(wait));
+    const when = wait >= 120 ? `${bn(Math.ceil(wait / 60))} মিনিট` : `${bn(wait)} সেকেন্ড`;
+    return res.status(429).json({
+      error: `একটু ধীরে — খুব দ্রুত অনেক প্রশ্ন হয়ে গেছে। ${when} পর আবার চেষ্টা করুন।`,
+      code: "ASSISTANT_RATE_LIMIT",
+      retryAfter: wait
+    });
   };
 
   // Voice (Module Access -> "AI Assistant — voice", users.can_use_assistant_voice,
@@ -4114,7 +4171,8 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
     if (!(await voiceAllowed(c))) return res.status(403).json({ error: "Voice isn't turned on for your account." });
     if (!geminiClient()) return res.status(503).json({ error: "ভয়েস এখন চালু নেই — লিখে প্রশ্ন করুন।" });
-    if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
+    const wait = limited(c.userId, "audio");
+    if (wait) return tooMany(res, wait);
     const data = typeof req.body?.audio_base64 === "string" ? req.body.audio_base64 : "";
     const mime = String(req.body?.mime_type || "audio/wav");
     if (!data) return res.status(400).json({ error: "No recording." });
@@ -4246,6 +4304,8 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
       res.setHeader("Cache-Control", "no-store");
       return res.send(hit.wav);
     }
+    const wait = limited(c.userId, "speak");
+    if (wait) return tooMany(res, wait);
     const list = await ttsModelList(ai);
     const order = preferredTtsModel && list.includes(preferredTtsModel) ? [preferredTtsModel, ...list.filter((m) => m !== preferredTtsModel)] : list;
     const why: string[] = [];
@@ -4317,7 +4377,8 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
     const message = String(req.body?.message || "").trim().slice(0, 1000);
     if (!message) return res.status(400).json({ error: "Message is required." });
-    if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
+    const wait = limited(c.userId, "chat");
+    if (wait) return tooMany(res, wait);
     const history = Array.isArray(req.body?.history) ? req.body.history.filter((m: any) => m && typeof m.text === "string") : [];
     let engine: "gemini" | "local" = "local";
     let out: Answer;
