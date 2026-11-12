@@ -20,6 +20,12 @@
 //   contracts     contracts ending within 60 days, or already ended
 //   headcount     active employees by gender, branch, project, employment category
 //   records       expired documents, awaiting e-signature, no app login
+//   overtime      who did OT in the period: hours (approved / waiting for
+//                 approval / on off-days and holidays), on which days, by
+//                 month. Read from ot_entries after recalcOt (OvertimeRoutes.ts),
+//                 so it matches Duty Roster -> OT Approval and Payroll. Only
+//                 people set to get OT (not_eligible rows) and not rejected
+//                 days. Hours only — no money.
 // The last five read the same per-employee facts as Employee Reports
 // (buildFacts, HrOpsReportsRoutes.ts), so the numbers match it.
 //
@@ -36,6 +42,7 @@ import { loadEmployeeWorld, loadSettings, snapshotOf, toDate } from "./HROperati
 import { fallbackServiceStatus } from "./hrServiceStatus";
 import { buildFacts } from "./HrOpsReportsRoutes";
 import { getStartupMarker, setStartupMarker } from "./startupOnce";
+import { recalcOt } from "./OvertimeRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -85,6 +92,13 @@ const religionOf = (v: any) => {
   for (const [re, name] of RELIGION_ALIASES) if (re.test(s)) return name;
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
+
+// One person's OT totals from their days (also used again by the page for a
+// single month).
+export function otTotals<T extends { days: { minutes: number; approved: number; waiting: number; off: boolean }[] }>(r: T) {
+  const add = (f: (d: T["days"][number]) => number) => r.days.reduce((a, d) => a + f(d), 0);
+  return { ...r, total: add((d) => d.minutes), approved: add((d) => d.approved), waiting: add((d) => d.waiting), off: add((d) => (d.off ? d.minutes : 0)), day_count: r.days.length };
+}
 
 export interface HrQuickDeps {
   authenticateToken: any;
@@ -415,6 +429,50 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
     };
   }
 
+  // Who did OT in the period, how many hours, on which days and months.
+  async function overtime(q: any, today: string) {
+    const { from, to } = period(q, today);
+    if (daysBetween(from, to) > 366) throw Object.assign(new Error("Pick at most one year."), { statusCode: 400 });
+    // Bring the period's OT up to date with attendance, a month at a time
+    // (recalcOt skips days someone already decided).
+    const end = to > today ? today : to;
+    for (let m = from; m <= end; ) {
+      const last = monthEnd(m.slice(0, 7));
+      await recalcOt(queryDB, m, last < end ? last : end).catch(() => undefined);
+      m = addDays(last, 1);
+    }
+    const [all, entries] = await Promise.all([
+      people(),
+      queryDB("SELECT employee_id, work_date, day_kind, in_at, out_at, calc_minutes, approved_minutes, status FROM ot_entries WHERE work_date BETWEEN ? AND ? AND status NOT IN ('not_eligible', 'rejected') ORDER BY work_date", [from, to]).catch(() => [])
+    ]);
+    const byId = new Map<number, Person>(all.map((p) => [p.id, p]));
+    const dept = String(q.department || "").trim();
+    const hm = (v: any) => (v ? String(v).replace("T", " ").slice(11, 16) : null);
+    const rowsById = new Map<number, any>();
+    const months = new Map<string, number>();
+    for (const x of (entries || []) as any[]) {
+      const p = byId.get(Number(x.employee_id));
+      if (!p || (dept && (p.department || "") !== dept)) continue;
+      const approved = Number(x.approved_minutes) || 0;
+      const waiting = x.status === "pending" ? Math.max(0, (Number(x.calc_minutes) || 0) - approved) : 0;
+      const minutes = approved + waiting;
+      if (minutes <= 0) continue;
+      const date = ymd(x.work_date) as string;
+      if (!rowsById.has(p.id)) rowsById.set(p.id, { id: p.id, name: p.name, employee_code: p.employee_code, designation: p.designation, department: p.department, days: [] as any[] });
+      rowsById.get(p.id).days.push({ date, minutes, approved, waiting, off: x.day_kind === "off", in: hm(x.in_at), out: hm(x.out_at), status: x.status });
+      months.set(date.slice(0, 7), (months.get(date.slice(0, 7)) || 0) + minutes);
+    }
+    const rows = [...rowsById.values()].map(otTotals).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
+    const sum = (k: string) => rows.reduce((a, r) => a + r[k], 0);
+    return {
+      from,
+      to,
+      summary: { people: rows.length, total_minutes: sum("total"), approved_minutes: sum("approved"), waiting_minutes: sum("waiting"), off_minutes: sum("off"), waiting_people: rows.filter((r) => r.waiting > 0).length },
+      months: [...months.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([month, minutes]) => ({ month, minutes })),
+      rows
+    };
+  }
+
   async function records(q: any, today: string) {
     const list = (await facts(["documents"], today.slice(0, 7), Number(today.slice(0, 4)), today)).filter(inDept(q));
     const rows = list
@@ -442,14 +500,15 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
     leave,
     contracts,
     headcount,
-    records
+    records,
+    overtime
   };
 
   // The cards' numbers (HR Operations and the Admin Dashboard).
   app.get("/api/hr-ops/quick/summary", ...gate, async (req: any, res: any) => {
     try {
       const today = todayInDhaka();
-      const [p, j, t, r, x, at, lv, ct, hc, rc] = await Promise.all([
+      const [p, j, t, r, x, at, lv, ct, hc, rc, ot] = await Promise.all([
         probation({}, today),
         joiners({}, today),
         transfers({}, today),
@@ -459,7 +518,8 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
         leave({}, today),
         contracts({}, today),
         headcount({}, today),
-        records({}, today)
+        records({}, today),
+        overtime({}, today).catch(() => null)
       ]);
       res.json({
         month: today.slice(0, 7),
@@ -472,7 +532,8 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
         leave: lv.summary,
         contracts: ct.summary,
         headcount: hc.summary,
-        records: rc.summary
+        records: rc.summary,
+        overtime: ot ? ot.summary : undefined
       });
     } catch (err) {
       fail(res, err);

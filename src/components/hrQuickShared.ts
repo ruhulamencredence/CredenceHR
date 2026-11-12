@@ -8,7 +8,7 @@
 // the reports and the text on their cards. Kept apart so the dashboard
 // doesn't load the PDF / Excel code.
 
-export type QuickKind = 'probation' | 'joiners' | 'transfers' | 'resignations' | 'religion' | 'attendance' | 'leave' | 'contracts' | 'headcount' | 'records';
+export type QuickKind = 'probation' | 'joiners' | 'transfers' | 'resignations' | 'religion' | 'attendance' | 'leave' | 'contracts' | 'headcount' | 'records' | 'overtime';
 // The Admin Dashboard's "HR reports" card opens a report through this key.
 export const QUICK_KIND_STORAGE_KEY = 'hr_ops_quick_kind';
 
@@ -24,6 +24,7 @@ export interface QuickSummary {
   contracts?: { due_60: number; ended: number };
   headcount?: { total: number; male: number; female: number };
   records?: { expired: number; unsigned: number; no_login: number };
+  overtime?: { people: number; total_minutes: number; approved_minutes: number; waiting_minutes: number; off_minutes: number; waiting_people: number };
 }
 
 export const QUICK_KINDS: { key: QuickKind; title: string }[] = [
@@ -36,8 +37,15 @@ export const QUICK_KINDS: { key: QuickKind; title: string }[] = [
   { key: 'leave', title: 'Leave watch' },
   { key: 'contracts', title: 'Contracts ending' },
   { key: 'headcount', title: 'Headcount mix' },
-  { key: 'records', title: 'Records to fix' }
+  { key: 'records', title: 'Records to fix' },
+  { key: 'overtime', title: 'Overtime (OT)' }
 ];
+
+// Minutes as hours: 90 -> "1.5 h".
+export const otHours = (min: number) => {
+  const h = Math.round((min / 60) * 100) / 100;
+  return `${h} h`;
+};
 
 // The five cards' numbers, the same on HR Operations and the Admin Dashboard.
 export function quickCardText(k: QuickKind, s: QuickSummary): { label: string; big: string; small: string } {
@@ -71,6 +79,10 @@ export function quickCardText(k: QuickKind, s: QuickSummary): { label: string; b
     case 'records': {
       const r = s.records || { expired: 0, unsigned: 0, no_login: 0 };
       return { label: 'Records to fix', big: String(r.expired + r.unsigned + r.no_login), small: `${r.expired} expired doc · ${r.unsigned} to sign · ${r.no_login} no login` };
+    }
+    case 'overtime': {
+      const o = s.overtime || { people: 0, total_minutes: 0, waiting_minutes: 0 };
+      return { label: 'Overtime (OT)', big: otHours(o.total_minutes), small: `${o.people} ${o.people === 1 ? 'person' : 'people'} this month${o.waiting_minutes ? ` · ${otHours(o.waiting_minutes)} waiting approval` : ''}` };
     }
   }
 }

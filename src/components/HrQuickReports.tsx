@@ -23,7 +23,7 @@ import { useHrApi, Notice, fmtDate, btnGhost } from './HrOpsShared';
 import { SearchSelect } from './Combobox';
 import { LoadingBlock } from './LoadingBlock';
 
-import { type QuickKind, type QuickSummary, QUICK_KIND_STORAGE_KEY, QUICK_KINDS as KINDS, quickCardText } from './hrQuickShared';
+import { type QuickKind, type QuickSummary, QUICK_KIND_STORAGE_KEY, QUICK_KINDS as KINDS, quickCardText, otHours } from './hrQuickShared';
 
 type PeriodKey = 'this_month' | 'last_month' | 'last_3' | 'this_year' | 'custom';
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -147,7 +147,28 @@ const COLUMNS: Record<QuickKind, Col[]> = {
     { label: 'Expired documents', get: (r) => (r.expired.length ? r.expired.join(', ') : '—') },
     { label: 'Awaiting signature', get: (r) => (r.unsigned ? String(r.unsigned) : '—') },
     { label: 'App login', get: (r) => (r.no_login ? 'None' : 'Yes') }
+  ],
+  overtime: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Total OT', get: (r) => otHours(r.total) },
+    { label: 'Approved', get: (r) => otHours(r.approved) },
+    { label: 'Waiting approval', get: (r) => (r.waiting ? otHours(r.waiting) : '—') },
+    { label: 'Off-day / holiday', get: (r) => (r.off ? otHours(r.off) : '—') },
+    { label: 'Days with OT', get: (r) => String(r.day_count) },
+    { label: 'Days', get: (r) => r.days.map((d: any) => `${otDay(d.date)} ${otHours(d.minutes)}`).join(', ') }
   ]
+};
+// "2026-11-03" -> "03 Nov".
+const OT_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const otDay = (d: string) => `${d.slice(8, 10)} ${OT_MON[Number(d.slice(5, 7)) - 1] || ''}`;
+const otMonth = (m: string) => `${OT_MON[Number(m.slice(5, 7)) - 1] || ''} ${m.slice(0, 4)}`;
+// One person's OT totals from the days kept (same sums as the server's otTotals).
+const otTotals = (r: any) => {
+  const add = (f: (d: any) => number) => r.days.reduce((a: number, d: any) => a + f(d), 0);
+  return { ...r, total: add((d) => d.minutes), approved: add((d) => d.approved), waiting: add((d) => d.waiting), off: add((d) => (d.off ? d.minutes : 0)), day_count: r.days.length };
 };
 // The later reports' views: chips above the table, and which rows each keeps.
 const HEADCOUNT_DIMS: { key: string; label: string; field: string; none: string }[] = [
@@ -252,13 +273,22 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
       const dim = HEADCOUNT_DIMS.find((d) => d.key === dimKey);
       return dim && value ? all.filter((r) => (r[dim.field] || dim.none) === value) : all;
     }
+    if (kind === 'overtime') {
+      // view: "" everyone · "waiting" · "off" · "m:YYYY-MM" one month (its own hours).
+      if (view.startsWith('m:')) {
+        const ym = view.slice(2);
+        return all.map((r) => otTotals({ ...r, days: r.days.filter((d: any) => d.date.startsWith(ym)) })).filter((r) => r.total > 0);
+      }
+      return view === 'waiting' ? all.filter((r) => r.waiting > 0) : view === 'off' ? all.filter((r) => r.off > 0) : all;
+    }
     const f = VIEW_FILTER[kind]?.[view];
     return f ? all.filter(f) : all;
   }, [data, kind, view]);
 
   const title = KINDS.find((k) => k.key === kind)!.title;
   const periodText = kind === 'attendance' && data?.month ? `Month ${data.month}` : kind === 'leave' && data?.year ? `Year ${data.year}` : usesPeriod ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'Active employees';
-  const filterText = [department || 'All departments', kind === 'resignations' && exitType ? exitType : '', view && view !== 'open' ? (STATE_TEXT[view] || view) : ''].filter(Boolean).join(' · ');
+  const viewText = kind === 'overtime' ? (view.startsWith('m:') ? otMonth(view.slice(2)) : view === 'waiting' ? 'Waiting approval' : view === 'off' ? 'Off-day / holiday OT' : '') : view && view !== 'open' ? STATE_TEXT[view] || view : '';
+  const filterText = [department || 'All departments', kind === 'resignations' && exitType ? exitType : '', viewText].filter(Boolean).join(' · ');
 
   const exportExcel = () => {
     const cols = COLUMNS[kind];
@@ -287,6 +317,29 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
           ['Turnover this year', `${data.turnover.left_this_year} of ${data.turnover.base} (${data.turnover.percent}%)`]
         ]),
         'Summary'
+      );
+    }
+    if (kind === 'overtime') {
+      // Which day: one row per person per day.
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Employee', 'Employee ID', 'Department', 'Designation', 'Date', 'Day', 'In', 'Out', 'OT hours', 'Approved', 'Waiting approval', 'Status'],
+          ...rows.flatMap((r) =>
+            r.days.map((d: any) => [r.name, r.employee_code || '', r.department || '', r.designation || '', d.date, d.off ? 'Off-day / holiday' : 'Working day', d.in || '', d.out || '', d.minutes / 60, d.approved / 60, d.waiting / 60, d.status])
+          )
+        ]),
+        'By day'
+      );
+      // Which month: one row per person, a column per month.
+      const ms = [...new Set(rows.flatMap((r) => r.days.map((d: any) => d.date.slice(0, 7))))].sort();
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ['Employee', 'Employee ID', 'Department', ...ms.map(otMonth), 'Total hours'],
+          ...rows.map((r) => [r.name, r.employee_code || '', r.department || '', ...ms.map((m) => r.days.filter((d: any) => d.date.startsWith(m)).reduce((a: number, d: any) => a + d.minutes, 0) / 60), r.total / 60])
+        ]),
+        'By month'
       );
     }
     void saveWorkbookCrossPlatform(wb, `${title.replace(/[^\w]+/g, '_')}.xlsx`);
@@ -553,7 +606,7 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
           .filter((c) => !['Employee', 'Employee ID', 'Department', 'Designation'].includes(c.label))
           .map((c) => (
             <React.Fragment key={c.label}>
-              {td(c.get(r), `whitespace-nowrap ${(kind === 'attendance' && c.label === 'Attendance' && r.low) || (kind === 'contracts' && r.state === 'ended' && c.label === 'Contract ends') ? 'font-bold text-rose-700' : ''}`)}
+              {td(c.get(r), `${kind === 'overtime' && c.label === 'Days' ? 'min-w-[16rem] text-xs text-slate-600' : 'whitespace-nowrap'} ${kind === 'overtime' && c.label === 'Total OT' ? 'font-bold text-slate-900' : ''} ${kind === 'overtime' && c.label === 'Waiting approval' && r.waiting ? 'text-amber-700 font-semibold' : ''} ${(kind === 'attendance' && c.label === 'Attendance' && r.low) || (kind === 'contracts' && r.state === 'ended' && c.label === 'Contract ends') ? 'font-bold text-rose-700' : ''}`)}
             </React.Fragment>
           ))}
       </>
@@ -647,6 +700,60 @@ const ReportTop: React.FC<{ kind: QuickKind; data: any; view: string; setView: (
   if (kind === 'attendance') return chips([['low', `Under 80% (${s.low})`], ['late', `Late more than 3 times (${s.often_late})`]]);
   if (kind === 'leave') return chips([['low', `Casual / Sick left 2 days or less (${s.low})`], ['lwp', `Took leave without pay (${s.lwp})`]]);
   if (kind === 'contracts') return chips([['due', `Ends in 60 days (${s.due_60})`], ['ended', `Already ended (${s.ended})`]]);
+  if (kind === 'overtime') {
+    const ms: { month: string; minutes: number }[] = data.months || [];
+    const max = Math.max(1, ...ms.map((m) => m.minutes));
+    const box = (label: string, big: string, small: string, strong = false) => (
+      <div className={`rounded-2xl bg-white px-4 py-3 ${strong ? 'border-2 border-blue-600' : 'border border-slate-200'}`}>
+        <span className={`text-[11px] font-bold uppercase tracking-wide ${strong ? 'text-blue-700' : 'text-slate-500'}`}>{label}</span>
+        <div className="flex items-baseline gap-2">
+          <b className="text-2xl text-slate-900">{big}</b>
+          <span className="text-xs text-slate-500">{small}</span>
+        </div>
+      </div>
+    );
+    return (
+      <div className="px-4 py-3 space-y-3">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          {box('Total OT', otHours(s.total_minutes), `${s.people} ${s.people === 1 ? 'person' : 'people'}`, true)}
+          {box('Approved', otHours(s.approved_minutes), 'counts for Payroll')}
+          {box('Waiting approval', otHours(s.waiting_minutes), `${s.waiting_people} ${s.waiting_people === 1 ? 'person' : 'people'}`)}
+          {box('Off-day / holiday', otHours(s.off_minutes), 'worked on a day off')}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={pill(!view)} onClick={() => setView('')}>
+            Everyone ({(data.rows || []).length})
+          </button>
+          <button type="button" className={pill(view === 'waiting')} onClick={() => setView(view === 'waiting' ? '' : 'waiting')}>
+            Waiting approval ({s.waiting_people})
+          </button>
+          <button type="button" className={pill(view === 'off')} onClick={() => setView(view === 'off' ? '' : 'off')}>
+            Off-day / holiday OT
+          </button>
+        </div>
+        {ms.length > 1 && (
+          <div className="space-y-1.5 max-w-xl">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">By month — tap one to see only that month</p>
+            {ms.map((m) => (
+              <button
+                key={m.month}
+                type="button"
+                onClick={() => setView(view === `m:${m.month}` ? '' : `m:${m.month}`)}
+                className={`w-full grid grid-cols-[6rem_1fr_4.5rem] items-center gap-2 text-sm text-left rounded-lg px-1.5 py-1 ${view === `m:${m.month}` ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+              >
+                <span className="text-slate-700">{otMonth(m.month)}</span>
+                <span className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <span className="block h-full rounded-full bg-indigo-500" style={{ width: `${Math.max(2, (m.minutes / max) * 100)}%` }} />
+                </span>
+                <b className="text-slate-800 text-right">{otHours(m.minutes)}</b>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-slate-500">From Duty Roster OT (worked out from attendance). Only people set to get OT; rejected days left out. Excel has "By day" and "By month" sheets too.</p>
+      </div>
+    );
+  }
   if (kind === 'records') return chips([['expired', `Expired documents (${s.expired})`], ['unsigned', `Awaiting signature (${s.unsigned})`], ['no_login', `No app login (${s.no_login})`]]);
   if (kind === 'headcount') {
     const dimKey = view.split(':')[0] || 'gender';
