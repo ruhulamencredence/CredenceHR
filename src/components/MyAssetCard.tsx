@@ -68,30 +68,30 @@ const AssetShelfBg: React.FC = () => (
     style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent 40%, #000 85%)', maskImage: 'linear-gradient(90deg, transparent 40%, #000 85%)' }}
   >
     <rect width="342" height="259" fill="var(--as-fill)" />
-    <g fill="none" stroke="var(--as-line)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <g fill="none" stroke="var(--as-line)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       {/* monitor */}
-      <g transform="translate(218,225) scale(1.1)">
+      <g transform="translate(236,240) scale(.68)">
         <rect x="3" y="4" width="18" height="12" rx="1.5" />
         <path d="M8 20h8M12 16v4" />
       </g>
       {/* laptop */}
-      <g transform="translate(250,228) scale(1)">
+      <g transform="translate(258,241) scale(.64)">
         <rect x="4" y="5" width="16" height="11" rx="1.5" />
         <path d="M2 19h20" />
       </g>
       {/* printer */}
-      <g transform="translate(278,225) scale(1.05)">
+      <g transform="translate(278,240) scale(.68)">
         <path d="M7 9V3h10v6" />
         <rect x="4" y="9" width="16" height="8" rx="1.5" />
         <path d="M7 14h10v7H7z" />
       </g>
       {/* chair */}
-      <g transform="translate(308,225) scale(1.05)">
+      <g transform="translate(298,240) scale(.68)">
         <path d="M7 3h10v9H7z" />
         <path d="M6 12h12M8 12v9M16 12v9" />
       </g>
     </g>
-    <path d="M200 248 H350" stroke="var(--as-line)" strokeWidth="2" />
+    <path d="M226 256.5 H350" stroke="var(--as-line)" strokeWidth="2" />
   </svg>
 );
 
@@ -118,7 +118,7 @@ export const MyAssetCard: React.FC<MyAssetCardProps> = ({ token, onOpen, classNa
         </button>
       </div>
 
-      <div className="relative p-5 pt-1 pb-11 sm:px-6 space-y-3 flex-1">
+      <div className="relative p-5 pt-1 sm:px-6 space-y-3 flex-1">
         <div className="grid grid-cols-3 gap-2">
           {stats.map((s) => (
             <button
