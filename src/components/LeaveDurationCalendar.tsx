@@ -256,7 +256,7 @@ export const LeaveDurationCalendar: React.FC<LeaveDurationCalendarProps> = ({ st
         createPortal(
           <div
             ref={popupRef}
-            className="fixed z-[60] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden"
+            className="solid-pop fixed z-[60] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden"
             style={{ top: coords.top, left: coords.left, width: coords.width }}
           >
             <div className="flex items-center justify-between px-3 py-2.5">

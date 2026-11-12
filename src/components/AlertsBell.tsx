@@ -463,7 +463,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
                       <div
                         key={alert.id}
                         onClick={() => handleAlertClick(alert)}
-                        className={`liquid-glass-inset rounded-2xl px-3.5 py-3 flex items-start gap-2.5 active:scale-[0.99] transition-transform ${alert.is_read ? '' : '!bg-white/80'}`}
+                        className={`liquid-glass-inset rounded-2xl px-3.5 py-3 flex items-start gap-2.5 active:scale-[0.99] transition-transform ${alert.is_read ? '' : 'alert-unread'}`}
                       >
                         <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
                         <div className="flex-1 min-w-0">
