@@ -23,7 +23,7 @@ import { useHrApi, Notice, fmtDate, btnGhost } from './HrOpsShared';
 import { SearchSelect } from './Combobox';
 import { LoadingBlock } from './LoadingBlock';
 
-import { type QuickKind, type QuickSummary, QUICK_KIND_STORAGE_KEY, QUICK_KINDS as KINDS, quickCardText, otHours } from './hrQuickShared';
+import { type QuickKind, type QuickSummary, QUICK_KIND_STORAGE_KEY, QUICK_KINDS as ALL_KINDS, quickCardText, otHours } from './hrQuickShared';
 
 type PeriodKey = 'this_month' | 'last_month' | 'last_3' | 'this_year' | 'custom';
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -200,8 +200,10 @@ const Chip: React.FC<{ tone: string; children: React.ReactNode }> = ({ tone, chi
   <span className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${toneBadge[tone] || 'bg-slate-100 text-slate-700'}`}>{children}</span>
 );
 
-export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: number) => void }> = ({ token, onOpenEmployee }) => {
+export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: number) => void; canOt?: boolean }> = ({ token, onOpenEmployee, canOt = false }) => {
   const api = useHrApi(token);
+  // The Overtime report needs its own layer (quick_ot) on top of Quick reports.
+  const KINDS = ALL_KINDS.filter((k) => k.key !== 'overtime' || canOt);
   const [kind, setKind] = useState<QuickKind>(() => {
     try {
       const k = sessionStorage.getItem(QUICK_KIND_STORAGE_KEY) as QuickKind | null;
@@ -621,7 +623,7 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
 
 // What sits between the toolbar and the table: state chips, totals, bars.
 const ReportTop: React.FC<{ kind: QuickKind; data: any; view: string; setView: (v: string) => void }> = ({ kind, data, view, setView }) => {
-  const s = data.summary || {};
+  let s = data.summary || {};
   if (kind === 'probation')
     return (
       <div className="flex flex-wrap gap-2 px-4 py-3">
@@ -702,6 +704,13 @@ const ReportTop: React.FC<{ kind: QuickKind; data: any; view: string; setView: (
   if (kind === 'contracts') return chips([['due', `Ends in 60 days (${s.due_60})`], ['ended', `Already ended (${s.ended})`]]);
   if (kind === 'overtime') {
     const ms: { month: string; minutes: number }[] = data.months || [];
+    // One month picked: the four boxes count that month only, like the table.
+    if (view.startsWith('m:')) {
+      const ym = view.slice(2);
+      const rs = (data.rows || []).map((r: any) => otTotals({ ...r, days: r.days.filter((d: any) => d.date.startsWith(ym)) })).filter((r: any) => r.total > 0);
+      const sum = (k: string) => rs.reduce((a: number, r: any) => a + r[k], 0);
+      s = { people: rs.length, total_minutes: sum('total'), approved_minutes: sum('approved'), waiting_minutes: sum('waiting'), off_minutes: sum('off'), waiting_people: rs.filter((r: any) => r.waiting > 0).length };
+    }
     const max = Math.max(1, ...ms.map((m) => m.minutes));
     const box = (label: string, big: string, small: string, strong = false) => (
       <div className={`rounded-2xl bg-white px-4 py-3 ${strong ? 'border-2 border-blue-600' : 'border border-slate-200'}`}>

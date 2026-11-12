@@ -35,7 +35,9 @@
 //
 // Access: HR Operations + its layer "quick_reports" (plain reading, so part of
 // the no-saved-layers default; accounts with saved layers got it once —
-// startup marker hr_quick_reports_grant). UI and API alike.
+// startup marker hr_quick_reports_grant). UI and API alike. The Overtime
+// report also needs its own layer "quick_ot" (same default; given once to
+// accounts that had Quick reports — marker hr_quick_ot_grant).
 
 import type { Express } from "express";
 import { loadEmployeeWorld, loadSettings, snapshotOf, toDate } from "./HROperationsRoutes";
@@ -59,6 +61,19 @@ export async function ensureHrQuickReportsSchema(dbPool: any): Promise<void> {
     }
   } catch (err: any) {
     console.warn("⚠️ Could not give HR Operations accounts the Quick reports layer: " + err.message);
+  }
+  try {
+    if (!(await getStartupMarker(dbPool, "hr_quick_ot_grant"))) {
+      // The Overtime report got its own layer: whoever already sees Quick
+      // reports keeps seeing it, once; untick it in Module Access to stop.
+      const [holders]: any = await dbPool.query("SELECT DISTINCT user_id, company_id FROM admin_module_permission_layers WHERE module_key = 'hr_operations' AND layer_key = 'quick_reports'");
+      for (const h of holders || []) {
+        await dbPool.query("INSERT IGNORE INTO admin_module_permission_layers (user_id, module_key, layer_key, company_id) VALUES (?, 'hr_operations', 'quick_ot', ?)", [h.user_id, h.company_id ?? 1]);
+      }
+      await setStartupMarker(dbPool, "hr_quick_ot_grant", String((holders || []).length));
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not give Quick reports accounts the Overtime report layer: " + err.message);
   }
 }
 
@@ -103,12 +118,15 @@ export function otTotals<T extends { days: { minutes: number; approved: number; 
 export interface HrQuickDeps {
   authenticateToken: any;
   requireModuleLayer: any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   queryDB: QueryDB;
   todayInDhaka: () => string;
 }
 
 export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
-  const { authenticateToken, requireModuleLayer, queryDB, todayInDhaka } = deps;
+  const { authenticateToken, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka } = deps;
+  // The Overtime report has its own layer on top of Quick reports.
+  const seesOt = (req: any) => hasModuleLayer(req.user, "hr_operations", "quick_ot").catch(() => false);
   const gate = [authenticateToken, requireModuleLayer("hr_operations", "quick_reports")];
   const fail = (res: any, err: any) => res.status(err?.statusCode || 500).json({ error: err?.message || String(err) });
 
@@ -519,7 +537,7 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
         contracts({}, today),
         headcount({}, today),
         records({}, today),
-        overtime({}, today).catch(() => null)
+        (await seesOt(req)) ? overtime({}, today).catch(() => null) : null
       ]);
       res.json({
         month: today.slice(0, 7),
@@ -545,6 +563,7 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
     try {
       const fn = REPORTS[String(req.params.kind)];
       if (!fn) return res.status(404).json({ error: "No such report." });
+      if (req.params.kind === "overtime" && !(await seesOt(req))) return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
       const departments: any[] = (await queryDB("SELECT name FROM departments WHERE is_active = 1 ORDER BY name").catch(() => [])) || [];
       res.json({ kind: req.params.kind, today: todayInDhaka(), departments: departments.map((d) => d.name), ...(await fn(req.query || {}, todayInDhaka())) });
     } catch (err) {

@@ -792,8 +792,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       key: `s-${a.id}`, name: a.name, sub: `${a.action}${a.status === 'pending' ? ' (awaiting approval)' : ''}`, right: shortDate(a.date),
       detail: { type: 'hr_action', id: a.id },
     }), 'Personnel actions taking effect', 'hr_operations'),
-    { key: 'advance_salary', label: 'Pending Advance Salary', icon: HandCoins, value: pendingAdvances ? String(pendingAdvances.length) : null },
-    { key: 'asset_requisition', label: 'Pending Asset Requisition', icon: Package, value: pendingAssetReqs ? String(pendingAssetReqs.length) : null, onClick: go('asset_management') },
+    // Waiting requests open their list with each one's details (like the tiles above).
+    listTile('advance_salary', 'Pending Advance Salary', HandCoins, pendingAdvances ?? undefined, (a: any) => ({
+      key: `adv-${a.id}`, name: a.employee_name || 'Employee', sub: [a.employee_code, a.request_kind === 'advance' ? 'Salary advance' : 'Loan'].filter(Boolean).join(' · ') || null,
+      right: a.total_amount != null ? `৳${Number(a.total_amount).toLocaleString('en-BD')}` : null, detail: { type: 'advance_request', id: Number(a.id) },
+    }), 'Advance salary / loan requests waiting', 'payroll'),
+    listTile('asset_requisition', 'Pending Asset Requisition', Package, pendingAssetReqs ?? undefined, (r: any) => ({
+      key: `asr-${r.id}`, name: r.employee_name || 'Employee', sub: [r.asset_category, r.urgency].filter(Boolean).join(' · ') || null,
+      right: shortDate(r.created_at ? String(r.created_at).slice(0, 10) : null), detail: { type: 'asset_requisition', id: Number(r.id) },
+    }), 'Asset requisitions waiting', 'asset_management'),
     listTile('document_request', 'Pending Document Request', ClipboardList, extras?.documents, (d) => ({
       key: d.id, name: d.name, sub: `${d.kind} · ${d.detail}`, right: shortDate(d.date),
     }), 'Document requests', 'hr_operations'),

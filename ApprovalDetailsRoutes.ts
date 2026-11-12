@@ -27,6 +27,10 @@
 //   - the Approvals module alone doesn't open them (it never listed them):
 //     an HR Action needs HR Operations, an Exit needs Exit / Offboarding,
 //     besides the people in its own chain;
+//   - an account with the module where that kind of request is worked on
+//     (Bill Claim, Attendance, Monthly Leave Application, Asset Management,
+//     Vehicle Management, Mobile Bill, Payroll for loans / advances, Claims):
+//     it already lists them there (MODULE_FOR_TYPE);
 //   - salary in an HR Action ("Now -> Becomes") is shown only to the
 //     Superadmin, whoever raised it, its approvers, and accounts with
 //     Payroll's "See salary amounts"; everyone else gets "*****".
@@ -165,6 +169,20 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
     return ids;
   }
 
+  const MODULE_FOR_TYPE: Record<string, string> = {
+    bill_claim: "bill_claim",
+    attendance_correction: "attendance",
+    attendance: "attendance",
+    leave_application: "leave_applications",
+    leave_reliever: "leave_applications",
+    leave_direct: "leave_applications",
+    asset_requisition: "asset_management",
+    vehicle_requisition: "vehicle_management",
+    mobile_limit_request: "mobile_bill",
+    advance_request: "payroll",
+    claim: "claims"
+  };
+
   async function mayOpen(user: any, type: string, id: number, src: { row: any; ownerUserId: number | null }, reqRow: any): Promise<boolean> {
     const me = Number(user.id);
     if (user.role === "superadmin") return true;
@@ -186,6 +204,12 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
     }
     if (src.ownerUserId === me) return true;
     if (modules.includes("approvals")) return true;
+    // Whoever works on this kind of request in its own module already sees it
+    // there (e.g. Payroll lists every advance waiting, Asset Management every
+    // requisition), so the Admin Dashboard's waiting lists can show its
+    // details to them too.
+    const owner = MODULE_FOR_TYPE[type];
+    if (owner && modules.includes(owner)) return true;
     if (type === "leave_application" || type === "leave_reliever" || type === "leave_direct") {
       if (Number(src.row.reliever_id) === me || Number(src.row.approver_id) === me || Number(src.row.decided_by) === me) return true;
     }

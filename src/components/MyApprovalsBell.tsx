@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { RequestDetailsButton } from './RequestDetails';
+import { RequestDetailsInline } from './RequestDetails';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { ApprovalRequest } from '../types';
@@ -142,7 +142,7 @@ export const MyApprovalsBell: React.FC<MyApprovalsBellProps> = ({ token }) => {
                     {r.source_label}
                     {r.source_amount != null ? ` \u2014 \u09f3${r.source_amount}` : ''}
                   </div>
-                  <RequestDetailsButton token={token} type={r.source_type} id={r.source_id} className="mt-1.5" />
+                  <RequestDetailsInline token={token} type={r.source_type} id={r.source_id} />
                   <div className="text-[11px] mt-0.5" style={{ color: 'var(--g-text-muted)' }}>
                     By {r.requested_by_name || '(account removed)'} \u2022 {formatDate(r.created_at)}
                   </div>

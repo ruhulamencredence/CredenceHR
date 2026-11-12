@@ -99,6 +99,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Quick reports-এর Overtime (OT) রিপোর্ট কে দেখেন?</td>
+<td>যাঁর HR Operations-এর <code>quick_reports</code> আর <code>quick_ot</code> দুটোই আছে (Superadmin সবসময়)। যাঁদের আগে Quick reports ছিল তাঁরা একবার <code>quick_ot</code> পেয়েছেন; Module Access থেকে খুলে নেওয়া যায়। না থাকলে কার্ড/chip লুকানো, <code>/api/hr-ops/quick/overtime</code> 403, summary-তে OT নেই। শুধু ঘণ্টা, টাকা নয়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>অপেক্ষায় থাকা আবেদনের বিস্তারিত (Admin Dashboard-এর টাইল, Pending Approvals, bell, Stuck) কে দেখেন?</td>
+<td>যিনি চেয়েছেন, chain-এর approver, Approvals module-এর Admin, আর ঐ আবেদনের নিজের module যাঁর আছে (যেমন Advance → Payroll, Asset → Asset Management); বাকিরা 403 — UI-তে নাম দেখলেও বিস্তারিত আসে না। HR Action / Exit-এ আগের কড়া নিয়ম।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়?</td>
 <td>তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)।</td>
 <td>✅</td>

@@ -60,7 +60,8 @@ export const AdminDashboardHrReports: React.FC<{ token: string; onNavigate?: (ta
         )}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {ORDER.map((k) => {
+        {/* Overtime shows only with its own layer (the summary leaves it out otherwise). */}
+        {ORDER.filter((k) => k !== 'overtime' || !!s.overtime).map((k) => {
           const t = quickCardText(k, s);
           const title = QUICK_KINDS.find((x) => x.key === k)!.title;
           return (

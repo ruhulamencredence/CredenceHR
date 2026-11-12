@@ -479,7 +479,7 @@ const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // explicit-only — the no-saved-layers default is "read" alone.
 // "reminders_receive" (explicit-only too): HR reminders of probation,
 // contract, document, retirement and increment dates (HrRemindersRoutes.ts).
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports"] as const;
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -3162,7 +3162,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3188,7 +3188,7 @@ async function startServer() {
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
           : moduleKey === "hr_operations"
-            ? ["read", "quick_reports"]
+            ? ["read", "quick_reports", "quick_ot"]
             : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
@@ -3226,7 +3226,7 @@ async function startServer() {
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
       : moduleKey === "hr_operations"
-        ? ["read", "quick_reports"]
+        ? ["read", "quick_reports", "quick_ot"]
         : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
@@ -3672,7 +3672,7 @@ async function startServer() {
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });
-  registerHrQuickReportsRoutes(app, { authenticateToken, requireModuleLayer, queryDB, todayInDhaka });
+  registerHrQuickReportsRoutes(app, { authenticateToken, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
   // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
   // reports in one place (ReportsInsightsRoutes.ts).
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
