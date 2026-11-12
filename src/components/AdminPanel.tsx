@@ -1751,19 +1751,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     permissions: setPermissions,
     departments: setDepartments
   };
+  // Which lists are being fetched / failed to load, so a page can say
+  // "Loading…" (or "Could not load") instead of looking empty.
+  const [sharedBusy, setSharedBusy] = useState<Set<SharedKey>>(new Set());
+  const [sharedFailed, setSharedFailed] = useState<Set<SharedKey>>(new Set());
+  const markShared = (setter: typeof setSharedBusy, k: SharedKey, on: boolean) =>
+    setter((cur) => {
+      if (cur.has(k) === on) return cur;
+      const n = new Set(cur);
+      if (on) n.add(k);
+      else n.delete(k);
+      return n;
+    });
   const loadShared = async (keys: SharedKey[]) => {
     if (!keys.length) return;
     keys.forEach((k) => loadedShared.current.add(k));
-    try {
-      await Promise.all(
-        keys.map(async (k) => {
+    await Promise.all(
+      keys.map(async (k) => {
+        markShared(setSharedBusy, k, true);
+        try {
           const res = await fetch(apiUrl(SHARED_URL[k]), { headers: { Authorization: `Bearer ${token}` } });
-          if (res.ok) SHARED_SET[k](await res.json());
-        })
-      );
-    } catch (err) {
-      console.error('Failed to load admin data', err);
-    }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          SHARED_SET[k](await res.json());
+          markShared(setSharedFailed, k, false);
+        } catch (err) {
+          console.error('Failed to load admin data: ' + k, err);
+          markShared(setSharedFailed, k, true);
+        } finally {
+          markShared(setSharedBusy, k, false);
+        }
+      })
+    );
   };
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
@@ -3707,7 +3725,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             <div className="p-6 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">All MPR Entries Report</h3>
-                <p className="text-xs text-slate-500">Showing {filteredEntries.length} matching records</p>
+                <p className="text-xs text-slate-500">
+                  {sharedBusy.has('entries') ? (
+                    <span className="inline-flex items-center gap-1.5 text-blue-600 font-medium">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> {entries.length ? 'Refreshing entries…' : 'Loading entries…'}
+                    </span>
+                  ) : (
+                    <>Showing {filteredEntries.length} matching records</>
+                  )}
+                </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
               {/* Rows the project has received in full move out to "Received". */}
@@ -3847,10 +3873,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEntries.length === 0 ? (
+                  {filteredEntries.length === 0 && entries.length === 0 && sharedBusy.has('entries') ? (
+                    // The first load of every PEPM entry can take a few seconds:
+                    // skeleton rows in the table's own columns, so it reads as
+                    // "data on its way", not "the data is gone".
+                    Array.from({ length: 10 }, (_, r) => (
+                      <tr key={`sk-${r}`} aria-hidden="true">
+                        {reportVisibleCols.map((c, j) => (
+                          <td key={c.key} className="px-1.5 py-2.5 border border-slate-200">
+                            <div
+                              className="h-2.5 rounded-full bg-slate-200/80 animate-pulse"
+                              style={{ width: `${j < 2 ? 70 : 45 + ((r * 7 + j * 13) % 50)}%`, animationDelay: `${(r % 5) * 120}ms` }}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : filteredEntries.length === 0 ? (
                     <tr>
                       <td colSpan={reportVisibleCols.length} className="px-6 py-12 text-center text-slate-400 border border-slate-200">
-                        No entries found matching the filter criteria.
+                        {entries.length === 0 && sharedFailed.has('entries') ? (
+                          <span className="inline-flex flex-col items-center gap-2 text-rose-600">
+                            <span className="text-sm font-medium">Could not load the MPR entries.</span>
+                            <button type="button" onClick={() => void loadShared(['entries'])} className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
+                              Try again
+                            </button>
+                          </span>
+                        ) : (
+                          'No entries found matching the filter criteria.'
+                        )}
                       </td>
                     </tr>
                   ) : (
