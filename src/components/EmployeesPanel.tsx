@@ -375,6 +375,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // The Device PIN the edited employee had when the form opened — the PIN is
+  // sent on Save only when it was actually changed, so editing anything else
+  // (status, branch…) can never wipe it (Office Attendance would then ask to
+  // link that PIN again).
+  const [loadedPin, setLoadedPin] = useState('');
   const [form, setForm] = useState<EmployeeFormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -607,6 +612,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
 
   const openEditForm = (e: Employee) => {
     setEditingId(e.id);
+    setLoadedPin(e.zk_device_pin || '');
     setForm({
       employee_id: e.employee_id || '',
       name: e.name || '',
@@ -906,7 +912,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         ...(form.branch_id ? {} : { branch: form.branch.trim() || null }),
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
-        zk_device_pin: form.zk_device_pin.trim() || null,
+        // Only when changed (or a new employee) — see loadedPin.
+        ...(!editingId || form.zk_device_pin.trim() !== loadedPin.trim() ? { zk_device_pin: form.zk_device_pin.trim() || null } : {}),
         is_active: form.is_active,
 
         middle_name: form.middle_name.trim() || null,
