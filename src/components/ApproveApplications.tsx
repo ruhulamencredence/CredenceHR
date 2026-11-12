@@ -316,6 +316,26 @@ useLiveRefresh(() => load(true));
     setActingKey(key);
     setMessage(null);
     try {
+      const data = await sendDecision(item, action, approvedAmount);
+      setMessage({
+        type: 'success',
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
+      setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
+      setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
+      setItems((prev) => prev.filter((i) => keyFor(i) !== key));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setActingKey(null);
+    }
+  };
+
+  // One decision to the server (the route depends on the kind of request).
+  // Throws with the server's message when it says no.
+  const sendDecision = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
+    const key = keyFor(item);
+    {
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${item.id}/reliever-decision`)
@@ -338,20 +358,74 @@ useLiveRefresh(() => load(true));
           allow_reclaim: item.source_type === 'bill_claim' && action === 'rejected' ? !!reclaimDraft[key] : undefined
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({
-        type: 'success',
-        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
-      });
-      setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
-      setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
-      setItems((prev) => prev.filter((i) => keyFor(i) !== key));
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
-    } finally {
-      setActingKey(null);
+      return data;
     }
+  };
+
+  // ---- Select & approve several at once ----------------------------------
+  // Only requests whose Approve is a plain yes: not the ones that need a form
+  // first (assign a vehicle, fulfil an asset, disburse with a voucher).
+  const bulkable = (item: MyApprovalItem) => !item.vehicle_maintainer_bypass && !item.asset_fulfiller_bypass && !item.conveyance_disburser_bypass;
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const pickable = items.filter(bulkable);
+  const pickedItems = pickable.filter((i) => picked.has(keyFor(i)));
+  const allPicked = pickable.length > 0 && pickedItems.length === pickable.length;
+  const togglePick = (item: MyApprovalItem) =>
+    setPicked((cur) => {
+      const n = new Set(cur);
+      const k = keyFor(item);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  // A bill claim approves at the amount shown on its card (as claimed, or
+  // what was typed / what the previous Layer approved), checked like a single Approve.
+  const bulkAmount = (item: MyApprovalItem): { amount?: number; error?: string } => {
+    if (item.source_type !== 'bill_claim') return {};
+    const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
+    const draft = approvedAmountDraft[keyFor(item)];
+    const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
+    const amount = Number(draft != null && draft !== '' ? draft : fallback);
+    if (!Number.isFinite(amount) || amount <= 0) return { error: 'Approved Amount must be a positive number' };
+    if (fallback != null && amount > Number(fallback)) return { error: 'Approved Amount is more than allowed' };
+    return { amount };
+  };
+  const approvePicked = async () => {
+    const list = pickedItems;
+    if (!list.length) return;
+    if (!(await confirmDialog(`Approve ${list.length} request${list.length === 1 ? '' : 's'}? Each one moves on to its next Layer, or is approved if this is the last.`, { title: 'Approve selected', confirmLabel: `Approve ${list.length}` })))
+      return;
+    setBulkBusy(true);
+    setMessage(null);
+    const done = new Set<string>();
+    const failed: string[] = [];
+    for (const item of list) {
+      const k = keyFor(item);
+      const { amount, error } = bulkAmount(item);
+      try {
+        if (error) throw new Error(error);
+        await sendDecision(item, 'approved', amount);
+        done.add(k);
+      } catch (err: any) {
+        failed.push(`${item.requested_by_name || 'Request'} (${sourceTitle(item.source_type)}): ${err.message || 'could not approve'}`);
+      }
+    }
+    setItems((prev) => prev.filter((i) => !done.has(keyFor(i))));
+    setPicked((cur) => new Set([...cur].filter((k) => !done.has(k))));
+    setRemarksDraft((prev) => {
+      const n = { ...prev };
+      done.forEach((k) => delete n[k]);
+      return n;
+    });
+    setMessage(
+      failed.length
+        ? { type: 'error', text: `Approved ${done.size}. Not approved — ${failed.join('; ')}` }
+        : { type: 'success', text: `Approved ${done.size} request${done.size === 1 ? '' : 's'}.` }
+    );
+    setBulkBusy(false);
   };
 
   // For a vehicle_maintainer_bypass item — the vehicle+driver form's own
@@ -516,6 +590,54 @@ useLiveRefresh(() => load(true));
             </div>
           )}
 
+          {!loading && pickable.length > 0 && (
+            <div className={`flex items-center justify-between gap-3 flex-wrap ${isPhone ? 'pt-3 pb-1' : 'px-6 py-3 border-b border-slate-100'}`}>
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={allPicked}
+                  onChange={() => setPicked(allPicked ? new Set() : new Set(pickable.map(keyFor)))}
+                />
+                {allPicked ? 'Unselect all' : `Select all (${pickable.length})`}
+              </label>
+              <button
+                type="button"
+                onClick={() => void approvePicked()}
+                disabled={!pickedItems.length || bulkBusy}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {bulkBusy ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Approve selected{pickedItems.length ? ` (${pickedItems.length})` : ''}
+              </button>
+            </div>
+          )}
+
+          {/* While something is ticked, the action also floats at the bottom,
+              so it is at hand however far down the list you are. */}
+          {!loading && pickedItems.length > 0 && (
+            <div className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 flex justify-center px-4 pointer-events-none">
+              <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-slate-900/90 backdrop-blur px-2 py-2 shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => setPicked(new Set())}
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold text-white/80 hover:text-white"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void approvePicked()}
+                  disabled={bulkBusy}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {bulkBusy ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  Approve {pickedItems.length} selected
+                </button>
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <SelfBodySkeleton shape="requests" />
           ) : items.length === 0 ? (
@@ -557,7 +679,17 @@ useLiveRefresh(() => load(true));
                     } ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
                     onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
                   >
-                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'justify-between flex-wrap'}`}>
+                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'flex-wrap'}`}>
+                      {bulkable(item) && (
+                        <input
+                          type="checkbox"
+                          className="mt-1 w-4 h-4 shrink-0 accent-emerald-600 cursor-pointer"
+                          checked={picked.has(key)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => togglePick(item)}
+                          aria-label={`Select ${sourceTitle(item.source_type)} from ${item.requested_by_name || 'this person'}`}
+                        />
+                      )}
                       {isPhone && (
                         <div className="relative shrink-0">
                           <div
