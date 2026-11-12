@@ -5,6 +5,7 @@ import {
   Landmark, GraduationCap
 } from 'lucide-react';
 import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { UserAvatar } from './UserAvatar';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
@@ -1394,7 +1395,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               <tbody className="divide-y divide-slate-100">
                 {pageRows.map((emp) => (
                   <tr key={emp.id} className="group hover:bg-slate-50 transition-colors">
-                    <td className="px-2.5 py-3 min-w-[130px]">
+                    <td className="px-2.5 py-3 min-w-[160px]">
+                      <div className="flex items-center gap-2.5">
+                      {/* Their profile photo (Self Service -> Personal Data), or
+                          initials when there is none / no login is linked. */}
+                      <UserAvatar userId={emp.user_id ?? null} name={emp.name} token={token} className="w-8 h-8 text-[11px]" />
+                      <div className="min-w-0">
                       <div className="font-semibold text-slate-900 text-xs">
                         {emp.name}
                         {companyCode((emp as any).company_id) && (
@@ -1406,6 +1412,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                       {emp.employee_id && (
                         <div className="text-[11px] text-slate-400 font-mono">{emp.employee_id}</div>
                       )}
+                      </div>
+                      </div>
                     </td>
                     <td className="px-2.5 py-3 text-xs text-slate-700 min-w-[95px] max-w-[160px]">
                       {emp.designation ? (
