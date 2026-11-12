@@ -51,7 +51,21 @@ import {
   UserCheck,
   Users,
   Wallet,
-  X
+  X,
+  UserPlus,
+  BadgeCheck,
+  MapPin,
+  Briefcase,
+  Network,
+  KeyRound,
+  DoorOpen,
+  TrendingDown,
+  AlarmClock,
+  CalendarMinus,
+  CalendarX,
+  Gift,
+  Star,
+  FileSignature,
 } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -145,6 +159,13 @@ const PERIOD_STAGES = new Set(['attendance', 'leave', 'claims', 'salary']);
 // ---------------------------------------------------------------------------
 
 const thisMonthName = MONTHS[new Date().getMonth()];
+const thisYear = String(new Date().getFullYear());
+// A year ago today (YYYY-MM-DD) — for "no increment in 12 months".
+const yearAgo = (() => {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
 const cfg = (p: Partial<ReportConfig>): ReportConfig => ({ ...EMPTY, ...p, filters: p.filters || [] });
 const PRESETS: { key: string; title: string; desc: string; icon: React.ComponentType<{ className?: string }>; payroll?: boolean; config: ReportConfig }[] = [
   {
@@ -308,6 +329,211 @@ const PRESETS: { key: string; title: string; desc: string; icon: React.Component
     desc: 'Active employees per department.',
     icon: Users,
     config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'joining_date'], group_by: 'department' })
+  },
+  // ---- More ready reports (people, attendance, pay, records) ----
+  {
+    key: 'gender',
+    title: 'Male / female',
+    desc: 'Employees by gender, with age and department.',
+    icon: Users,
+    config: cfg({ columns: ['name', 'designation', 'department', 'gender', 'age'], group_by: 'gender' })
+  },
+  {
+    key: 'new_month',
+    title: `New joiners in ${thisMonthName}`,
+    desc: 'Who joined this month.',
+    icon: UserPlus,
+    config: cfg({
+      columns: ['name', 'employee_code', 'designation', 'department', 'joining_date', 'supervisor'],
+      filters: [
+        { key: 'joining_year', op: 'eq', value: thisYear },
+        { key: 'joining_month', op: 'eq', value: thisMonthName }
+      ]
+    })
+  },
+  {
+    key: 'new_year',
+    title: `New joiners in ${thisYear}`,
+    desc: 'Everyone who joined this year, by month.',
+    icon: UserPlus,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'joining_date'], group_by: 'joining_month', filters: [{ key: 'joining_year', op: 'eq', value: thisYear }] })
+  },
+  {
+    key: 'contract_end',
+    title: 'Contract ending (60 days)',
+    desc: 'Contracts that end soon — renew or let go.',
+    icon: CalendarClock,
+    config: cfg({ columns: ['name', 'designation', 'department', 'joining_date', 'contract_end_date', 'supervisor'], filters: [{ key: 'contract_end_date', op: 'next_days', value: 60 }] })
+  },
+  {
+    key: 'confirmed',
+    title: 'Confirmed in the last 90 days',
+    desc: 'Recent confirmations after probation.',
+    icon: BadgeCheck,
+    config: cfg({ columns: ['name', 'designation', 'department', 'joining_date', 'confirmation_date'], filters: [{ key: 'confirmation_date', op: 'past_days', value: 90 }] })
+  },
+  {
+    key: 'by_branch',
+    title: 'Headcount by branch',
+    desc: 'Employees per branch / office.',
+    icon: Building2,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'branch'], group_by: 'branch' })
+  },
+  {
+    key: 'by_project',
+    title: 'Headcount by project',
+    desc: 'Employees per project / site.',
+    icon: MapPin,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'project'], group_by: 'project' })
+  },
+  {
+    key: 'by_category',
+    title: 'Headcount by employment category',
+    desc: 'Permanent, contractual, casual…',
+    icon: Briefcase,
+    config: cfg({ columns: ['name', 'designation', 'department', 'employment_category', 'job_status'], group_by: 'employment_category' })
+  },
+  {
+    key: 'by_job_status',
+    title: 'Headcount by job status',
+    desc: 'Employees per job status.',
+    icon: Layers,
+    config: cfg({ columns: ['name', 'designation', 'department', 'job_status', 'service_status'], group_by: 'job_status' })
+  },
+  {
+    key: 'by_supervisor',
+    title: 'Teams by supervisor',
+    desc: 'Who reports to whom.',
+    icon: Network,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'supervisor'], group_by: 'supervisor' })
+  },
+  {
+    key: 'no_login',
+    title: 'No app login',
+    desc: "Employees who can't use the app yet.",
+    icon: KeyRound,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'mobile', 'email'], filters: [{ key: 'has_login', op: 'is_false', value: null }] })
+  },
+  {
+    key: 'exiting',
+    title: 'Exit in progress',
+    desc: 'Resignations and terminations being processed.',
+    icon: DoorOpen,
+    config: cfg({ columns: ['name', 'designation', 'department', 'joining_date', 'service_years', 'exit_status'], filters: [{ key: 'exit_status', op: 'not_empty', value: null }] })
+  },
+  {
+    key: 'low_attendance',
+    title: 'Low attendance (below 80%)',
+    desc: "This month's attendance under 80%.",
+    icon: TrendingDown,
+    config: cfg({
+      columns: ['name', 'department', 'att_working', 'att_present', 'att_absent', 'att_leave', 'att_percent'],
+      filters: [
+        { key: 'att_percent', op: 'lt', value: 80 },
+        { key: 'att_working', op: 'gt', value: 0 }
+      ]
+    })
+  },
+  {
+    key: 'often_late',
+    title: 'Often late (more than 3 times)',
+    desc: 'Late more than 3 times this month.',
+    icon: AlarmClock,
+    config: cfg({ columns: ['name', 'department', 'att_present', 'att_late', 'att_extreme_late', 'att_percent'], filters: [{ key: 'att_late', op: 'gt', value: 3 }] })
+  },
+  {
+    key: 'low_leave',
+    title: 'Leave almost used up',
+    desc: 'Casual or Sick leave left 2 days or less this year.',
+    icon: CalendarMinus,
+    config: cfg({
+      columns: ['name', 'department', 'casual_taken', 'casual_balance', 'sick_taken', 'sick_balance', 'leave_remaining'],
+      match: 'any',
+      filters: [
+        { key: 'casual_balance', op: 'lte', value: 2 },
+        { key: 'sick_balance', op: 'lte', value: 2 }
+      ]
+    })
+  },
+  {
+    key: 'lwp',
+    title: 'Took leave without pay',
+    desc: 'Leave Without Pay days this year.',
+    icon: CalendarX,
+    config: cfg({ columns: ['name', 'department', 'lwp_taken', 'leave_taken', 'last_leave_date'], filters: [{ key: 'lwp_taken', op: 'gt', value: 0 }] })
+  },
+  {
+    key: 'no_increment',
+    title: 'No increment in 12 months',
+    desc: 'Last increment over a year ago, or never.',
+    icon: Wallet,
+    payroll: true,
+    config: cfg({
+      columns: ['name', 'designation', 'department', 'joining_date', 'gross_salary', 'last_increment_date', 'last_increment_percent'],
+      match: 'any',
+      filters: [
+        { key: 'last_increment_date', op: 'before', value: yearAgo },
+        { key: 'last_increment_date', op: 'empty', value: null }
+      ]
+    })
+  },
+  {
+    key: 'bonus',
+    title: `Bonus paid in ${thisYear}`,
+    desc: 'Who got a bonus this year, and how much.',
+    icon: Gift,
+    payroll: true,
+    config: cfg({ columns: ['name', 'designation', 'department', 'gross_salary', 'bonus_year'], filters: [{ key: 'bonus_year', op: 'gt', value: 0 }] })
+  },
+  {
+    key: 'by_grade',
+    title: 'Salary by grade',
+    desc: 'Pay of every employee, grouped by grade.',
+    icon: HandCoins,
+    payroll: true,
+    config: cfg({ columns: ['name', 'designation', 'department', 'grade', 'basic_salary', 'gross_salary'], group_by: 'grade' })
+  },
+  {
+    key: 'disciplinary',
+    title: 'Disciplinary records',
+    desc: 'Employees with show-cause / warning records.',
+    icon: ShieldAlert,
+    config: cfg({ columns: ['name', 'designation', 'department', 'disciplinary_count', 'last_disciplinary'], filters: [{ key: 'disciplinary_count', op: 'gt', value: 0 }] })
+  },
+  {
+    key: 'rating',
+    title: 'Performance ratings',
+    desc: 'Last review rating, grouped.',
+    icon: Star,
+    config: cfg({ columns: ['name', 'designation', 'department', 'last_rating', 'last_review_cycle'], group_by: 'last_rating', filters: [{ key: 'last_rating', op: 'not_empty', value: null }] })
+  },
+  {
+    key: 'no_training',
+    title: 'No training recorded',
+    desc: 'Employees who have not attended any training.',
+    icon: GraduationCap,
+    config: cfg({ columns: ['name', 'employee_code', 'designation', 'department', 'joining_date'], filters: [{ key: 'training_count', op: 'eq', value: 0 }] })
+  },
+  {
+    key: 'docs_expired',
+    title: 'Expired documents',
+    desc: 'Documents past their expiry date.',
+    icon: FileWarning,
+    config: cfg({ columns: ['name', 'employee_code', 'department', 'expired_documents'], filters: [{ key: 'expired_documents', op: 'count_gt', value: 0 }] })
+  },
+  {
+    key: 'unsigned',
+    title: 'Documents awaiting signature',
+    desc: 'Sent for e-signature, not signed yet.',
+    icon: FileSignature,
+    config: cfg({ columns: ['name', 'department', 'unsigned_documents', 'documents_count'], filters: [{ key: 'unsigned_documents', op: 'gt', value: 0 }] })
+  },
+  {
+    key: 'claims_pending',
+    title: 'Claims waiting',
+    desc: 'Employees with claims not yet approved.',
+    icon: Receipt,
+    config: cfg({ columns: ['name', 'department', 'claims_pending_count', 'claims_pending', 'claims_claimed'], filters: [{ key: 'claims_pending_count', op: 'gt', value: 0 }] })
   }
 ];
 
