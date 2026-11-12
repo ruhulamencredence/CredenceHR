@@ -132,6 +132,7 @@ useLiveRefresh(() => fetchStatus(true));
             onChange={(e) => setPurpose(e.target.value)}
             disabled={hasOpenClaim}
             maxLength={255}
+            autoComplete="off"
             placeholder="e.g. Bank visit — City Branch"
             className="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:outline-none disabled:opacity-70"
           />

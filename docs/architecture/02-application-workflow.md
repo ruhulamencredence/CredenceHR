@@ -858,7 +858,7 @@ Deploy বা `pm2 restart`-এর সময় Node app কয়েক সে�
 
 - নিজেই বোঝে কোনটা: খোলা claim নেই → **Check In**, আছে → **Check Out** (`GET /api/claims/status`)।
 - map-এ নীল ফোঁটা = আপনি এখন; নিচের sheet-এ ঠিকানা (`/api/vehicles/places/reverse`), coordinate, "My location" বোতাম (GPS আবার পড়ে)।
-- Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো), কাছের project site-গুলো এক চাপে Purpose-এ বসানোর chip (`/api/vehicles/places/nearby`, ৫ km-এর মধ্যে), Remarks, **Check In here**।
+- Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো; কর্মী নিজে লেখেন — কাছের project site বা browser / keyboard-এর কোনো সাজেশন আসে না, ১২ নভেম্বর থেকে), Remarks, **Check In here**।
 - Check Out: Check In-এর জায়গার pin, সেখান থেকে আপনার কাছে ড্যাশ লাইন আর কত দূর এসেছেন, Remarks, **Check Out here**।
 - একই API (`POST /api/claims/check-in`, `/api/claims/:id/check-out`), একই অনুমতি (`requireMovementClaimAccess`, Module Access → Check In/Out) আর একই approval। শেষে ফোনে উপরে ছোট বার্তা ("Checked in — have a safe trip!"), তালিকা নতুন হয়।
 

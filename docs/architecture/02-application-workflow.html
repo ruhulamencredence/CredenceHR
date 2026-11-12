@@ -745,7 +745,7 @@ Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (<cod
 <ul>
 <li>নিজেই বোঝে কোনটা: খোলা claim নেই → <strong>Check In</strong>, আছে → <strong>Check Out</strong> (<code>GET /api/claims/status</code>)।</li>
 <li>map-এ নীল ফোঁটা = আপনি এখন; নিচের sheet-এ ঠিকানা (<code>/api/vehicles/places/reverse</code>), coordinate, "My location" বোতাম (GPS আবার পড়ে)।</li>
-<li>Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো), কাছের project site-গুলো এক চাপে Purpose-এ বসানোর chip (<code>/api/vehicles/places/nearby</code>, ৫ km-এর মধ্যে), Remarks, <strong>Check In here</strong>।</li>
+<li>Check In: Purpose (খসড়া হিসেবে থাকে, আগের মতো; কর্মী নিজে লেখেন — কাছের project site বা browser / keyboard-এর কোনো সাজেশন আসে না, ১২ নভেম্বর থেকে), Remarks, <strong>Check In here</strong>।</li>
 <li>Check Out: Check In-এর জায়গার pin, সেখান থেকে আপনার কাছে ড্যাশ লাইন আর কত দূর এসেছেন, Remarks, <strong>Check Out here</strong>।</li>
 <li>একই API (<code>POST /api/claims/check-in</code>, <code>/api/claims/:id/check-out</code>), একই অনুমতি (<code>requireMovementClaimAccess</code>, Module Access → Check In/Out) আর একই approval। শেষে ফোনে উপরে ছোট বার্তা ("Checked in — have a safe trip!"), তালিকা নতুন হয়।</li>
 </ul>

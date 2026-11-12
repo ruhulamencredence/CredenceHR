@@ -11,8 +11,8 @@
 // - Opens on whichever is next: nothing open -> Check In, a claim open ->
 //   Check Out (GET /api/claims/status).
 // - Check In: the address under you (GET /api/vehicles/places/reverse),
-//   Purpose (kept as a draft, same as the form), the nearest project sites as
-//   one-tap suggestions (GET /api/vehicles/places/nearby), Remarks.
+//   Purpose (kept as a draft, same as the form; typed freely — no
+//   suggestions), Remarks.
 // - Check Out: the Check In pin, a dashed line to you and the distance.
 // - "My location" re-reads GPS. The same API calls as the form
 //   (POST /api/claims/check-in, /api/claims/:id/check-out), so the same
@@ -22,7 +22,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ArrowLeft, Building2, LocateFixed, LogIn, LogOut, MapPin, Route } from 'lucide-react';
+import { ArrowLeft, LocateFixed, LogIn, LogOut, MapPin, Route } from 'lucide-react';
 import type { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { getCurrentCoords, lastKnownCoords } from '../lib/currentCoords';
@@ -81,7 +81,6 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   const [locating, setLocating] = useState(true);
   const [gpsError, setGpsError] = useState('');
   const [address, setAddress] = useState<string | null>(null);
-  const [nearby, setNearby] = useState<{ label: string; distance_m: number }[]>([]);
   const [purpose, setPurposeState] = useState(() => readDraft<string>('checkinout-purpose') || '');
   const [remarks, setRemarks] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -126,7 +125,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The address and the nearest sites, for each new fix.
+  // The address, for each new fix.
   useEffect(() => {
     if (!coords) return;
     let alive = true;
@@ -136,10 +135,6 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => alive && setAddress(d?.label || ''))
       .catch(() => alive && setAddress(''));
-    fetch(apiUrl(`/api/vehicles/places/nearby?${q}`), { headers: auth })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => alive && setNearby(Array.isArray(d?.offices) ? d.offices : []))
-      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -274,24 +269,10 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
             maxLength={255}
+            autoComplete="off"
             placeholder="e.g. Bank visit — City Branch"
             className="w-full text-[15px] px-3.5 py-2.5 bg-slate-100/80 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[color:var(--g-accent,#7F00FF)]"
           />
-          {nearby.length > 0 && (
-            <div className="mt-2 flex gap-2 overflow-x-auto pb-0.5">
-              {nearby.map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => setPurpose(p.label)}
-                  className="shrink-0 flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-700"
-                >
-                  <Building2 className="w-3.5 h-3.5" style={{ color: 'var(--g-accent, #7F00FF)' }} /> {p.label}
-                  <span className="font-normal text-slate-400">{fmt(p.distance_m)}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
