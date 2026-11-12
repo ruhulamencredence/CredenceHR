@@ -3873,17 +3873,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEntries.length === 0 ? (
+                  {filteredEntries.length === 0 && entries.length === 0 && sharedBusy.has('entries') ? (
+                    // The first load of every PEPM entry can take a few seconds:
+                    // skeleton rows in the table's own columns, so it reads as
+                    // "data on its way", not "the data is gone".
+                    Array.from({ length: 10 }, (_, r) => (
+                      <tr key={`sk-${r}`} aria-hidden="true">
+                        {reportVisibleCols.map((c, j) => (
+                          <td key={c.key} className="px-1.5 py-2.5 border border-slate-200">
+                            <div
+                              className="h-2.5 rounded-full bg-slate-200/80 animate-pulse"
+                              style={{ width: `${j < 2 ? 70 : 45 + ((r * 7 + j * 13) % 50)}%`, animationDelay: `${(r % 5) * 120}ms` }}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : filteredEntries.length === 0 ? (
                     <tr>
                       <td colSpan={reportVisibleCols.length} className="px-6 py-12 text-center text-slate-400 border border-slate-200">
-                        {entries.length === 0 && sharedBusy.has('entries') ? (
-                          // The first load of every PEPM entry can take a few seconds — say so, so it doesn't look as if the data is gone.
-                          <span className="inline-flex flex-col items-center gap-2 text-slate-500">
-                            <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-                            <span className="text-sm font-medium">Loading MPR entries…</span>
-                            <span className="text-[11px] text-slate-400">This can take a few seconds.</span>
-                          </span>
-                        ) : entries.length === 0 && sharedFailed.has('entries') ? (
+                        {entries.length === 0 && sharedFailed.has('entries') ? (
                           <span className="inline-flex flex-col items-center gap-2 text-rose-600">
                             <span className="text-sm font-medium">Could not load the MPR entries.</span>
                             <button type="button" onClick={() => void loadShared(['entries'])} className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
