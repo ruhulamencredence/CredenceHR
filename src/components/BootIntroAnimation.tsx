@@ -16,8 +16,18 @@
  * 360 x 780 stage (the design board) that is scaled to the phone; the cream
  * smile fill spans the real screen width, so its keyframes are built from
  * the window size when the component mounts.
+ *
+ * Smooth on slow phones: the app itself is starting underneath at the same
+ * moment and keeps the phone's main thread busy, so every moving part only
+ * animates transform / opacity (and a small blur), which the GPU runs on its
+ * own. Nothing animates width, left/top or a clip-path, which would have to
+ * be redrawn on the busy main thread every frame and stutter. The smile is a
+ * picture drawn once (shadow included) and stretched open.
+ * The timeline also waits (at most PRELOAD_MAX_MS) until the pictures and
+ * the font have arrived and are decoded, holding the splash frame meanwhile,
+ * so nothing pops in halfway through.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 // Inlined (data URL), so the first frame is there at once, like index.html's.
 import tileImg from '../assets/boot/app-icon-336.webp?inline';
@@ -49,6 +59,8 @@ const T = {
   exit: 3700, exitDur: 450,
 };
 const DONE_MS = T.exit + T.exitDur;
+// Longest the splash frame is held while the pictures / font load.
+const PRELOAD_MAX_MS = 1500;
 
 const EASE_OUT = 'cubic-bezier(.22,1,.36,1)';
 const EASE_IN_OUT = 'cubic-bezier(.45,0,.55,1)';
@@ -59,19 +71,43 @@ function anim(name: string, dur: number, delay: number, ease = EASE_OUT) {
 
 export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
+  // false: the splash frame is held (no keyframes yet, so every part sits in
+  // its first-frame state); true: the keyframes go in and the timeline runs.
+  const [go, setGo] = useState(false);
+  const decoded = useRef<HTMLImageElement[]>([]);
 
   useEffect(() => {
-    // Start fetching the signature font now; the slogan only appears ~2.7s in.
+    let alive = true;
+    const waits: Promise<unknown>[] = [];
     try {
       const face = new FontFace('CredenceSignature', `url(${signatureFont}) format('woff')`);
       document.fonts.add(face);
-      void face.load();
+      waits.push(face.load());
     } catch {
       /* the @font-face rule below is the fallback */
     }
+    for (const src of [...LETTERS, wedgeImg, hrImg]) {
+      const img = new Image();
+      img.src = src;
+      decoded.current.push(img); // kept, so the decoded picture stays cached
+      waits.push(typeof img.decode === 'function' ? img.decode() : new Promise((r) => (img.onload = r)));
+    }
+    const settled = Promise.all(waits.map((w) => w.catch(() => undefined)));
+    const capped = new Promise((r) => setTimeout(r, PRELOAD_MAX_MS));
+    void Promise.race([settled, capped]).then(() => {
+      // Two frames, so the first animated frame isn't the one React just built.
+      requestAnimationFrame(() => requestAnimationFrame(() => alive && setGo(true)));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!go) return;
     const finish = setTimeout(onDone, DONE_MS);
     return () => clearTimeout(finish);
-  }, [onDone]);
+  }, [go, onDone]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -90,14 +126,45 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
     const lineTop = cy + 69 * s;
     const lineBot = cy + 75 * s;
     const shallowEdge = cy + 56 * s;
-    const path = (d: string) => `path('${d}')`;
-    const linePath = path(`M0 ${lineTop} Q${W / 2} ${lineTop} ${W} ${lineTop} L${W} ${lineBot} L0 ${lineBot} Z`);
-    const shallowPath = path(`M0 ${shallowEdge} Q${W / 2} ${2 * low - shallowEdge} ${W} ${shallowEdge} L${W} ${H} L0 ${H} Z`);
-    const smilePath = path(`M0 ${edge} Q${W / 2} ${2 * low - edge} ${W} ${edge} L${W} ${H} L0 ${H} Z`);
+    // The cream fill = everything below the curve. It is built from two
+    // pieces that only scale vertically (GPU work only):
+    //  - "base": the part below the curve's lowest point (low .. bottom),
+    //    growing down from a thin strip;
+    //  - "cap": the two horns between the curve and that lowest point,
+    //    drawn once as a picture (gradient + upward shadow) and stretched up
+    //    from y = low. Scaling a parabola about its lowest point gives the
+    //    same family of curves the old clip-path keyframes stepped through:
+    //    flat line -> shallow curve -> the full smile.
+    const depth = low - edge; // full height of the horns
+    const pad = 40; // room above the curve for its shadow
+    const capTop = edge - pad;
+    const capH = pad + depth + 1; // +1 px overlaps the base, no seam
+    const capSvg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${capH}" viewBox="0 0 ${W} ${capH}">` +
+      `<defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="${-capTop}" x2="0" y2="${H - capTop}">` +
+      `<stop offset=".5" stop-color="#ffffff"/><stop offset=".68" stop-color="#fff4ea"/><stop offset="1" stop-color="#fdeadb"/></linearGradient>` +
+      `<filter id="f" filterUnits="userSpaceOnUse" x="-40" y="0" width="${W + 80}" height="${capH}">` +
+      `<feDropShadow dx="0" dy="-8" stdDeviation="8" flood-color="rgb(150,50,0)" flood-opacity="0.32"/></filter></defs>` +
+      `<path filter="url(#f)" fill="url(#g)" d="M0 ${pad} Q${W / 2} ${pad + 2 * depth} ${W} ${pad} L${W} ${capH} L0 ${capH} Z"/></svg>`;
+    const capSrc = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(capSvg)}`;
+    const capStart = Math.max(0.01, (low - lineTop) / depth); // the thin line
+    const capShallow = (low - shallowEdge) / depth; // the shallow curve
+    const baseTop = low - 1;
+    const baseH = H - baseTop;
+    const baseStart = Math.max(0.005, (lineBot - baseTop) / baseH);
     const dot = 26 * s;
     const line = 6 * s;
     return {
       scale: s,
+      W,
+      H,
+      capSrc,
+      capTop,
+      capH,
+      capOrigin: pad + depth,
+      baseTop,
+      baseH,
+      dot,
       keyframes: `
 @font-face{font-family:'CredenceSignature';src:url(${signatureFont}) format('woff');font-display:block}
 @keyframes chrTileOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.82)}}
@@ -105,9 +172,10 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
 @keyframes chrWedge{0%{opacity:0;transform:translate(-6px,-26px) rotate(-90deg) scale(.5)}62%{opacity:1;transform:translate(0,1px) rotate(6deg) scale(1.04);animation-timing-function:${EASE_IN_OUT}}100%{opacity:1;transform:none}}
 @keyframes chrFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes chrFadeOut{from{opacity:1}to{opacity:0}}
-@keyframes chrBar{from{width:0}to{width:120px}}
-@keyframes chrDot{0%{left:${W / 2}px;top:${low}px;width:0;height:0;opacity:1;animation-timing-function:cubic-bezier(.34,1.4,.64,1)}25%{left:${W / 2 - dot / 2}px;top:${low - dot / 2}px;width:${dot}px;height:${dot}px;opacity:1;animation-timing-function:cubic-bezier(.65,0,.35,1)}100%{left:0;top:${lineTop}px;width:${W}px;height:${line}px;opacity:1}}
-@keyframes chrFill{0%{clip-path:${linePath};opacity:1;animation-timing-function:cubic-bezier(.4,0,.6,1)}30%{clip-path:${shallowPath};animation-timing-function:${EASE_OUT}}100%{clip-path:${smilePath};opacity:1}}
+@keyframes chrBar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes chrDot{0%{transform:translate(${W / 2}px,${low}px) scale(0);opacity:1;animation-timing-function:cubic-bezier(.34,1.4,.64,1)}25%{transform:translate(${W / 2 - dot / 2}px,${low - dot / 2}px) scale(1);opacity:1;animation-timing-function:cubic-bezier(.65,0,.35,1)}100%{transform:translate(0px,${lineTop}px) scale(${W / dot},${line / dot});opacity:1}}
+@keyframes chrCap{0%{transform:scaleY(${capStart});opacity:1;animation-timing-function:cubic-bezier(.4,0,.6,1)}30%{transform:scaleY(${capShallow});animation-timing-function:${EASE_OUT}}100%{transform:scaleY(1);opacity:1}}
+@keyframes chrBase{0%{transform:scaleY(${baseStart});opacity:1;animation-timing-function:cubic-bezier(.4,0,.6,1)}30%{transform:scaleY(1)}100%{transform:scaleY(1);opacity:1}}
 @keyframes chrSoft{from{opacity:0;transform:translateY(12px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
 @keyframes chrTag{from{opacity:0;transform:translateY(8px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
 `,
@@ -123,35 +191,64 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
         inset: 0,
         zIndex: 9999,
         overflow: 'hidden',
+        contain: 'strict',
         background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)',
         animation: leaving ? 'chrFadeOut 300ms ease-out both' : anim('chrFadeOut', T.exitDur, T.exit, EASE_IN_OUT),
       }}
     >
-      <style>{css.keyframes}</style>
+      {/* Until everything has loaded there are no keyframes, so every part
+          stays in its first-frame state: the splash. */}
+      {(go || leaving) && <style>{css.keyframes}</style>}
 
-      {/* Cream smile fill (full screen width) */}
-      <div style={{ position: 'absolute', inset: 0, filter: 'drop-shadow(0 -8px 16px rgba(150,50,0,0.32))' }}>
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            opacity: 0, // hidden until the dot has become the line
-            background: 'linear-gradient(180deg, #ffffff 50%, #fff4ea 68%, #fdeadb 100%)',
-            // 'forwards', not 'both': before it starts it must stay hidden,
-            // not show the thin line it opens from.
-            animation: `chrFill ${T.fillDur}ms ${EASE_OUT} ${T.fill}ms forwards`,
-          }}
-        />
-      </div>
+      {/* Cream smile fill (full screen width). Hidden until the dot has
+          become the line; 'forwards', not 'both', so before it starts it
+          stays hidden instead of showing the thin line it opens from. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: css.baseTop,
+          width: css.W,
+          height: css.baseH,
+          opacity: 0,
+          transformOrigin: '50% 0',
+          willChange: 'transform, opacity',
+          background: 'linear-gradient(180deg, #ffffff 50%, #fff4ea 68%, #fdeadb 100%)',
+          backgroundSize: `${css.W}px ${css.H}px`,
+          backgroundPosition: `0 ${-css.baseTop}px`,
+          backgroundRepeat: 'no-repeat',
+          animation: `chrBase ${T.fillDur}ms ${EASE_OUT} ${T.fill}ms forwards`,
+        }}
+      />
+      <img
+        src={css.capSrc}
+        alt=""
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: css.capTop,
+          width: css.W,
+          height: css.capH,
+          display: 'block',
+          opacity: 0,
+          transformOrigin: `50% ${css.capOrigin}px`,
+          willChange: 'transform, opacity',
+          animation: `chrCap ${T.fillDur}ms ${EASE_OUT} ${T.fill}ms forwards`,
+        }}
+      />
       {/* Dot that stretches into the line the smile opens from */}
       <div
         style={{
           position: 'absolute',
-          width: 0,
-          height: 0,
+          left: 0,
+          top: 0,
+          width: css.dot,
+          height: css.dot,
           opacity: 0,
-          borderRadius: 13 * css.scale,
+          borderRadius: '50%',
           background: '#ffffff',
+          transformOrigin: '0 0',
+          willChange: 'transform, opacity',
           animation: `${anim('chrDot', T.dotDur, T.dot, 'linear')}, ${anim('chrFadeOut', 80, T.fill + 60, 'linear')}`,
         }}
       />
@@ -192,7 +289,7 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
                 key={i}
                 src={src}
                 alt=""
-                style={{ position: 'absolute', inset: 0, width: 250, height: 50, display: 'block', transform: 'translateY(110%)', animation: anim('chrRise', T.letterDur, T.letters + i * T.letterStagger) }}
+                style={{ position: 'absolute', inset: 0, width: 250, height: 50, display: 'block', transform: 'translateY(110%)', willChange: 'transform', animation: anim('chrRise', T.letterDur, T.letters + i * T.letterStagger) }}
               />
             ))}
           </div>
@@ -206,7 +303,7 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
         {/* Loading line, under CREDENCE */}
         <div style={{ position: 'absolute', top: 396, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: 120, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden', opacity: 0, animation: anim('chrFadeIn', T.trackDur, T.track, 'ease-out') }}>
-            <div style={{ height: 3, width: 0, borderRadius: 2, background: '#ffffff', animation: anim('chrBar', T.barDur, T.bar, EASE_IN_OUT) }} />
+            <div style={{ height: 3, width: 120, borderRadius: 2, background: '#ffffff', transform: 'scaleX(0)', transformOrigin: '0 50%', willChange: 'transform', animation: anim('chrBar', T.barDur, T.bar, EASE_IN_OUT) }} />
           </div>
         </div>
 

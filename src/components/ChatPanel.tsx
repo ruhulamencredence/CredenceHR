@@ -1059,7 +1059,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       {/* Sidebar: room list */}
       <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
-          <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
+          {/* Phones always; on a computer only in the installed app (no
+              browser Back there) — a browser tab has its own. */}
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            title="Back"
+            className={`p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg ${variant === 'fullscreen' && isStandalone() ? '' : 'md:hidden'}`}
+          >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>

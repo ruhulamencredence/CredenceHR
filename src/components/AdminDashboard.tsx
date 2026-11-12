@@ -39,6 +39,7 @@ import {
 import { confirmDialog } from '../lib/confirmDialog';
 import { User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
+import { RequestDetailsInline } from './RequestDetails';
 import { useMyCompanies } from '../lib/company';
 
 interface AdminDashboardProps {
@@ -57,6 +58,9 @@ interface ListRow {
   // Pending attendance rows: how this account may approve it (server-decided;
   // null = it may not) — ticked rows go through "Approve selected".
   approve?: Approve;
+  // The request behind the row: its details show right under it
+  // (RequestDetailsInline, the same data and access check as Approve Application).
+  detail?: { type: string; id: number };
 }
 type Approve = { via: 'chain'; request_id: number } | { via: 'correction'; id: number } | null;
 interface Person {
@@ -68,7 +72,7 @@ interface Person {
 interface Extras {
   today: string;
   birthdays: (Person & { date: string; days_away: number; turning: number })[];
-  attendance_approvals: (Person & { id: number; date: string | null; approve?: Approve })[];
+  attendance_approvals: (Person & { id: number; source_id?: number; date: string | null; approve?: Approve })[];
   attendance_corrections: (Person & { id: number; date: string | null; approve?: Approve })[];
   documents: (Person & { id: string; kind: string; detail: string; date: string | null })[];
   status_effective: (Person & { id: number; action: string; date: string | null; status: string })[];
@@ -232,6 +236,8 @@ interface BreakdownEntry {
   user_id: number;
   name: string;
   department: string;
+  // Pending Leave Application: the application, so its details show under the name.
+  leave_id?: number;
 }
 
 interface DepartmentGroup {
@@ -439,6 +445,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       .filter((a) => a.status === 'pending')
       .map((a) => ({
         user_id: Number(a.user_id),
+        leave_id: Number(a.id),
         name: a.user_name || `User #${a.user_id}`,
         department: deptByUserId.get(Number(a.user_id)) || 'Unassigned'
       }));
@@ -662,8 +669,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
 
   const go = (tab: string) => (onNavigate ? () => onNavigate(tab) : undefined);
   // A pending attendance approval ('a') / correction ('c') as a popup row.
-  const attendanceRow = (prefix: 'a' | 'c') => (x: Person & { id: number; date: string | null; approve?: Approve }): ListRow => ({
+  const attendanceRow = (prefix: 'a' | 'c') => (x: Person & { id: number; source_id?: number; date: string | null; approve?: Approve }): ListRow => ({
     key: `${prefix}-${x.id}`, name: x.name, sub: personSub(x), right: shortDate(x.date), approve: x.approve ?? null,
+    detail: prefix === 'c' ? { type: 'attendance_correction', id: x.id } : x.source_id ? { type: 'attendance', id: x.source_id } : undefined,
   });
   // A tile counting people/requests: click opens their list.
   function listTile<T>(
@@ -782,6 +790,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     listTile('attendance_recon', 'Pending Attendance Recon.', ShieldAlert, extras?.attendance_corrections, attendanceRow('c'), 'Attendance corrections waiting for review', undefined, true),
     listTile('status_effective', 'Status To Be Effective', UserCog, extras?.status_effective, (a) => ({
       key: `s-${a.id}`, name: a.name, sub: `${a.action}${a.status === 'pending' ? ' (awaiting approval)' : ''}`, right: shortDate(a.date),
+      detail: { type: 'hr_action', id: a.id },
     }), 'Personnel actions taking effect', 'hr_operations'),
     { key: 'advance_salary', label: 'Pending Advance Salary', icon: HandCoins, value: pendingAdvances ? String(pendingAdvances.length) : null },
     { key: 'asset_requisition', label: 'Pending Asset Requisition', icon: Package, value: pendingAssetReqs ? String(pendingAssetReqs.length) : null, onClick: go('asset_management') },
@@ -1553,8 +1562,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                     {r.right && <span className="text-[10px] font-semibold text-blue-600 shrink-0">{r.right}</span>}
                   </>
                 );
+                const details = r.detail ? <RequestDetailsInline token={token} type={r.detail.type} id={r.detail.id} className="mt-0 max-w-none" /> : null;
                 return r.approve ? (
-                  <label key={r.key} className="liquid-glass-inset flex items-center gap-2 text-xs px-2.5 py-2 rounded-xl cursor-pointer select-none">
+                  <div key={r.key} className="liquid-glass-inset rounded-xl px-2.5 py-2 space-y-2">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={picked.has(r.key)}
@@ -1571,9 +1582,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                     />
                     {content}
                   </label>
+                  {details}
+                  </div>
                 ) : (
-                  <div key={r.key} className="liquid-glass-inset flex items-center gap-2 text-xs px-2.5 py-2 rounded-xl">
-                    {content}
+                  <div key={r.key} className="liquid-glass-inset rounded-xl px-2.5 py-2 space-y-2">
+                    <div className="flex items-center gap-2 text-xs">{content}</div>
+                    {details}
                   </div>
                 );
               })}
@@ -1620,14 +1634,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
 
       {openBreakdown && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center liquid-glass-backdrop p-4"
           onClick={() => setOpenBreakdown(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
+            className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/60 shrink-0">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">{openBreakdown.title}</h3>
                 <p className="text-xs text-slate-400 mt-0.5">{openBreakdown.entries.length} total &middot; by Department</p>
@@ -1635,7 +1649,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               <button
                 type="button"
                 onClick={() => setOpenBreakdown(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600"
                 aria-label="Close"
               >
                 <X className="w-4 h-4" />
@@ -1652,9 +1666,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   </div>
                   <div className="space-y-1">
                     {g.entries.map((e, idx) => (
-                      <div key={`${e.user_id}-${idx}`} className="flex items-center gap-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
-                        <UserAvatar userId={e.user_id} name={e.name} className="w-5 h-5 text-[9px]" color={avatarColorFor(e.user_id)} />
-                        <span className="text-slate-700 font-medium truncate">{e.name}</span>
+                      <div key={`${e.user_id}-${idx}`} className="liquid-glass-inset text-xs px-2.5 py-2 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <UserAvatar userId={e.user_id} name={e.name} className="w-5 h-5 text-[9px]" color={avatarColorFor(e.user_id)} />
+                          <span className="text-slate-700 font-medium truncate">{e.name}</span>
+                        </div>
+                        {e.leave_id ? <RequestDetailsInline token={token} type="leave_application" id={e.leave_id} className="max-w-none" /> : null}
                       </div>
                     ))}
                   </div>

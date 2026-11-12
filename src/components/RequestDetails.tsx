@@ -40,8 +40,10 @@ interface Details {
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const nice = (v: string) => {
-  if (!ISO.test(v)) return v;
+  // Plain dates ("2026-11-03", "2026-11-02 to 2026-11-05") read as 03-Nov-2026.
+  if (!ISO.test(v)) return v.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, y, mo, d) => (MON[Number(mo) - 1] ? `${d}-${MON[Number(mo) - 1]}-${y}` : m));
   const d = new Date(v);
   return isNaN(d.getTime()) ? v : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
@@ -256,5 +258,136 @@ export const RequestDetailsButton: React.FC<{ token: string; type: string; id: n
       </button>
       {open && <RequestDetailsPopup token={token} type={type} id={n} onClose={() => setOpen(false)} />}
     </>
+  );
+};
+
+/**
+ * The same details, laid straight into a request card (Approve Application),
+ * so the approver reads what they decide without opening anything: the
+ * request's fields, its item lines, attachments and map points. The
+ * requester, status and approval layer already show on the card, so they
+ * are left out here. `hide` drops fields the card already shows itself;
+ * `noTable` drops the item lines when the card draws its own.
+ */
+export const RequestDetailsInline: React.FC<{ token: string; type: string; id: number | string; hide?: string[]; noTable?: boolean; className?: string }> = ({
+  token,
+  type,
+  id,
+  hide = [],
+  noTable = false,
+  className = ''
+}) => {
+  const n = Number(id);
+  const [data, setData] = useState<Details | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!type || !Number.isFinite(n) || n <= 0) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(apiUrl(`/api/approval-details?type=${encodeURIComponent(type)}&id=${n}`), { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        if (alive) setData(d);
+      } catch {
+        if (alive) setFailed(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [token, type, n]);
+
+  if (!type || !Number.isFinite(n) || n <= 0 || failed) return null;
+  if (!data)
+    return (
+      <div className={`mt-2 max-w-xl grid grid-cols-2 gap-x-4 gap-y-2 ${className}`} aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i}>
+            <div className="h-2 w-14 rounded-full bg-slate-200/80 animate-pulse" />
+            <div className="mt-1 h-2.5 w-24 rounded-full bg-slate-200/80 animate-pulse" />
+          </div>
+        ))}
+      </div>
+    );
+
+  const skip = new Set(['Status', ...hide]);
+  const fields = data.fields.filter((f) => !skip.has(f.label) && f.value !== '');
+  const openFile = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const r = await fetch(apiUrl(`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${n}`), { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return;
+    const url = URL.createObjectURL(await r.blob());
+    window.open(url, '_blank', 'noopener');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+  const table = !noTable && data.table && data.table.rows.length ? data.table : null;
+  if (!fields.length && !table && !data.attachments.length && !data.locations.length) return null;
+  return (
+    <div className={`mt-2 max-w-xl space-y-2 ${className}`}>
+      {fields.length > 0 && (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-xl bg-white/60 border border-slate-200/80 px-3 py-2">
+          {fields.map((f, i) => (
+            <div key={i} className={f.value.length > 40 ? 'col-span-2' : ''}>
+              <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{f.label}</dt>
+              <dd className="text-xs text-slate-800 whitespace-pre-wrap break-words">{nice(f.value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {table && (
+        <div className="rounded-xl border border-slate-200/80 bg-white/60 overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-slate-400">
+                {table.columns.map((c) => (
+                  <th key={c} className="px-2.5 py-1.5 font-semibold capitalize">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((row, i) => (
+                <tr key={i} className="border-t border-slate-100">
+                  {row.map((cell, j) => (
+                    <td key={j} className="px-2.5 py-1.5 text-slate-700 align-top">
+                      {nice(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(data.attachments.length > 0 || data.locations.length > 0) && (
+        <div className="flex flex-wrap gap-1.5">
+          {data.attachments.map((a, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={(e) => void openFile(e)}
+              disabled={!data.has_file}
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Paperclip className="w-3 h-3" /> {a.label}
+            </button>
+          ))}
+          {data.locations.map((l, i) => (
+            <a
+              key={i}
+              href={`https://www.google.com/maps?q=${l.lat},${l.lng}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 hover:bg-slate-50"
+            >
+              <MapPin className="w-3 h-3 text-rose-500" /> {l.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
