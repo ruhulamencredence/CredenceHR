@@ -1,0 +1,53 @@
+// Conveyance Disbursement filters (GET /api/conveyance-bills?limit=… and
+// /filter-options). Run after disb-setup.sql; test server :3200.
+import { execSync } from 'node:child_process';
+const B = 'http://127.0.0.1:3200';
+const sql = (q) => execSync(`mysql -ucred -pcredpass admin_ui -N -e ${JSON.stringify(q)} 2>/dev/null`).toString().trim();
+const login = async (email) => (await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'ProbePass123', workspace: 'credence' }) })).json()).token;
+let pass = 0, n = 0;
+const ok = (name, c, x = '') => { n++; if (c) pass++; console.log(c ? 'PASS' : 'FAIL', name, c ? '' : x); };
+sql("UPDATE users u JOIN (SELECT password_hash FROM users WHERE id = 1) a SET u.password_hash = a.password_hash WHERE u.id IN (133, 140)");
+const sa = await login('admin@credence.test');
+const ids = sql("SELECT GROUP_CONCAT(id ORDER BY id) FROM conveyance_bills WHERE remarks = 'QA disb'").split(',').map(Number);
+const [A, Bb, C, D, E, F] = ids;
+const list = async (t, qs) => { const r = await fetch(`${B}/api/conveyance-bills?limit=200&${qs}`, { headers: { authorization: 'Bearer ' + t } }); return { s: r.status, j: await r.json().catch(() => null) }; };
+const got = async (qs) => (await list(sa, qs)).j.rows.map((r) => r.id).filter((id) => ids.includes(id)).sort((a, b) => a - b).join();
+const want = (...x) => x.sort((a, b) => a - b).join();
+const m = sql("SELECT DATE_FORMAT(CURDATE(), '%Y-%m')");
+
+let r = (await list(sa, 'status=pending')).j;
+ok('rows carry Employee ID, designation, department, branch', r.rows.find((x) => x.id === A)?.designation === 'Officer, Accounts' && r.rows.find((x) => x.id === A)?.employee_code === 'EMP-0048' && r.rows.find((x) => x.id === A)?.department === 'Finance' && r.rows.find((x) => x.id === A)?.branch === 'Head Office', JSON.stringify(r.rows[0]));
+ok('summary adds up the filtered bills', r.summary && r.summary.bills === r.total && r.summary.pending === r.total && r.summary.disbursed === 0, JSON.stringify(r.summary));
+ok('department=MIS → only Tanvir\'s', await got('department=MIS') === want(E, F));
+ok('designation', await got('designation=' + encodeURIComponent('Executive, Accounts')) === want(D));
+ok('branch', await got('branch=' + encodeURIComponent('Gulshan Site')) === want(E, F));
+ok('search by name', await got('q=rafiq') === want(A, Bb, C));
+ok('search by Employee ID', await got('q=EMP-0037') === want(E, F));
+ok('search by Bill No (CB-…)', await got(`q=CB-${D}`) === want(D));
+ok('search by voucher no', await got('q=PV-QA-77') === want(C));
+ok('search with % or _ is taken literally', await got('q=%25') === '' && await got('q=_') === '');
+ok('bill date this month leaves the 2025 one out', await got(`from=${m}-01&to=${m}-31`) === want(A, Bb, C, D, E));
+ok('disbursed date + disbursed by', await got(`dfrom=2025-03-01&dto=2025-03-31&disbursed_by=1`) === want(F));
+ok('category Food', await got('category=Food') === want(A));
+ok('category Conveyance = Check In/Out and typed-in lines', await got('category=Conveyance') === want(Bb, C, E, F));
+ok('source Bill Claim', await got('source=bill_claim') === want(A, D));
+ok('source Check In/Out', await got('source=checkin') === want(C));
+ok('source manual', await got('source=manual') === want(Bb, E, F));
+ok('amount from / to', await got('min=400&max=1000') === want(A, E));
+r = (await list(sa, 'department=Finance&branch=Head%20Office&status=all')).j;
+ok('several together + summary', r.summary.bills === 4 && r.summary.total === 900 + 300 + 2000 + 1500 && r.summary.disbursed_total === 2000 && r.summary.pending_total === 2700, JSON.stringify(r.summary));
+ok('paging keeps the filtered total', (await list(sa, 'department=Finance&branch=Head%20Office&status=all&limit=1')).j.total === 4);
+const o = await (await fetch(B + '/api/conveyance-bills/filter-options', { headers: { authorization: 'Bearer ' + sa } })).json();
+ok('filter options list departments, branches, disbursers, categories', o.departments.includes('MIS') && o.branches.includes('Gulshan Site') && o.disbursers.some((d) => d.id === 1) && o.categories.includes('Food') && o.categories.includes('Conveyance'), JSON.stringify(o));
+ok('a bad SQL-looking value is just text', (await list(sa, "department=x' OR '1'='1")).j.total === 0);
+
+console.log('— who may');
+const kamal = await login('kamal.uddin@credence.test');
+ok('no Disbursement / Bill Claim module: list 403', (await list(kamal, 'status=all')).s === 403);
+ok('no module: filter options 403', (await fetch(B + '/api/conveyance-bills/filter-options', { headers: { authorization: 'Bearer ' + kamal } })).status === 403);
+sql("DELETE FROM admin_module_permissions WHERE user_id = 133; INSERT INTO admin_module_permissions (user_id, module_key) VALUES (133, 'disbursement')");
+const t133 = await login('roster.hr@credence.test');
+ok('Disbursement module: allowed', (await list(t133, 'department=Finance')).s === 200 && (await fetch(B + '/api/conveyance-bills/filter-options', { headers: { authorization: 'Bearer ' + t133 } })).status === 200);
+sql('DELETE FROM admin_module_permissions WHERE user_id = 133');
+console.log(`\n${pass}/${n} passed`);
+process.exit(pass === n ? 0 : 1);

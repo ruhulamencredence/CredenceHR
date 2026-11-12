@@ -50,3 +50,14 @@ before / after captured with `scripts/details-access-probe.mjs`.
 | Check | Result |
 |---|---|
 | `details-access-api.mjs`: employee refused on own pending HR Action and HR-opened termination, still opens own resignation and leave; Approvals module alone refused on HR Action / Exit, still opens leave; HR Operations opens HR Action with salary `*****`, with "See salary amounts" sees it; Exit / Offboarding opens Exit; chain approvers and Superadmin see everything; the file route follows the same rule | 17/17 |
+
+# Conveyance Disbursement: every filter in the toolbar
+
+Data: `scripts/disb-setup.sql` (six bills — Rafiq: Food claim, typed-in,
+Check In/Out disbursed; Sadia: Transport claim; Tanvir (MIS, Gulshan Site):
+typed-in, and one from 2025 disbursed).
+
+| Check | Result |
+|---|---|
+| API (`disb-filters-api.mjs`): rows carry Employee ID / designation / department / branch; summary; Department, Designation, Branch, Search (name, Employee ID, CB-no, voucher no, `%` / `_` literal), Bill date, Disbursed date + by, Category (Food; Conveyance = Check In/Out and typed-in), Source, Amount from/to, several together, paging total, filter options; SQL-looking text is just text; no module 403, Disbursement module allowed | 25/25 |
+| Screen (`disb-filters-ui.mjs`): every filter in the toolbar; designation under the name; summary; Department, Search + Category, chips, Clear all, Disbursed date picked dates, Amount; phone fits, Filters sheet, card shows designation; no page errors | 15/15 |
