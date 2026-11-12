@@ -155,7 +155,7 @@ const suggestVoucherNo = (billId: number) => {
   return `PV-${billId}-${y}${m}${day}`;
 };
 
-// Admin Panel -> Conveyance Disbursement (Superadmin + explicitly-granted
+// Admin Panel -> Bill Disbursement (Superadmin + explicitly-granted
 // Admins only — see ADMIN_MODULES/'disbursement'). Sits one step downstream of
 // Bill Claim: once a Bill's items have been approved and finalized
 // there, this is where the money actually going out gets recorded (a Voucher
@@ -651,10 +651,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
         <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Banknote className="w-4 h-4 text-emerald-600" /> Conveyance Disbursement
+              <Banknote className="w-4 h-4 text-emerald-600" /> Bill Disbursement
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Mark finalized Conveyance Bills as disbursed and print a Payment Voucher for each. Select one or more
+              Mark finalized Bills as disbursed and print a Payment Voucher for each. Select one or more
               Pending bills to disburse them together.
             </p>
           </div>

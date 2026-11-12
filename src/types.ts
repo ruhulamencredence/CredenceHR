@@ -46,7 +46,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'tracking', label: 'Employee Tracking' },
   { key: 'claims', label: 'Check In/Out' },
   { key: 'bill_claim', label: 'Bill Claim' },
-  { key: 'disbursement', label: 'Conveyance Disbursement' },
+  { key: 'disbursement', label: 'Bill Disbursement' },
   { key: 'approvals', label: 'Approvals' },
   { key: 'notices', label: 'Notices' },
   { key: 'holidays', label: 'Holidays (Global Calendar)' },
@@ -2126,7 +2126,7 @@ export interface ConveyanceBill {
   item_count?: number;
   total_amount?: number;
   items?: ConveyanceBillItem[];
-  // Set once this Bill has been paid out (Admin Panel -> Conveyance Disbursement,
+  // Set once this Bill has been paid out (Admin Panel -> Bill Disbursement,
   // Superadmin + explicitly-granted Admins only — see ADMIN_MODULES/'disbursement').
   // A Bill is otherwise just a claim document; disbursement is the separate
   // "money actually handed over" step, recorded here so it isn't re-paid by

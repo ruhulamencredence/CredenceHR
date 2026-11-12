@@ -574,7 +574,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
   // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
-  // (Check In/Out, Bill Claim, Conveyance Disbursement, My
+  // (Check In/Out, Bill Claim, Bill Disbursement, My
   // Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
   // World-class HRM extension modules (Exit/Offboarding, Performance,

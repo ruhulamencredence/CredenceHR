@@ -34,7 +34,7 @@ const PAGE_LABEL: Record<DashPage, string> = {
   leave_applications: 'Leave Applications',
   approvals: 'Approvals',
   target_reports: 'Target Reports',
-  disbursement: 'Conveyance Disbursement',
+  disbursement: 'Bill Disbursement',
   bill_claim: 'Bill Claim',
   mprs: 'MPR Numbers',
   reports: 'PEPM Reports',
