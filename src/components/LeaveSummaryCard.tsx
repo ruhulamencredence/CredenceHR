@@ -89,7 +89,7 @@ useLiveRefresh(() => load());
         // grid (see the same note on AttendanceCard). The violet header
         // inside stays either way — that's this card's own identity, not the
         // mobile surface treatment.
-        className="glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
+        className="glass-mask-fix leave-card relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
       {/* No backdrop-blur on this outer shell (there used to be one, split
           onto its own absolutely-positioned -z-10 child layer to work
@@ -114,7 +114,11 @@ useLiveRefresh(() => load());
           this header is just the title/subtitle plus a decorative Lottie
           badge in the top-right corner (pointer-events-none — purely
           visual, so it never blocks the card's onOpen tap target). */}
-      <div className="px-5 pt-5 pb-6 sm:px-6 text-white" style={{ background: 'var(--g-gradient)' }}>
+      {/* Dark Glass: the header's colour band gives way to a soft orange
+          glow from the top-right corner and a thin orange line along the top
+          edge (.leave-card in index.css). Light and plain Dark keep the band. */}
+      <div className="leave-glow" aria-hidden="true" />
+      <div className="leave-head relative px-5 pt-5 pb-6 sm:px-6 text-white" style={{ background: 'var(--g-gradient)' }}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-bold flex items-center gap-2">
@@ -141,7 +145,7 @@ useLiveRefresh(() => load());
           glass-mask-fix (index.css) covers the broader version of that same
           bug for this strip's own rounded translucent background,
           independent of whether blur is present at all. */}
-      <div className="px-5 sm:px-6 -mt-4 pb-5">
+      <div className="relative px-5 sm:px-6 -mt-4 pb-5">
         <div
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
           className={`glass-mask-fix bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
@@ -153,13 +157,13 @@ useLiveRefresh(() => load());
               <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" /> Available
               </div>
-              <p className="text-lg font-bold text-slate-900 mt-0.5">{available}</p>
+              <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{available}</p>
             </div>
             <div>
               <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used
               </div>
-              <p className="text-lg font-bold text-slate-900 mt-0.5">{used}</p>
+              <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{used}</p>
             </div>
           </div>
         </div>
