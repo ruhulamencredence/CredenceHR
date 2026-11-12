@@ -1945,9 +1945,11 @@ export default function App() {
           and on phone-width web (mobile browser, iPhone Home Screen) so a
           phone looks the same everywhere. */}
       {!Capacitor.isNativePlatform() && (
-        <footer className="hidden md:block py-6 text-center text-xs" style={{ background: 'var(--g-accent)', color: 'rgba(255,255,255,0.85)' }}>
+        // No band of its own: small, quiet text on the page's own background,
+        // right at the bottom.
+        <footer className="hidden md:block mt-auto pt-2 pb-1.5 text-center text-[10px] leading-tight text-slate-400">
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
-          <p className="mt-1" style={{ color: 'rgba(255,255,255,0.65)' }}>&copy; 2026 Credence Housing Limited. All rights reserved.</p>
+          <p className="opacity-80">&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>
       )}
         </div>
