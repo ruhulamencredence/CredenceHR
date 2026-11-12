@@ -1503,3 +1503,7 @@ html[data-dark][data-dark] .auth-glow {
 /* Book a Ride card's background map (BookRideCard.tsx). */
 .ride-map { --rm-land: #eef2f6; --rm-water: #cfe3f5; --rm-park: #d7ecd9; --rm-block: #e3e8ee; --rm-road: #ffffff; --rm-route: #f97316; }
 html[data-dark] .ride-map { --rm-land: #262b33; --rm-water: #1f3447; --rm-park: #22362a; --rm-block: #2d333c; --rm-road: #3a414b; --rm-route: #fb923c; }
+
+/* My Attendance card's background clock (AttendanceCard.tsx, web only). */
+.att-clock { --ac-face: #fff3e8; --ac-rim: #e2e8f0; --ac-tick: #cbd5e1; --ac-accent: #f97316; }
+html[data-dark] .att-clock { --ac-face: #2c2622; --ac-rim: #323843; --ac-tick: #3d4450; --ac-accent: #fb923c; }
