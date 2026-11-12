@@ -118,6 +118,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
             is_active: !!Number(e.is_active),
             created_at: e.created_at,
             user_id: e.user_id || null,
+            // Office Attendance device PIN — the edit form shows (and keeps) it.
+            zk_device_pin: e.zk_device_pin ?? null,
             // Whose employee (the list mixes companies in All companies mode).
             company_id: Number(e.company_id ?? 1)
           };
