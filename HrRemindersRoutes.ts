@@ -9,7 +9,8 @@
 //   probation   — hr_employee_service.probation_end_date, until confirmed
 //   contract    — hr_employee_service.contract_end_date
 //   document    — employee_documents.expiry_date
-//   retirement  — date of birth + the retirement age (HR Ops Settings)
+//   retirement  — date of birth + the retirement age (HR Ops Settings) — off
+//                 unless ticked there (not wanted on the dashboard)
 //   increment   — the active increment policy (computeIncrementsDue)
 //
 // Who is told: Admin / User accounts ticked for the HR Operations layer
@@ -132,7 +133,8 @@ const dateOnly = (v: any): string | null => {
 };
 
 export function enabledKinds(settings: Record<string, string>): ReminderKind[] {
-  const want = String(settings.reminder_kinds ?? REMINDER_KINDS.join(","))
+  // Retirement is off unless ticked in HR Ops Settings.
+  const want = String(settings.reminder_kinds ?? REMINDER_KINDS.filter((k) => k !== "retirement").join(","))
     .split(",")
     .map((x) => x.trim());
   return REMINDER_KINDS.filter((k) => want.includes(k));

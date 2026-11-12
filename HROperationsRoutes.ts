@@ -142,7 +142,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   reminder_lead_days: "30,15,7,0",
   reminder_notify_supervisor: "1",
   retirement_age: "60",
-  reminder_kinds: "probation,contract,document,retirement,increment"
+  // Retirement is off by default (not wanted on "Coming up"); HR can tick it
+  // in Settings.
+  reminder_kinds: "probation,contract,document,increment"
 };
 
 const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: string; due_days: number }[] = [
@@ -600,6 +602,25 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       }
     } catch {
       // company_id not there yet on a brand-new database — the plain seed above already has them.
+    }
+    // Retirement reminders were on by default and aren't wanted: take them off
+    // once per company that had saved its reminder kinds (a marker keeps HR
+    // ticking it back on in Settings from being undone).
+    try {
+      const [cos]: any = await dbPool.query("SELECT DISTINCT company_id FROM hr_ops_settings");
+      for (const co of cos || []) {
+        const cid = Number(co.company_id);
+        const [mark]: any = await dbPool.query("SELECT id FROM hr_ops_settings WHERE company_id = ? AND setting_key = 'reminder_retirement_off_v1'", [cid]);
+        if (mark.length) continue;
+        const [rows]: any = await dbPool.query("SELECT id, setting_value FROM hr_ops_settings WHERE company_id = ? AND setting_key = 'reminder_kinds'", [cid]);
+        for (const r of rows || []) {
+          const next = String(r.setting_value || "").split(",").map((x: string) => x.trim()).filter((x: string) => x && x !== "retirement").join(",");
+          await dbPool.query("UPDATE hr_ops_settings SET setting_value = ? WHERE id = ?", [next, r.id]);
+        }
+        await dbPool.query("INSERT INTO hr_ops_settings (company_id, setting_key, setting_value) VALUES (?, 'reminder_retirement_off_v1', '1')", [cid]);
+      }
+    } catch {
+      // company_id not there yet on a brand-new database — the default is already off.
     }
   } catch (err: any) {
     console.warn("⚠️ Could not seed HR Operations defaults: " + err.message);

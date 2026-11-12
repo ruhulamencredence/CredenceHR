@@ -129,7 +129,7 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
             ['retirement', 'Retirement'],
             ['increment', 'Increment due']
           ].map(([k, label]) => {
-            const kinds = String(s.reminder_kinds ?? 'probation,contract,document,retirement,increment').split(',').filter(Boolean);
+            const kinds = String(s.reminder_kinds ?? 'probation,contract,document,increment').split(',').filter(Boolean);
             return (
               <label key={k} className="flex items-center gap-1.5 text-xs text-slate-700">
                 <input
