@@ -95,7 +95,69 @@ const COLUMNS: Record<QuickKind, Col[]> = {
     { label: 'Designation', get: (r) => r.designation || '' },
     { label: 'Department', get: (r) => r.department || '' },
     { label: 'Religion', get: (r) => r.religion || 'Not recorded' }
+  ],
+  attendance: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Present / working days', get: (r) => `${r.present} / ${r.working}` },
+    { label: 'Absent', get: (r) => String(r.absent) },
+    { label: 'Leave', get: (r) => String(r.leave) },
+    { label: 'Late', get: (r) => `${r.late}${r.extreme_late ? ` (${r.extreme_late} extreme)` : ''}` },
+    { label: 'Attendance', get: (r) => (r.percent == null ? '—' : `${r.percent}%`) }
+  ],
+  leave: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Casual (taken / left)', get: (r) => `${r.casual_taken} / ${r.casual_balance ?? '—'}` },
+    { label: 'Sick (taken / left)', get: (r) => `${r.sick_taken} / ${r.sick_balance ?? '—'}` },
+    { label: 'Without pay', get: (r) => (r.lwp ? `${r.lwp} day${r.lwp === 1 ? '' : 's'}` : '—') },
+    { label: 'Last leave', get: (r) => dShort(r.last_leave) }
+  ],
+  contracts: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Category', get: (r) => r.employment_category || '' },
+    { label: 'Joined', get: (r) => dShort(r.joining_date) },
+    { label: 'Contract ends', get: (r) => `${dShort(r.contract_end_date)} (${daysText(r.days)})` }
+  ],
+  headcount: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Gender', get: (r) => r.gender || 'Not recorded' },
+    { label: 'Branch', get: (r) => r.branch || '—' },
+    { label: 'Project', get: (r) => r.project || '—' },
+    { label: 'Category', get: (r) => r.category || '—' }
+  ],
+  records: [
+    { label: 'Employee', get: (r) => r.name },
+    { label: 'Employee ID', get: (r) => r.employee_code || '' },
+    { label: 'Designation', get: (r) => r.designation || '' },
+    { label: 'Department', get: (r) => r.department || '' },
+    { label: 'Expired documents', get: (r) => (r.expired.length ? r.expired.join(', ') : '—') },
+    { label: 'Awaiting signature', get: (r) => (r.unsigned ? String(r.unsigned) : '—') },
+    { label: 'App login', get: (r) => (r.no_login ? 'None' : 'Yes') }
   ]
+};
+// The later reports' views: chips above the table, and which rows each keeps.
+const HEADCOUNT_DIMS: { key: string; label: string; field: string; none: string }[] = [
+  { key: 'gender', label: 'Gender', field: 'gender', none: 'Not recorded' },
+  { key: 'branch', label: 'Branch', field: 'branch', none: 'No branch' },
+  { key: 'project', label: 'Project', field: 'project', none: 'No project' },
+  { key: 'category', label: 'Employment category', field: 'category', none: 'Not recorded' }
+];
+const VIEW_FILTER: Partial<Record<QuickKind, Record<string, (r: any) => boolean>>> = {
+  attendance: { low: (r) => r.low, late: (r) => r.often_late },
+  leave: { low: (r) => r.low, lwp: (r) => r.took_lwp },
+  contracts: { due: (r) => r.state === 'due', ended: (r) => r.state === 'ended' },
+  records: { expired: (r) => r.expired.length > 0, unsigned: (r) => r.unsigned > 0, no_login: (r) => r.no_login }
 };
 
 const pill = (on: boolean) =>
@@ -149,7 +211,8 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
 
   const today = data?.today || new Date().toISOString().slice(0, 10);
   const range = periodRange(period, today, custom);
-  const usesPeriod = kind !== 'religion';
+  // Religion, contracts, headcount and records are about today, not a period.
+  const usesPeriod = !['religion', 'contracts', 'headcount', 'records'].includes(kind);
   useEffect(() => {
     if (period === 'custom' && (!custom.from || !custom.to)) return;
     let live = true;
@@ -172,7 +235,7 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, kind, range.from, range.to, department, exitType]);
-  useEffect(() => setView(kind === 'probation' ? 'open' : ''), [kind]);
+  useEffect(() => setView(kind === 'probation' ? 'open' : kind === 'headcount' ? 'gender:' : ''), [kind]);
 
   const rows: any[] = useMemo(() => {
     if (!data || data.kind !== kind) return [];
@@ -180,11 +243,18 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
     if (kind === 'probation') return view === 'open' ? all.filter((r) => r.state !== 'confirmed') : view ? all.filter((r) => r.state === view) : all;
     if (kind === 'religion') return view ? all.filter((r) => (r.religion || 'Not recorded') === view) : all;
     if (kind === 'joiners') return view ? all.filter((r) => (r.department || 'No department') === view) : all;
-    return all;
+    if (kind === 'headcount') {
+      // view = "<dimension>:<value>" — empty value lists everyone.
+      const [dimKey, value] = [view.split(':')[0], view.slice(view.indexOf(':') + 1)];
+      const dim = HEADCOUNT_DIMS.find((d) => d.key === dimKey);
+      return dim && value ? all.filter((r) => (r[dim.field] || dim.none) === value) : all;
+    }
+    const f = VIEW_FILTER[kind]?.[view];
+    return f ? all.filter(f) : all;
   }, [data, kind, view]);
 
   const title = KINDS.find((k) => k.key === kind)!.title;
-  const periodText = usesPeriod ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'Active employees';
+  const periodText = kind === 'attendance' && data?.month ? `Month ${data.month}` : kind === 'leave' && data?.year ? `Year ${data.year}` : usesPeriod ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'Active employees';
   const filterText = [department || 'All departments', kind === 'resignations' && exitType ? exitType : '', view && view !== 'open' ? (STATE_TEXT[view] || view) : ''].filter(Boolean).join(' · ');
 
   const exportExcel = () => {
@@ -193,6 +263,13 @@ export const HrQuickReports: React.FC<{ token: string; onOpenEmployee: (id: numb
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([cols.map((c) => c.label), ...rows.map((r) => cols.map((c) => c.get(r)))]), title.slice(0, 30).replace(/[\\/?*[\]:]/g, ''));
     if (kind === 'religion' && data?.groups) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Religion', 'Employees', '%'], ...data.groups.map((g: any) => [g.label, g.count, g.percent])]), 'Summary');
+    }
+    if (kind === 'headcount' && data?.dimensions) {
+      const aoa: any[][] = [];
+      for (const d of HEADCOUNT_DIMS) {
+        aoa.push([d.label, 'Employees', '%'], ...(data.dimensions[d.key] || []).map((g: any) => [g.label, g.count, g.percent]), []);
+      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Summary');
     }
     if (kind === 'resignations' && data?.reasons) {
       XLSX.utils.book_append_sheet(
@@ -457,6 +534,20 @@ const Cells: React.FC<{ kind: QuickKind; r: any }> = ({ kind, r }) => {
         {td(<Chip tone={r.status}>{EXIT_STATUS[r.status] || r.status}</Chip>)}
       </>
     );
+  if (kind !== 'religion')
+    // The later reports: the shown columns, as plain text.
+    return (
+      <>
+        {who(r)}
+        {COLUMNS[kind]
+          .filter((c) => !['Employee', 'Employee ID', 'Designation'].includes(c.label))
+          .map((c) => (
+            <React.Fragment key={c.label}>
+              {td(c.get(r), `whitespace-nowrap ${(kind === 'attendance' && c.label === 'Attendance' && r.low) || (kind === 'contracts' && r.state === 'ended' && c.label === 'Contract ends') ? 'font-bold text-rose-700' : ''}`)}
+            </React.Fragment>
+          ))}
+      </>
+    );
   return (
     <>
       {who(r)}
@@ -529,6 +620,63 @@ const ReportTop: React.FC<{ kind: QuickKind; data: any; view: string; setView: (
           );
         })}
         <p className="text-xs text-slate-500 pt-1">Tap a religion to list its people. "Not recorded" shows who still needs it filled in.</p>
+      </div>
+    );
+  }
+  const chips = (items: [string, string][]) => (
+    <div className="flex flex-wrap gap-2 px-4 py-3">
+      <button type="button" className={pill(!view)} onClick={() => setView('')}>
+        Everyone listed ({(data.rows || []).length})
+      </button>
+      {items.map(([k, label]) => (
+        <button key={k} type="button" className={pill(view === k)} onClick={() => setView(view === k ? '' : k)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  if (kind === 'attendance') return chips([['low', `Under 80% (${s.low})`], ['late', `Late more than 3 times (${s.often_late})`]]);
+  if (kind === 'leave') return chips([['low', `Casual / Sick left 2 days or less (${s.low})`], ['lwp', `Took leave without pay (${s.lwp})`]]);
+  if (kind === 'contracts') return chips([['due', `Ends in 60 days (${s.due_60})`], ['ended', `Already ended (${s.ended})`]]);
+  if (kind === 'records') return chips([['expired', `Expired documents (${s.expired})`], ['unsigned', `Awaiting signature (${s.unsigned})`], ['no_login', `No app login (${s.no_login})`]]);
+  if (kind === 'headcount') {
+    const dimKey = view.split(':')[0] || 'gender';
+    const value = view.slice(view.indexOf(':') + 1);
+    const groups: any[] = data.dimensions?.[dimKey] || [];
+    const max = Math.max(1, ...groups.map((g) => g.count));
+    return (
+      <div className="px-4 py-3 space-y-2">
+        <div className="flex flex-wrap gap-2">
+          {HEADCOUNT_DIMS.map((d) => (
+            <button key={d.key} type="button" className={pill(dimKey === d.key)} onClick={() => setView(`${d.key}:`)}>
+              {d.label}
+            </button>
+          ))}
+          <span className="text-xs text-slate-500 self-center">
+            {s.total} active · {s.male} male · {s.female} female
+          </span>
+        </div>
+        <div className="space-y-1.5 max-w-xl">
+          {groups.map((g) => {
+            const none = /^(not recorded|no )/i.test(g.label);
+            return (
+              <button
+                key={g.label}
+                type="button"
+                onClick={() => setView(value === g.label ? `${dimKey}:` : `${dimKey}:${g.label}`)}
+                className={`w-full grid grid-cols-[9rem_1fr_3rem_3rem] items-center gap-2 text-sm text-left rounded-lg px-1.5 py-1 ${value === g.label ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+              >
+                <span className={`truncate ${none ? 'text-rose-700 font-semibold' : 'text-slate-700'}`}>{g.label}</span>
+                <span className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <span className={`block h-full rounded-full ${none ? 'bg-rose-300' : 'bg-blue-500'}`} style={{ width: `${Math.max(2, (g.count / max) * 100)}%` }} />
+                </span>
+                <b className={none ? 'text-rose-700' : 'text-slate-800'}>{g.count}</b>
+                <span className="text-xs text-slate-500">{g.percent}%</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-500">Tap a bar to list its people.</p>
       </div>
     );
   }
