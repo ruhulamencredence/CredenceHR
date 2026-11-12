@@ -72,3 +72,22 @@ dark colours; in Dark Glass the popup was see-through over that light veil.
 Checked by screenshots (desktop popup and phone Chat, Light / Dark / Dark
 Glass, with a three-message conversation): list, names, both bubble kinds and
 the typing bar readable in Dark and Dark Glass; Light unchanged.
+
+# Soft test of the whole application (end of day)
+
+Code at `490025c` (+ this log), test server :3200, test database.
+
+| Check | Result |
+|---|---|
+| Typecheck (`tsc --noEmit`) | clean |
+| Unit tests (onboarding, HR linkage, fingerprint, APK) | 54 + 25 + 4 + 7, 0 failed |
+| Production build (`npm run build`) | ok (only the usual large-chunk notice) |
+| QA suite (`tests/qa/run-all.sh`) | all suites passed (174 checks) |
+| Today's feature tests: quick-api, details-access-api, disb-filters-api, dept-api, app-access-api | 42/42, 17/17, 25/25, 33/33 (after `dept-setup.sql`), 18/18 |
+| Page walk (`scripts/crawl.mjs`): every Admin page and Self Service page, computer + phone — Superadmin and an employee in Light (192 pages), Superadmin in Dark Glass (142 pages) | no page errors, no failed API calls (no 4xx / 5xx), no sideways overflow, no blank page; slowest page ~5 s on the dev server |
+
+The crawl flagged 66 pages for the text "nan"; it matches case-insensitively, so
+"Fi**nan**ce" set it off. Checked again on all those pages for a real `NaN`,
+`undefined` or `[object Object]` (whole word, exact case), computer and phone:
+none. Dark Glass screenshots of Management Dashboard, HR Operations (phone) and
+Leave Applications read fine.
