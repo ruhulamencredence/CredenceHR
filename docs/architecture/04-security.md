@@ -240,6 +240,8 @@
 
 ১২ নভেম্বর — **PEPM প্রজেক্ট team** (`PepmTeam.ts`): Self Service-এ entry দেখা ও বদলানো এখন প্রজেক্টের permission (`user_project_permissions`) ধরে — একই প্রজেক্টের সবাই সবার entry দেখে ও বদলায়, অন্য প্রজেক্টের কিছু নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের সব entry-র অধিকার সাথে সাথে যায় (নিজের দেওয়াগুলোরও)। server-এর প্রতিটা route (`GET/PUT/DELETE /api/entries`, split, Add MPR, Job Edit, Final Submit, `material-receive/my-mpr`, confirm, take-back) প্রজেক্ট যাচাই করে; Admin role একা যথেষ্ট নয় (Reports layer লাগে, আগের মতো)। Final Submit-এর আটকানো প্রতি Budget + প্রজেক্ট (`budget_project_locks`), তাই submit-কারী transfer হলেও খোলে না।
 
+১২ নভেম্বর — **Approval Details** (`ApprovalDetailsRoutes.ts`): একটা আবেদনের পুরো তথ্য ও সংযুক্ত ফাইল (`GET /api/approval-details`, `/file`) দেখতে পারেন শুধু — যিনি চেয়েছেন; ঐ আবেদনের chain-এর যেকোনো approver (Supervisor, Head, Template Layer-এর যে কেউ, পুরনো global chain-এর step, ad-hoc approver ও যিনি তাঁকে ডেকেছেন, যিনি আগে approve / reject করেছেন); ছুটির Reliever বা সরাসরি Approver; Exit-এর clearance approver; HR action-এর chain-এর approver ও যিনি তুলেছেন; Approvals module-ওয়ালা Admin; Superadmin। বাকিরা 403। আগে Bill Claim / Attendance Correction-এর ফাইল শুধু মালিক বা ঐ module-এর Admin খুলতে পারতেন, সাধারণ approver পারতেন না — এখন এই পথে approver-ও দেখেন, অন্য কেউ নয়।
+
 ২৫ অক্টোবরের আগে ধরা এবং এখন **ঠিক হওয়া** জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।
 
 ---

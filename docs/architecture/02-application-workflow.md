@@ -361,6 +361,10 @@ flowchart TD
 
 ---
 
+## Approval-এর আবেদনের Details
+
+যিনি approve করবেন তিনি যেন জানেন কী approve করছেন — প্রতিটা আবেদনের পাশে **Details** বোতাম, যেখানেই approval দেখায়: Self Service → Approve Application (Pending আর History), Dashboard-এর Pending Approvals card, উপরের approvals bell, ফোনের Approve পাতা, Admin Panel → Approvals আর Admin Dashboard-এর "Stuck for 3+ days"। চাপলে liquid-glass popup (`src/components/RequestDetails.tsx`) — কে চেয়েছেন (Employee ID, পদ, Department, Branch, কবে), আবেদনের সব ঘর, সারির টেবিল (Bill Claim-এর bill, Asset-এর item, HR action-এর আগে → পরে, Exit clearance-এর সব department), সংযুক্ত ফাইল, check in / out-এর জায়গা (Google Maps), আর approval কতদূর (কোন Layer-এ কে কী করেছেন, মন্তব্য, এখন কার অপেক্ষায়)। ছুটিতে ঐ বছরে একই ধরনের আগে approve হওয়া দিনও, Loan / Advance-এ আগের approve হওয়া loan। ধরন: Bill Claim, Attendance Correction, Leave (Reliever / সরাসরি approver সহ), Asset, Vehicle, Mobile limit, Loan / Advance, Check In/Out, Movement, HR action, Exit clearance। Data: `GET /api/approval-details?type=&id=`, ফাইল `GET /api/approval-details/file` (`ApprovalDetailsRoutes.ts`)।
+
 ## ১২. PEPM: প্রকল্পের MPR চক্র
 
 ```mermaid

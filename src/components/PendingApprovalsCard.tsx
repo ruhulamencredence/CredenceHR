@@ -1,4 +1,5 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
+import { RequestDetailsButton } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { readScreenCache, writeScreenCache } from '../lib/screenCache';
 import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
@@ -485,6 +486,7 @@ useLiveRefresh(() => load());
                         <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>
                       )}
                     </div>
+                    <RequestDetailsButton token={token} type={item.source_type} id={item.source_id} className="mt-1.5" />
                     <div className="text-[11px] text-slate-400 mt-1">
                       From {item.requested_by_name || `User #${item.requested_by}`}
                       {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
