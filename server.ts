@@ -3774,7 +3774,7 @@ async function startServer() {
     setTimeout(() => requestApprovalReconcile(0), 20 * 1000);
   }
   // "Details" of any request, for whoever approves it (ApprovalDetailsRoutes.ts).
-  registerApprovalDetailsRoutes(app, { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString });
+  registerApprovalDetailsRoutes(app, { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString, hasModuleLayer });
   registerApprovalRoutes(app, {
     rehomeAwaitingApprovals,
     reconcilePendingApprovals,

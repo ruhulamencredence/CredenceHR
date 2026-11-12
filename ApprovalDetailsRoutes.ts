@@ -19,6 +19,17 @@
 // already acted); the Reliever / direct Approver of a Leave Application;
 // the approvers of an Exit's clearance items; an Admin with the Approvals
 // module (who sees every request there); the Superadmin. Nobody else.
+//
+// HR Actions and Exits are decided ABOUT someone, not asked for by them:
+//   - the employee never opens an HR Action about them (a separation,
+//     demotion or increment HR is still deciding), nor an Exit HR opened for
+//     them (a termination) — only a resignation they asked for themselves;
+//   - the Approvals module alone doesn't open them (it never listed them):
+//     an HR Action needs HR Operations, an Exit needs Exit / Offboarding,
+//     besides the people in its own chain;
+//   - salary in an HR Action ("Now -> Becomes") is shown only to the
+//     Superadmin, whoever raised it, its approvers, and accounts with
+//     Payroll's "See salary amounts"; everyone else gets "*****".
 
 import type { Express } from "express";
 
@@ -31,7 +42,11 @@ interface Deps {
   getApprovalChain: () => Promise<any[]>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   toDateOnlyString: (value: any) => string | null;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
 }
+
+const SALARY_KEY = /salary|basic|gross|house_rent|medical|conveyance|allowance|pf_|_pf|tax|increment|amount|pay/i;
+const MASK = "*****";
 
 const TYPE_LABEL: Record<string, string> = {
   bill_claim: "Bill Claim",
@@ -71,7 +86,7 @@ const leaveTypeLabel = (t: string) =>
   ({ casual: "Casual", sick: "Sick", lwp: "Leave Without Pay", earned: "Earned", maternity: "Maternity", paternity: "Paternity" } as Record<string, string>)[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ") : "Leave");
 
 export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
-  const { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString } = deps;
+  const { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString, hasModuleLayer } = deps;
   const d = (v: any) => (v ? toDateOnlyString(v) : null);
   const dt = (v: any) => {
     if (!v) return null;
@@ -142,26 +157,37 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
     return null;
   }
 
+  // Everyone in an HR Action's own chain: its approvers and whoever acted.
+  function hrActionPeople(row: any): Set<number> {
+    const ids = new Set<number>();
+    for (const st of parse(row.chain_json, [])) for (const x of st?.approver_ids || []) ids.add(Number(x));
+    for (const h of parse(row.history_json, [])) if (h?.by != null) ids.add(Number(h.by));
+    return ids;
+  }
+
   async function mayOpen(user: any, type: string, id: number, src: { row: any; ownerUserId: number | null }, reqRow: any): Promise<boolean> {
     const me = Number(user.id);
     if (user.role === "superadmin") return true;
-    if (src.ownerUserId === me) return true;
-    if (user.role === "admin" || user.role === "user") {
-      const modules = await getAdminModules(me).catch(() => [] as string[]);
-      if (modules.includes("approvals")) return true;
-    }
-    if (type === "leave_application" || type === "leave_reliever" || type === "leave_direct") {
-      if (Number(src.row.reliever_id) === me || Number(src.row.approver_id) === me || Number(src.row.decided_by) === me) return true;
+    const modules = user.role === "admin" || user.role === "user" ? await getAdminModules(me).catch(() => [] as string[]) : [];
+    if (type === "hr_action") {
+      // Never the employee it is about (unless they raised it themselves).
+      if (Number(src.row.created_by) === me) return true;
+      if (hrActionPeople(src.row).has(me)) return true;
+      return modules.includes("hr_operations");
     }
     if (type === "exit_clearance") {
+      // The employee: only a resignation they asked for (not one HR opened).
+      const ownAsk = src.row.exit_type === "resignation" && (src.row.requested_by == null || Number(src.row.requested_by) === src.ownerUserId);
+      if (src.ownerUserId === me && ownAsk) return true;
+      if (Number(src.row.requested_by) === me) return true;
       const items: any[] = (await queryDB("SELECT approver_user_id, cleared_by FROM exit_clearance_items WHERE exit_id = ?", [Number(src.row.id)]).catch(() => [])) || [];
       if (items.some((i) => Number(i.approver_user_id) === me || Number(i.cleared_by) === me)) return true;
+      return modules.includes("exit_offboarding");
     }
-    if (type === "hr_action") {
-      const chain = parse(src.row.chain_json, []);
-      if (chain.some((s: any) => (s.approver_ids || []).map(Number).includes(me))) return true;
-      if (parse(src.row.history_json, []).some((h: any) => Number(h.by) === me)) return true;
-      if (Number(src.row.created_by) === me) return true;
+    if (src.ownerUserId === me) return true;
+    if (modules.includes("approvals")) return true;
+    if (type === "leave_application" || type === "leave_reliever" || type === "leave_direct") {
+      if (Number(src.row.reliever_id) === me || Number(src.row.approver_id) === me || Number(src.row.decided_by) === me) return true;
     }
     // Every approval_requests row for it (a resubmitted request has several).
     const sourceType = type === "leave_reliever" || type === "leave_direct" ? "leave_application" : type;
@@ -216,7 +242,7 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
   }
 
   // Field list per type: [label, value] pairs (empty values are dropped).
-  async function describe(type: string, src: { row: any }) {
+  async function describe(type: string, src: { row: any }, seesSalary = true) {
     const r = src.row;
     const F = (pairs: [string, any][]) => pairs.filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "").map(([label, value]) => ({ label, value: String(value) }));
     let title = TYPE_LABEL[type] || type;
@@ -393,7 +419,8 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
       const from = parse(r.from_json, {});
       const to = parse(r.to_json, {});
       const keys = [...new Set([...Object.keys(from), ...Object.keys(to)])].filter((k) => !/(_id|^id)$/.test(k) && String(from[k] ?? "") !== String(to[k] ?? ""));
-      if (keys.length) table = { columns: ["What", "Now", "Becomes"], rows: keys.map((k) => [k.replace(/_/g, " "), String(from[k] ?? "—"), String(to[k] ?? "—")]) };
+      const shown = (k: string, v: any) => (!seesSalary && SALARY_KEY.test(k) ? MASK : String(v ?? "—"));
+      if (keys.length) table = { columns: ["What", "Now", "Becomes"], rows: keys.map((k) => [k.replace(/_/g, " "), shown(k, from[k]), shown(k, to[k])]) };
     } else if (t === "exit_clearance") {
       const ci = r.clearance_item;
       title = `Exit clearance — ${ci?.department || ""}`;
@@ -436,7 +463,16 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
       const ok = await read(req, res);
       if (!ok) return;
       const { type, id, src, reqRow } = ok;
-      const body = await describe(type, src);
+      // HR Action salary: Superadmin, who raised it, its approvers, or
+      // Payroll's "See salary amounts".
+      const me = Number(req.user.id);
+      const seesSalary =
+        type !== "hr_action" ||
+        req.user.role === "superadmin" ||
+        Number(src.row.created_by) === me ||
+        hrActionPeople(src.row).has(me) ||
+        (await hasModuleLayer(req.user, "payroll", "salary_amounts").catch(() => false));
+      const body = await describe(type, src, seesSalary);
       let tl = await timeline(reqRow);
       if (!tl && type === "hr_action") {
         const hist = parse(src.row.history_json, []);

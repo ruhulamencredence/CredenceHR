@@ -38,3 +38,15 @@ incl. "muslim" spelling, one inactive, Rumana not recorded.
 |---|---|
 | API (`quick-api.mjs`): the five summary numbers; each report's rows, order, filters (Department, Period, type), onboarding and clearance progress, reasons, turnover (only those already gone), no money fields; unknown report 404; bad dates fall back to this month; no token 401; no HR Operations 403; HR Operations with no layers ticked → allowed (default); layers ticked without Quick reports → 403 on all six routes while HR Operations still opens; ticked → allowed; existing "read" holders get the layer once (`quick-grant.ts`), unticking sticks | 42/42 |
 | Screen (`quick-ui.mjs`): Admin Dashboard "HR reports" card (2 probation, Islam 6); tap Resignations → HR Operations → Reports → Quick reports with Resignations open; Probation (overdue / due soon / Confirmed in period); Religion → Not recorded → Rumana; Transfers + Excel + PDF downloads + This year; New joiners → row → Service Book; Build your own still opens Employee Reports; phone fits; no page errors; an account without the layer sees no card, no Quick reports tab, no menu item; ticked → card shows | 22/22 |
+
+# Approval Details: HR Actions and Exits (fix to 20d5c1c)
+
+Found while checking `20d5c1c`: the employee could open a pending HR Action
+about them (separation with HR's remarks and salary 40000 → 0), and an Exit HR
+opened for them; an Admin with only the Approvals module could open HR Actions
+(with salary) and Exits. Data: `scripts/details-access-setup.sql`;
+before / after captured with `scripts/details-access-probe.mjs`.
+
+| Check | Result |
+|---|---|
+| `details-access-api.mjs`: employee refused on own pending HR Action and HR-opened termination, still opens own resignation and leave; Approvals module alone refused on HR Action / Exit, still opens leave; HR Operations opens HR Action with salary `*****`, with "See salary amounts" sees it; Exit / Offboarding opens Exit; chain approvers and Superadmin see everything; the file route follows the same rule | 17/17 |
