@@ -1499,3 +1499,7 @@ html[data-dark][data-dark] .auth-glow {
     radial-gradient(ellipse 760px 520px at 30% 50%, rgba(var(--g-accent-rgb), 0.22) 0%, rgba(var(--g-accent-rgb), 0.06) 45%, transparent 72%),
     radial-gradient(ellipse 620px 480px at 78% 55%, rgba(99, 102, 241, 0.14) 0%, transparent 70%) !important;
 }
+
+/* Book a Ride card's background map (BookRideCard.tsx). */
+.ride-map { --rm-land: #eef2f6; --rm-water: #cfe3f5; --rm-park: #d7ecd9; --rm-block: #e3e8ee; --rm-road: #ffffff; --rm-route: #f97316; }
+html[data-dark] .ride-map { --rm-land: #262b33; --rm-water: #1f3447; --rm-park: #22362a; --rm-block: #2d333c; --rm-road: #3a414b; --rm-route: #fb923c; }
