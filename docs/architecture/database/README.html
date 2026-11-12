@@ -26,19 +26,19 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>টেবিল</td>
-<td><strong>২৪৬</strong></td>
+<td><strong>২৫৭</strong></td>
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,৬৮১</strong></td>
+<td><strong>২,৭৮৯</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
-<td><strong>২৭৫</strong> (ON DELETE: CASCADE ১৬৬, SET NULL ৯৫, RESTRICT ১৪)</td>
+<td><strong>২৭৮</strong> (ON DELETE: CASCADE ১৬৯, SET NULL ৯৫, RESTRICT ১৪)</td>
 </tr>
 <tr>
 <td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
-<td>৬০</td>
+<td>৬৩</td>
 </tr>
 <tr>
 <td>ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম)</td>
@@ -46,19 +46,19 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>সবচেয়ে বেশি কলামের টেবিল</td>
-<td><code>users</code> (৭৩), <code>all_employees</code> (৪৯), <code>payrolls</code> (৪৩)</td>
+<td><code>users</code> (৭৫), <code>all_employees</code> (৫০), <code>payrolls</code> (৪৩)</td>
 </tr>
 </tbody>
 </table>
 <!-- /AUTO:stats -->
 
-<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৪৬<!--/n--> টেবিল)</h2>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৫৭<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 <a href="diagrams/full-application-er.svg">SVG (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a> · PNG/PDF: GitHub → Actions → সবশেষ <strong>Docs sync</strong> রান → Artifacts → <code>CredenceHR-documentation</code> (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)</p>
 <ul>
 <li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
 <li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
-<li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৭৫<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
+<li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৭৮<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
 </ul>
 <p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.svg" /></p>
 <h2 id="_4">২. মডিউল মানচিত্র</h2>
@@ -99,36 +99,36 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="d-attendance-roster-breaks-tracking-26">D. Attendance, Roster, Breaks &amp; Tracking (26টি টেবিল)</h3>
+<h3 id="d-attendance-roster-breaks-tracking-33">D. Attendance, Roster, Breaks &amp; Tracking (33টি টেবিল)</h3>
 <p>তিন ধরনের উপস্থিতি (রিমোট GPS, অফিস ZKTeco, সাইট muster roll), রোস্টার, বিরতি, লাইভ লোকেশন।</p>
 <p>মূল টেবিল: <code>attendance</code>, <code>zk_attendance_logs</code>, <code>site_attendance_*</code>, <code>duty_roster</code>, <code>employee_breaks</code></p>
 <p><img alt="D. Attendance, Roster, Breaks &amp; Tracking" src="diagrams/d-attendance-roster-breaks-tracking.png" /></p>
 <p><a href="diagrams/d-attendance-roster-breaks-tracking.svg">বড় SVG</a> · <a href="diagrams/d-attendance-roster-breaks-tracking.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`attendance`, `attendance_corrections`, `attendance_mock_attempts`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
+`attendance`, `attendance_corrections`, `attendance_mock_attempts`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `guard_post_needs`, `guard_posts`, `guard_relief`, `late_policy_settings`, `late_waivers`, `location_pings`, `ot_entries`, `ot_payroll_changes`, `ot_rates`, `ot_settings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
 
 </details>
 
-<h3 id="a-accounts-access-security-32">A. Accounts, Access &amp; Security (32টি টেবিল)</h3>
+<h3 id="a-accounts-access-security-33">A. Accounts, Access &amp; Security (33টি টেবিল)</h3>
 <p>লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র <code>users</code> (১৫৮টি foreign key এখানে এসে মেলে)।</p>
 <p>মূল টেবিল: <code>users</code> (লগইন), <code>user_sessions</code>, <code>user_devices</code>, <code>admin_module_permissions</code>(+<code>_layers</code>), <code>login_attempts</code>, <code>password_reset_*</code></p>
 <p><img alt="A. Accounts, Access &amp; Security" src="diagrams/a-accounts-access-security.png" /></p>
 <p><a href="diagrams/a-accounts-access-security.svg">বড় SVG</a> · <a href="diagrams/a-accounts-access-security.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_device_requests`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
+`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `app_access_settings`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_device_requests`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
 
 </details>
 
-<h3 id="m-pepm-mpr-jobs-budget-materials-20">M. PEPM: MPR, Jobs, Budget &amp; Materials (20টি টেবিল)</h3>
+<h3 id="m-pepm-mpr-jobs-budget-materials-21">M. PEPM: MPR, Jobs, Budget &amp; Materials (21টি টেবিল)</h3>
 <p>প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।</p>
 <p>মূল টেবিল: <code>jobs</code>, <code>entries</code>, <code>budgets</code>, <code>mpr_numbers</code>, <code>mpr_dispatches</code></p>
 <p><img alt="M. PEPM: MPR, Jobs, Budget &amp; Materials" src="diagrams/m-pepm-mpr-jobs-budget-materials.png" /></p>
 <p><a href="diagrams/m-pepm-mpr-jobs-budget-materials.svg">বড় SVG</a> · <a href="diagrams/m-pepm-mpr-jobs-budget-materials.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `delivery_material_condition_items`, `delivery_material_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
+`budget_items`, `budget_project_locks`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `delivery_material_condition_items`, `delivery_material_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
 
 </details>
 
@@ -143,14 +143,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="b-company-organisation-employees-22">B. Company, Organisation &amp; Employees (22টি টেবিল)</h3>
+<h3 id="b-company-organisation-employees-24">B. Company, Organisation &amp; Employees (24টি টেবিল)</h3>
 <p>কোম্পানি-গ্রুপ, সংগঠন কাঠামো আর কর্মীর মূল রেকর্ড। <code>users</code> = লগইন, <code>all_employees</code> = HR-এর কর্মী-রেকর্ড; <code>all_employees.user_id</code> দিয়ে জোড়া।</p>
 <p>মূল টেবিল: <code>companies</code>, <code>departments</code>, <code>branches</code>, <code>projects</code>, <code>all_employees</code>, <code>employee_*</code>, <code>hr_emp_*</code></p>
 <p><img alt="B. Company, Organisation &amp; Employees" src="diagrams/b-company-organisation-employees.png" /></p>
 <p><a href="diagrams/b-company-organisation-employees.svg">বড় SVG</a> · <a href="diagrams/b-company-organisation-employees.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`all_employees`, `branches`, `companies`, `company_groups`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
+`all_employees`, `branches`, `companies`, `company_groups`, `department_team_members`, `department_teams`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
 
 </details>
 
@@ -232,7 +232,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td><code>data-dictionary.md</code></td>
-<td><!--n:tables-->২৪৬<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+<td><!--n:tables-->২৫৭<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
 </tr>
 <tr>
 <td><code>diagrams/*.mmd</code></td>
@@ -256,6 +256,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <p>নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর <strong>Docs sync</strong> কাজটি সার্ভার চালিয়ে <code>information_schema</code> পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে <code>npm run docs:db</code> (বিস্তারিত <code>../README.md</code>-এর "স্বয়ংক্রিয় আপডেট")।</p>
 <h2 id="drawio">draw.io ফাইল</h2>
 <p><code>credencehr-database.drawio</code> — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৪৬<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৫৭<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা <code>data-dictionary.md</code> তে।
 জেনারেটর: <code>../tools/db/drawio_*</code> (<code>npm run docs:db</code> নিজে চালায়)।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

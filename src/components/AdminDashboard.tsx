@@ -29,6 +29,7 @@
 import { UserAvatar } from './UserAvatar';
 import { AdminDashboardWatch } from './AdminDashboardWatch';
 import { AdminDashboardReminders } from './AdminDashboardReminders';
+import { AdminDashboardHrReports } from './AdminDashboardHrReports';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
@@ -36,7 +37,7 @@ import {
   ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X, AlertTriangle, ArrowRight, Loader2, CheckCircle2,
 } from 'lucide-react';
 import { confirmDialog } from '../lib/confirmDialog';
-import { User } from '../types';
+import { User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
 import { useMyCompanies } from '../lib/company';
 
@@ -273,6 +274,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
   const isSuper = user.role === 'superadmin';
   const myModules: string[] = (user.module_permissions as string[] | undefined) || [];
   const has = (...keys: string[]) => isSuper || keys.some((k) => myModules.includes(k));
+  // HR reports card: HR Operations + its "quick_reports" layer (no saved
+  // layers = the defaults, which include it).
+  const savedHrOps: string[] | undefined = (user as any).module_permission_layers?.hr_operations;
+  const showHrReports = isSuper || (has('hr_operations') && (savedHrOps && savedHrOps.length > 0 ? savedHrOps.includes('quick_reports') : !EXPLICIT_ONLY_LAYERS.includes('quick_reports')));
   const showLeave = has('leave_applications');
   const showAttendanceReport = has('attendance_reports');
   const showQuickView = showAttendanceReport;
@@ -953,6 +958,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
 
           {/* Coming up — next 60 days (HR Operations "reminders_receive" only) */}
           <AdminDashboardReminders token={token} user={user} onNavigate={onNavigate} onShown={setRemindersShown} />
+
+          {/* HR reports: probation, joiners, transfers, resignations, religion */}
+          {showHrReports && <AdminDashboardHrReports token={token} onNavigate={onNavigate} />}
 
           {/* HR alerts: probation / contract ends and document expiries */}
           {!remindersShown && extras && extras.alerts.length > 0 && (

@@ -18,6 +18,7 @@
 // styling, Spinner, money()) so it drops in as a full-screen modal over
 // PayrollModule.tsx.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2, Search, Paperclip } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -59,6 +60,16 @@ interface WizardRow {
   already_generated: boolean;
   included: boolean;
   pending_bonus_amount?: number;
+  // Overtime approved in OT Approval (OvertimeRoutes.ts) — filled in by
+  // itself; a change needs a reason (kept with the run).
+  ot_from_approval?: boolean;
+  ot_pending?: number;
+  ot_src_hours: number;
+  ot_src_amount: number;
+  ot_src_rate: number;
+  ot_normal_minutes?: number;
+  ot_off_minutes?: number;
+  ot_change_reason: string;
 }
 
 // One Bank/MFS disbursement line of an employee's Payment split (Admin Panel
@@ -109,8 +120,8 @@ interface SubmitResult {
 
 const STEPS = ['Select Month', 'Attendance & Leave', 'Adjustments', 'Preview & Calculate', 'Submit'];
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);
@@ -142,6 +153,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   const [monthYear, setMonthYear] = useState(initialMonthYear);
   const [rows, setRows] = useState<WizardRow[]>([]);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  // OT still waiting for approval this salary month (OT Approval).
+  const [otPendingTotal, setOtPendingTotal] = useState(0);
   const [summaryError, setSummaryError] = useState('');
 
   const [previewResults, setPreviewResults] = useState<Map<number, PreviewResult>>(new Map());
@@ -176,12 +189,18 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
         return;
       }
       setLatePolicy(data.late_policy || null);
+      setOtPendingTotal(Number(data.ot_pending_total) || 0);
       setPeriod(data.period_start && data.period_end ? { start: data.period_start, end: data.period_end } : null);
       setRows(
         (data.employees || []).map((e: any) => ({
           ...e,
-          overtime_rate: 0,
-          overtime_amount: 0,
+          overtime_hours: Number(e.overtime_hours) || 0,
+          overtime_rate: Number(e.overtime_rate) || 0,
+          overtime_amount: Number(e.overtime_amount) || 0,
+          ot_src_hours: Number(e.overtime_hours) || 0,
+          ot_src_amount: Number(e.overtime_amount) || 0,
+          ot_src_rate: Number(e.overtime_rate) || 0,
+          ot_change_reason: '',
           // Pre-filled from any bonus staged earlier via Bonus & Incentive
           // -> "Stage" (POST /api/payroll/pending-bonuses) for an employee
           // who had no run yet for this month — still editable here, and
@@ -350,6 +369,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             late_deduction_days: r.late_deduction_days + r.extreme_late_deduction_days,
             overtime_hours: r.overtime_hours,
             overtime_amount: r.overtime_amount,
+            ot_change_reason: otChanged(r) ? r.ot_change_reason : undefined,
             bonus_amount: r.bonus_amount,
             other_deduction: r.other_deduction,
             remarks: r.remarks || null
@@ -385,6 +405,11 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   );
 
   const otTotal = (hours: number, rate: number) => Math.round((Number(hours) || 0) * (Number(rate) || 0) * 100) / 100;
+  // OT that differs from what OT Approval gave needs a reason.
+  function otChanged(r: WizardRow) {
+    return Math.abs((Number(r.overtime_hours) || 0) - r.ot_src_hours) > 0.009 || Math.abs((Number(r.overtime_amount) || 0) - r.ot_src_amount) > 0.009;
+  }
+  const otReasonMissing = includedRows.filter((r) => otChanged(r) && r.ot_change_reason.trim().length < 3);
 
   const numInput = (row: WizardRow, key: keyof WizardRow, width = 'w-16') => (
     <input
@@ -394,8 +419,11 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
       onChange={(e) => {
         const v = Number(e.target.value);
         // OT hours / rate keep the total (hours x rate) in step.
-        if (key === 'overtime_hours') updateRow(row.employee_id, { overtime_hours: v, overtime_amount: otTotal(v, row.overtime_rate) });
-        else if (key === 'overtime_rate') updateRow(row.employee_id, { overtime_rate: v, overtime_amount: otTotal(row.overtime_hours, v) });
+        // Back to the approved hours and rate = back to the approved amount
+        // (worked from the exact rate, so hours x the rounded rate can be a paisa off).
+        const amountFor = (h: number, r: number) => (h === row.ot_src_hours && r === row.ot_src_rate ? row.ot_src_amount : otTotal(h, r));
+        if (key === 'overtime_hours') updateRow(row.employee_id, { overtime_hours: v, overtime_amount: amountFor(v, row.overtime_rate) });
+        else if (key === 'overtime_rate') updateRow(row.employee_id, { overtime_rate: v, overtime_amount: amountFor(row.overtime_hours, v) });
         else updateRow(row.employee_id, { [key]: v } as any);
       }}
       className={`${width} px-1.5 py-1 text-xs border border-slate-200 rounded-md text-right focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-300`}
@@ -404,7 +432,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-2 sm:p-3">
+    {/* Above the floating Chat button (z-50), which otherwise sits on the footer's Next button. */}
+    <div className="fixed inset-0 bg-black/40 z-[70] flex items-center justify-center p-2 sm:p-3">
       {/* Nearly the whole screen, so every column of the step tables fits without scrolling sideways. */}
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-[1680px] max-h-[94vh] flex flex-col overflow-hidden">
         {/* Header */}
@@ -630,6 +659,19 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 Add any manual Bonus/Incentive, Overtime, or Fine for this run — only for the {includedRows.length} employee
                 {includedRows.length === 1 ? '' : 's'} included from Step 2.
               </p>
+              {otPendingTotal > 0 && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-xl bg-amber-50 text-amber-800">
+                  {otPendingTotal} overtime entr{otPendingTotal === 1 ? 'y is' : 'ies are'} still waiting for approval (Duty Roster → OT Approval) — only approved OT is filled in below.
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500 mb-2">
+                OT hours, rate and amount come from approved OT (Payroll → OT Rules). Change them only with a reason — it is kept with the run.
+              </p>
+              {otReasonMissing.length > 0 && (
+                <div className="mb-2 text-xs px-3 py-2 rounded-xl bg-amber-50 text-amber-800">
+                  Overtime changed for {otReasonMissing.length} employee{otReasonMissing.length === 1 ? '' : 's'} — write the reason next to the amount to go on.
+                </div>
+              )}
               {filterBar(shownIncluded.length, includedRows.length)}
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="min-w-full divide-y divide-slate-200">
@@ -651,10 +693,24 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           <p className="font-medium text-slate-800">{r.employee_name}</p>
                           <p className="text-[10px] text-slate-400">{[r.employee_code || '—', r.department || '—'].join(' · ')}</p>
                         </td>
-                        <td className="px-3 py-2 text-right">{numInput(r, 'overtime_hours')}</td>
+                        <td className="px-3 py-2 text-right">
+                          {numInput(r, 'overtime_hours')}
+                          {r.ot_from_approval && <p className="text-[9px] text-emerald-700 mt-0.5">From OT Approval{r.ot_off_minutes ? ` · ${Math.round((r.ot_off_minutes / 60) * 100) / 100} h Off day` : ''}</p>}
+                          {!!r.ot_pending && <p className="text-[9px] text-amber-600 mt-0.5">{r.ot_pending} waiting</p>}
+                        </td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_rate', 'w-20')}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-slate-800" title={`${r.overtime_hours || 0} h × ${r.overtime_rate || 0}`}>
                           {r.included && r.overtime_amount > 0 ? money(r.overtime_amount) : '—'}
+                          {otChanged(r) && (
+                            <input
+                              type="text"
+                              value={r.ot_change_reason}
+                              onChange={(e) => updateRow(r.employee_id, { ot_change_reason: e.target.value })}
+                              placeholder="Reason for the change"
+                              aria-label={`Reason for changing ${r.employee_name}'s overtime`}
+                              className={`block mt-1 w-36 ml-auto px-1.5 py-1 text-[11px] font-normal border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400 ${r.ot_change_reason.trim().length < 3 ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`}
+                            />
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           {numInput(r, 'bonus_amount', 'w-20')}
@@ -893,7 +949,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   else if (step === 3) goToStep4();
                   else setStep((s) => s + 1);
                 }}
-                disabled={(step === 2 && (loadingSummary || includedRows.length === 0)) || (step === 4 && calculating)}
+                disabled={(step === 2 && (loadingSummary || includedRows.length === 0)) || (step === 3 && otReasonMissing.length > 0) || (step === 4 && calculating)}
+                title={step === 3 && otReasonMissing.length > 0 ? 'Give the reason for each changed overtime' : undefined}
                 className="flex items-center gap-1 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
               >
                 Next <ChevronRight className="w-3.5 h-3.5" />
@@ -1058,7 +1115,7 @@ const LateDaysModal: React.FC<{
   const extremeDeductionDays = policy ? Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1)) : 0;
 
   return (
-    <div className="liquid-glass-backdrop fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
       <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[85vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/50">

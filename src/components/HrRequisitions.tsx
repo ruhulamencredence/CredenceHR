@@ -201,9 +201,9 @@ export const HrRequisitions: React.FC<{ token: string }> = ({ token }) => {
                 <label className={labelCls}>SIM</label>
                 {acting.row.person_sims.length === 0 ? (
                   <div className="liquid-glass-inset rounded-2xl p-3 text-xs text-slate-600">
-                    No SIM is given to this employee in Mobile Bill yet. Add the SIM there (with this employee), then come back and issue it.
+                    No SIM is given to this employee in SIM & Mobile Bill yet. Add the SIM there (with this employee), then come back and issue it.
                     <button type="button" onClick={openMobileBill} className="block mt-2 text-xs font-semibold text-blue-700 underline">
-                      Open Mobile Bill
+                      Open SIM & Mobile Bill
                     </button>
                   </div>
                 ) : (

@@ -35,6 +35,7 @@ const AssetManagement: React.FC<React.ComponentProps<typeof AssetManagementLazy>
 );
 import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
+import { COLOR_MODES, ColorMode, applyColorMode, getSavedColorMode } from '../lib/colorMode';
 import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent, HEADER_GLOWS, HeaderGlowId, applyHeaderGlow, effectiveHeaderGlow } from '../lib/backgroundTheme';
 
 interface ProfilePageProps {
@@ -146,6 +147,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
     applyBackgroundTheme(id, true);
     setBgTheme(id);
+  };
+  const [colorMode, setColorMode] = useState<ColorMode>(getSavedColorMode());
+  const handlePickColorMode = (m: ColorMode) => {
+    applyColorMode(m, true);
+    setColorMode(m);
   };
   const [monoAccent, setMonoAccent] = useState<MonoAccentId>(getSavedMonoAccent());
   const handlePickMonoAccent = (id: MonoAccentId) => {
@@ -330,6 +336,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               Appearance
             </p>
             <section className="gemini-card overflow-hidden">
+              <ColorModePicker selected={colorMode} onPick={handlePickColorMode} />
               <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} />
               <HeaderGlowPicker selected={headerGlow} onPick={handlePickHeaderGlow} />
             </section>
@@ -478,6 +485,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-5 pb-1" style={{ color: 'var(--g-text-muted)' }}>
                   Appearance
                 </p>
+                <ColorModePicker selected={colorMode} onPick={handlePickColorMode} padded />
                 <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} padded />
               </section>
             )}
@@ -618,6 +626,34 @@ const HeaderGlowPicker: React.FC<{ selected: HeaderGlowId | null; onPick: (id: H
               {on && <BadgeCheck className="w-4 h-4" style={{ color: 'var(--g-accent)' }} />}
             </span>
             <span className="text-[11px]" style={{ color: on ? 'var(--g-text)' : 'var(--g-text-muted)' }}>{g.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
+// Light / Dark / Dark Glass / Like this device (colorMode.ts) — a switch on
+// top of Appearance; per device, applied on tap.
+const ColorModePicker: React.FC<{ selected: ColorMode; onPick: (m: ColorMode) => void; padded?: boolean }> = ({ selected, onPick, padded }) => (
+  <div className={`${padded ? 'px-5' : 'px-4'} pt-3.5 pb-1`}>
+    <p className="text-[11px] mb-2" style={{ color: 'var(--g-text-muted)' }}>
+      Mode — Dark is easy on the eyes at night; Dark Glass adds see-through frosted cards; "Like this device" follows your phone or computer.
+    </p>
+    <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl" style={{ background: 'var(--g-surface-muted)', border: '1px solid var(--g-border)' }} role="radiogroup" aria-label="Light or dark mode">
+      {COLOR_MODES.map((m) => {
+        const on = m.id === selected;
+        return (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onPick(m.id)}
+            className="min-h-9 py-1 px-1 rounded-xl text-[11px] leading-tight font-semibold transition-colors"
+            style={on ? { background: 'var(--g-accent)', color: '#fff' } : { color: 'var(--g-text-muted)' }}
+          >
+            {m.label}
           </button>
         );
       })}

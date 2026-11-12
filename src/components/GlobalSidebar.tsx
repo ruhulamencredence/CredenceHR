@@ -9,7 +9,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, Timer, TimerReset, PenLine, ReceiptText,
   Coffee, MessageSquareHeart, PlayCircle
 } from 'lucide-react';
 import { openTutorials, useTutorialsState } from '../lib/tutorials';
@@ -83,7 +83,7 @@ interface GlobalSidebarProps {
   onGoToBillClaims: (target: 'movementClaims' | 'billClaim' | 'noticeBoard') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myOt' | 'teamOt' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => void;
   // Admin Panel's own Check In/Out / Bill Claim review tabs —
   // separate feature from onGoToBillClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -396,10 +396,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_tasks || canSeeModule('task_management')) {
     selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks'), href: selfHref('myTasks') });
   }
-  // My Mobile SIM (MyMobileSim.tsx) — company SIMs, limits, bills, limit
+  // My SIM & Bill (MyMobileSim.tsx) — company SIMs, limits, bills, limit
   // requests. Off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_view_mobile_bill || canSeeModule('mobile_bill')) {
-    selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim'), href: selfHref('myMobileSim') });
+    selfServiceItems.push({ key: 'myMobileSim', label: 'My SIM & Bill', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim'), href: selfHref('myMobileSim') });
   }
   // My Loan / Advance (MyLoans.tsx) — apply for a loan or salary advance.
   // users.can_view_loan_request.
@@ -416,6 +416,16 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_roster) {
     selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster'), href: selfHref('myRoster') });
   }
+  // My OT (MyOvertime.tsx) — own overtime. users.can_view_my_ot, off until
+  // turned on in Module Access.
+  if (isSuperAdmin || !!user.can_view_my_ot) {
+    selfServiceItems.push({ key: 'myOt', label: 'My OT', icon: Timer, onClick: () => onGoToSelfServiceTab('myOt'), href: selfHref('myOt') });
+  }
+  // Team OT (OtApprovalPanel.tsx) — approve the team's overtime as its
+  // supervisor. users.can_approve_team_ot, off until turned on.
+  if (isSuperAdmin || !!user.can_approve_team_ot) {
+    selfServiceItems.push({ key: 'teamOt', label: 'Team OT', icon: TimerReset, onClick: () => onGoToSelfServiceTab('teamOt'), href: selfHref('teamOt') });
+  }
   // Break Time (MyBreak.tsx) — start / end a break. users.can_take_break,
   // off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_take_break) {
@@ -429,7 +439,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // SIM & ID Card (MyRequisitions.tsx) — ask HR for a SIM or an ID card.
   // users.can_request_items, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_request_items) {
-    selfServiceItems.push({ key: 'myRequisitions', label: 'SIM & ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions'), href: selfHref('myRequisitions') });
+    selfServiceItems.push({ key: 'myRequisitions', label: 'Request SIM / ID Card', icon: CreditCard, onClick: () => onGoToSelfServiceTab('myRequisitions'), href: selfHref('myRequisitions') });
   }
   // My Payslip (MyPayslips.tsx) — this account's approved / paid payslips.
   // users.can_view_payslip, off until turned on in Module Access.
@@ -557,7 +567,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices'), href: adminHref('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays'), href: adminHref('holidays') },
     { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management'), href: adminHref('task_management') },
-    { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill'), href: adminHref('mobile_bill') },
+    { key: 'mobile_bill', label: 'SIM & Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill'), href: adminHref('mobile_bill') },
     { key: 'target_reports', label: 'Target Reports', icon: Target, onClick: () => onGoToAdminModule('target_reports'), href: adminHref('target_reports') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
@@ -598,9 +608,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // "HR Operations" (HROperationsPanel.tsx) — one 'hr_operations' module
   // grant; each item opens that page on its own tab (the panel listens for
   // the tab event, and reads the stored tab when it mounts fresh).
-  const openHrOps = (tab: string) => {
+  const openHrOps = (tab: string, reportsView?: 'quick' | 'build') => {
     try {
       sessionStorage.setItem('hr_ops_tab', tab);
+      if (reportsView) sessionStorage.setItem('hr_ops_reports_view', reportsView);
     } catch {
       // storage unavailable — the panel just opens on its default tab
     }
@@ -618,7 +629,15 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { key: 'hr_operations_letters', label: 'Letters', icon: FileText, onClick: () => openHrOps('letters') },
         { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
         { key: 'hr_operations_increments', label: 'Increments', icon: TrendingUp, onClick: () => openHrOps('increments') },
-        { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports') },
+        // Ready reports (probation, joiners, transfers, resignations,
+        // religion) — with the "quick_reports" layer (on by default).
+        ...(isSuperAdmin ||
+        ((user.module_permission_layers?.hr_operations || []).length > 0
+          ? (user.module_permission_layers?.hr_operations || []).includes('quick_reports')
+          : true)
+          ? [{ key: 'hr_operations_quick_reports', label: 'Quick Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports', 'quick') }]
+          : []),
+        { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports', 'build') },
         // SIM & ID card requests — only with the explicit "requisitions" layer.
         ...(isSuperAdmin || (user.module_permission_layers?.hr_operations || []).includes('requisitions')
           ? [{ key: 'hr_operations_requisitions', label: 'SIM & ID Card Requests', icon: CreditCard, onClick: () => openHrOps('requisitions') }]
@@ -725,7 +744,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const selfGroups = makeGroups([
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
-    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myBreak') },
+    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myOt', 'teamOt', 'myBreak') },
     {
       key: 'g_requests',
       label: 'Requests & Claims',
@@ -733,10 +752,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       // Grouped by what they are: money, things the office gives you, HR papers.
       entries: pick(
         { heading: 'Claims & Money' }, 'userMovementClaims', 'userBillClaims', 'myLoans', 'myPayslips',
-        { heading: 'Office Items' }, 'assetManagement', 'myMobileSim', 'myRequisitions', 'vehicleManagement',
+        { heading: 'Office Items' }, 'assetManagement', 'vehicleManagement',
         { heading: 'HR Documents' }, 'myLetters'
       )
     },
+    // SIM & ID Card: the company SIM given to you (limit, bills) and asking HR for a SIM / ID card.
+    { key: 'g_sim_self', label: 'SIM & ID Card', icon: Smartphone, entries: pick('myMobileSim', 'myRequisitions') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
@@ -768,12 +789,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Briefcase,
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
-        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments', 'hr_operations_requisitions',
-        { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
-        { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_increments',
+        { heading: 'Reports' }, 'hr_operations_quick_reports', 'hr_operations_reports', 'hr_operations', 'target_reports',
+        { heading: 'Facilities' }, 'asset_management', 'vehicle_management',
         { heading: 'Settings' }, 'hr_operations_settings'
       )
     },
+    // SIM Management: company SIMs, limits and bills, and the SIM / ID card requests.
+    { key: 'g_sim_admin', label: 'SIM Management', icon: Smartphone, entries: pick('mobile_bill', 'hr_operations_requisitions') },
     {
       key: 'g_settings',
       label: 'Settings & Administration',

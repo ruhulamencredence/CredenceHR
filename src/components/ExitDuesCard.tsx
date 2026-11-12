@@ -30,7 +30,7 @@ export interface ExitDue {
 
 const GROUPS: { kinds: ExitDue['kind'][]; title: string; icon: React.ComponentType<{ className?: string }>; module: string; moduleLabel: string }[] = [
   { kinds: ['asset'], title: 'Assets', icon: Package, module: 'asset_management', moduleLabel: 'Asset Management' },
-  { kinds: ['sim'], title: 'Mobile SIM', icon: Smartphone, module: 'mobile_bill', moduleLabel: 'Mobile Bill' },
+  { kinds: ['sim'], title: 'Mobile SIM', icon: Smartphone, module: 'mobile_bill', moduleLabel: 'SIM & Mobile Bill' },
   { kinds: ['loan', 'loan_request'], title: 'Loans & advances', icon: Wallet, module: 'payroll', moduleLabel: 'Payroll' },
   { kinds: ['claim', 'bill'], title: 'Claims & bills', icon: Receipt, module: 'claims', moduleLabel: 'Claims' },
   { kinds: ['vehicle'], title: 'Vehicle', icon: Car, module: 'vehicle_management', moduleLabel: 'Vehicle Management' }

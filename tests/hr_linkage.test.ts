@@ -68,7 +68,7 @@ describe("retirement date", () => {
 
 describe("reminder kinds setting", () => {
   test("only the listed kinds", () => assert.deepEqual(enabledKinds({ reminder_kinds: "contract,increment" }), ["contract", "increment"]));
-  test("unset means all", () => assert.equal(enabledKinds({}).length, 5));
+  test("unset means all but retirement", () => assert.deepEqual(enabledKinds({}), ["probation", "contract", "document", "increment"]));
 });
 
 describe("settlement added dues", () => {

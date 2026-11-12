@@ -19,6 +19,7 @@ export function payslipRows(
     basic_amount: number;
     allowances_total: number;
     overtime_amount: number;
+    overtime_hours?: number;
     bonus_amount: number;
     absent_deduction: number;
     tax_deduction: number;
@@ -33,7 +34,10 @@ export function payslipRows(
   const earnings: [string, number][] = [
     ['Basic Salary', r.basic_amount],
     ['Allowances', r.allowances_total],
-    ['Overtime', r.overtime_amount],
+    // "Overtime (18 h × 115.38)" when the hours are known.
+    [Number(r.overtime_hours) > 0 && Number(r.overtime_amount) > 0
+      ? `Overtime (${Number(r.overtime_hours)} h × ${money(Math.round((Number(r.overtime_amount) / Number(r.overtime_hours)) * 100) / 100)})`
+      : 'Overtime', r.overtime_amount],
     ['Bonus', r.bonus_amount],
     ...lines.filter((l) => l.kind === 'earning').map((l) => [l.name, l.amount] as [string, number])
   ];

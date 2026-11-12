@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { maskMoney, usePayrollAmounts } from '../lib/payrollAmounts';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import jsPDF from '../lib/jspdf';
@@ -39,6 +40,7 @@ import { PayslipManagementPanel } from './PayslipManagementPanel';
 import { LoanAdvanceManagementPanel } from './LoanAdvanceManagementPanel';
 import { PayrollApprovalPanel } from './PayrollApprovalPanel';
 import { PayrollActivityLog } from './PayrollActivityLog';
+import { OtRulesPanel } from './OtRulesPanel';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
 import { SelfBodySkeleton } from './SelfPageSkeleton';
@@ -128,15 +130,15 @@ const DEPT_COLORS = [
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
-const compactMoney = (n: number | null | undefined) => {
+const compactMoney = maskMoney((n: number | null | undefined) => {
   const v = Number(n) || 0;
   if (Math.abs(v) >= 100000) return `৳${(v / 100000).toFixed(1)}L`;
   if (Math.abs(v) >= 1000) return `৳${(v / 1000).toFixed(1)}k`;
   return `৳${v.toFixed(0)}`;
-};
+});
 
 const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);
@@ -578,9 +580,11 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   // Phone: the blended app header with "Payroll", no breadcrumb (lib/adminPhone.ts).
   const adminPhone = useAdminPhonePage('Payroll');
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // "See salary amounts": without it every amount on these pages is *****.
+  usePayrollAmounts(token);
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'approval' | 'activity'
+    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'otRules' | 'approval' | 'activity'
   >(() => {
     // A Loan / Advance alert opens Loans & Advances straight away.
     try {
@@ -626,6 +630,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
     bonus: 'Bonus & Incentive',
     adjustments: 'Allowance & Adjustment',
     setup: 'Salary Setup',
+    otRules: 'OT Rules',
     approval: 'Approval',
     activity: 'Activity Log'
   };
@@ -642,12 +647,15 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   // Dashboard, the list, Approval and the log — no tab that changes salaries.
   const [canSeeLog, setCanSeeLog] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  // Payroll -> OT Rules: only for the "ot_rules" layer.
+  const [canOtRules, setCanOtRules] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         setCanSeeLog(!!d?.access_log);
         setCanEdit(!!d?.edit);
+        setCanOtRules(!!d?.ot_rules);
       })
       .catch(() => {});
   }, [authHeaders]);
@@ -799,6 +807,16 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
               Salary Setup
             </button>
           )}
+          {canOtRules && (
+            <button
+              onClick={() => setActiveTab('otRules')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'otRules' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              OT Rules
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('approval')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -821,6 +839,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
 
         {activeTab === 'list' ? (
           <PayrollListPanel token={token} canEdit={canEdit} />
+        ) : activeTab === 'otRules' && canOtRules ? (
+          <OtRulesPanel token={token} />
         ) : !canEdit && ['attendance', 'payslips', 'loans', 'bonus', 'adjustments', 'setup'].includes(activeTab) ? (
           <PayrollApprovalPanel token={token} monthYear={monthYear} />
         ) : activeTab === 'attendance' ? (

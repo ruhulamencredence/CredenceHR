@@ -8,22 +8,22 @@
 <!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২৪৬** |
-| কলাম | **২,৬৮১** |
-| ঘোষিত Foreign Key | **২৭৫** (ON DELETE: CASCADE ১৬৬, SET NULL ৯৫, RESTRICT ১৪) |
-| `company_id` আছে এমন টেবিল (multi-company) | ৬০ |
+| টেবিল | **২৫৭** |
+| কলাম | **২,৭৮৯** |
+| ঘোষিত Foreign Key | **২৭৮** (ON DELETE: CASCADE ১৬৯, SET NULL ৯৫, RESTRICT ১৪) |
+| `company_id` আছে এমন টেবিল (multi-company) | ৬৩ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ৩০টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
-| সবচেয়ে বেশি কলামের টেবিল | `users` (৭৩), `all_employees` (৪৯), `payrolls` (৪৩) |
+| সবচেয়ে বেশি কলামের টেবিল | `users` (৭৫), `all_employees` (৫০), `payrolls` (৪৩) |
 <!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৪৬<!--/n--> টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৫৭<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 [SVG (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.svg) · [Graphviz সোর্স](diagrams/full-application-er.dot) · PNG/PDF: GitHub → Actions → সবশেষ **Docs sync** রান → Artifacts → `CredenceHR-documentation` (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)
 
 - ১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে **`users`** (সব মডিউল এর সাথে জোড়া)।
 - প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা `data-dictionary.md`-তে।
-- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৭৫<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
+- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৭৮<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
 
 ![পুরো ডাটাবেস](diagrams/full-application-er.svg)
 
@@ -80,7 +80,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 </details>
 
-### D. Attendance, Roster, Breaks & Tracking (26টি টেবিল)
+### D. Attendance, Roster, Breaks & Tracking (33টি টেবিল)
 
 তিন ধরনের উপস্থিতি (রিমোট GPS, অফিস ZKTeco, সাইট muster roll), রোস্টার, বিরতি, লাইভ লোকেশন।
 
@@ -92,11 +92,11 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`attendance`, `attendance_corrections`, `attendance_mock_attempts`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
+`attendance`, `attendance_corrections`, `attendance_mock_attempts`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `guard_post_needs`, `guard_posts`, `guard_relief`, `late_policy_settings`, `late_waivers`, `location_pings`, `ot_entries`, `ot_payroll_changes`, `ot_rates`, `ot_settings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_department_access`, `tracking_device_state`, `tracking_employee_access`, `tracking_notice_recipients`, `user_attendance_projects`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_device_pins`, `zk_devices`
 
 </details>
 
-### A. Accounts, Access & Security (32টি টেবিল)
+### A. Accounts, Access & Security (33টি টেবিল)
 
 লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র `users` (১৫৮টি foreign key এখানে এসে মেলে)।
 
@@ -108,11 +108,11 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_device_requests`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
+`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `api_access_logs`, `api_clients`, `app_access_settings`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `profile_photo_requests`, `session_policy`, `sso_login_logs`, `sso_login_requests`, `startup_migrations`, `user_access_audit`, `user_app_access`, `user_company_access`, `user_device_requests`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`, `welcome_slides_settings`
 
 </details>
 
-### M. PEPM: MPR, Jobs, Budget & Materials (20টি টেবিল)
+### M. PEPM: MPR, Jobs, Budget & Materials (21টি টেবিল)
 
 প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।
 
@@ -124,7 +124,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `delivery_material_condition_items`, `delivery_material_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
+`budget_items`, `budget_project_locks`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `delivery_material_condition_items`, `delivery_material_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
 
 </details>
 
@@ -144,7 +144,7 @@ Check In/Out (movement claim), Bill Claim (employee claim → approval → bill 
 
 </details>
 
-### B. Company, Organisation & Employees (22টি টেবিল)
+### B. Company, Organisation & Employees (24টি টেবিল)
 
 কোম্পানি-গ্রুপ, সংগঠন কাঠামো আর কর্মীর মূল রেকর্ড। `users` = লগইন, `all_employees` = HR-এর কর্মী-রেকর্ড; `all_employees.user_id` দিয়ে জোড়া।
 
@@ -156,7 +156,7 @@ Check In/Out (movement claim), Bill Claim (employee claim → approval → bill 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`all_employees`, `branches`, `companies`, `company_groups`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
+`all_employees`, `branches`, `companies`, `company_groups`, `department_team_members`, `department_teams`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
 
 </details>
 
@@ -261,7 +261,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | <!--n:tables-->২৪৬<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২৫৭<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -274,6 +274,6 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৪৬<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৫৭<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
 জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

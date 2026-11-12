@@ -176,7 +176,9 @@ Candidate-এর ভুল তথ্য (নাম, email, ফোন, source) Re
 
 গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি **কর্মী নন** (`all_employees`-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 `ONBOARDING_ONLY`)।
 
-**SIM ও ID card requisition** (`RequisitionRoutes.ts`, টেবিল `employee_requisitions`): কর্মী Self Service → "SIM & ID Card" থেকে (সুইচ `users.can_request_items`, ডিফল্টে বন্ধ) আর নতুন joiner My Onboarding থেকে (HR Ops Settings → "Joiners can ask for a SIM / ID card", ডিফল্টে বন্ধ) SIM বা ID card চান (New / Lost / Damaged / Replacement)। HR Operations → "SIM & ID Card" (layer `requisitions`, explicit-only) থেকে HR issue করে: SIM হলে Mobile Bill-এ ওই কর্মীকে আগে দেওয়া SIM বেছে নেয়, ID card হলে কার্ড নম্বর লেখে (onboarding checklist-এর "ID card issued" নিজে টিক হয়); অথবা কারণসহ turn down। কর্মী alert পান। Joiner-এর request onboarding approve হলে কর্মীর নামে যায়; তার আগে issue করা যায় না।
+**Sidebar-এ SIM এক জায়গায়:** Self Service → **SIM & ID Card** group: "My SIM & Bill" (আগে My Mobile SIM) আর "Request SIM / ID Card" (আগে SIM & ID Card)। Admin Panel → **SIM Management** group: "SIM & Mobile Bill" (আগে Mobile Bill, module `mobile_bill`) আর "SIM & ID Card Requests" (HR Operations-এর `requisitions` layer)। শুধু নাম আর জায়গা বদলেছে; ঠিকানা আর permission আগের মতো, কোনোটার access না থাকলে group দেখায় না।
+
+**SIM ও ID card requisition** (`RequisitionRoutes.ts`, টেবিল `employee_requisitions`): কর্মী Self Service → SIM & ID Card → "Request SIM / ID Card" থেকে (সুইচ `users.can_request_items`, ডিফল্টে বন্ধ) আর নতুন joiner My Onboarding থেকে (HR Ops Settings → "Joiners can ask for a SIM / ID card", ডিফল্টে বন্ধ) SIM বা ID card চান (New / Lost / Damaged / Replacement)। HR Operations → "SIM & ID Card" (layer `requisitions`, explicit-only) থেকে HR issue করে: SIM হলে Mobile Bill-এ ওই কর্মীকে আগে দেওয়া SIM বেছে নেয়, ID card হলে কার্ড নম্বর লেখে (onboarding checklist-এর "ID card issued" নিজে টিক হয়); অথবা কারণসহ turn down। কর্মী alert পান। Joiner-এর request onboarding approve হলে কর্মীর নামে যায়; তার আগে issue করা যায় না।
 
 ---
 
@@ -359,6 +361,10 @@ flowchart TD
 
 ---
 
+## Approval-এর আবেদনের Details
+
+যিনি approve করবেন তিনি যেন জানেন কী approve করছেন — প্রতিটা আবেদনের পাশে **Details** বোতাম, যেখানেই approval দেখায়: Self Service → Approve Application (Pending আর History), Dashboard-এর Pending Approvals card, উপরের approvals bell, ফোনের Approve পাতা, Admin Panel → Approvals আর Admin Dashboard-এর "Stuck for 3+ days"। চাপলে liquid-glass popup (`src/components/RequestDetails.tsx`) — কে চেয়েছেন (Employee ID, পদ, Department, Branch, কবে), আবেদনের সব ঘর, সারির টেবিল (Bill Claim-এর bill, Asset-এর item, HR action-এর আগে → পরে, Exit clearance-এর সব department), সংযুক্ত ফাইল, check in / out-এর জায়গা (Google Maps), আর approval কতদূর (কোন Layer-এ কে কী করেছেন, মন্তব্য, এখন কার অপেক্ষায়)। ছুটিতে ঐ বছরে একই ধরনের আগে approve হওয়া দিনও, Loan / Advance-এ আগের approve হওয়া loan। ধরন: Bill Claim, Attendance Correction, Leave (Reliever / সরাসরি approver সহ), Asset, Vehicle, Mobile limit, Loan / Advance, Check In/Out, Movement, HR action, Exit clearance। Data: `GET /api/approval-details?type=&id=`, ফাইল `GET /api/approval-details/file` (`ApprovalDetailsRoutes.ts`)। HR Action ও HR-এর খোলা Exit যাঁর সম্পর্কে তিনি খুলতে পারেন না; শুধু Approvals module থাকলেও না (HR Operations / Exit / Offboarding লাগে); HR Action-এর বেতন "See salary amounts" ছাড়া (chain-এর বাইরের লোকের কাছে) `*****`।
+
 ## ১২. PEPM: প্রকল্পের MPR চক্র
 
 ```mermaid
@@ -373,6 +379,16 @@ flowchart LR
 ```
 
 অনুমতি: Reports মডিউলের layer `dispatch_material`, `dispatch_all` (দুটোই 🔒)। Receive-এর সুইচ `can_receive_material`। ফাইল: `EntriesRoutes.ts`, `MprDispatchRoutes.ts`, `BudgetImportRoutes.ts`।
+
+**প্রজেক্ট team (`PepmTeam.ts`):** একটা প্রজেক্টের permission (Admin Panel → Users → Manage Projects, `user_project_permissions`) যাদের দেওয়া, তারাই ঐ প্রজেক্টের team — আলাদা কোনো সুইচ নেই। আগে এক প্রজেক্ট account থেকে দুই-তিনজন যেভাবে কাজ করত, এখন প্রত্যেকে নিজের login-এ ঠিক সেভাবেই:
+- **দেখা ও বদলানো:** Self Service-এর PEPM পাতায় (Entry, Jobs, Entry Details, Job Edit, My MPR in Dispatch) প্রত্যেকে নিজের প্রজেক্টের **সবার** entry দেখে আর আগের নিয়মে edit / split / Add MPR / delete করে (Final Submit-এর আগে পুরো edit, পরে শুধু Delivery Date আর Job Edit অনুমোদন; Edit Delivery Date ও Job Edit প্রতি জনের নিজের অনুমতি)। প্রতিটা সারিতে "by নাম" — কে দিয়েছে (`entries.created_by`)। অন্য প্রজেক্টের কিছু নয়। Admin / Superadmin নিজের দেওয়া entry-ও দেখে।
+- **Final Submit:** team-এর একজন Budget Final Submit করলে তার সব প্রজেক্টে ঐ Budget পুরো team-এর জন্য আটকে যায় (`budget_project_locks`, প্রতি Budget + প্রজেক্ট একটা সারি; `budget_submissions`-এ কে করেছে থাকে); Job Final Submit পুরো team-এর জন্য ঐ Job আটকায়। entry মুছে প্রজেক্টে কিছু না থাকলে আটকানো নিজে খুলে যায়; Admin → Data Import → Submissions-এর Unlock ঐ submit-এর সব প্রজেক্ট খুলে দেয়।
+- **Job No:** প্রতি প্রজেক্ট (Budget-এর ভেতরে) একটা ধারা — team-এর কেউ একই নম্বর পায় না (`GET /api/jobs/next-no?project_id=`)।
+- **MPR No ও Qty:** team-এর কেউ একটা MPR No নিলে team-এর যে কেউ তার বাকি Qty নিতে পারে; অন্য প্রজেক্টের জন্য বন্ধ। Qty-র সীমা পুরো team মিলিয়ে।
+- **Transfer:** প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের কোনো entry আর দেখা বা বদলানো যায় না (নিজের দেওয়াগুলোও না); নতুন জনকে প্রজেক্ট দিলেই সব পুরনো entry পায়। entry কোথাও সরে না।
+- **আগের ডাটা:** চালু হওয়ার সময় একবার আগের প্রতিটা Budget Final Submit তার entry-র প্রজেক্টগুলোতে আটকানো হিসেবে লেখা হয় (`ensurePepmTeamSchema`) — আগে যা আটকানো ছিল ঠিক তাই থাকে।
+
+**অন্য প্রজেক্ট / সবার entry:** অন্যের entry (team-এর বাইরে) দেখা যায় শুধু Admin Panel → PEPM Reports-এ (`?scope=all`), Reports module-এর Read layer থাকলে (Superadmin সবসময়)। team-এর বাইরের entry-তে Self Service-এর edit, split, Add MPR আর delete শুধু Reports-এর Edit (`edit_add`) বা Delete (`delete_trash`) layer থাকলে — শুধু Admin role হলে চলে না। Admin Panel-এর Reports নিজের API দিয়ে (`/api/reports/entries/:id`) একই layer-এ edit / delete করে।
 
 **Job Edit অনুমোদন:** Final Submit হয়ে যাওয়া Job-এ `can_job_edit` থাকা ব্যবহারকারী নতুন Job, Add MPR বা Delete MPR চাইলে সেটা সরাসরি হয় না, `job_edit_requests`-এ জমা থাকে। PEPM Manage → MPR Edit Log → Job Edit Approvals থেকে Approve/Reject (মডিউল `editlog`)। Details-এ দেখায় কী বদলাবে: মোছার সারির সব তথ্য (dispatch/receive হয়ে থাকলে সতর্কতা), যোগ হওয়া সারির Budget Qty আগে → পরে, আর Job-এর সব MPR সারি, বদলটা জায়গামতো চিহ্নিত (`GET /api/job-edits/:id/context`, একই `editlog` gate)। কয়েকটা অনুরোধ টিক দিয়ে একসাথে Approve/Reject করা যায় (প্রতিটা একই `POST /api/job-edits/:id/act` দিয়ে যায়; যেটা আর approve করা যায় না সেটা জানানো হয়, বাকিগুলো হয়ে যায়)।
 
@@ -534,6 +550,27 @@ Inventory-তে দুটো ভাগ: Vehicles আর Drivers। Driver য�
 
 HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও চুক্তি শেষ, ডকুমেন্টের মেয়াদ, অবসর, increment; ৩০ দিন আগের মেয়াদোত্তীর্ণ থেকে ৬০ দিন সামনে, পাশে Confirm / Extend / Renew / Increment বোতাম) Admin Dashboard-এও দেখায় — শুধু যাঁদের HR Operations আর তার "Reminders — receive & view" layer আছে। এটা দেখালে ছোট "HR Alerts" (৩০ দিন) বক্সটা আর আলাদা করে দেখায় না; layer না থাকলে আগের মতো HR Alerts থাকে।
 
+অবসরের (retirement) রিমাইন্ডার default-এ বন্ধ থাকে — Coming up বা HR Alerts কোথাও দেখায় না। কোনো কোম্পানি চাইলে HR Operations → Settings-এর রিমাইন্ডার তালিকায় "Retirement" টিক দিয়ে আবার চালু করতে পারে। আগে যেসব কোম্পানির সেটিংয়ে retirement সেভ করা ছিল, সেখান থেকে একবার (marker `reminder_retirement_off_v1`) সেটা সরিয়ে দেওয়া হয়েছে।
+
+**HR Quick reports** (`HrQuickReports.ts`, `src/components/HrQuickReports.tsx`): HR Operations → **Reports** tab-এ এখন দুটো ভাগ — **Quick reports** (তৈরি রিপোর্ট, এক ক্লিকে) আর **Build your own** (আগের Employee Reports, নিজে কলাম/filter বেছে)। Sidebar-এ HR Operations-এর নিচে "Quick Reports" আর "Employee Reports" আলাদা। Quick reports-এ উপরে ৫টা কার্ড, কার্ড চাপলে নিচে সেই রিপোর্ট; Period (This month / Last month / Last 3 months / This year / Custom) আর Department বদলানো যায়, Excel / PDF এক ক্লিকে, row চাপলে সেই কর্মীর Service Book।
+- **Probation / Confirmation:** confirm হননি এমন কর্মী যাঁদের probation ৩০ দিনের মধ্যে শেষ (Due soon) বা শেষ হয়ে গেছে (Overdue, কত দিন দেরি), আর Period-এ confirm হয়েছেন যাঁরা। Probation শেষের তারিখ Employee Reports-এর মতোই: Service Details-এর probation end, না থাকলে যোগদান + probation মাস (কর্মীর, না হলে HR Settings-এর default)। Service status ফাঁকা হলে শুধু গত ৬ মাসে শেষ হওয়াগুলো ধরা হয়, যাতে পুরোনো কর্মীরা সবাই "Overdue" না দেখায়।
+- **New joiners:** Period-এ যোগ দিয়েছেন যাঁরা, Department অনুযায়ী সংখ্যা, probation কবে শেষ, onboarding checklist কতটা হয়েছে (n/a বাদে)।
+- **Transfers:** `employee_transfers` থেকে Period-এ কার্যকর — কোন Department থেকে কোথায়, পদ বদল, কারণ; ভবিষ্যতে কার্যকর হলে "From <তারিখ>"। Department filter "থেকে" বা "যেখানে" যেকোনোটা মেলালে দেখায়।
+- **Resignations & exits:** `exit_requests` (cancelled বাদ) — Period-এ জমা পড়া, এখন notice-এ (Settled নয় আর last working day পার হয়নি), ৩০ দিনের মধ্যে চলে যাবেন, Settled; প্রতিজনের last working day কত দিন বাকি, clearance কতটা হয়েছে (`exit_clearance_items`)। পাশে এ বছরের কারণ (Better offer / Higher study / Family / personal / Other — কারণের লেখা থেকে), Department অনুযায়ী সংখ্যা, আর turnover (এ বছর যাঁদের last working day পার হয়েছে ÷ এ বছর কর্মরত সবাই)। Type: Resignation / Termination। **কোনো টাকার অঙ্ক নেই** — settlement Exit / Offboarding আর Payroll-এই থাকে।
+- **Religion:** সক্রিয় কর্মী ধর্ম অনুযায়ী (সংখ্যা, %), "Not recorded" আলাদা লাল; একটা ধর্ম চাপলে তাঁদের তালিকা (উৎসব বোনাস / ছুটির জন্য), "Not recorded" চাপলে যাঁদের তথ্য বাকি। একই ধর্মের ভিন্ন বানান (Muslim / Islam, Hindu / Hinduism…) এক নামে গোনা হয়।
+
+**Quick reports-এ আরও ৫টা কার্ড** (মোট ১০টা; একই পাতা, একই অনুমতি — HR Operations + "Quick reports" layer; হিসাব Employee Reports-এর একই `buildFacts` থেকে, তাই সংখ্যা মেলে; **কোনো টাকার অঙ্ক নেই**):
+- **Attendance watch:** Period-এর মাসে হাজিরা ৮০%-এর নিচে, বা মাসে ৩ বারের বেশি দেরি — উপস্থিত / কাজের দিন, অনুপস্থিত, ছুটি, দেরি (extreme সহ), %।
+- **Leave watch:** Period-এর বছরে Casual বা Sick বাকি ২ দিন বা কম, বা Leave Without Pay নিয়েছেন।
+- **Contracts ending:** contract ৬০ দিনের মধ্যে শেষ, বা শেষ হয়ে গেছে (গত ৬ মাসে)।
+- **Headcount mix:** সক্রিয় কর্মী Gender / Branch / Project / Employment category অনুযায়ী (সংখ্যা, %, bar); bar চাপলে তাঁদের তালিকা; "male / Male" এক ধরা হয়।
+- **Records to fix:** মেয়াদ শেষ document, e-signature বাকি, app login নেই।
+Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (`AdminDashboardHrReports.tsx`, `hrQuickShared.ts`)।
+
+**Build your own → Ready Reports-এ আরও ২৫টা** (এক ক্লিকে, Report Builder-এর preset — `src/components/HrOpsReports.tsx` PRESETS; নতুন data লাগে না): পুরুষ / নারী; এ মাসে ও এ বছরে নতুন যোগদান; Contract শেষ হচ্ছে (৬০ দিন); গত ৯০ দিনে confirm; Branch / Project / Employment category / Job status অনুযায়ী লোকবল; Supervisor অনুযায়ী team; App login নেই; Exit চলছে; কম হাজিরা (৮০%-এর নিচে); ঘনঘন দেরি (মাসে ৩-এর বেশি); ছুটি প্রায় শেষ (Casual / Sick ২ দিন বা কম); Leave Without Pay; ১২ মাসে increment নেই, এ বছরের bonus, Grade অনুযায়ী বেতন (এই তিনটা বেতনের — payroll অনুমতি ছাড়া বেতনের ঘর আগের মতোই লুকানো); শৃঙ্খলাভঙ্গের রেকর্ড; Performance rating; কোনো training নেই; মেয়াদ শেষ document; সই বাকি document; claim অপেক্ষায়।
+
+**Admin Dashboard → "HR reports" কার্ড:** একই ৫টা সংখ্যা (probation ≤ ৩০ দিন ও overdue, এ মাসের joiner ও transfer, notice-এ থাকা resignation, ধর্ম অনুযায়ী সংখ্যা)। কার্ড চাপলে HR Operations → Reports → Quick reports-এ সেই রিপোর্টটা খোলে। শুধু যাঁদের HR Operations আর তার নতুন layer **"Quick reports"** আছে তাঁরাই দেখেন — layer-টা শুধু দেখার, তাই যাঁদের HR Operations-এ কোনো layer টিক করা নেই তাঁরা default-এ পান, আর যাঁদের আগে থেকে "HR Operations" (read) টিক ছিল তাঁরা একবার (startup marker `hr_quick_reports_grant`) পেয়েছেন; Module Access-এ untick করলে বন্ধ থাকে।
+
 ## Profile → My Service Book
 
 কর্মীর নিজের Service Book (নিজের Employee 360, শুধু দেখা যায়) এখন **Profile** পাতায়। Desktop-এ উপরে বড় ছবিসহ header (ক্যামেরা বোতামে Personal Data খুলে ছবি বদল), বাঁ দিকে মেনু (My Service Book, Contact & Account, Personal Data, My Asset, Appearance, Notifications, Fingerprint, Change Password / Username, Feedback, Logout), ডানে যেটা বাছা — শুরুতে My Service Book। ফোনে দুটো ট্যাব: আগে Settings (খুললে এটাই দেখায়), তারপর Service Book। শুধু যাঁদের Module Access-এ "My Service Book" (`users.can_view_service_book`, ডিফল্টে বন্ধ) চালু, তাঁরাই দেখেন; Superadmin সবসময় দেখেন, তবে তাঁর লগইন কোনো Employee record-এর সাথে যুক্ত না থাকলে Service Book ট্যাবই দেখায় না — "contact HR" বার্তাও না (`/api/auth/me`-এর `has_employee`); server-এ `/api/hr-ops/my/p360` আগের মতোই এই সুইচ যাচাই করে। My Letters & Service Record-এ আর Service Book ট্যাব নেই — সেখানে সবার জন্য Service Record। Assistant-এর "My Service Book খুলুন" বোতাম সরাসরি Profile-এর Service Book খোলে।
@@ -542,11 +579,15 @@ HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও �
 
 **Service Book-এর Supervisor:** কর্মীর নিজের supervisor (HR Operations → Transfer / Supervisor, `employee_supervisors`) থাকলে সেটা; না থাকলে তাঁর Department-এর Supervisor (Departments পাতা, `departments.supervisor_user_id` — approval-এর "Supervisor is 1st layer"-ও এটাই), পাশে "(Department)" লেখা। Department-এর Supervisor নিজেই হলে ফাঁকা। এটা শুধু দেখানো — HR-এর action-এ (transfer ইত্যাদি) "আগের supervisor" হিসেবে শুধু নিজের supervisor ধরা হয়।
 
-**App-এর theme (Profile → Settings → Appearance):** default theme এখন **Orange** — CredenceHR-এর brand কমলা (#F47920, app icon আর launch screen-এর রং) পুরো app-এ: ফোনের header ও welcome banner, desktop-এর sidebar, বোতাম, link, Leave Summary card, নিচের বার, Welcome slides, Tutorials (`src/lib/backgroundTheme.ts` `orange`, `<html data-ui="orange">`; index.css Tailwind-এর violet / purple / fuchsia রং কমলায় বদলে দেয়, blue / indigo আর সবুজ / হলুদ / লাল status রং যেমন ছিল)। আগের theme-গুলো বাছাই হিসেবে থাকে: **Apple Glow (Violet)** (আগের default), **Classic**, **Minimal Mono**। যিনি আগে নিজে কোনো theme বেছেছিলেন তাঁর সেটাই থাকে; যিনি কখনো বাছেননি তিনি Orange পান। পছন্দটা ডিভাইসে থাকে (localStorage `mpr_bg_theme_v2`)।
+**Dark mode (Profile → Settings → Appearance → Mode):** চারটা বিকল্প — **Light**, **Dark**, **Dark Glass**, **Like this device** (ফোন / কম্পিউটার dark করলে app-ও dark, বদলালে সাথে সাথে বদলায়)। প্রতি device-এ মনে থাকে (`localStorage` `mpr_color_mode`, `src/lib/colorMode.ts`); `index.html` প্রথম ছবি আঁকার আগেই `<html data-dark>` বসায়, তাই সাদা ঝলক দেখায় না। web, Android app, iPhone app আর iPhone-এর Home Screen app — সব একই। রং charcoal, একদম কালো নয়: পাতা `#25282c`, card `#2f3237`, সরু কিনারা `#3a3e44`, লেখা হালকা ধূসর; sidebar, উপরের header, phone Home-এর উপরের অংশ আর নিচের bar-ও charcoal, খোলা পাতা sidebar-এ বাঁ দিকের accent দাগে চেনা যায়। accent রং (বোতাম, চিহ্ন) আর Approved / Absent-এর মতো রং-চিহ্ন থাকে, শুধু হালকা পটভূমির chip গাঢ় হয়ে যায়। যেকোনো background theme-এর সাথে চলে (`index.css`-এর "Dark mode" অংশ: neutral রঙের ধাপ উল্টে দেওয়া, রঙিন হালকা আভা গাঢ় করা)। Android-এ status bar-এর ঘড়ি / ব্যাটারি dark-এ সবসময় সাদা (`Navbar.tsx`), browser-এর উপরের bar-এর রং (`theme-color`) dark-এ charcoal।
+
+**Dark Glass:** Dark-এর সব কিছু, সাথে liquid glass চেহারা — প্রায় কালো পাতার পেছনে accent, নীল আর সবুজের নরম আলো; card, sidebar, উপরের header, phone Home-এর banner, নিচের bar আর popup স্বচ্ছ ঝাপসা কাচ, পেছনের আলো হালকা দেখা যায় (`<html data-dark data-glass>`, `index.css`-এর "Dark Glass" অংশ)। এটাও প্রতি device-এ মনে থাকে; "Like this device" সাধারণ Dark দেয়।
+
+**App-এর theme (Profile → Settings → Appearance):** default theme এখন **Orange** — CredenceHR-এর brand কমলা, "Orange Fade" palette (`#ff6700` মূল রং / বোতাম, `#fb7216`, `#ff8532`, `#fd8f45`, `#ffa162`; header, sidebar আর banner-এর gradient হালকা থেকে গাঢ় `#ff8532 → #fb7216 → #ff6700` (আগের মতো দিক); লেখার জন্য গাঢ় ধাপ `#e05a00` / `#b34700`; `index.css` `--or-*` আর `html[data-ui="orange"]`) পুরো app-এ (app icon আর launch screen আগের `#F47920`-ই): ফোনের header ও welcome banner, desktop-এর sidebar, বোতাম, link, Leave Summary card, নিচের বার, Welcome slides, Tutorials (`src/lib/backgroundTheme.ts` `orange`, `<html data-ui="orange">`; index.css Tailwind-এর violet / purple / fuchsia রং কমলায় বদলে দেয়, blue / indigo আর সবুজ / হলুদ / লাল status রং যেমন ছিল)। আগের theme-গুলো বাছাই হিসেবে থাকে: **Apple Glow (Violet)** (আগের default), **Classic**, **Minimal Mono**। যিনি আগে নিজে কোনো theme বেছেছিলেন তাঁর সেটাই থাকে; যিনি কখনো বাছেননি তিনি Orange পান। পছন্দটা ডিভাইসে থাকে (localStorage `mpr_bg_theme_v2`)।
 
 **Android-এর নিচের navigation bar (নতুন APK):** অ্যাপ আর ফোনের নিচের navigation bar-এর (৩ বোতাম বা gesture-এর দাগ) পেছনে আঁকে না। WebView ঠিক তার উপরে শেষ হয় (`MainActivity` insets listener, margin), bar-এর পেছনের ফালিটা সাদা আর তাতে গাঢ় বোতাম। আগে popup / sheet-এর নিচের বোতাম (যেমন Profile photo approvals-এর Approve) আর অনেক পাতার শেষ অংশ ঐ bar-এর নিচে চাপা পড়ত, কারণ প্রতিটা popup-কে নিজে জায়গা ছাড়তে হতো আর অনেকগুলো তা ছাড়ত না। এখন page-কে `--native-safe-area-inset-bottom` 0 জানানো হয়। পুরনো APK-এর জন্য footer ছাড়া Mail-ধাঁচের popup (`MailPopup`) নিজেই সেই জায়গা ছাড়ে। **পুরনো APK আর iPhone-এ সব popup-এ:** যে APK-গুলো এখনো bar-এর পেছনে আঁকে (আর iPhone-এর নিচের home দাগ), সেখানে `index.css`-এর একটা নিয়ম প্রতিটা পূর্ণ-পর্দা popup / sheet-এর (`fixed inset-0`) নিচে bar-এর সমান একটা স্বচ্ছ border দেয় (`--nav-room`): ভেতরের card bar-এর উপরে থামে, পেছনের ঝাপসা পর্দা নিচ পর্যন্ত যায়। ভেতরে `--native-safe-area-inset-bottom` 0 হয়ে যায়, তাই যে popup আগে থেকেই জায়গা রাখত সে দুবার রাখে না। keyboard খোলা থাকলে keyboard-এর নিয়মটা খাটে। নিজে সামলায় এমন layer-এ `data-nav-self` দিলে নিয়মটা খাটে না। নতুন APK আর computer-এ কিছু বদলায় না (মান 0)। একই নিয়ম পাশ থেকে খোলা menu-তেও (`fixed top-0 bottom-0`, নিচের Logout) খাটে; script দিয়ে বসানো dropdown / ছোট card (SearchSelect, filter, calendar-এর দিন) `src/lib/navRoom.ts`-এর `usableHeight()` দেখে bar-এর উপরে খোলে; Notice খুললে পুরো পর্দার card (phone) bar-এর উপরে থামে; ভাসমান বোতাম / toast আর Mail পাতার উচ্চতা একই মান নেয়।
 
-**ফোনের পাতার header-এর রং (Profile → Settings → Appearance):** ফোনে (APK, iPhone Home Screen, মোবাইল ব্রাউজার) Timesheet, Check In/Out, Leave, My Tasks, My Targets, Approve Application, Documents to Sign, My Duty Roster, Break Time, Bill Claim, My Loan / Advance, My Payslip, My Asset, My Mobile SIM, SIM & ID Card, Book a Ride, My Letters & Service Record, Credence Mail, Alerts, Employee Directory, Grievance & Disciplinary ও My Resignation-এর header-এ রঙিন bar নেই; বাঁয়ে গোল সাদা Back (ফোনের Back-এর মতোই এক ধাপ পেছনে), মাঝে শিরোনাম, ডানে একটি গোল বোতাম — Timesheet-এ Alerts, বাকিগুলোয় ⋮ (Home — সরাসরি Dashboard-এ, Alerts, Chat, Profile, Menu; অপঠিত থাকলে লাল ফোঁটা; Employee Directory-তে নিচে স্ক্রল করলে ⋮-এর পাশে গোল Search বোতামও আসে), পেছনে নরম আলো শুধু উপরে, যা নিচে নামতে নামতে পাতার সাদাটে সমতল রঙে মিশে যায় (এই পাতাগুলোয় থিমের background gradient নিচে দেখায় না), স্ক্রল করলে কাচের মতো ঝাপসা। আলোর রং কর্মী নিজে বাছেন — Violet & pink, Warm orange বা Sky blue; না বাছলে থিমের রং (Classic → Sky blue, Apple Glow → Violet, Orange → Warm orange)। পছন্দটা এই ডিভাইসেই থাকে (localStorage `mpr_header_glow`, `<html data-glow>`), server-এ কিছু যায় না। Desktop আগের মতোই।
+**ফোনের পাতার header-এর রং (Profile → Settings → Appearance):** ফোনে (APK, iPhone Home Screen, মোবাইল ব্রাউজার) Timesheet, Check In/Out, Leave, My Tasks, My Targets, Approve Application, Documents to Sign, My Duty Roster, Break Time, Bill Claim, My Loan / Advance, My Payslip, My Asset, My SIM & Bill, SIM & ID Card, Book a Ride, My Letters & Service Record, Credence Mail, Alerts, Employee Directory, Grievance & Disciplinary ও My Resignation-এর header-এ রঙিন bar নেই; বাঁয়ে গোল সাদা Back (ফোনের Back-এর মতোই এক ধাপ পেছনে), মাঝে শিরোনাম, ডানে একটি গোল বোতাম — Timesheet-এ Alerts, বাকিগুলোয় ⋮ (Home — সরাসরি Dashboard-এ, Alerts, Chat, Profile, Menu; অপঠিত থাকলে লাল ফোঁটা; Employee Directory-তে নিচে স্ক্রল করলে ⋮-এর পাশে গোল Search বোতামও আসে), পেছনে নরম আলো শুধু উপরে, যা নিচে নামতে নামতে পাতার সাদাটে সমতল রঙে মিশে যায় (এই পাতাগুলোয় থিমের background gradient নিচে দেখায় না), স্ক্রল করলে কাচের মতো ঝাপসা। আলোর রং কর্মী নিজে বাছেন — Violet & pink, Warm orange বা Sky blue; না বাছলে থিমের রং (Classic → Sky blue, Apple Glow → Violet, Orange → Warm orange)। পছন্দটা এই ডিভাইসেই থাকে (localStorage `mpr_header_glow`, `<html data-glow>`), server-এ কিছু যায় না। Desktop আগের মতোই।
 
 **ফোনের Self Service তালিকার card (`src/components/SelfCard.tsx`):** উপরের সব পাতায় তালিকার প্রতিটি জিনিস (দিন, claim, ছুটি, task, target, আবেদন, payslip, asset, SIM, letter, alert, grievance…) Employee Directory-র card-এর মতো — হালকা রঙিন gradient, গোল কোণ, বাঁয়ে গোল আইকন/আদ্যক্ষর, নাম আর এক লাইনের বিবরণ, নিচে ছোট chip, ডানে গোল বোতাম। রং অবস্থা অনুযায়ী: সবুজ = হয়ে গেছে / On time / Paid, হলুদ = অপেক্ষায় / Delay / চলছে, গোলাপি = Absent / Rejected / Overdue, বেগুনি-নীল-আকাশি = অবস্থা নেই এমন সাধারণ তালিকা; Weekend / Holiday / বন্ধ জিনিস হালকা। শুধু phone-এ; desktop-এর তালিকা আগের মতোই।
 
@@ -832,6 +873,60 @@ Deploy বা `pm2 restart`-এর সময় Node app কয়েক সে�
 
 পুরনো ডাটাবেস server চালু হওয়ার সময় নিজে বদলে যায় (`billClaimRename.ts`, base schema-র ঠিক পরে, বাকি migration-এর আগে): টেবিল / কলাম / index rename, ENUM-এর মান বদল, আর দেওয়া অনুমতি (module, layer, App access, Access Template) নতুন নামে সরানো — ডাটা হারায় না, আর আবার চালালে কিছু করে না। **Conveyance Bill** (`conveyance_bills`, `conveyance_bill_items`, `/api/conveyance-bills`, Disburser ধাপ) আলাদা জিনিস — claim approve হলে যে বিল তৈরি হয় — তার নাম আগের মতোই।
 
+## Payroll: বেতনের অঙ্ক দেখার আলাদা অনুমতি
+
+Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amounts`, Module Access → Payroll)। এটা না থাকলে:
+- Payroll-এর প্রতিটা পাতায় (Dashboard, Payroll List, Approval-এর Salary sheet / Top Sheet / Month comparison, Loans, Bonus, Adjustment, Salary Setup…) সব টাকার অঙ্ক `*****` দেখায়; নাম, বিভাগ, মাস, দিন, status, কতজন — এসব দেখা যায়।
+- সার্ভারই লুকায় (`payrollAmountMask.ts`, `/api/payroll`-এর সব উত্তরে): তাই Excel / PDF, Assistant বা সরাসরি API — কোথাও আসল অঙ্ক যায় না। Approval-এর সংযুক্ত ফাইল (scan) খোলা যায় না।
+- Payroll-এ কিছু বদলানো যায় না (salary বানানো, edit, approve, pay…) — লুকানো অঙ্কসহ ফর্ম save হলে আসল বেতন ০ হয়ে যেত। পাতার ভেতরের এডিট বোতামও লুকায়।
+- HR Operations → Reports-এর Salary / loan কলামও এই layer চায় (scheduled report-এ মালিকের অনুমতি দেখা হয়)।
+- কর্মীর নিজের payslip, My Loan — এগুলো আলাদা, কখনো লুকায় না।
+
+নতুন account-এ এটা টিক না দিলে থাকে না (explicit-only)। চালু হওয়ার সময় একবার (startup marker `payroll_salary_amounts_grant`), তখন যাঁদের Payroll ছিল তাঁরা সবাই এটা পেয়েছেন, যাতে কেউ আগের দিনের দেখা হারান না; Superadmin চাইলে Module Access থেকে খুলে নিতে পারেন।
+
+## Mobile App (APK) চালু: একসাথে অনেকের, আর নতুন account-এ নিজে থেকেই
+
+আগে নতুন account-এ Mobile App বন্ধ থাকত, আর Module Access-এ একজন একজন করে চালু করতে হতো। এখন (`AppAccess.ts`, `AppAccessBanner.tsx`):
+- **Users পাতার উপরে**: "N accounts can't use the Mobile App yet" — **Show them** (শুধু তাঁদের তালিকা) আর **Turn on for all N** (একবার জিজ্ঞেস করে সবার চালু)। তালিকায় তাঁদের নামের পাশে "No app"; ফিল্টার "Mobile App off"।
+- **কয়েকজন টিক দিয়ে**: উপরের বারে **Mobile App: Turn on / Turn off** — Department ফিল্টার করে "সবাই" টিক দিলে পুরো Department একবারে।
+- **"New accounts get the Mobile App"** (Superadmin, workspace ধরে; শুরুতে চালু): যে account-এ নিজের কিছু ঠিক করা নেই (`users.can_use_app` = NULL, নতুন সব login — Users, Employees, Data Import) সে এই setting মানে; তাই নতুন কর্মী প্রথম দিন থেকেই app-এ ঢুকতে পারেন, website-এর সমান অনুমতি নিয়ে। বন্ধ করলে নতুনরা শুধু website; যাঁদের হাতে চালু / বন্ধ করা আছে তাঁরা যেমন আছেন।
+
+পরীক্ষা: `docs/test-logs/2026-11-12/scripts/app-access-*.mjs` — API ১৮/১৮, browser ৯/৯।
+
+## Department: Head of Department আর টিম ধরে Supervisor
+
+Admin Panel → Departments → Edit (`DepartmentTeams.ts`, `DepartmentTeamsEditor.tsx`):
+- **Head of Department** — একজন (`departments.head_user_id`)।
+- **Teams** — প্রতিটা টিমের নাম, নিজের **Supervisor**, সদস্য (একজন কর্মী একটাই টিমে)। একটা টিমে টিক দেওয়া যায় "বাকি সবাইও" — যাঁরা অন্য কোনো টিমে নেই (নতুন কর্মীও নিজে সেখানে পড়েন)। Backup Supervisor নেই।
+
+**Approval ধারা** (`createTemplateApprovalRequest`, server.ts) — প্রতিটা অনুরোধে:
+1. **Supervisor**: কর্মীর নিজের Direct Supervisor (Employees → Supervisor) থাকলে তিনি; না থাকলে **নিজের টিমের Supervisor** — অন্য টিমের Supervisor কখনো নয়। টিমে নেই (আর "বাকি সবাই" টিমও নেই) → এই ধাপ নেই। Supervisor নিজে অনুরোধ দিলে এই ধাপ বাদ।
+2. **Head of Department** — শুরু থেকেই সবসময় (আলাদা সুইচ নেই), Department-এ Head থাকলে। Head নিজে অনুরোধকারী বা একই মানুষ আগের ধাপের Supervisor হলে বাদ (`approval_requests.head_step_user_id`)।
+3. তারপর Approval Template-এর layer-গুলো।
+
+টিম / সদস্য / Head বদলালে অপেক্ষমাণ অনুরোধ নিজে নতুন মানুষের কাছে যায় (reconcile); Head সরালে Head ধাপ বাদ দিয়ে পরের layer-এ।
+
+**আগের Department Supervisor (একবার, startup marker `department_teams_from_supervisor`)**: যে Department-এ Supervisor ছিলেন ("approval-এ রাখা" চালু), সেখানে "<Department> team" — Supervisor তিনি, "বাকি সবাই" টিক দেওয়া — আর Head না থাকলে Head-ও তিনি (Head = Supervisor বলে Head ধাপ বাদ): আগের মতোই সব অনুরোধ তাঁর কাছে যায়, Tasks / Targets / Module Access-এও আগের মতো।
+
+অন্য জায়গা: Tasks-এ "department head" = Head of Department; Targets-এ Head পুরো Department দেখেন, টিম Supervisor নিজের টিম; Module Access-এ Head বা টিম Supervisor-এর Department প্রথমবার টিক দেওয়া থাকে; OT Approval-এ টিম Supervisor = Team Supervisor।
+
+পরীক্ষা: `docs/test-logs/2026-11-12` — API ৩৩/৩৩, browser ৭/৭, migration।
+
+## Overtime (OT) আর Security Guard
+
+OT নিজে হিসাব হয়, Roster-এ ঠিক হয়, যিনি অনুমোদন দেবেন তিনি setting-এ ঠিক করা, আর Payroll-এ নিজে বসে (`OvertimeCalc.ts`, `OvertimeRoutes.ts`, `GuardRoutes.ts`)।
+
+1. **Payroll → OT Rules** (layer `ot_rules`): rate-এর ধরন (শ্রম আইন: মূল ÷ ২০৮ × ২ / নির্দিষ্ট ৳ ঘণ্টায় / gross ভিত্তিক), গুণক, "কত মিনিট পর থেকে" (৩০), "গোল করা" (৩০), দিনে / মাসে সর্বোচ্চ, office-এর সময় (roster না থাকলে), **কে অনুমোদন দেবেন** (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর), পদ বা কর্মী ধরে নিজের rate, আর **কে OT পাবেন** (`all_employees.gets_ot`, শুরুতে সবার বন্ধ)।
+2. **Duty Roster → Shifts**: প্রতিটা shift-এ "স্বাভাবিক সময়" আর তার বেশি সময় "OT হিসেবে টাকা" নাকি "বেতনের মধ্যেই" (guard-এর ১২ ঘণ্টা: ৮ স্বাভাবিক + ৪ OT, বা ১২-ই বেতনে)। **Roster**-এ দিনের ঘরে "+১ / +২ ঘণ্টা OT" (আগে থেকে অনুমোদিত)।
+3. **হাজিরা সবার মতো**: app Check In / Out, office device বা Site Attendance muster — দিনের প্রথম In থেকে শেষ Out। রাতের shift পরের দিন সকালে শেষ হলেও যেদিন শুরু সেদিনের।
+4. **হিসাব** (`ot_entries`, তালিকা / Payroll খুললে নতুন করে, যে দিনের সিদ্ধান্ত হয়ে গেছে সেটা বদলায় না): কাজের দিনে shift শেষের পরের সময় (+ shift-এর ভেতরের OT), Off / ছুটির দিনে পুরো সময় (Off দিনের rate-এ)। Roster-এ আগে থেকে দেওয়া OT নিজে অনুমোদিত, বাকিটা অপেক্ষায়। "OT পান না" এমন কর্মীর বাড়তি সময় শুধু দেখায় (`not_eligible`), টাকা হয় না।
+5. **অনুমোদন**: Duty Roster → **OT Approval** (layer `ot_approve`) বা Self Service → **Team OT** (`users.can_approve_team_ot`)। Team Supervisor = Direct Supervisor (login আছে এমন) বা Site Attendance team-এর supervisor / backup — শুধু নিজের team; Roster manager = `ot_approve` আছে আর Duty Roster-এর department-এ পড়ে। যাঁর supervisor নেই তাঁর OT Roster manager-এর কাছে। টিক দিয়ে একসাথে Approve, ঘণ্টা কমানো, Reject। "দুজনই পরপর" হলে supervisor হ্যাঁ বললে Roster manager-এর কাছে যায়।
+6. **Payroll → Run Payroll**: অনুমোদিত ঘণ্টা, rate আর টাকা নিজে বসে (মাসের সর্বোচ্চ মেনে); অপেক্ষায় থাকলে সতর্কতা। হাতে বদলালে কারণ লিখতে হয় (`ot_payroll_changes`)। Payslip-এ "Overtime (১৮ h × ১১৫.৩৮)"।
+7. **Self Service → My OT** (`users.can_view_my_ot`): নিজের OT — ঘণ্টা ও অবস্থা, টাকা নয়।
+8. **Security Guard** — Duty Roster → **Guard Posts** (layer `guard_posts`): post আর কোন shift-এ কতজন লাগবে, সপ্তাহের coverage (খালি লাল), এক ক্লিকে relief (যিনি Off বা অন্য shift-এ; relief-এর সময় OT, অপেক্ষায়), আর ছক দিয়ে মাস ভরা (৬ দিন ১ Off / দিন-রাত প্রতি সপ্তাহ / ৪ দিন ৪ রাত ২ Off)। Guard-এর হাজিরার আলাদা কিছু নেই।
+
+পরীক্ষা: `docs/test-logs/2026-11-11/scripts/ot-*.{ts,mjs}` — হিসাব ১৭/১৭, API ৬৪/৬৪, browser ৩২/৩২।
+
 ## Admin Dashboard: Pending Attendance — একসাথে Approve
 
 Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে Check In/Out) আর **Pending Attendance Recon.** (হাজিরা সংশোধন) — দুটোতেই চাপলে একই popup খোলে (০ থাকলেও; "Nothing is waiting")। যে সারি এই অ্যাকাউন্ট approve করতে পারে, শুধু তার পাশে tick box; উপরে "Select all you can approve", নিচে **Approve selected (n)** — জিজ্ঞেস করে (`confirmDialog`) তারপর একটা একটা করে approve করে, আর তালিকা নতুন করে আনে। কে পারে তা সার্ভার ঠিক করে (`/api/admin-dashboard/extras`, প্রতিটা সারির `approve`), একক approve-এর একই নিয়মে:
@@ -847,6 +942,10 @@ Admin Dashboard-এর **Pending Attendance Approval** (মাঠ থেকে C
 ## Login পেজের animation ডিভাইসে রাখা
 
 Login পেজের illustration animation (`office-illustration.json`, ~৮৬৫ KB, gzip-এ অনেক ছোট) একটা আলাদা JSON ফাইল, যার নামে তার content-এর hash থাকে। প্রথমবার নামার পর browser-এর **Cache Storage**-এ (`credence-static-v1`) রাখা হয় (`src/lib/assetCache.ts`, `src/lib/authHeroAsset.ts`)। website, ফোনের browser, "Add to Home screen" আর Android অ্যাপ সব জায়গায় পরের বার network ছাড়াই দেখায়। সাধারণ HTTP cache-এর মতো এটা browser-এর জায়গা দরকার হলে মুছে যায় না। login অবস্থায় অ্যাপ খোলার ৮ সেকেন্ড পর একবার পেছনে নামিয়ে রাখে, তাই sign-out-এর পর login পেজে সাথে সাথে আসে। animation বদলালে নতুন hash হয়, নতুনটা নামে, পুরনোটা মুছে যায়। শুধু অ্যাপের স্থির ফাইল রাখা হয়, `/api`-এর কোনো data কখনো না।
+
+## Admin Panel: কম্পিউটারে Edit জায়গায় দাঁড়িয়েই
+
+Departments-এ নিচের দিকের কোনো সারির Edit চাপলে আগে পাতার উপরের form ভরত — উপরে scroll করে আবার নিচে ফিরতে হতো। এখন একই form popup-এ খোলে, যেখানে আছেন সেখানেই (`PhoneSheet` `editPopupOnDesktop`); পাতা নড়ে না, Save / Cancel / ✕ / Esc / বাইরে ক্লিকে বন্ধ। "Add" form উপরে আগের মতো। ফোনে আগের মতোই নিচ থেকে sheet। অন্য পাতায়ও একই option দিয়ে চালু করা যায়।
 
 ## Admin Panel: ফোনে Self Service-এর মতো
 

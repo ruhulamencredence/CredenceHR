@@ -46,7 +46,7 @@ type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare" | "top_sheet" | "hrd_review";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "approval_sheet" | "month_compare" | "top_sheet" | "hrd_review" | "salary_amounts" | "ot_rules";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -403,7 +403,7 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log, edit, sheet, compare, top, hrd] = await Promise.all([
+    const [audit, pay, log, edit, sheet, compare, top, hrd, amounts, otRules] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
       hasModuleLayer(req.user, "payroll", "access_log"),
@@ -411,11 +411,27 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       hasModuleLayer(req.user, "payroll", "approval_sheet"),
       hasModuleLayer(req.user, "payroll", "month_compare"),
       hasModuleLayer(req.user, "payroll", "top_sheet"),
-      hasModuleLayer(req.user, "payroll", "hrd_review")
+      hasModuleLayer(req.user, "payroll", "hrd_review"),
+      hasModuleLayer(req.user, "payroll", "salary_amounts"),
+      hasModuleLayer(req.user, "payroll", "ot_rules")
     ]);
     // edit = HR's "Payroll" layer; without it the account only views.
     // approval_sheet = the Salary sheet table in Approval.
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit, approval_sheet: sheet, month_compare: compare, top_sheet: top, hrd_review: hrd });
+    // salary_amounts = See salary amounts: without it amounts are ***** and
+    // no change goes through (payrollAmountMask.ts), so nothing is editable.
+    res.json({
+      audit_approve: audit && amounts,
+      accounts_pay: pay && amounts,
+      access_log: log,
+      edit: edit && amounts,
+      approval_sheet: sheet,
+      month_compare: compare,
+      top_sheet: top,
+      hrd_review: hrd && amounts,
+      salary_amounts: amounts,
+      // Payroll -> OT Rules tab (OvertimeRoutes.ts).
+      ot_rules: otRules
+    });
   });
 
   // ---- one month's approval state ---------------------------------------

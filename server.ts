@@ -66,6 +66,9 @@ import { registerCallRoutes, setupCallSocket, callAccess } from "./CallRoutes";
 import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
+import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
+import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
@@ -74,6 +77,8 @@ import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
 import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
+import { ensurePepmTeamSchema } from "./PepmTeam";
+import { registerApprovalDetailsRoutes } from "./ApprovalDetailsRoutes";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
@@ -94,6 +99,8 @@ import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequ
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { registerHrQuickReportsRoutes, ensureHrQuickReportsSchema } from "./HrQuickReports";
+import { payrollAmountGuard } from "./payrollAmountMask";
 import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
@@ -291,6 +298,9 @@ async function initDB() {
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    await ensureOvertimeSchema(dbPool);
+    await ensureGuardSchema(dbPool);
+    await ensureDepartmentTeamsSchema(dbPool);
     // Employee Tracking: whom each account may see (TrackingScope.ts).
     await ensureTrackingScopeSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
@@ -356,6 +366,8 @@ async function initDB() {
     await autoLinkByEmployeeId(queryDB);
     // SIM & ID card requisitions (RequisitionRoutes.ts).
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
+    // PEPM Project teams: the per-Project Final Submit locks (PepmTeam.ts).
+    await ensurePepmTeamSchema(queryDB).catch((e: any) => console.warn("⚠️ PEPM project locks: " + e.message));
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) {
       startZkSyncSchedule(dbPool);
@@ -436,7 +448,13 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "top_sheet" = Payroll -> Approval -> Top Sheet: the month's salary by
 // Branch / site (Accounts' top sheet, with each site's own sheet), Excel /
 // PDF. Plain reading too, so also in that default.
-const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review"] as const;
+// "salary_amounts" = See salary amounts: without it every Payroll answer has
+// its amounts shown as ***** and nothing in Payroll can be changed
+// (payrollAmountMask.ts). Explicit-only — never part of the default below.
+// "ot_rules" = Payroll -> OT Rules: how overtime is paid (rate, who approves,
+// a designation's / person's own rate) and who gets OT (OvertimeRoutes.ts).
+// Explicit-only.
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload", "approval_sheet", "month_compare", "top_sheet", "hrd_review", "salary_amounts", "ot_rules"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -461,7 +479,7 @@ const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // explicit-only — the no-saved-layers default is "read" alone.
 // "reminders_receive" (explicit-only too): HR reminders of probation,
 // contract, document, retirement and increment dates (HrRemindersRoutes.ts).
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions"] as const;
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -494,7 +512,10 @@ const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_setti
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
-const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
+// "ot_approve" = OT Approval: approve / trim / reject overtime as the Roster
+// manager (and as a Team Supervisor). "guard_posts" = guard posts, filling a
+// month from a pattern, relief (GuardRoutes.ts). Both explicit-only.
+const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage", "ot_approve", "guard_posts"] as const;
 // Break Time (BreakRoutes.ts): "read" = the report and who is on a break now;
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -817,25 +838,27 @@ async function resolveApprovalTemplate(employeeUserId: number, requestType: "bil
 // This is the FALLBACK layer — resolveSupervisorApprover below tries the
 // Employee's own Direct Supervisor (employee_supervisors) first and only
 // calls this when that isn't usable.
+// Now the employee's own TEAM's Supervisor (DepartmentTeams.ts): their
+// team in their Department, else the Department's "everyone else" team —
+// never another team's Supervisor; nobody for someone in no team.
 async function resolveDepartmentSupervisor(employeeUserId: number): Promise<number | null> {
-  try {
-    const rows = await queryDB(
-      `SELECT d.supervisor_user_id
-       FROM all_employees e
-       JOIN departments d ON d.id = e.department_id
-       WHERE e.user_id = ? AND d.is_active = 1 AND d.include_supervisor_approval = 1 AND d.supervisor_user_id IS NOT NULL
-       LIMIT 1`,
-      [employeeUserId]
-    );
-    if (rows.length === 0) return null;
-    const supervisorId = Number(rows[0].supervisor_user_id);
-    if (!supervisorId || supervisorId === Number(employeeUserId)) return null;
-    return supervisorId;
-  } catch (err: any) {
-    console.warn("⚠️ Could not resolve department supervisor: " + err.message);
-    return null;
-  }
+  return resolveTeamSupervisor(queryDB, employeeUserId);
 }
+
+// The Head of Department step (DepartmentTeams.ts): after the Supervisor,
+// always, when the employee's Department has a Head — skipped when the Head
+// is the requester, is already the Supervisor step, or can't act any more.
+async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null): Promise<number | null> {
+  const head = await resolveDepartmentHead(queryDB, employeeUserId);
+  if (!head || head === supervisorId) return null;
+  if ((await inactiveUserIds([head])).has(head)) return null;
+  return head;
+}
+// Steps put in front of an Approval Template's own layers: the Supervisor
+// (step 1) and / or the Head of Department (the step after it).
+const autoStepCount = (r: any) => (r?.supervisor_step_user_id ? 1 : 0) + (r?.head_step_user_id ? 1 : 0);
+const headStepNo = (r: any) => (r?.supervisor_step_user_id ? 2 : 1);
+const onHeadStep = (r: any) => !!r?.head_step_user_id && Number(r.current_step) === headStepNo(r);
 
 // Employee's own Direct Supervisor (Admin Panel -> Employees -> Edit ->
 // Supervisor tab, employee_supervisors.is_direct = 1) — tried BEFORE the
@@ -964,8 +987,11 @@ async function createTemplateApprovalRequest(
     : overrideSupervisorId !== undefined
     ? overrideSupervisorId
     : await resolveSupervisorApprover(requestedBy);
+  // Head of Department next (not when HR files with "no Supervisor gate", or
+  // a Template that sets its own first Layer).
+  const headId = template?.skip_auto_supervisor || overrideSupervisorId === null ? null : await resolveHeadApprover(requestedBy, supervisorId || null);
 
-  const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
+  const totalSteps = (supervisorId ? 1 : 0) + (headId ? 1 : 0) + templateSteps;
   if (totalSteps === 0) {
     // HR filing a Vehicle Requisition directly and choosing no Supervisor
     // (overrideSupervisorId === null) with no Template still goes straight
@@ -985,9 +1011,9 @@ async function createTemplateApprovalRequest(
   }
 
   const ins: any = await queryDB(
-    `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
-     VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?)`,
-    [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
+    `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id, head_step_user_id)
+     VALUES (?, 'submit', ?, ?, 'pending', 1, ?, '[]', ?, ?, ?)`,
+    [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null, headId || null]
   );
   const newId = Number(ins?.insertId);
   if (newId) {
@@ -1082,15 +1108,16 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
         if (!steps) template = null;
       }
       const sup = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(Number(r.requested_by));
-      const total = (sup ? 1 : 0) + steps;
+      const head = template?.skip_auto_supervisor ? null : await resolveHeadApprover(Number(r.requested_by), sup || null);
+      const total = (sup ? 1 : 0) + (head ? 1 : 0) + steps;
       if (!total) continue;
       const done: any = await queryDB(
-        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
-        [template ? template.id : null, sup || null, total, r.id]
+        "UPDATE approval_requests SET awaiting_approver = 0, stuck_since = NULL, template_id = ?, supervisor_step_user_id = ?, head_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        [template ? template.id : null, sup || null, head || null, total, r.id]
       );
       if (!Number(done?.affectedRows)) continue;
       moved++;
-      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, total_steps: total, current_step: 1 });
+      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, head_step_user_id: head || null, total_steps: total, current_step: 1 });
       const mapping = APPROVAL_ALERT[r.source_type];
       const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [r.requested_by])) || [];
       for (const a of await getCurrentStepApprovers(r)) {
@@ -1122,7 +1149,7 @@ async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
 // Everyone on a request's current Template Layer (active or not).
 async function templateLayerApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
   if (!request?.template_id) return [];
-  const templateStepOrder = request.supervisor_step_user_id ? Number(request.current_step) - 1 : Number(request.current_step);
+  const templateStepOrder = Number(request.current_step) - autoStepCount(request);
   const rows: any[] =
     (await queryDB(
       `SELECT sa.user_id, u.name AS user_name
@@ -1247,15 +1274,17 @@ async function reconcileOneApproval(r: any): Promise<number> {
       await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${newName}.`);
       return changed + 1;
     }
-    // No (active) supervisor now: on to the Template's first Layer, or to "no approver".
+    // No (active) supervisor now: on to the Head of Department / the
+    // Template's first Layer, or to "no approver".
     const steps: any[] = r.template_id ? (await queryDB("SELECT id FROM approval_template_steps WHERE template_id = ?", [r.template_id]).catch(() => [])) || [] : [];
-    if (steps.length) {
+    const headLeft = r.head_step_user_id ? 1 : 0;
+    if (steps.length + headLeft) {
       const done: any = await queryDB(
         "UPDATE approval_requests SET supervisor_step_user_id = NULL, supervisor_pinned = 0, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = 1 AND supervisor_step_user_id = ?",
-        [steps.length, r.id, stored]
+        [steps.length + headLeft, r.id, stored]
       );
       if (!Number(done?.affectedRows)) return changed;
-      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length });
+      Object.assign(r, { supervisor_step_user_id: null, total_steps: steps.length + headLeft });
       const next = await getCurrentStepApprovers(r);
       for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why} and no other supervisor is set, so it moved on to you.`);
       await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
@@ -1268,6 +1297,55 @@ async function reconcileOneApproval(r: any): Promise<number> {
     if (!Number(done?.affectedRows)) return changed;
     for (const id of await superadminIds(requester)) {
       await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set their Supervisor and it moves there by itself, or decide it yourself in Approve Application.`);
+    }
+    await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
+    return changed + 1;
+  }
+
+  // Waiting on the Head of Department: the Department's CURRENT Head; with
+  // none any more it moves on to the Template's Layer, or to "no approver".
+  if (onHeadStep(r)) {
+    const stored = Number(r.head_step_user_id);
+    const storedGone = (await inactiveUserIds([stored])).has(stored);
+    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null);
+    if (desired === stored && !storedGone) return changed;
+    const who = await whoName();
+    const oldName = await nameOf(stored);
+    const why = storedGone ? `${oldName} is no longer active` : `${oldName} is no longer the Head of ${who}'s Department`;
+    if (desired && desired !== stored) {
+      const done: any = await queryDB("UPDATE approval_requests SET head_step_user_id = ? WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?", [
+        desired,
+        r.id,
+        headStepNo(r),
+        stored
+      ]);
+      if (!Number(done?.affectedRows)) return changed;
+      await tell(desired, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it now waits on you as Head of Department.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It now waits on ${await nameOf(desired)}.`);
+      return changed + 1;
+    }
+    const total = Number(r.total_steps) - 1;
+    if (total >= Number(r.current_step)) {
+      const done: any = await queryDB("UPDATE approval_requests SET head_step_user_id = NULL, total_steps = ? WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?", [
+        total,
+        r.id,
+        headStepNo(r),
+        stored
+      ]);
+      if (!Number(done?.affectedRows)) return changed;
+      Object.assign(r, { head_step_user_id: null, total_steps: total });
+      const next = await getCurrentStepApprovers(r);
+      for (const a of next) await tell(a.user_id, "Approval waiting on you", `${who}'s ${label} was waiting on ${oldName} — ${why}, so it moved on to you.`);
+      await tellRequester("Your request moved", `Your ${label} was waiting on ${oldName} — ${why}. It moved on to ${next.map((a) => a.user_name).filter(Boolean).join(", ") || "the next approver"}.`);
+      return changed + 1 + (await reconcileOneApproval(r));
+    }
+    const done: any = await queryDB(
+      "UPDATE approval_requests SET head_step_user_id = NULL, supervisor_step_user_id = NULL, current_step = 1, total_steps = 1, awaiting_approver = 1 WHERE id = ? AND status = 'pending' AND current_step = ? AND head_step_user_id = ?",
+      [r.id, headStepNo(r), stored]
+    );
+    if (!Number(done?.affectedRows)) return changed;
+    for (const id of await superadminIds(requester)) {
+      await tell(id, "No approver set", `${who}'s ${label} was waiting on ${oldName} — ${why} and nobody else is set. Set the Head of Department and it moves there by itself, or decide it yourself in Approve Application.`);
     }
     await tellRequester("Your request is waiting for an approver", `Your ${label} was waiting on ${oldName} — ${why}. HR has been asked to set your new approver.`);
     return changed + 1;
@@ -1334,6 +1412,11 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
     if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
     return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
   }
+  if (onHeadStep(request)) {
+    const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.head_step_user_id]);
+    if (!rows.length || (await inactiveUserIds([Number(rows[0].id)])).size) return [];
+    return [{ user_id: Number(rows[0].id), user_name: rows[0].name }];
+  }
   if (request.template_id) {
     const rows = await templateLayerApprovers(request);
     const gone = await inactiveUserIds(rows.map((r) => r.user_id));
@@ -1351,7 +1434,8 @@ async function getCurrentTemplateStepType(request: any): Promise<string | null> 
   if (!request?.template_id) return null;
   const hasSupervisorStep = !!request.supervisor_step_user_id;
   if (hasSupervisorStep && Number(request.current_step) === 1) return null;
-  const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
+  if (onHeadStep(request)) return null;
+  const templateStepOrder = Number(request.current_step) - autoStepCount(request);
   const steps = await queryDB("SELECT * FROM approval_template_steps");
   const step = steps.find((s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder);
   return step ? step.approver_type || null : null;
@@ -3078,7 +3162,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3103,7 +3187,9 @@ async function startServer() {
             ? [...MANAGEMENT_DASHBOARD_DEFAULT_LAYERS]
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+          : moduleKey === "hr_operations"
+            ? ["read", "quick_reports"]
+            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3139,7 +3225,9 @@ async function startServer() {
         ? MANAGEMENT_DASHBOARD_DEFAULT_LAYERS
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+      : moduleKey === "hr_operations"
+        ? ["read", "quick_reports"]
+        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3171,13 +3259,15 @@ async function startServer() {
   registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
   // Admin Panel -> Users -> Module Access: Mobile App switch and App ticks
   // (after the Users routes, so the access audit log records changes).
-  registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId });
+  registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId, activeGroupId });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
+  // Head of Department + teams with their own Supervisor (DepartmentTeams.ts).
+  registerDepartmentTeamsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, onChange: () => requestApprovalReconcile() });
 
   // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
   registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
@@ -3441,6 +3531,9 @@ async function startServer() {
     if (reading && (await hasModuleLayer(req.user, k, "payroll_view").catch(() => false))) return next();
     return requireModuleLayer(k, "read")(req, res, next);
   };
+  // "See salary amounts": without it every Payroll answer is masked and no
+  // change is allowed (payrollAmountMask.ts) — before every Payroll route.
+  app.use("/api/payroll", payrollAmountGuard({ authenticateToken, canSeeAmounts: (u) => hasModuleLayer(u, "payroll", "salary_amounts") }));
   registerPayrollApprovalRoutes(app, {
     authenticateToken,
     requireAdmin,
@@ -3578,7 +3671,8 @@ async function startServer() {
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
-  registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });
+  registerHrQuickReportsRoutes(app, { authenticateToken, requireModuleLayer, queryDB, todayInDhaka });
   // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
   // reports in one place (ReportsInsightsRoutes.ts).
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
@@ -3679,6 +3773,8 @@ async function startServer() {
     setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);
     setTimeout(() => requestApprovalReconcile(0), 20 * 1000);
   }
+  // "Details" of any request, for whoever approves it (ApprovalDetailsRoutes.ts).
+  registerApprovalDetailsRoutes(app, { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString, hasModuleLayer });
   registerApprovalRoutes(app, {
     rehomeAwaitingApprovals,
     reconcilePendingApprovals,
@@ -3723,6 +3819,7 @@ async function startServer() {
     requireModule,
     getAdminModules,
     requireModuleLayer,
+    hasModuleLayer,
     requireBudgetModuleAccess,
     requireBudgetRead,
     queryDB,
@@ -3890,6 +3987,10 @@ async function startServer() {
   registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
   registerPoImportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
+  // Overtime: rules, daily calculation, approval, My OT (OvertimeRoutes.ts)
+  // and guard posts (GuardRoutes.ts).
+  registerOvertimeRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
+  registerGuardRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
   // Break Time (Self Service + Admin Panel module "break_time").
   registerBreakRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
   // SIM & ID card requisitions: Self Service, My Onboarding, HR Operations.

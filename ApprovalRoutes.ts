@@ -81,6 +81,11 @@ interface ApprovalRouteDeps {
   ) => Promise<void>;
 }
 
+// The steps put in front of a Template's own layers: the Supervisor (step 1)
+// and the Head of Department (the step after it) — server.ts / DepartmentTeams.ts.
+const autoStepCount = (r: any) => (r?.supervisor_step_user_id ? 1 : 0) + (r?.head_step_user_id ? 1 : 0);
+const onHeadStep = (r: any) => !!r?.head_step_user_id && Number(r.current_step) === (r?.supervisor_step_user_id ? 2 : 1);
+
 export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   const {
     authenticateToken,
@@ -428,8 +433,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             } else if (hasSupervisorStep && Number(r.current_step) === 1) {
               const su = userMap.get(Number(r.supervisor_step_user_id));
               currentApprovers = [{ user_id: Number(r.supervisor_step_user_id), user_name: su ? su.name : null }];
+            } else if (onHeadStep(r)) {
+              // Head of Department (DepartmentTeams.ts), the step after the Supervisor.
+              const hu = userMap.get(Number(r.head_step_user_id));
+              currentApprovers = [{ user_id: Number(r.head_step_user_id), user_name: hu ? hu.name : null }];
             } else if (r.template_id) {
-              const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
+              const templateStepOrder = Number(r.current_step) - autoStepCount(r);
               currentApprovers = templateStepApproversMap.get(`${r.template_id}:${templateStepOrder}`) || [];
             } else {
               const step = chainByStep.get(Number(r.current_step));
@@ -456,7 +465,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
               r.source_type === "bill_claim" &&
               !!r.template_id &&
               Number(r.current_step) >= Number(r.total_steps) &&
-              disburserSteps.has(`${r.template_id}:${r.supervisor_step_user_id ? Number(r.current_step) - 1 : Number(r.current_step)}`),
+              disburserSteps.has(`${r.template_id}:${Number(r.current_step) - autoStepCount(r)}`),
             actions
           };
         })
@@ -742,8 +751,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (hasSupervisorStep && Number(r.current_step) === 1) {
           return Number(r.supervisor_step_user_id) === myId;
         }
+        if (onHeadStep(r)) return Number(r.head_step_user_id) === myId;
         if (r.template_id) {
-          const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
+          const templateStepOrder = Number(r.current_step) - autoStepCount(r);
           const approverIds = templateStepApproverIds.get(`${r.template_id}:${templateStepOrder}`) || [];
           return approverIds.includes(myId);
         }
@@ -936,9 +946,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           let vehicleMaintainerBypass = false;
           let assetFulfillerBypass = false;
           let conveyanceDisburserBypass = false;
-          if (Number(r.current_step) >= Number(r.total_steps) && r.template_id && !r.adhoc_approver_id) {
-            const hasSupervisorStep = !!r.supervisor_step_user_id;
-            const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
+          if (Number(r.current_step) >= Number(r.total_steps) && r.template_id && !r.adhoc_approver_id && !onHeadStep(r)) {
+            const templateStepOrder = Number(r.current_step) - autoStepCount(r);
             const stepType = templateStepApproverType.get(`${r.template_id}:${templateStepOrder}`);
             vehicleMaintainerBypass = r.source_type === "vehicle_requisition" && stepType === "vehicle_maintainer";
             // Asset Fulfiller Layer — this approver fulfills (types what was
@@ -1084,7 +1093,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         const d = day(at);
         return (!from || d >= from) && (!to || d <= to);
       };
-      type Row = { key: string; type: string; title: string; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
+      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
       const rows: Row[] = [];
 
       // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
@@ -1153,6 +1162,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           const detail = detailOf(r);
           rows.push({
             key: `ar-${r.id}-${n}`,
+            source_type: r.source_type,
+            source_id: Number(r.source_id),
             type: TYPE_TITLE[r.source_type] || r.source_type,
             title: detail,
             requester_id: Number(r.requested_by) || null,
@@ -1181,6 +1192,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             const emp = emps.get(Number(a.employee_id));
             rows.push({
               key: `hr-${a.id}-${n}`,
+              source_type: "hr_action",
+              source_id: Number(a.id),
               type: "HR Action",
               title: `${String(a.action_type).replace(/_/g, " ")}${emp ? ` · ${emp.name}` : ""} · from ${day(a.effective_date)}`,
               requester_id: emp?.user_id ? Number(emp.user_id) : null,
@@ -1201,6 +1214,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (viaWorkflow.has(Number(la.id)) || Number(la.decided_by) !== myId || !inRange(la.decided_at)) continue;
         rows.push({
           key: `la-${la.id}`,
+          source_type: "leave_application",
+          source_id: Number(la.id),
           type: "Leave Application",
           title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`,
           requester_id: Number(la.user_id),
@@ -1218,6 +1233,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (!inRange(at)) continue;
         rows.push({
           key: `lr-${la.id}`,
+          source_type: "leave_application",
+          source_id: Number(la.id),
           type: "Leave (as Reliever)",
           title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)}`,
           requester_id: Number(la.user_id),
@@ -1237,6 +1254,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           const ex = exits.get(Number(c.exit_id));
           rows.push({
             key: `ec-${c.id}`,
+            source_type: "exit_clearance",
+            source_id: Number(c.id),
             type: "Exit Clearance",
             title: `${c.department}${c.item_label ? ` — ${c.item_label}` : ""}${ex ? ` · ${ex.exit_type}` : ""}`,
             requester_id: ex ? Number(ex.user_id) : null,
@@ -1667,7 +1686,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     for (const r of pending) {
       const hasSup = !!r.supervisor_step_user_id;
       if (hasSup && Number(r.current_step) === 1) continue;
-      const order = hasSup ? Number(r.current_step) - 1 : Number(r.current_step);
+      if (onHeadStep(r)) continue;
+      const order = Number(r.current_step) - autoStepCount(r);
       const now = steps[order - 1]?.approver_user_ids || [];
       const added = now.map(Number).filter((u) => !had.get(order)?.has(u) && u !== Number(r.requested_by));
       if (!added.length) continue;

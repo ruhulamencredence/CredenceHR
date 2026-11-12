@@ -77,7 +77,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'task_management', label: 'Task Management' },
   // Mobile Bill (MobileBillAdmin.tsx): company SIMs, limits by employee type,
   // the operators' monthly bills, payment sheet and reports.
-  { key: 'mobile_bill', label: 'Mobile Bill' },
+  { key: 'mobile_bill', label: 'SIM & Mobile Bill' },
   // Target Reports (TargetReports.tsx): every Employee's monthly / yearly
   // targets and how far each task got, by department / employee.
   { key: 'target_reports', label: 'Target Reports' },
@@ -97,7 +97,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -142,6 +142,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     // Sees every Payroll page and report, changes nothing — give it to Audit
     // and Accounts with their Audit Approve / Accounts Pay layer.
     { key: 'payroll_view', label: 'View only (Audit / Accounts)' },
+    // Without it every amount in Payroll shows as ***** (also in its Excel /
+    // PDF and the Assistant) and nothing in Payroll can be changed.
+    { key: 'salary_amounts', label: 'See salary amounts' },
+    // Payroll -> OT Rules: rate, who approves OT, own rates, who gets OT.
+    { key: 'ot_rules', label: 'OT Rules (overtime pay)' },
     // Payroll -> Approval -> Salary sheet: the month's salaries on screen.
     { key: 'approval_sheet', label: 'Approval — Salary sheet (view)' },
     // Payroll -> Approval -> Month comparison (this month vs last, and why).
@@ -162,7 +167,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   ],
   // Mobile Bill -> Reports -> Limit changes (a second report, plain reading).
   mobile_bill: [
-    { key: 'read', label: 'Mobile Bill' },
+    { key: 'read', label: 'SIM & Mobile Bill' },
     { key: 'limit_history', label: 'Limit Change History' }
   ],
   // Office Attendance -> Unlinked PINs (edits Employees: explicit only).
@@ -192,7 +197,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'onboarding_review', label: 'Onboarding — Review / Reject' },
     { key: 'onboarding_approve', label: 'Onboarding — Approve' },
     { key: 'reminders_receive', label: 'Reminders — receive & view' },
-    { key: 'requisitions', label: 'SIM & ID card requisitions — issue / reject' }
+    { key: 'requisitions', label: 'SIM & ID card requisitions — issue / reject' },
+    // Reports -> Quick reports (probation, joiners, transfers, religion,
+    // resignations) and the Admin Dashboard's "HR reports" card. Reading
+    // only, so not explicit-only: on by default for HR Operations.
+    { key: 'quick_reports', label: 'Quick reports (probation, joiners, transfers, religion, resignations)' }
   ],
   // Exit / Offboarding -> the exiting Employee's dues from other modules
   // (assets, SIM, loans / advances, claims) and adding them to the
@@ -231,7 +240,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // roster (explicit only).
   duty_roster: [
     { key: 'read', label: 'See shifts and roster' },
-    { key: 'roster_manage', label: 'Set shifts and roster' }
+    { key: 'roster_manage', label: 'Set shifts and roster' },
+    // Approve / trim / reject overtime (as Roster manager or Team Supervisor).
+    { key: 'ot_approve', label: 'OT Approval' },
+    // Guard posts, filling a month from a pattern, relief guards.
+    { key: 'guard_posts', label: 'Guard posts & relief' }
   ],
   // Break Time: the report and who is on a break now; changing the rules and
   // ending a break someone forgot (explicit only).
@@ -293,7 +306,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -576,6 +589,12 @@ export interface Department {
   include_supervisor_approval: boolean;
   is_active: boolean;
   created_at?: string;
+  // Head of Department and teams, each with its own Supervisor
+  // (DepartmentTeams.ts). A request goes to the person's own team
+  // Supervisor, then the Head, then the workflow.
+  head_user_id?: number | null;
+  head_name?: string | null;
+  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; members: number }[];
 }
 
 
@@ -854,6 +873,11 @@ export interface User {
   can_use_fingerprint?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
+  can_view_my_ot?: boolean;
+  // Mobile App (APK) on for this account (its own switch, or the workspace's
+  // "New accounts get the Mobile App" — AppAccess.ts). Users list only.
+  app_on?: boolean;
+  can_approve_team_ot?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.
   can_take_break?: boolean;
   // Book a Ride -> save places (Home / Work…) with a note for the driver — off by default.
@@ -887,7 +911,7 @@ export interface User {
   can_view_group_dashboard?: boolean;
   // Self Service -> My Tasks (MyTasks.tsx) — off until turned on in Module Access.
   can_view_tasks?: boolean;
-  // Self Service -> My Mobile SIM (MyMobileSim.tsx) — off until turned on in Module Access.
+  // Self Service -> My SIM & Bill (MyMobileSim.tsx) — off until turned on in Module Access.
   can_view_mobile_bill?: boolean;
   // Profile -> My Service Book (own Employee 360).
   can_view_service_book?: boolean;
@@ -1215,6 +1239,8 @@ export interface Entry {
   job_duration: string;
   mpr_no: string;
   user_name?: string;
+  // Who entered the row — a Project team has several members (PepmTeam.ts).
+  entered_by_name?: string | null;
   budget_name?: string | null;
   created_at?: string;
   // Pulled from the matching imported Budget Excel row (budget_id + MRF No + Description)
@@ -1948,7 +1974,7 @@ export type AlertType =
   // request to HR — opens the task in My Tasks or Task Management.
   | 'task'
   // Mobile Bill (MobileBillRoutes.ts): a SIM given to me / my limit request
-  // decided -> My Mobile SIM; a new request with no approval chain -> HR's
+  // decided -> My SIM & Bill; a new request with no approval chain -> HR's
   // Mobile Bill. 'mobile_limit_approval' = a request waiting on this account
   // -> Approve Application.
   | 'mobile_bill'

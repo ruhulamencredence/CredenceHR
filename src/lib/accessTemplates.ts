@@ -75,7 +75,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_tasks', label: 'My Tasks', selfService: true },
-  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true },
+  { key: 'can_view_mobile_bill', label: 'My SIM & Bill', selfService: true },
   { key: 'can_view_service_book', label: 'My Service Book', selfService: true },
   { key: 'can_view_loan_request', label: 'Loan / Advance Request', selfService: true },
   { key: 'can_view_targets', label: 'My Targets', selfService: true },
@@ -88,7 +88,7 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_use_assistant_voice', label: 'AI Assistant — voice', selfService: true },
   { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true },
   { key: 'can_view_payslip', label: 'My Payslip', selfService: true },
-  { key: 'can_request_items', label: 'SIM & ID Card requests', selfService: true }
+  { key: 'can_request_items', label: 'Request SIM / ID Card', selfService: true }
 ];
 
 export interface AccessTemplate {

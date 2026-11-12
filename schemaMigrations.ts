@@ -25,6 +25,7 @@ import { ensureHROperationsSchema } from "./HROperationsRoutes";
 import { ensureEmployee360Schema } from "./HrOps360Routes";
 import { ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { ensureHrQuickReportsSchema } from "./HrQuickReports";
 import { ensureLoanRequestSchema } from "./LoanRequestRoutes";
 import { ensureLoanPlanSchema } from "./LoanPlan";
 import { ensureProfilePhotoRequestSchema } from "./profileRoutes";
@@ -143,6 +144,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureHROperationsSchema(dbPool);
   await ensureEmployee360Schema(dbPool);
   await ensureHrReportsSchema(dbPool);
+  await ensureHrQuickReportsSchema(dbPool);
   await ensureInfoRequestsSchema(dbPool);
   await ensureSiteAttendanceSchema(dbPool);
   // Chat (Direct/Group/Community messaging) — table + schema owned by
@@ -2513,6 +2515,29 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     if (!alreadyDone) await setStartupMarker(dbPool, "approval_chain_to_templates");
   } catch (err: any) {
     console.warn("⚠️ Could not migrate the old global Approval Chain into default Templates: " + err.message);
+  }
+
+  // Payroll -> "See salary amounts" (salary_amounts) is new and explicit-only:
+  // without it amounts show as ***** and Payroll can't be changed. Once, when
+  // it ships, every account that already has Payroll gets it, so nobody loses
+  // what they saw the day before; an account with Payroll but no ticked
+  // layers keeps its default ones too (the same list as server.ts
+  // hasModuleLayer). After this it is given only when ticked.
+  try {
+    if (!(await getStartupMarker(dbPool, "payroll_salary_amounts_grant"))) {
+      const [holders]: any = await dbPool.query("SELECT DISTINCT user_id FROM admin_module_permissions WHERE module_key = 'payroll'");
+      for (const h of holders || []) {
+        const uid = Number(h.user_id);
+        const [had]: any = await dbPool.query("SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = 'payroll'", [uid]);
+        const layers = (had || []).length > 0 ? ["salary_amounts"] : ["read", "approval_sheet", "month_compare", "top_sheet", "salary_amounts"];
+        for (const l of layers) {
+          await dbPool.query("INSERT IGNORE INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, 'payroll', ?)", [uid, l]);
+        }
+      }
+      await setStartupMarker(dbPool, "payroll_salary_amounts_grant", String((holders || []).length));
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not give existing Payroll accounts the new See salary amounts layer: " + err.message);
   }
 
   // Second pass (see the first call above): on a brand-new database this is

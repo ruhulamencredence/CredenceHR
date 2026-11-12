@@ -258,6 +258,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
               // HR: Employee Reports -> Requests.
               try {
                 sessionStorage.setItem('hr_ops_tab', 'reports');
+                sessionStorage.setItem('hr_ops_reports_view', 'build');
                 sessionStorage.setItem('hr_reports_view', 'requests');
               } catch {
                 // storage unavailable
@@ -281,6 +282,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             // HR Operations -> Employee Reports -> Received.
             try {
               sessionStorage.setItem('hr_ops_tab', 'reports');
+              sessionStorage.setItem('hr_ops_reports_view', 'build');
               sessionStorage.setItem('hr_reports_view', 'received');
             } catch {
               // storage unavailable — opens on the default tab
@@ -325,7 +327,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? // My Loan / Advance, or Payroll -> Loans & Advances for one to decide (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-loan', { detail: { title: alert.title } }))
         : alert.type === 'mobile_bill'
-        ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
+        ? // My SIM & Bill, or HR's Mobile Bill for a request with no approval chain (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))
         : alert.type === 'device_request' && alert.related_type === 'user_device_decision'
         ? undefined

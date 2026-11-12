@@ -9,6 +9,7 @@
 // stamp (each print is numbered on the server: POST .../printed) so an old
 // copy can be told apart, and the four signature boxes.
 
+import { maskMoney } from './payrollAmounts';
 import jsPDF from './jspdf';
 import autoTable from 'jspdf-autotable';
 import { apiUrl } from './api';
@@ -44,7 +45,7 @@ interface Row {
   status: string;
 }
 
-const n0 = (v: number) => Math.round(Number(v) || 0).toLocaleString('en-US');
+const n0 = maskMoney((v: number) => Math.round(Number(v) || 0).toLocaleString('en-US'));
 const monthText = (m: string) => {
   const [y, mo] = m.split('-').map(Number);
   return new Date(y, (mo || 1) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });

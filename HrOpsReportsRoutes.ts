@@ -63,6 +63,9 @@ interface HrReportsRouteDeps {
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
   todayInDhaka: () => string;
+  // Payroll's "See salary amounts" layer (server.ts hasModuleLayer): the
+  // Salary and loan columns need it on top of the Payroll module.
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   createAlert: (
     queryDB: QueryDB,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -851,7 +854,8 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
     return new Set(await getAdminModules(userId).catch(() => []));
   }
   const has = (mods: Set<string>, k: string) => mods.has("*") || mods.has(k);
-  const canPayroll = async (req: any) => has(await modulesOf(Number(req.user.id), req.user.role), "payroll");
+  // Salary / loan columns: the Payroll module AND its "See salary amounts" layer.
+  const canPayroll = async (req: any) => deps.hasModuleLayer(req.user, "payroll", "salary_amounts").catch(() => false);
 
   // Anyone who can open HR Operations — the people a schedule may notify.
   async function hrOperatorUsers() {
@@ -918,7 +922,9 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
     if (!has(mods, "hr_operations")) return { run_id: null, count: 0, notified: 0 };
     const config = cleanConfig(parseJson(r.config_json, {}));
     const schedule = cleanSchedule(parseJson(r.schedule_json, null));
-    const result = await runReport(queryDB, todayInDhaka(), config, has(mods, "payroll"));
+    const owner: any = ((await queryDB("SELECT id, role FROM users WHERE id = ?", [ownerId]).catch(() => [])) || [])[0];
+    const ownerSeesAmounts = owner ? await deps.hasModuleLayer(owner, "payroll", "salary_amounts").catch(() => false) : false;
+    const result = await runReport(queryDB, todayInDhaka(), config, ownerSeesAmounts);
     const recipients = [...new Set([...(schedule?.recipients || [])])];
     if (!force && schedule?.only_if_rows && result.total === 0) return { run_id: null, count: 0, notified: 0 };
     const stored = { ...result, rows: result.rows.slice(0, MAX_RUN_ROWS), truncated: result.rows.length > MAX_RUN_ROWS };

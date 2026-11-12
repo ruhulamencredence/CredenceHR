@@ -31,6 +31,7 @@
 // moves when a salary that took an installment is marked Paid
 // (settlePaidPayroll, PayrollApprovalRoutes.ts). Popups: LoanPayoutPlan.tsx.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   HandCoins,
@@ -106,8 +107,8 @@ interface EmployeeLite {
   designation: string | null;
 }
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);

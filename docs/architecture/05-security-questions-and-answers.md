@@ -26,6 +26,7 @@
 | প্রশ্ন | উত্তর | অবস্থা |
 |---|---|---|
 | কর্মী কি অন্যের SIM/ID card request দেখতে বা নিজে issue করতে পারে? | না। কর্মী শুধু নিজের request দেখেন ও বাতিল করেন (সুইচ ডিফল্টে বন্ধ); issue বা turn down শুধু HR Operations-এর আলাদা `requisitions` layer দিয়ে, যা ডিফল্টে কারও নেই। নতুন joiner-এর request-এর route শুধু onboarding login খুলতে পারে, আর approve না হওয়া পর্যন্ত কিছু issue হয় না। | ✅ |
+| HR Operations-এর Quick reports (probation, joiner, transfer, resignation, ধর্ম) আর Admin Dashboard-এর "HR reports" কার্ড কে দেখতে পারেন? | শুধু যাঁর HR Operations module আর তার `quick_reports` layer আছে (Superadmin সবসময়)। Layer-টা শুধু দেখার, তাই HR Operations-এ কোনো layer টিক না থাকলে default-এ পান; layer টিক করা থাকলে এটাও টিক থাকতে হয়। না থাকলে কার্ড, tab, menu লুকানো আর `/api/hr-ops/quick/*` 403 দেয়। এই রিপোর্টে কোনো টাকার অঙ্ক নেই। টেস্ট: `docs/test-logs/2026-11-12/scripts/quick-api.mjs`, `quick-ui.mjs`। | ✅ |
 | কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়? | তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)। | ✅ |
 | বেতনের তথ্য কে দেখে? | শুধু Payroll মডিউলের Admin। কর্মী শুধু নিজের payslip। টেস্টে কর্মী অন্যের payroll খুলতে পারেনি। | ✅ |
 | লোনের টাকা কে দেয়, কীভাবে প্রমাণ থাকে? | অনুমোদনের পর লোন "Waiting for payment" থাকে, বেতন থেকে কাটা হয় না। শুধু Accounts Pay layer-ধারী (বা Superadmin) টাকা দিয়ে "Mark as paid" দেন — তারিখ, মাধ্যম, reference সহ; বেতনের বাইরে ফেরতও তাঁরাই গোনেন। প্রতিটা ধাপ (কে, কবে, কত, কীভাবে) `loan_events`-এ, কর্মী নিজের History দেখেন। `LoanPlan.ts`, টেস্ট `docs/test-logs/2026-11-09/scripts/loan-payout-plan.mjs` (৪০/৪০)। | ✅ |
@@ -50,6 +51,9 @@
 | iPhone-এ কলের notification-এ কী তথ্য যায়? | শুধু কে ফোন করছে (নাম), audio না video, group-এর নাম আর chat-এর id — Apple-এর push সার্ভার দিয়ে, Web Push-এর নিয়মে encrypted। কোনো message বা অন্য তথ্য না; কল শেষ হলেই পাঠানো থামে। | ✅ |
 | অ্যাপ বন্ধ থাকলে কল বাজাতে অ্যাপ কোন বাড়তি Android অনুমতি নেয়? | `FOREGROUND_SERVICE_PHONE_CALL` আর `MANAGE_OWN_CALLS` (install-এ পাওয়া যায়, শুধু কল বাজার সময়ের service-এর জন্য), আর ঐচ্ছিক `SYSTEM_ALERT_WINDOW` ("Display over other apps", ব্যবহারকারী নিজে চালু করেন, শুধু কল-পর্দা দেখাতে)। ফোনের আসল কল, contacts বা call log ছোঁয় না। | ✅ |
 | কেউ Fake GPS app দিয়ে Employee Tracking-এ ভুয়া জায়গা দেখাতে পারে? | নতুন APK-এ এমন প্রতিটা point ধরা পড়ে (Android-এর mock-location চিহ্ন) — map-এ লাল "!", live board-এ লাল ring, route ও Stay Report-এ গোনা হয় না। Root করা ফোনে চিহ্নটাও লুকানো সম্ভব, তাই এটা সতর্কসংকেত, প্রমাণ নয়। Remote Attendance-এর Check In / Out-এও নতুন APK fake GPS ধরলে punch হয় না (সার্ভারও ফেরায়, চেষ্টা `attendance_mock_attempts`-এ থাকে); web browser ও পুরনো APK থেকে এই যাচাই হয় না। | ⚠️ আংশিক |
+| Overtime কে অনুমোদন দেন, কেউ কি অন্যের বা নিজের OT বাড়িয়ে নিতে পারে? | কে দেবেন সেটা Payroll → OT Rules-এর setting (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর); সার্ভার প্রতিটা entry-তে দেখে — supervisor শুধু নিজের team-এর, Roster manager শুধু নিজের Duty Roster department-এর। হিসাবের চেয়ে বেশি ঘণ্টা অনুমোদন হয় না; সিদ্ধান্ত হওয়া দিন আর বদলায় না; Run Payroll-এ হাতে বদলালে কারণ লিখতে হয় ও থেকে যায়। নিয়ম বদলাতে `ot_rules`, অনুমোদনে `ot_approve` / Team OT সুইচ — সব শুরুতে বন্ধ (`OvertimeRoutes.ts`)। | ✅ |
+| এক টিমের কর্মীর অনুরোধ কি অন্য টিমের Supervisor দেখতে বা approve করতে পারেন? | না। অনুরোধ শুধু কর্মীর নিজের টিমের Supervisor-এর কাছে যায় (Direct Supervisor থাকলে তাঁর), তারপর Head of Department, তারপর Template; অন্য টিমের Supervisor তালিকায় পান না আর API দিয়ে approve করলে 403। টিমে নেই এমন কর্মীর অনুরোধ Head-এর কাছে, তারপর workflow। টিম / Head ঠিক করতে Departments module-এর Edit অনুমতি লাগে (`DepartmentTeams.ts`)। | ✅ |
+| নতুন কর্মী কি নিজে থেকেই Mobile App পেয়ে যান? কে সবার জন্য চালু করতে পারেন? | Workspace-এর "New accounts get the Mobile App" চালু থাকলে (শুরুতে চালু, শুধু Superadmin বদলাতে পারেন) নতুন login app-এ ঢুকতে পারে — website-এ যা অনুমতি ঠিক তাই, বেশি নয়। একসাথে অনেকের চালু / বন্ধ করতে Module Access দেওয়ার অনুমতি লাগে; delegated Admin শুধু সাধারণ User-দের; প্রতিটা বদল access log-এ (`AppAccess.ts`)। | ✅ |
 
 ## গ. ডাটা সুরক্ষা
 
@@ -162,6 +166,15 @@
 **প্রশ্ন: "Conveyance Bill Claim" থেকে "Bill Claim" নাম বদলানোর পর কেউ কি অনুমতি হারায় বা বাড়তি পায়?**
 উত্তর: না। Server চালু হওয়ার সময় (`billClaimRename.ts`) আগে দেওয়া প্রতিটা অনুমতি একই মানুষের কাছে নতুন নামে সরে যায়: Admin module `conveyance` → `bill_claim`, তার layer, Data Import-এর `import_conveyance` → `import_bill_claims`, Self Service switch `can_view_conveyance_claims` → `can_view_bill_claims`, App access আর Access Template-এর টিক। নতুন কিছু দেওয়া হয় না। পুরনো API (`/api/user-claims`) আর নেই, নতুন `/api/bill-claims` আগের মতোই module / layer / switch যাচাই করে।
 
+**প্রশ্ন: Approval-এর Details-এ কি যে কেউ অন্যের আবেদন (ছুটির কারণ, টাকার অঙ্ক, ফাইল) দেখতে পারে?**
+উত্তর: না। দেখতে পারেন শুধু যিনি চেয়েছেন, ঐ আবেদনের approval chain-এর লোকেরা (আগের, এখনকার বা পরের Layer-এর approver, Supervisor / Head, ad-hoc approver, ছুটির Reliever, Exit clearance-এর approver), Approvals module-ওয়ালা Admin আর Superadmin — server প্রতিবার যাচাই করে (`ApprovalDetailsRoutes.ts`), সংযুক্ত ফাইলেও একই নিয়ম। অন্য কেউ id বদলে চাইলেও 403 পান। **HR Action ও Exit আলাদা নিয়ম:** এগুলো কারও *সম্পর্কে* নেওয়া সিদ্ধান্ত, তাই যাঁর সম্পর্কে তিনি নিজে খুলতে পারেন না (অপেক্ষায় থাকা separation / demotion / increment, বা HR-এর খোলা termination) — শুধু নিজের চাওয়া resignation দেখেন; শুধু Approvals module থাকলে এগুলো খোলে না — HR Action-এ HR Operations, Exit-এ Exit / Offboarding module লাগে (chain-এর লোক ছাড়া); HR Action-এর বেতন ("Now → Becomes") দেখেন শুধু Superadmin, যিনি তুলেছেন, তার approver-রা আর Payroll-এর "See salary amounts" যাঁর আছে, বাকিদের `*****`। টেস্ট: `docs/test-logs/2026-11-12/scripts/details-access-api.mjs`।
+
+**প্রশ্ন: HR কারও termination বা increment নিয়ে ভাবছে — কর্মী কি Details দিয়ে আগেই দেখে ফেলতে পারেন?**
+উত্তর: না। HR Action বা HR-এর খোলা Exit যাঁর সম্পর্কে, তিনি সেটা খুললে 403 পান (id বদলে চেষ্টা করলেও)। নিজের resignation আর নিজের অন্য আবেদন আগের মতোই দেখেন।
+
+**প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
+উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
+
 **প্রশ্ন: কারো Budget (PEPM) switch বন্ধ থাকলে সে কি API দিয়ে Budget বা MPR No-র তালিকা পড়তে পারে?**
 উত্তর: না (৭ নভেম্বর ২০২৬ থেকে)। আগে menu লুকাত কিন্তু `/api/budgets`, budget item, MPR No, Job-এর তালিকা যেকোনো login করা account পেত — পুরো-অ্যাপ টেস্টে ধরা পড়ে। এখন `requireBudgetRead` শুধু Superadmin, Budget switch চালু, Job Edit, আর PEPM module (Imports, MPR Nos, Reports, Projects) থাকা Admin-কে দেয়; বাকিরা 403। Admin Dashboard-ও এখন শুধু দেওয়া module-এর tile দেখায় ও তার ডাটাই চায়।
 
@@ -180,6 +193,9 @@
 
 **প্রশ্ন: Check In/Out দ্রুত করতে ফোন আগের অবস্থান মনে রাখে — তাহলে কি পুরোনো জায়গা থেকে check-in করা যায়?**
 উত্তর: না। শেষ অবস্থান (`credence_last_fix`) শুধু map কোথায় খুলবে তা ঠিক করে; Check In / Check Out-এ পাঠানো অবস্থান সবসময় নতুন GPS fix (ফোনের নিজের, সর্বোচ্চ ৩০ সেকেন্ড পুরোনো)। শেষ অবস্থান ১২ ঘণ্টা পর বাদ, logout-এ মুছে যায়, তাই একই ফোনে অন্য কেউ login করলে আগের জনের জায়গা দেখে না। Map-এর ছবি (tile) ফোনে জমা থাকে, কিন্তু তাতে কারও তথ্য নেই।
+
+**প্রশ্ন: Payroll-এর কাজ করেন কিন্তু বেতন দেখার কথা নয় — তিনি কি কোনোভাবে অঙ্ক দেখতে পারেন?**
+উত্তর: না, যদি "See salary amounts" টিক না থাকে। অঙ্ক লুকানো হয় সার্ভারে, পাঠানোর আগেই — তাই পর্দা, Excel / PDF, AI Assistant বা সরাসরি API, সব জায়গায় `*****`। তিনি Payroll-এ কিছু বদলাতেও পারেন না, আর HR Operations report-এ Salary কলাম পান না। নিজের payslip তিনি আগের মতোই দেখেন।
 
 **প্রশ্ন: Admin Dashboard থেকে একসাথে অনেক হাজিরা approve করলে কি কেউ এমন কিছু approve করতে পারে যা তাঁর approve করার কথা নয়?**
 উত্তর: না। যে সারি তিনি একা approve করতে পারতেন না, সেখানে tick box-ই আসে না; আর "Approve selected" প্রতিটা সারির জন্য আগের একক approve-এর API ডাকে, যা প্রতিবার যাচাই করে — Approval Workflow-এ শুধু যাঁর ধাপ বা Superadmin, workflow-এর বাইরের সংশোধনে Attendance module। কেউ API সরাসরি ডাকলেও 403।

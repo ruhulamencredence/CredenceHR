@@ -318,9 +318,12 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
         const src = STUCK_SOURCES[ar.source_type];
         const step = Number(ar.current_step);
         const supervisorStep = !!ar.supervisor_step_user_id;
+        const headStep = !!ar.head_step_user_id && step === (supervisorStep ? 2 : 1);
         const layer = supervisorStep && step === 1
           ? "Supervisor"
-          : (ar.template_id && stepLabel.get(`${ar.template_id}:${step - (supervisorStep ? 1 : 0)}`)) || `Step ${step}`;
+          : headStep
+            ? "Head of Department"
+            : (ar.template_id && stepLabel.get(`${ar.template_id}:${step - (supervisorStep ? 1 : 0) - (ar.head_step_user_id ? 1 : 0)}`)) || `Step ${step}`;
         const approvers = await getCurrentStepApprovers(ar).catch(() => []);
         const since = dateOnly(ar.since) || today;
         items.push({

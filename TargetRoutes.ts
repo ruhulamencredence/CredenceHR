@@ -6,7 +6,8 @@
 // Targets — monthly / yearly targets per Employee, each with several tasks,
 // followed to a deadline.
 //
-//   A supervisor (department head — departments.supervisor_user_id — or the
+//   A supervisor (Head of Department — departments.head_user_id — their team's
+//   Supervisor (DepartmentTeams.ts), or the
 //   Employee's supervisor in employee_supervisors) gives targets to the
 //   people under them from Self Service -> My Targets -> Team (one person or
 //   the whole team at once: everyone gets their own copy). An Employee can
@@ -42,6 +43,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { runsBackgroundJobs } from "./jobRunner";
+import { teamSupervisorByEmployee } from "./DepartmentTeams";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -234,11 +236,14 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
     const emps = await rows(
       "SELECT id, employee_id, name, designation, department, department_id, user_id FROM all_employees WHERE user_id IS NOT NULL AND is_active = 1"
     );
-    const depts = await rows("SELECT id, name FROM departments WHERE supervisor_user_id = ? AND is_active = 1", [userId]);
+    // The Head sees the whole Department; a team Supervisor their own team (DepartmentTeams.ts).
+    const depts = await rows("SELECT id, name FROM departments WHERE head_user_id = ? AND is_active = 1", [userId]);
+    const teamSup = await teamSupervisorByEmployee(queryDB);
     const ids = new Set(depts.map((d) => Number(d.id)));
     const names = new Set(depts.map((d) => String(d.name).toLowerCase()));
     for (const e of emps) {
       if ((e.department_id && ids.has(Number(e.department_id))) || (e.department && names.has(String(e.department).toLowerCase()))) out.set(Number(e.user_id), e);
+      else if (teamSup.get(Number(e.id)) === Number(userId)) out.set(Number(e.user_id), e);
     }
     const me = emps.find((e) => Number(e.user_id) === Number(userId)) || (await employeeOf(userId));
     if (me) {
@@ -261,11 +266,14 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
       [emp.id]
     );
     for (const s of sup) out.push(Number(s.user_id));
+    // Their team's Supervisor, then the Head of Department (DepartmentTeams.ts).
+    const teamSup = (await teamSupervisorByEmployee(queryDB)).get(Number(emp.id));
+    if (teamSup) out.push(teamSup);
     const heads = await rows(
-      "SELECT supervisor_user_id FROM departments WHERE supervisor_user_id IS NOT NULL AND is_active = 1 AND (id = ? OR LOWER(name) = LOWER(?))",
+      "SELECT head_user_id FROM departments WHERE head_user_id IS NOT NULL AND is_active = 1 AND (id = ? OR LOWER(name) = LOWER(?))",
       [emp.department_id || 0, emp.department || ""]
     );
-    for (const h of heads) out.push(Number(h.supervisor_user_id));
+    for (const h of heads) out.push(Number(h.head_user_id));
     return Array.from(new Set(out.filter((id) => id && id !== Number(userId))));
   }
 

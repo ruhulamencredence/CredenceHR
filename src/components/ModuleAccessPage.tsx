@@ -93,7 +93,14 @@ type FlagKey =
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_request_items'
-  | 'can_email_reports';
+  | 'can_email_reports'
+  | 'can_view_my_ot'
+  | 'can_approve_team_ot';
+
+// The Head of a Department, or the Supervisor of one of its teams
+// (DepartmentTeams.ts) — their Department is pre-ticked the first time.
+const leadsDept = (d: { head_user_id?: number | null; teams?: { supervisor_user_id: number | null }[] }, userId: number) =>
+  d.head_user_id === userId || !!d.teams?.some((t) => t.supervisor_user_id === userId);
 
 interface FlagDef {
   key: FlagKey;
@@ -135,6 +142,8 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_leave_application', label: 'Leave Application', desc: 'Apply for leave and see their own balance.', section: 'attendance', endpoint: 'leave-application-access' },
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
   { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
+  { key: 'can_view_my_ot', label: 'My OT', desc: 'Their own overtime: hours worked out, approved, waiting.', section: 'attendance', endpoint: 'my-ot-access' },
+  { key: 'can_approve_team_ot', label: 'Team OT (approve)', desc: 'Approve the overtime of the people they supervise (Direct Supervisor or Site Attendance team), when OT Rules says the Team Supervisor approves.', section: 'attendance', endpoint: 'team-ot-access' },
   { key: 'can_update_check_out', label: 'Remote Attendance — update Out Time', desc: 'Give the Out Time again later the same day (e.g. after tapping it too early); the new time goes for approval again.', section: 'attendance', endpoint: 'check-out-update-access' },
   { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
   { key: 'can_save_ride_places', label: 'Book a Ride — saved places', desc: 'Save pickup / drop places (Home, Work…) with a note for the driver, and pick them first next time.', section: 'general', endpoint: 'ride-places-access' },
@@ -144,12 +153,12 @@ const FLAGS: FlagDef[] = [
 
   { key: 'can_view_movement_claims', label: 'Check In/Out', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
   { key: 'can_view_bill_claims', label: 'Bill Claim', desc: 'Submit bill claims.', section: 'claims', endpoint: 'bill-claim-access' },
-  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
+  { key: 'can_view_mobile_bill', label: 'My SIM & Bill', desc: 'Their SIMs, limits and bills.', section: 'claims', endpoint: 'mobile-bill-access' },
 
   { key: 'can_use_tracking', label: 'Live location tracking', desc: 'Their phone shares its location while on duty.', section: 'employees', endpoint: null },
   { key: 'can_view_service_book', label: 'My Service Book', desc: 'Their own service record, read only.', section: 'employees', endpoint: 'service-book-access' },
 
-  { key: 'can_request_items', label: 'SIM & ID Card requests', desc: 'Ask HR for a company SIM or an ID card (new, lost, damaged).', section: 'hr', endpoint: 'request-items-access' },
+  { key: 'can_request_items', label: 'Request SIM / ID Card', desc: 'Ask HR for a company SIM or an ID card (new, lost, damaged).', section: 'hr', endpoint: 'request-items-access' },
   { key: 'can_view_payslip', label: 'My Payslip', desc: 'See and download their approved payslips.', section: 'payroll', endpoint: 'payslip-access' },
   { key: 'can_view_loan_request', label: 'Loan / Advance Request', desc: 'Apply for a loan or salary advance.', section: 'payroll', endpoint: 'loan-request-access' },
 
@@ -521,7 +530,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
         DEPT_KINDS.forEach((d, i) => {
           saved[d.module] = lists[i];
           // A Department they supervise is pre-ticked the first time only.
-          const start = lists[i].length === 0 && d.preTick ? departments.filter((x) => x.supervisor_user_id === u.id).map((x) => x.name) : lists[i];
+          const start = lists[i].length === 0 && d.preTick ? departments.filter((x) => leadsDept(x, u.id)).map((x) => x.name) : lists[i];
           draft[d.module] = new Set(start);
         });
         setDepts((m) => ({ ...m, [u.id]: { saved, draft } }));
@@ -963,7 +972,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
           <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel → Departments).</p>
         ) : (
           <ModuleAccessChecklist
-            items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+            items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.head_user_id === single.id ? 'Head' : x.teams?.some((t) => t.supervisor_user_id === single.id) ? 'Team Supervisor' : undefined }))}
             selected={ds.draft[kind]}
             onToggle={(k) => setDept(kind, [k], !ds.draft[kind].has(k))}
             onSetMany={(keys, checked) => setDept(kind, keys, checked)}
@@ -1001,7 +1010,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
               <p className="text-[11px] text-slate-400 mb-2">No Departments set up yet (Admin Panel → Departments).</p>
             ) : (
               <ModuleAccessChecklist
-                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.supervisor_user_id === single.id ? 'Supervisor' : undefined }))}
+                items={departments.map((x) => ({ key: x.name, label: x.name, badge: x.head_user_id === single.id ? 'Head' : x.teams?.some((t) => t.supervisor_user_id === single.id) ? 'Team Supervisor' : undefined }))}
                 selected={ts.draft.departments}
                 onToggle={(k) => editTrack((d) => (d.departments.has(k) ? d.departments.delete(k) : d.departments.add(k)))}
                 onSetMany={(keys, checked) => editTrack((d) => keys.forEach((k) => (checked ? d.departments.add(k) : d.departments.delete(k))))}

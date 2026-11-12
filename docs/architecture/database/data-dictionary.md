@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৪৬টি টেবিল, ২৬৮১টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৭টি টেবিল, ২৭৮৯টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1079,6 +1079,8 @@ Unique: `uniq_break_settings_company`(company_id)
 | `note` | varchar(255) | হ্যাঁ |  | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `planned_ot_minutes` | int(11) | না | default 0 | |
+| `post_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `uniq_duty_roster_day`(employee_id,roster_date)
 
@@ -1110,6 +1112,8 @@ Unique: `unique_user_department`(user_id,department)
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `normal_minutes` | int(11) | হ্যাঁ |  | |
+| `extra_mode` | varchar(10) | না | default 'ot' | |
 
 ### `employee_breaks`
 
@@ -1127,6 +1131,44 @@ Unique: `unique_user_department`(user_id,department)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `uniq_employee_breaks_open`(user_id,open_flag)
+
+### `guard_post_needs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `post_id` | int(11) | না |  | FK → `guard_posts.id` |
+| `shift_id` | int(11) | না |  | logical → `duty_shifts` |
+| `headcount` | int(11) | না | default 1 | |
+
+Unique: `uniq_guard_need`(post_id,shift_id)
+
+### `guard_posts`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `name` | varchar(120) | না |  | |
+| `site` | varchar(150) | হ্যাঁ |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `guard_relief`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `employee_id` | int(11) | না |  | logical → `all_employees` |
+| `relief_date` | date | না |  | |
+| `post_id` | int(11) | না |  | |
+| `shift_id` | int(11) | না |  | logical → `duty_shifts` |
+| `note` | varchar(255) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uniq_guard_relief`(employee_id,relief_date)
 
 ### `late_policy_settings`
 
@@ -1172,6 +1214,90 @@ Unique: `unique_employee_waiver_date`(employee_id,waiver_date)
 | `recorded_at` | timestamp | না |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `is_mock` | tinyint(1) | না | default 0 | |
+
+### `ot_entries`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `employee_id` | int(11) | না |  | logical → `all_employees` |
+| `work_date` | date | না |  | |
+| `day_kind` | varchar(8) | না | default 'normal' | |
+| `shift_id` | int(11) | হ্যাঁ |  | logical → `duty_shifts` |
+| `relief` | tinyint(1) | না | default 0 | |
+| `in_at` | datetime | হ্যাঁ |  | |
+| `out_at` | datetime | হ্যাঁ |  | |
+| `worked_minutes` | int(11) | না | default 0 | |
+| `built_in_minutes` | int(11) | না | default 0 | |
+| `calc_minutes` | int(11) | না | default 0 | |
+| `auto_minutes` | int(11) | না | default 0 | |
+| `over_limit_minutes` | int(11) | না | default 0 | |
+| `approved_minutes` | int(11) | না | default 0 | |
+| `status` | varchar(16) | না | default 'pending' | |
+| `step` | int(11) | না | default 1 | |
+| `step1_by` | int(11) | হ্যাঁ |  | |
+| `step1_minutes` | int(11) | হ্যাঁ |  | |
+| `decided_by` | int(11) | হ্যাঁ |  | |
+| `decided_at` | datetime | হ্যাঁ |  | |
+| `note` | varchar(255) | হ্যাঁ |  | |
+| `calculated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `uniq_ot_entry`(employee_id,work_date)
+
+### `ot_payroll_changes`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `employee_id` | int(11) | না |  | logical → `all_employees` |
+| `month_year` | varchar(7) | না |  | |
+| `from_hours` | decimal(7,2) | না | default 0.00 | |
+| `to_hours` | decimal(7,2) | না | default 0.00 | |
+| `from_amount` | decimal(12,2) | না | default 0.00 | |
+| `to_amount` | decimal(12,2) | না | default 0.00 | |
+| `reason` | varchar(500) | না |  | |
+| `user_id` | int(11) | হ্যাঁ |  | logical → `users` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `ot_rates`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `designation` | varchar(150) | হ্যাঁ |  | |
+| `employee_id` | int(11) | হ্যাঁ |  | logical → `all_employees` |
+| `rate_type` | varchar(12) | না | default 'fixed' | |
+| `rate` | decimal(10,2) | হ্যাঁ |  | |
+| `off_rate` | decimal(10,2) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `ot_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | না | UNI default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `rate_type` | varchar(12) | না | default 'labour_law' | |
+| `divisor` | decimal(8,2) | না | default 208.00 | |
+| `multiplier` | decimal(5,2) | না | default 2.00 | |
+| `off_multiplier` | decimal(5,2) | না | default 2.00 | |
+| `fixed_rate` | decimal(10,2) | না | default 0.00 | |
+| `fixed_off_rate` | decimal(10,2) | না | default 0.00 | |
+| `min_minutes` | int(11) | না | default 30 | |
+| `round_minutes` | int(11) | না | default 30 | |
+| `daily_max_minutes` | int(11) | না | default 120 | |
+| `monthly_max_minutes` | int(11) | না | default 0 | |
+| `only_approved` | tinyint(1) | না | default 1 | |
+| `planned_counts_approved` | tinyint(1) | না | default 1 | |
+| `approver_mode` | varchar(16) | না | default 'supervisor' | |
+| `office_start` | varchar(5) | না | default '09:00' | |
+| `office_end` | varchar(5) | না | default '18:00' | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `uniq_ot_settings_company`(company_id)
 
 ### `site_attendance_entries`
 
@@ -1463,6 +1589,15 @@ Unique: `unique_user_company_module`(user_id,company_id,module_key)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `app_id`(app_id)
+
+### `app_access_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `group_id` | int(11) | না | PK  | |
+| `new_accounts_app` | tinyint(1) | না | default 1 | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 ### `employee_template_assignments`
 
@@ -1791,7 +1926,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_group_directory` | tinyint(1) | না | default 0 | |
 | `can_work_all_companies` | tinyint(1) | না | default 0 | |
 | `max_devices` | int(11) | না | default 1 | |
-| `can_use_app` | tinyint(1) | না | default 0 | |
+| `can_use_app` | tinyint(1) | হ্যাঁ |  | |
 | `app_access_custom` | tinyint(1) | না | default 0 | |
 | `sessions_valid_after` | datetime(3) | হ্যাঁ |  | |
 | `can_view_budget_module` | tinyint(1) | না | default 1 | |
@@ -1825,6 +1960,8 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_mail_directory` | tinyint(1) | না | default 0 | |
 | `can_use_mail_groups` | tinyint(1) | না | default 0 | |
 | `can_view_roster` | tinyint(1) | না | default 0 | |
+| `can_view_my_ot` | tinyint(1) | না | default 0 | |
+| `can_approve_team_ot` | tinyint(1) | না | default 0 | |
 | `can_take_break` | tinyint(1) | না | default 0 | |
 | `can_give_feedback` | tinyint(1) | না | default 0 | |
 | `can_use_fingerprint` | tinyint(1) | না | default 0 | |
@@ -1902,6 +2039,18 @@ Unique: `uniq_web_push_endpoint`(endpoint)
 | `app_user` | varchar(100) | হ্যাঁ |  | |
 | `site_sup_date` | varchar(50) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `budget_project_locks`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `budget_id` | int(11) | না |  | logical → `budgets` |
+| `project_id` | int(11) | না |  | logical → `projects` |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `submitted_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `unique_budget_project`(budget_id,project_id)
 
 ### `budget_submissions`
 
@@ -2576,6 +2725,7 @@ Unique: `uniq_mobile_sim_number`(company_id,phone_number)
 | `department_id` | int(11) | হ্যাঁ |  | FK → `departments.id` |
 | `branch_id` | int(11) | হ্যাঁ |  | FK → `branches.id` |
 | `joining_date` | date | হ্যাঁ |  | |
+| `gets_ot` | tinyint(1) | না | default 0 | |
 
 Unique: `zk_device_pin`(zk_device_pin)
 
@@ -2634,6 +2784,29 @@ Unique: `unique_company_code`(group_id,short_code)
 
 Unique: `unique_workspace_code`(workspace_code)
 
+### `department_team_members`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `team_id` | int(11) | না |  | FK → `department_teams.id` |
+| `employee_id` | int(11) | না | UNI  | logical → `all_employees` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uniq_team_member`(employee_id)
+
+### `department_teams`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `department_id` | int(11) | না |  | FK → `departments.id` |
+| `name` | varchar(120) | না |  | |
+| `supervisor_user_id` | int(11) | হ্যাঁ |  | |
+| `everyone_else` | tinyint(1) | না | default 0 | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
 ### `departments`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -2646,6 +2819,7 @@ Unique: `unique_workspace_code`(workspace_code)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `head_user_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `unique_company_name`(company_id,name)
 
@@ -4111,6 +4285,7 @@ Unique: `unique_step_order`(step_order)
 | `adhoc_approver_id` | int(11) | হ্যাঁ |  | |
 | `adhoc_added_by` | int(11) | হ্যাঁ |  | |
 | `adhoc_note` | varchar(500) | হ্যাঁ |  | |
+| `head_step_user_id` | int(11) | হ্যাঁ |  | |
 | `awaiting_approver` | tinyint(1) | না | default 0 | |
 | `stuck_since` | datetime | হ্যাঁ |  | |
 | `supervisor_pinned` | tinyint(1) | না | default 0 | |

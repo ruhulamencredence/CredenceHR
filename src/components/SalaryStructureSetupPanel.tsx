@@ -18,6 +18,7 @@
 // Same visual language as PayrollListPanel.tsx (card shell, filter bar,
 // table styling) so this drops into the existing Payroll module untouched.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Settings2,
@@ -104,8 +105,8 @@ interface SalaryStructureRow {
   effective_date: string;
 }
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);

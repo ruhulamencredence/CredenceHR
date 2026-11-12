@@ -18,8 +18,13 @@
 //   onCancelEdit closing the sheet while editing — the page's own Cancel
 //   doneKey     changes when the form has saved (e.g. the list's length): close
 //   closeOnApply close after a tap on an "Apply" / "Search" button inside
+//   editPopupOnDesktop  on a computer, editing an item (the row's pencil)
+//               opens the same form in a popup over the list, right where
+//               the row is, instead of filling the form at the top of the
+//               page — no scrolling up and back. Adding stays inline. The
+//               form's place at the top keeps its height, so nothing moves.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, SlidersHorizontal, X } from 'lucide-react';
 import { useAdminPhoneFlag } from '../lib/adminPhone';
@@ -34,11 +39,32 @@ interface PhoneSheetProps {
   doneKey?: unknown;
   closeOnApply?: boolean;
   activeCount?: number;
+  editPopupOnDesktop?: boolean;
   children: React.ReactNode;
 }
 
-export const PhoneSheet: React.FC<PhoneSheetProps> = ({ label, title, kind = 'add', editing, onCancelEdit, doneKey, closeOnApply, activeCount, children }) => {
+export const PhoneSheet: React.FC<PhoneSheetProps> = ({ label, title, kind = 'add', editing, onCancelEdit, doneKey, closeOnApply, activeCount, editPopupOnDesktop, children }) => {
   const phone = useAdminPhoneFlag();
+  // Desktop edit popup: the inline block's last height, kept as an empty
+  // space while the form is in the popup.
+  const inlineRef = useRef<HTMLDivElement>(null);
+  const [inlineH, setInlineH] = useState(0);
+  const desktopPopup = !phone && !!editPopupOnDesktop && !!editing;
+  useLayoutEffect(() => {
+    if (desktopPopup || phone || !editPopupOnDesktop) return;
+    const el = inlineRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setInlineH(el.offsetHeight));
+    ro.observe(el);
+    setInlineH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [desktopPopup, phone, editPopupOnDesktop]);
+  useEffect(() => {
+    if (!desktopPopup) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCancelEdit?.();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [desktopPopup, onCancelEdit]);
   const [open, setOpen] = useState(false);
   const isOpen = open || !!editing;
   const firstDone = useRef(true);
@@ -57,6 +83,28 @@ export const PhoneSheet: React.FC<PhoneSheetProps> = ({ label, title, kind = 'ad
   };
   useBackButtonClose(phone && isOpen, close);
 
+  if (!phone && editPopupOnDesktop) {
+    if (!desktopPopup) return <div ref={inlineRef}>{children}</div>;
+    return (
+      <>
+        <div style={{ height: inlineH }} aria-hidden="true" />
+        {createPortal(
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label={title || label}>
+            <div className="absolute inset-0 liquid-glass-backdrop" onClick={onCancelEdit} />
+            <div className="relative w-full max-w-2xl">
+              <div className="liquid-glass liquid-glass-in rounded-[32px] p-2 max-h-[88vh] overflow-y-auto desktop-edit-popup">
+                <button type="button" onClick={onCancelEdit} className="liquid-glass-chip absolute top-4 right-4 z-10 w-9 h-9 rounded-full flex items-center justify-center" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+                {children}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      </>
+    );
+  }
   if (!phone) return <>{children}</>;
 
   const onClickCapture = (e: React.MouseEvent) => {

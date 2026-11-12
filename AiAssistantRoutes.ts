@@ -204,6 +204,15 @@ const st = (s: any) => STATUS_BN[String(s || "").toLowerCase()] || String(s || "
 
 const isSuper = (c: Ctx) => c.role === "superadmin";
 const hasMod = (c: Ctx, k: string) => isSuper(c) || c.modules.includes(k);
+// Payroll answers come back with amounts as "*****" for an account without
+// Payroll's "See salary amounts" layer (payrollAmountMask.ts): say so rather
+// than add up hidden figures.
+const payrollAmountsHidden = (body: any) => JSON.stringify(body ?? null).includes('"*****"');
+const AMOUNTS_HIDDEN = {
+  ok: false,
+  text: "আপনার account-এ বেতনের অঙ্ক দেখার অনুমতি (Payroll → \"See salary amounts\") নেই, তাই অঙ্কগুলো দেখাতে পারছি না। দরকার হলে Superadmin-কে বলুন।",
+  data: { amounts_hidden: true }
+};
 
 // The asker's login has no Employee record, so there is nothing of "their
 // own" (attendance, late days, loans…). Someone who manages Employees — a
@@ -283,7 +292,7 @@ const HELP: HelpEntry[] = [
   { id: "target_reports", title: "Target Reports", keys: ["target report", "টার্গেট রিপোর্ট", "target status", "department target"],
     steps: "মেনু → HR Operations → Reports → **Target Reports**। বছর, মাস, department, employee আর status দিয়ে filter করুন; By department / By employee / Targets দেখুন।", nav: "admin:target_reports", can: (c) => isSuper(c) || c.modules.includes("target_reports") },
   { id: "sim", title: "Mobile SIM / বিল", keys: ["sim", "সিম", "mobile bill", "মোবাইল বিল", "phone bill", "limit"],
-    steps: "মেনু → Requests & Claims → **My Mobile SIM**। আপনার SIM, মাসিক limit আর বিল দেখা যায়; limit বাড়াতে request দিন।", nav: "self:myMobileSim", can: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill") },
+    steps: "মেনু → SIM & ID Card → **My SIM & Bill**। আপনার SIM, মাসিক limit আর বিল দেখা যায়; limit বাড়াতে request দিন।", nav: "self:myMobileSim", can: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill") },
   { id: "tasks", title: "My Tasks", keys: ["task", "টাস্ক"],
     steps: "মেনু → Work & Approvals → **My Tasks**।", nav: "self:myTasks", can: (c) => isSuper(c) || c.flags.can_view_tasks || c.modules.includes("task_management") },
   { id: "approve", title: "আবেদন অনুমোদন", keys: ["approve", "অনুমোদন", "approval", "এপ্রুভ", "approve korbo"],
@@ -382,7 +391,7 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → HR Operations → Facilities → **Vehicle Management**:\n• **Requests** — ride অনুমোদন, গাড়ি ও চালক দেওয়া, সময় বাড়ানোর আবেদন (Approve Extension)।\n• **Emergency** — HR সরাসরি ride দিতে পারে।\n• **Inventory** — গাড়ি যোগ (\"Add\")।",
     nav: "admin:vehicle_management", can: (c) => hasMod(c, "vehicle_management") },
   { id: "mobile_bill_admin", title: "Mobile Bill — SIM ও বিল (HR)", keys: ["give a sim", "sim dibo", "সিম দেওয়া", "sim add", "import bill", "bill import", "বিল ইমপোর্ট", "mobile limit set", "limit policy", "payment sheet"],
-    steps: "মেনু → HR Operations → Facilities → **Mobile Bill**:\n• **\"Give a SIM\"** — নম্বর, অপারেটর, কর্মী, limit (policy অনুযায়ী বা নিজের মতো)।\n• **\"Add limit\"** — পদবি/ধরন অনুযায়ী limit policy।\n• **\"Import bill\"** — অপারেটরের Excel (\"Download template\" দেখে)। limit-এর বেশি হলে কর্মীর বেতন থেকে কাটা যায়।\n• **\"Payment sheet PDF\"** — মাসের পরিশোধ।",
+    steps: "মেনু → Admin Panel → SIM Management → **SIM & Mobile Bill**:\n• **\"Give a SIM\"** — নম্বর, অপারেটর, কর্মী, limit (policy অনুযায়ী বা নিজের মতো)।\n• **\"Add limit\"** — পদবি/ধরন অনুযায়ী limit policy।\n• **\"Import bill\"** — অপারেটরের Excel (\"Download template\" দেখে)। limit-এর বেশি হলে কর্মীর বেতন থেকে কাটা যায়।\n• **\"Payment sheet PDF\"** — মাসের পরিশোধ।",
     nav: "admin:mobile_bill", can: (c) => hasMod(c, "mobile_bill") },
   { id: "exit_admin", title: "Exit / Offboarding (HR)", keys: ["exit request", "new exit", "exit add", "offboarding kivabe", "clearance start", "start clearance", "settlement", "সেটেলমেন্ট", "final settlement", "mark paid", "clearance department", "experience certificate", "release letter"],
     steps: "মেনু → Employee Management → **Exit / Offboarding**:\n১. **\"New Exit Request\"** (কর্মী resignation দিলে নিজেও আসে) → কর্মী, ধরন, notice ও শেষ কর্মদিবস।\n২. **\"Start Clearance\"** → প্রতিটা department-এর clearance তার approver-এর কাছে যায় (কোন department, ঠিক করতে **\"Clearance Departments\"**)।\n৩. Settlement (Gratuity, ছুটির টাকা, কাটা loan) তৈরি → সব clearance আর বকেয়া শেষ হলে **\"Mark Paid & Settle\"**।\n৪. Clearance Certificate / Settlement Sheet PDF, আর HR Operations → Letters থেকে Release / Experience Letter।",
@@ -1495,6 +1504,7 @@ const TOOLS: Tool[] = [
     run: async (c, args) => {
       const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const r = await callApi(c.req, `/api/payroll/approval/${month}/salary-sheet`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return fail(r.status);
       const q = String(args?.name || "").trim().toLowerCase();
       const rows: any[] = (r.body?.rows || []).filter((x: any) => !q || [x.employee_name, x.employee_code, x.department, x.designation].some((v) => String(v || "").toLowerCase().includes(q)));
@@ -1525,6 +1535,7 @@ const TOOLS: Tool[] = [
       const month = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const vs = /^\d{4}-\d{2}$/.test(String(args?.vs || "")) ? `?vs=${args.vs}` : "";
       const r = await callApi(c.req, `/api/payroll/approval/${month}/compare${vs}`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return r.status === 400 ? { ok: false, text: String(r.body?.error || ""), data: {} } : fail(r.status);
       const b = r.body;
       const tk = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}৳${bn(Math.abs(Math.round(v)).toLocaleString("en-IN"))}`;
@@ -1569,7 +1580,7 @@ const TOOLS: Tool[] = [
         (groups.length && !dept ? groups.slice(0, 12).map((g) => `• ${g.key}: ${bn(g.count)} জন`).join("\n") + "\n" : "") +
         rows.slice(0, 15).map((x) => "• " + cols.slice(0, 4).map((col) => val(x[col.key])).filter((v) => v !== "").join(" · ")).join("\n") +
         (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)} জন (পুরোটা PDF / Excel-এ)` : "") +
-        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো আপনার account-এ Payroll না থাকায় দেখানো হয়নি।)");
+        (cols.some((col) => col.payroll) || !p.payroll ? "" : "\n(বেতনের কলামগুলো দেখানো হয়নি — এর জন্য Payroll আর তার \"See salary amounts\" অনুমতি লাগে।)");
       return {
         ok: true, text, data: { preset: key, total: rows.length, groups: groups.slice(0, 20), rows: rows.slice(0, 40).map((x) => Object.fromEntries(cols.map((col) => [col.label, val(x[col.key])]))) },
         actions: [{ label: "HR Operations → Reports খুলুন", nav: "hrops:reports" }],
@@ -1598,7 +1609,7 @@ const TOOLS: Tool[] = [
         (over.length ? `\nসীমার বেশি:\n` + over.slice(0, 10).map((b) => `• ${who(b)} (${b.month}) — ${tk(b.amount)}, সীমা ${tk(b.limit_amount)}, বেশি ${tk(b.amount - b.limit_amount)}`).join("\n") : "\nকেউ সীমার বেশি নয়।");
       return {
         ok: true, text, data: { from, to, sims: sims.length, bills: bills.length, total, over_limit: over.slice(0, 30).map((b) => ({ who: who(b), month: b.month, amount: b.amount, limit: b.limit_amount })) },
-        actions: [{ label: "Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
+        actions: [{ label: "SIM & Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
         report: report("Mobile Bill Report", `Mobile-Bill-${from}-${to}`, ["Month", "Phone", "Employee", "Department", "Operator", "Limit", "Bill", "Over limit", "Paid"],
           bills.map((b) => { const sm = simById.get(b.sim_id) || {}; return [b.month, sm.phone_number || "", sm.employee?.name || "", sm.employee?.department || "", sm.operator || "", b.limit_amount, b.amount, Math.max(0, b.amount - b.limit_amount), b.paid ? "Yes" : "No"]; }),
           [["From", from], ["To", to]])
@@ -1979,12 +1990,12 @@ const TOOLS: Tool[] = [
       if (!r.ok) return fail(r.status);
       const sims: any[] = r.body?.sims || [];
       const reqs: any[] = (r.body?.requests || []).filter((x: any) => x.status === "pending");
-      if (!sims.length) return { ok: true, text: "আপনার নামে কোনো অফিস SIM নেই।", data: { sims: [] }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+      if (!sims.length) return { ok: true, text: "আপনার নামে কোনো অফিস SIM নেই।", data: { sims: [] }, actions: [{ label: "My SIM & Bill খুলুন", nav: "self:myMobileSim" }] };
       const text = sims.map((s) => {
         const b = (s.bills || [])[0];
         return `• **${s.phone_number}** (${s.operator || ""}) — limit ${money(s.limit_amount)}` + (b ? `\n  ${bnMonth(String(b.month))}-এর bill ${money(b.amount)}${Number(b.amount) > Number(b.limit_amount) ? ` — ⚠️ ${money(Number(b.amount) - Number(b.limit_amount))} বেশি (কাটা যেতে পারে)` : " — limit-এর মধ্যে"}` : "\n  এখনো কোনো bill আসেনি");
       }).join("\n") + (reqs.length ? `\nLimit বাড়ানোর অনুরোধ অপেক্ষায়: ${reqs.map((x) => `${money(x.current_limit)} → ${money(x.requested_limit)}`).join(", ")}` : "");
-      return { ok: true, text, data: { sims: sims.map((s) => ({ phone: s.phone_number, limit: s.limit_amount, last_bills: (s.bills || []).slice(0, 3) })), pending_requests: reqs.map((x) => ({ from: x.current_limit, to: x.requested_limit })) }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+      return { ok: true, text, data: { sims: sims.map((s) => ({ phone: s.phone_number, limit: s.limit_amount, last_bills: (s.bills || []).slice(0, 3) })), pending_requests: reqs.map((x) => ({ from: x.current_limit, to: x.requested_limit })) }, actions: [{ label: "My SIM & Bill খুলুন", nav: "self:myMobileSim" }] };
     }
   },
   {
@@ -2318,6 +2329,7 @@ const TOOLS: Tool[] = [
     run: async (c, args) => {
       const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
       const r = await callApi(c.req, `/api/payroll/approval/${ym}`);
+      if (r.ok && payrollAmountsHidden(r.body)) return AMOUNTS_HIDDEN;
       if (!r.ok) return fail(r.status);
       const b = r.body || {};
       const sm = b.summary || {};

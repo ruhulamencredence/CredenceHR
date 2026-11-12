@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw, PauseCircle, X } from 'lucide-react';
@@ -51,8 +52,8 @@ interface Department {
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 // unpaid -> Pending, processed -> Approved, paid -> Paid — the labels this
 // list uses match the payroll payment_status enum 1:1, just in plain English.

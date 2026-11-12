@@ -70,6 +70,9 @@ const AlertsPage = lazy(retryImport(() => import('./components/AlertsPage').then
 const CredenceMail = lazy(retryImport(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail }))));
 // My Duty Roster (Self Service, users.can_view_roster).
 const MyRoster = lazy(retryImport(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster }))));
+// My OT / Team OT (Self Service, users.can_view_my_ot / users.can_approve_team_ot).
+const MyOvertime = lazy(retryImport(() => import('./components/MyOvertime').then(m => ({ default: m.MyOvertime }))));
+const OtApprovalPanel = lazy(retryImport(() => import('./components/OtApprovalPanel').then(m => ({ default: m.OtApprovalPanel }))));
 // Break Time (Self Service, users.can_take_break).
 const MyBreak = lazy(retryImport(() => import('./components/MyBreak').then(m => ({ default: m.MyBreak }))));
 // PEPM Operation -> Material Receive (users.can_receive_material, MprDispatchRoutes.ts).
@@ -204,7 +207,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myOt' | 'teamOt' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -221,6 +224,8 @@ export default function App() {
       if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
       if (saved === 'credenceMail' && canOpenSelfView('credenceMail', user)) return 'credenceMail';
       if (saved === 'myRoster' && canOpenSelfView('myRoster', user)) return 'myRoster';
+      if (saved === 'myOt' && canOpenSelfView('myOt', user)) return 'myOt';
+      if (saved === 'teamOt' && canOpenSelfView('teamOt', user)) return 'teamOt';
       if (saved === 'myBreak' && canOpenSelfView('myBreak', user)) return 'myBreak';
       if (saved === 'mySignatures' && canOpenSelfView('mySignatures', user)) return 'mySignatures';
       if (saved === 'myPayslips' && canOpenSelfView('myPayslips', user)) return 'myPayslips';
@@ -1166,7 +1171,7 @@ export default function App() {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'timesheet' || target === 'credenceMail' || target === 'myRoster' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'timesheet' || target === 'credenceMail' || target === 'myRoster' || target === 'myOt' || target === 'teamOt' || target === 'myBreak' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive' || target === 'myRequisitions') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -1231,7 +1236,7 @@ export default function App() {
     return () => window.removeEventListener('credence:open-target', onOpen);
   }, [user]);
   // A Mobile Bill alert (MobileBillRoutes.ts): a new limit request with no
-  // approval chain opens HR's Mobile Bill; anything else opens My Mobile SIM.
+  // approval chain opens HR's Mobile Bill; anything else opens My SIM & Bill.
   useEffect(() => {
     const onOpen = (e: Event) => {
       if (!user) return;
@@ -1474,7 +1479,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myOt' | 'teamOt' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'myRequisitions') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1841,6 +1846,10 @@ export default function App() {
           <MyLoans token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'credenceMail' && canOpenSelfView('credenceMail', user) ? (
           <CredenceMail token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myOt' && canOpenSelfView('myOt', user) ? (
+          <MyOvertime token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'teamOt' && canOpenSelfView('teamOt', user) ? (
+          <OtApprovalPanel token={token} selfService onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myRoster' && canOpenSelfView('myRoster', user) ? (
           <MyRoster token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myBreak' && canOpenSelfView('myBreak', user) ? (

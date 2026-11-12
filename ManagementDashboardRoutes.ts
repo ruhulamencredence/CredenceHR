@@ -254,7 +254,13 @@ export function registerManagementDashboardRoutes(app: Express, deps: Management
           requester: nameOfUser(r.requested_by),
           department: deptOfUser(r.requested_by),
           layer: `${r.current_step}/${r.total_steps}`,
-          waiting_on: r.adhoc_approver_id ? nameOfUser(r.adhoc_approver_id) : r.current_step === 1 && r.supervisor_step_user_id ? nameOfUser(r.supervisor_step_user_id) : null,
+          waiting_on: r.adhoc_approver_id
+            ? nameOfUser(r.adhoc_approver_id)
+            : r.current_step === 1 && r.supervisor_step_user_id
+              ? nameOfUser(r.supervisor_step_user_id)
+              : r.head_step_user_id && Number(r.current_step) === (r.supervisor_step_user_id ? 2 : 1)
+                ? nameOfUser(r.head_step_user_id)
+                : null,
           days: daysBetween(r.created_at, today)
         }));
       const stuck = pending.filter((r) => daysBetween(r.created_at, today) >= 3).length;

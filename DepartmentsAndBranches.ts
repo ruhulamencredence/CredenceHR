@@ -297,18 +297,41 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   // Employees form's Department picker needs this regardless of whether that
   // account has been granted the "departments" module itself; only
   // create/update/delete are gated.
+  // Older callers that still send one Department "Supervisor": it becomes the
+  // Department's "everyone else" team (DepartmentTeams.ts) when it has no
+  // teams yet, so approvals keep going to that person.
+  const supervisorAsTeam = async (deptId: number, deptName: string, sent: any) => {
+    if (!sent) return;
+    try {
+      const has: any[] = (await queryDB("SELECT id FROM department_teams WHERE department_id = ? LIMIT 1", [deptId])) || [];
+      if (!has.length) await queryDB("INSERT INTO department_teams (department_id, name, supervisor_user_id, everyone_else) VALUES (?, ?, ?, 1)", [deptId, `${String(deptName).slice(0, 110)} team`, Number(sent)]);
+    } catch {
+      // no teams table yet
+    }
+  };
+
   app.get("/api/departments", authenticateToken, async (req: any, res) => {
     try {
       const rows = await queryDB(
-        `SELECT d.*, u.name AS supervisor_name
+        `SELECT d.*, u.name AS supervisor_name, h.name AS head_name
          FROM departments d
          LEFT JOIN users u ON u.id = d.supervisor_user_id
+         LEFT JOIN users h ON h.id = d.head_user_id
          ORDER BY d.name ASC`
       );
+      // Teams (DepartmentTeams.ts): name, Supervisor, how many people.
+      const teams: any[] = (await queryDB("SELECT t.id, t.department_id, t.name, t.supervisor_user_id, t.everyone_else, u.name AS supervisor_name FROM department_teams t LEFT JOIN users u ON u.id = t.supervisor_user_id WHERE t.is_active = 1 ORDER BY t.everyone_else DESC, t.name").catch(() => [])) || [];
+      const members: any[] = (await queryDB("SELECT team_id, COUNT(*) AS n FROM department_team_members GROUP BY team_id").catch(() => [])) || [];
+      const memberCount = new Map<number, number>(members.map((m: any) => [Number(m.team_id), Number(m.n)]));
       res.json(
         rows.map((d: any) => ({
           id: d.id,
           name: d.name,
+          head_user_id: d.head_user_id || null,
+          head_name: d.head_name || null,
+          teams: teams
+            .filter((t: any) => Number(t.department_id) === Number(d.id))
+            .map((t: any) => ({ id: Number(t.id), name: t.name, supervisor_user_id: t.supervisor_user_id ? Number(t.supervisor_user_id) : null, supervisor_name: t.supervisor_name || null, everyone_else: Number(t.everyone_else) === 1, members: memberCount.get(Number(t.id)) || 0 })),
           supervisor_user_id: d.supervisor_user_id || null,
           supervisor_name: d.supervisor_name || null,
           include_supervisor_approval: !!Number(d.include_supervisor_approval),
@@ -333,15 +356,19 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         const su = await queryDB("SELECT id FROM users WHERE id = ?", [supervisorUserId]);
         if (su.length === 0) return res.status(400).json({ error: "Selected Supervisor account not found." });
       }
+      // Head of Department (DepartmentTeams.ts); teams are saved with PUT /api/departments/:id/teams.
+      const headUserId = req.body?.head_user_id ? Number(req.body.head_user_id) : null;
+      if (headUserId && !(await queryDB("SELECT id FROM users WHERE id = ?", [headUserId])).length) return res.status(400).json({ error: "Selected Head of Department account not found." });
       // Defaults ON — simply picking a Supervisor is enough to gate this
       // Department's Approval Workflow with them as the first layer; an Admin
       // has to deliberately turn this off (see the departments table comment).
       const includeSupervisorApproval = req.body?.include_supervisor_approval === false ? 0 : 1;
 
       const result = await queryDB(
-        "INSERT INTO departments (name, supervisor_user_id, include_supervisor_approval, is_active) VALUES (?, ?, ?, 1)",
-        [name, supervisorUserId, includeSupervisorApproval]
+        "INSERT INTO departments (name, supervisor_user_id, include_supervisor_approval, head_user_id, is_active) VALUES (?, ?, ?, ?, 1)",
+        [name, supervisorUserId, includeSupervisorApproval, headUserId]
       );
+      await supervisorAsTeam(Number(result.insertId), name, req.body?.supervisor_user_id);
       res.status(201).json({ success: true, id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -359,18 +386,23 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       const dupe = await queryDB("SELECT id FROM departments WHERE name = ? AND id <> ?", [name, id]);
       if (dupe.length > 0) return res.status(400).json({ error: "A Department with this name already exists." });
 
-      const supervisorUserId = req.body?.supervisor_user_id ? Number(req.body.supervisor_user_id) : null;
+      // The old single Supervisor is only changed when sent (teams replace
+      // it — DepartmentTeams.ts); the Head likewise.
+      const supervisorUserId = req.body?.supervisor_user_id === undefined ? existing[0].supervisor_user_id ?? null : req.body.supervisor_user_id ? Number(req.body.supervisor_user_id) : null;
       if (supervisorUserId) {
         const su = await queryDB("SELECT id FROM users WHERE id = ?", [supervisorUserId]);
         if (su.length === 0) return res.status(400).json({ error: "Selected Supervisor account not found." });
       }
-      const includeSupervisorApproval = req.body?.include_supervisor_approval === false ? 0 : 1;
+      const headUserId = req.body?.head_user_id === undefined ? existing[0].head_user_id ?? null : req.body.head_user_id ? Number(req.body.head_user_id) : null;
+      if (headUserId && !(await queryDB("SELECT id FROM users WHERE id = ?", [headUserId])).length) return res.status(400).json({ error: "Selected Head of Department account not found." });
+      const includeSupervisorApproval = req.body?.include_supervisor_approval === undefined ? Number(existing[0].include_supervisor_approval ?? 1) : req.body.include_supervisor_approval === false ? 0 : 1;
       const isActive = req.body?.is_active === false ? 0 : 1;
 
       await queryDB(
-        "UPDATE departments SET name = ?, supervisor_user_id = ?, include_supervisor_approval = ?, is_active = ? WHERE id = ?",
-        [name, supervisorUserId, includeSupervisorApproval, isActive, id]
+        "UPDATE departments SET name = ?, supervisor_user_id = ?, include_supervisor_approval = ?, head_user_id = ?, is_active = ? WHERE id = ?",
+        [name, supervisorUserId, includeSupervisorApproval, headUserId, isActive, id]
       );
+      await supervisorAsTeam(id, name, req.body?.supervisor_user_id);
         requestApprovalReconcile();
       // Keep every existing reader's plain-text `all_employees.department`
       // mirror in sync with a rename (Notices targeting, Attendance Reports,

@@ -14,6 +14,7 @@
 // Every payroll run generated afterwards picks these up by itself and shows
 // each on the payslip under its own name.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Ban, Pencil, Plus, RefreshCw, Scale, Search, Trash2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -73,8 +74,8 @@ interface Adjustment {
   created_by_name: string | null;
 }
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const monthName = (ym: string | null) => {
   if (!ym) return '—';
   const [y, m] = ym.split('-').map(Number);

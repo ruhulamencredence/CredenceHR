@@ -17,6 +17,7 @@
 // never drift from what Run Payroll / the Payroll List already show.
 // A "Paid" run is read-only here too (PUT already refuses those).
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Clock, AlertTriangle, Pencil, Check, X, RefreshCw, Banknote } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -58,8 +59,8 @@ interface EditState {
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
 
-const money = (n: number | null | undefined) =>
-  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = maskMoney((n: number | null | undefined) =>
+  `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 const monthLabel = (my: string) => {
   const [y, m] = my.split('-').map(Number);

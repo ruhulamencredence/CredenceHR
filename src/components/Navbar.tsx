@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useDarkMode } from '../lib/colorMode';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { User, chatAllowed } from '../types';
@@ -218,12 +219,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, [blend]);
   // The app's status bar: dark clock/battery on the light blended header,
   // white on the purple one.
+  // In dark mode every header is dark: white clock / battery everywhere.
+  const darkMode = useDarkMode();
   useEffect(() => {
     if (!isNativeApp) return;
     import('@capacitor/status-bar')
-      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: blend ? Style.Light : Style.Dark }))
+      .then(({ StatusBar, Style }) => StatusBar.setStyle({ style: blend && !darkMode ? Style.Light : Style.Dark }))
       .catch(() => {});
-  }, [blend, isNativeApp]);
+  }, [blend, isNativeApp, darkMode]);
   // A page-title takeover (e.g. "Select a Budget") means this page owns the
   // whole mobile header row — its own search icon (if some other, unrelated
   // page had left one docked) and the Weather badge both get out of the way

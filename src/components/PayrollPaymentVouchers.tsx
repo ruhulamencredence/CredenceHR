@@ -11,6 +11,7 @@
 // MFS's own app, then confirms here with Pay. One Excel and one printable PDF
 // per Bank / MFS, or all of them together.
 
+import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from '../lib/jspdf';
@@ -46,7 +47,7 @@ interface Group {
   total: number;
 }
 
-const tk = (n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const tk = maskMoney((n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const KIND_ORDER = { Bank: 0, MFS: 1, Cash: 2, None: 3 } as const;
 
 function buildGroups(rows: SheetRow[]): Group[] {

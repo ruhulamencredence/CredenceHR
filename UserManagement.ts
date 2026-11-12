@@ -21,6 +21,7 @@ import type { Express } from "express";
 import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
+import { appOn } from "./AppAccess";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
@@ -448,7 +449,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_disappearing, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_bill_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_disappearing, can_use_chat, can_use_mail, can_view_mail_directory, can_use_mail_groups, can_receive_material, can_return_dispatch, can_give_feedback, can_use_fingerprint, can_view_roster, can_view_my_ot, can_approve_team_ot, can_take_break, can_save_ride_places, can_update_check_out, can_add_adhoc_approver, can_use_assistant_voice, can_sign_documents, can_view_payslip, can_request_items, can_email_reports, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_handle_assistant_support, can_export_assistant_reports, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -519,8 +520,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
           }))
         );
       }
+      // Mobile App on (AppAccess.ts): the account's own switch, or the
+      // workspace's "New accounts get the Mobile App" when it has none.
+      const appRows: any[] = (await queryDB("SELECT id, can_use_app, group_id, role, is_platform_admin FROM users").catch(() => [])) || [];
+      const appOnById = new Map<number, boolean>();
+      for (const r of appRows) appOnById.set(Number(r.id), r.role === "superadmin" || Number(r.is_platform_admin || 0) === 1 ? true : await appOn(queryDB, r));
       res.json(visibleUsers.map((u: any) => ({
         ...u,
+        app_on: appOnById.get(Number(u.id)) ?? true,
         employee_active: !inactiveUsers.has(Number(u.id)),
         // From the linked Employee record (Users page department filter).
         department: departmentByUser.get(Number(u.id)) || null,
@@ -556,6 +563,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_give_feedback: u.role === "superadmin" ? true : !!Number(u.can_give_feedback || 0),
         can_use_fingerprint: u.role === "superadmin" ? true : !!Number(u.can_use_fingerprint || 0),
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
+        can_view_my_ot: u.role === "superadmin" ? true : !!Number(u.can_view_my_ot || 0),
+        can_approve_team_ot: u.role === "superadmin" ? true : !!Number(u.can_approve_team_ot || 0),
         can_take_break: u.role === "superadmin" ? true : !!Number(u.can_take_break),
         can_save_ride_places: u.role === "superadmin" ? true : !!Number(u.can_save_ride_places),
         can_update_check_out: u.role === "superadmin" ? true : !!Number(u.can_update_check_out),
@@ -1283,7 +1292,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  // Self Service -> My Mobile SIM (MobileBillRoutes.ts): own SIMs, limits,
+  // Self Service -> My SIM & Bill (MobileBillRoutes.ts): own SIMs, limits,
   // bills, and applying for a higher limit. OFF by default.
   app.put("/api/users/:id/mobile-bill-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
@@ -1292,7 +1301,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
-        return res.status(400).json({ error: "My Mobile SIM only applies to Admin and User accounts." });
+        return res.status(400).json({ error: "My SIM & Bill only applies to Admin and User accounts." });
       }
       await queryDB("UPDATE users SET can_view_mobile_bill = ? WHERE id = ?", [enabled ? 1 : 0, id]);
       res.json({ success: true, can_view_mobile_bill: enabled });
@@ -1642,6 +1651,40 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       }
       await queryDB("UPDATE users SET can_view_roster = ? WHERE id = ?", [enabled ? 1 : 0, id]);
       res.json({ success: true, can_view_roster: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // My OT (OvertimeRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/my-ot-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_my_ot;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My OT access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_my_ot = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_my_ot: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Team OT (OvertimeRoutes.ts) — OFF by default, per account.
+  app.put("/api/users/:id/team-ot-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_approve_team_ot;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Team OT access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_approve_team_ot = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_approve_team_ot: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

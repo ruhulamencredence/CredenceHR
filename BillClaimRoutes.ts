@@ -501,7 +501,8 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       for (const r of requests) {
         let actions: any[] = [];
         try { actions = JSON.parse(r.actions_json || "[]"); } catch { actions = []; }
-        const offset = Number(r.supervisor_step_user_id) > 0 ? 1 : 0;
+        // Supervisor and Head of Department steps come before the Template's.
+        const offset = (Number(r.supervisor_step_user_id) > 0 ? 1 : 0) + (Number(r.head_step_user_id) > 0 ? 1 : 0);
         for (const a of actions) {
           if (a.action !== "approved") continue;
           const step = Number(a.step_order);
@@ -513,7 +514,12 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           const img = sig?.image ? (Buffer.isBuffer(sig.image) ? sig.image : Buffer.from(sig.image)) : null;
           out.set(key, {
             step_order: step,
-            label: step === 1 && offset ? "Supervisor" : tmpl?.label || `Layer ${step}`,
+            label:
+              step === 1 && Number(r.supervisor_step_user_id) > 0
+                ? "Supervisor"
+                : Number(r.head_step_user_id) > 0 && step === (Number(r.supervisor_step_user_id) > 0 ? 2 : 1)
+                  ? "Head of Department"
+                  : tmpl?.label || `Layer ${step}`,
             approver_id: Number(a.approver_id),
             approver_name: a.approver_name || null,
             approved_at: a.acted_at || null,

@@ -658,61 +658,61 @@ html[data-ui="mono"]:not([data-app-shell]) .app-tile-icon {
   blue / indigo and the green / amber / red status colours stay.
 */
 html[data-ui="orange"] {
-  --or-50: #fff6ef;
-  --or-100: #ffebdb;
-  --or-200: #ffd4b3;
-  --or-300: #ffb580;
-  --or-400: #ff9238;
-  --or-500: #f47920;
-  --or-600: #e2600e;
-  --or-700: #bf4d0a;
-  --or-800: #983d0c;
-  --or-900: #7a330e;
-  --or-950: #421805;
+  --or-50: #fff5ee;
+  --or-100: #ffe8d6;
+  --or-200: #ffcfae;
+  --or-300: #ffa162;
+  --or-400: #fd8f45;
+  --or-500: #fb7216;
+  --or-600: #ff6700;
+  --or-700: #e05a00;
+  --or-800: #b34700;
+  --or-900: #7f3300;
+  --or-950: #4a1d00;
 
   --g-bg: #fff8f3;
   --g-bg-gradient: linear-gradient(180deg, #fffaf6 0%, #fff4ec 55%, #ffeee2 100%);
-  --g-accent: #e8650f;
-  --g-accent-rgb: 232, 101, 15;
-  --g-accent-hover: #c95409;
+  --g-accent: #ff6700;
+  --g-accent-rgb: 255, 103, 0;
+  --g-accent-hover: #e05a00;
   --g-accent-soft: #fff1e6;
-  --g-accent-100: #ffebdb;
-  --g-accent-200: #ffd4b3;
-  --g-accent-300: #ffb580;
-  --g-accent-400: #ff9238;
-  --g-accent-500: #f47920;
-  --g-accent-600: #e2600e;
-  --g-accent-700: #bf4d0a;
-  --g-accent-800: #983d0c;
-  --g-accent-900: #7a330e;
-  --g-accent-950: #5a2509;
-  --g-accent-975: #421805;
-  --g-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
+  --g-accent-100: #ffe8d6;
+  --g-accent-200: #ffcfae;
+  --g-accent-300: #ffa162;
+  --g-accent-400: #fd8f45;
+  --g-accent-500: #fb7216;
+  --g-accent-600: #ff6700;
+  --g-accent-700: #e05a00;
+  --g-accent-800: #b34700;
+  --g-accent-900: #7f3300;
+  --g-accent-950: #4a1d00;
+  --g-accent-975: #2e1200;
+  --g-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
 
   /* Phone header + the welcome banner under it (white text). Left to right,
      like the banner's own gradient (WelcomeBanner.tsx), so the two read as
      one piece — a diagonal here left a seam where the banner starts. */
-  --g-header-gradient: linear-gradient(90deg, #ff9238 0%, #f47920 50%, #e2600e 100%);
-  --g-banner-1: #ff9238;
-  --g-banner-2: #f47920;
-  --g-banner-3: #e2600e;
-  --g-sidebar-bg: linear-gradient(165deg, rgba(244, 121, 32, 0.97) 0%, rgba(226, 96, 14, 0.97) 55%, rgba(191, 77, 10, 0.98) 100%);
+  --g-header-gradient: linear-gradient(90deg, #ff8532 0%, #fb7216 50%, #ff6700 100%);
+  --g-banner-1: #ff8532;
+  --g-banner-2: #fb7216;
+  --g-banner-3: #ff6700;
+  --g-sidebar-bg: linear-gradient(165deg, rgba(255, 133, 50, 0.97) 0%, rgba(251, 114, 22, 0.97) 55%, rgba(255, 103, 0, 0.98) 100%);
 
-  --g-avatar-1: #f47920;
-  --g-avatar-2: #ff9238;
-  --g-avatar-3: #ffb580;
-  --g-avatar-4: #bf4d0a;
-  --g-avatar-5: #e2600e;
-  --g-badge-check: #ffb580;
+  --g-avatar-1: #ff6700;
+  --g-avatar-2: #fb7216;
+  --g-avatar-3: #ffa162;
+  --g-avatar-4: #e05a00;
+  --g-avatar-5: #fd8f45;
+  --g-badge-check: #ffa162;
   --g-boot-bg: #f47920;
-  --g-chart-5: #f47920;
+  --g-chart-5: #fb7216;
 
   /* Welcome slides, tutorials, Management Dashboard buttons. */
-  --g-cta-1: #e8650f;
-  --g-cta-2: #ff9a4d;
-  --g-cta-dark-1: #983d0c;
-  --g-cta-dark-2: #e2600e;
-  --g-cta-text: #c95409;
+  --g-cta-1: #ff6700;
+  --g-cta-2: #ff8532;
+  --g-cta-dark-1: #b34700;
+  --g-cta-dark-2: #fb7216;
+  --g-cta-text: #e05a00;
   --g-cta-soft: #fff4ec;
   --g-cta-ring: #ffd9bd;
   --g-cta-track: #f6d6c0;
@@ -720,7 +720,7 @@ html[data-ui="orange"] {
   --g-slides-blob: radial-gradient(circle at 35% 30%, #fff0e3, #ffd9bd 55%, #ffc39a);
 
   /* The phone pages' top glow (.page-glow): warm orange + peach. */
-  --glow-a: 255, 190, 140;
+  --glow-a: 255, 161, 98;
   --glow-b: 255, 214, 190;
   --page-flat: #fcf8f5;
 }
@@ -1152,4 +1152,350 @@ html:not(.kb-open) .fixed.inset-0:not([data-nav-self]),
 html:not(.kb-open) .fixed.top-0.bottom-0:not([data-nav-self]) {
   border-bottom: var(--nav-room) solid transparent !important;
   --native-safe-area-inset-bottom: 0px;
+}
+
+/* Desktop edit popup (PhoneSheet editPopupOnDesktop): the page's own white
+   form card sits inside the liquid-glass popup, so it drops its own box;
+   room on the right for the popup's round close button. */
+.desktop-edit-popup > .bg-white { background: transparent; border-color: transparent; box-shadow: none; }
+.desktop-edit-popup > .bg-white > h3 { padding-right: 3rem; }
+
+
+/* ================================================================
+   Dark mode (Profile -> Settings -> Appearance -> Dark / Like this
+   device; src/lib/colorMode.ts sets <html data-dark>). Charcoal, not
+   black: page #25282c, cards #2f3237, hairlines #3a3e44, light grey text.
+   Works over any background theme: the neutral Tailwind scales are
+   turned round (slate/gray/zinc 50 = dark … 900 = light), coloured tints
+   (-50/-100/-200) become dim washes of their colour and dark coloured
+   text (-700/-800/-900) the lighter -300, so badges and chips keep their
+   meaning. The accent (buttons, the open menu item, icons) stays.
+   ================================================================ */
+html[data-dark] {
+  color-scheme: dark;
+  --g-bg: #25282c !important;
+  --g-bg-gradient: linear-gradient(180deg, #282b30 0%, #25282c 60%, #222529 100%) !important;
+  --g-surface: #2f3237 !important;
+  --g-surface-muted: #2c2f34 !important;
+  --g-border: #3a3e44 !important;
+  --g-text: #e4e6ea !important;
+  --g-text-muted: #8d939a !important;
+  --g-accent-soft: color-mix(in oklab, var(--g-accent) 18%, #2f3237) !important;
+  --color-slate-50: #2b2e33;
+  --color-slate-100: #31353a;
+  --color-slate-200: #3a3e44;
+  --color-slate-300: #4a4f56;
+  --color-slate-400: #6b7178;
+  --color-slate-500: #8d939a;
+  --color-slate-600: #a9aeb4;
+  --color-slate-700: #c6cad0;
+  --color-slate-800: #dcdfe3;
+  --color-slate-900: #e9ebee;
+  --color-slate-950: #f4f5f7;
+  --color-gray-50: #2b2e33;
+  --color-gray-100: #31353a;
+  --color-gray-200: #3a3e44;
+  --color-gray-300: #4a4f56;
+  --color-gray-400: #6b7178;
+  --color-gray-500: #8d939a;
+  --color-gray-600: #a9aeb4;
+  --color-gray-700: #c6cad0;
+  --color-gray-800: #dcdfe3;
+  --color-gray-900: #e9ebee;
+  --color-gray-950: #f4f5f7;
+  --color-zinc-50: #2b2e33;
+  --color-zinc-100: #31353a;
+  --color-zinc-200: #3a3e44;
+  --color-zinc-300: #4a4f56;
+  --color-zinc-400: #6b7178;
+  --color-zinc-500: #8d939a;
+  --color-zinc-600: #a9aeb4;
+  --color-zinc-700: #c6cad0;
+  --color-zinc-800: #dcdfe3;
+  --color-zinc-900: #e9ebee;
+  --color-zinc-950: #f4f5f7;
+  --color-neutral-50: #2b2e33;
+  --color-neutral-100: #31353a;
+  --color-neutral-200: #3a3e44;
+  --color-neutral-300: #4a4f56;
+  --color-neutral-400: #6b7178;
+  --color-neutral-500: #8d939a;
+  --color-neutral-600: #a9aeb4;
+  --color-neutral-700: #c6cad0;
+  --color-neutral-800: #dcdfe3;
+  --color-neutral-900: #e9ebee;
+  --color-neutral-950: #f4f5f7;
+  --color-stone-50: #2b2e33;
+  --color-stone-100: #31353a;
+  --color-stone-200: #3a3e44;
+  --color-stone-300: #4a4f56;
+  --color-stone-400: #6b7178;
+  --color-stone-500: #8d939a;
+  --color-stone-600: #a9aeb4;
+  --color-stone-700: #c6cad0;
+  --color-stone-800: #dcdfe3;
+  --color-stone-900: #e9ebee;
+  --color-stone-950: #f4f5f7;
+  --color-red-50: color-mix(in oklab, var(--color-red-500) 13%, #2f3237);
+  --color-red-100: color-mix(in oklab, var(--color-red-500) 20%, #2f3237);
+  --color-red-200: color-mix(in oklab, var(--color-red-500) 34%, #2f3237);
+  --color-rose-50: color-mix(in oklab, var(--color-rose-500) 13%, #2f3237);
+  --color-rose-100: color-mix(in oklab, var(--color-rose-500) 20%, #2f3237);
+  --color-rose-200: color-mix(in oklab, var(--color-rose-500) 34%, #2f3237);
+  --color-orange-50: color-mix(in oklab, var(--color-orange-500) 13%, #2f3237);
+  --color-orange-100: color-mix(in oklab, var(--color-orange-500) 20%, #2f3237);
+  --color-orange-200: color-mix(in oklab, var(--color-orange-500) 34%, #2f3237);
+  --color-amber-50: color-mix(in oklab, var(--color-amber-500) 13%, #2f3237);
+  --color-amber-100: color-mix(in oklab, var(--color-amber-500) 20%, #2f3237);
+  --color-amber-200: color-mix(in oklab, var(--color-amber-500) 34%, #2f3237);
+  --color-yellow-50: color-mix(in oklab, var(--color-yellow-500) 13%, #2f3237);
+  --color-yellow-100: color-mix(in oklab, var(--color-yellow-500) 20%, #2f3237);
+  --color-yellow-200: color-mix(in oklab, var(--color-yellow-500) 34%, #2f3237);
+  --color-lime-50: color-mix(in oklab, var(--color-lime-500) 13%, #2f3237);
+  --color-lime-100: color-mix(in oklab, var(--color-lime-500) 20%, #2f3237);
+  --color-lime-200: color-mix(in oklab, var(--color-lime-500) 34%, #2f3237);
+  --color-green-50: color-mix(in oklab, var(--color-green-500) 13%, #2f3237);
+  --color-green-100: color-mix(in oklab, var(--color-green-500) 20%, #2f3237);
+  --color-green-200: color-mix(in oklab, var(--color-green-500) 34%, #2f3237);
+  --color-emerald-50: color-mix(in oklab, var(--color-emerald-500) 13%, #2f3237);
+  --color-emerald-100: color-mix(in oklab, var(--color-emerald-500) 20%, #2f3237);
+  --color-emerald-200: color-mix(in oklab, var(--color-emerald-500) 34%, #2f3237);
+  --color-teal-50: color-mix(in oklab, var(--color-teal-500) 13%, #2f3237);
+  --color-teal-100: color-mix(in oklab, var(--color-teal-500) 20%, #2f3237);
+  --color-teal-200: color-mix(in oklab, var(--color-teal-500) 34%, #2f3237);
+  --color-cyan-50: color-mix(in oklab, var(--color-cyan-500) 13%, #2f3237);
+  --color-cyan-100: color-mix(in oklab, var(--color-cyan-500) 20%, #2f3237);
+  --color-cyan-200: color-mix(in oklab, var(--color-cyan-500) 34%, #2f3237);
+  --color-sky-50: color-mix(in oklab, var(--color-sky-500) 13%, #2f3237);
+  --color-sky-100: color-mix(in oklab, var(--color-sky-500) 20%, #2f3237);
+  --color-sky-200: color-mix(in oklab, var(--color-sky-500) 34%, #2f3237);
+  --color-blue-50: color-mix(in oklab, var(--color-blue-500) 13%, #2f3237);
+  --color-blue-100: color-mix(in oklab, var(--color-blue-500) 20%, #2f3237);
+  --color-blue-200: color-mix(in oklab, var(--color-blue-500) 34%, #2f3237);
+  --color-indigo-50: color-mix(in oklab, var(--color-indigo-500) 13%, #2f3237);
+  --color-indigo-100: color-mix(in oklab, var(--color-indigo-500) 20%, #2f3237);
+  --color-indigo-200: color-mix(in oklab, var(--color-indigo-500) 34%, #2f3237);
+  --color-violet-50: color-mix(in oklab, var(--color-violet-500) 13%, #2f3237);
+  --color-violet-100: color-mix(in oklab, var(--color-violet-500) 20%, #2f3237);
+  --color-violet-200: color-mix(in oklab, var(--color-violet-500) 34%, #2f3237);
+  --color-purple-50: color-mix(in oklab, var(--color-purple-500) 13%, #2f3237);
+  --color-purple-100: color-mix(in oklab, var(--color-purple-500) 20%, #2f3237);
+  --color-purple-200: color-mix(in oklab, var(--color-purple-500) 34%, #2f3237);
+  --color-fuchsia-50: color-mix(in oklab, var(--color-fuchsia-500) 13%, #2f3237);
+  --color-fuchsia-100: color-mix(in oklab, var(--color-fuchsia-500) 20%, #2f3237);
+  --color-fuchsia-200: color-mix(in oklab, var(--color-fuchsia-500) 34%, #2f3237);
+  --color-pink-50: color-mix(in oklab, var(--color-pink-500) 13%, #2f3237);
+  --color-pink-100: color-mix(in oklab, var(--color-pink-500) 20%, #2f3237);
+  --color-pink-200: color-mix(in oklab, var(--color-pink-500) 34%, #2f3237);
+}
+html[data-dark] body { background: var(--g-bg-gradient) fixed, var(--g-bg); color: var(--g-text); }
+html[data-dark] .bg-white, html[data-dark] [class*="bg-white/"]:not(.gsidebar *):not(button[class*="liquid"]) { background-color: #2f3237 !important; }
+html[data-dark] [class*="bg-white/9"], html[data-dark] [class*="bg-white/8"], html[data-dark] [class*="bg-white/7"] { background-color: rgba(47,50,55,.85) !important; }
+html[data-dark] [class*="bg-white/6"], html[data-dark] [class*="bg-white/5"], html[data-dark] [class*="bg-white/4"] { background-color: rgba(47,50,55,.6) !important; }
+html[data-dark] .text-black, html[data-dark] [class*="text-[#1e1b2e]"], html[data-dark] [class*="text-[#18181b]"] { color: #e4e6ea !important; }
+html[data-dark] [class*="border-white"] { border-color: rgba(255,255,255,.08) !important; }
+html[data-dark] input, html[data-dark] select, html[data-dark] textarea { background-color: #2c2f34; color: #e4e6ea; border-color: #3a3e44; }
+html[data-dark] input::placeholder, html[data-dark] textarea::placeholder { color: #6b7178; }
+html[data-dark] [class*="from-white"] { --tw-gradient-from: #2f3237 !important; }
+html[data-dark] [class*="via-white"] { --tw-gradient-via: #2f3237 !important; }
+html[data-dark] [class*="shadow"] { --tw-shadow-color: rgba(0,0,0,.5); }
+/* Liquid glass in dark */
+html[data-dark] .liquid-glass-backdrop { background: rgba(0,0,0,.5); }
+html[data-dark] .liquid-glass {
+  background: linear-gradient(160deg, rgba(52,55,61,.92) 0%, rgba(45,48,53,.9) 55%, rgba(48,51,57,.92) 100%);
+  border-color: rgba(255,255,255,.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 30px 70px -20px rgba(0,0,0,.7), 0 8px 24px -12px rgba(0,0,0,.5) !important;
+  color: #e4e6ea;
+}
+html[data-dark] .liquid-glass::before { background: radial-gradient(120% 60% at 15% -10%, rgba(255,255,255,.06), transparent 55%), radial-gradient(90% 50% at 110% 110%, rgba(var(--g-accent-rgb),.12), transparent 60%); }
+html[data-dark] .liquid-glass-inset { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.07); box-shadow: inset 0 1px 2px rgba(0,0,0,.3); }
+html[data-dark] .liquid-glass-chip { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.1); box-shadow: none; color: #c6cad0; }
+html[data-dark] .liquid-glass-button { border-color: rgba(255,255,255,.15); }
+
+/* page backgrounds painted with the light theme's own gradient / pastel colours */
+html[data-dark] [class*="from-[#f"], html[data-dark] [class*="from-orange-50"], html[data-dark] [class*="from-violet-50"] { --tw-gradient-from: #282b30 !important; }
+html[data-dark] [class*="to-[#f"], html[data-dark] [class*="to-orange-50"], html[data-dark] [class*="to-white"] { --tw-gradient-to: #25282c !important; }
+html[data-dark] main, html[data-dark] .min-h-screen { background-color: transparent; }
+html[data-dark] h1, html[data-dark] h2, html[data-dark] h3 { color: #e4e6ea; }
+html[data-dark] :is([class*="text-[#0"], [class*="text-[#1"], [class*="text-[#2"], [class*="text-[#3"], [class*="text-[#4"]) { color: #e4e6ea !important; }
+html[data-dark] :is([class*="text-[#5"], [class*="text-[#6"]) { color: #a3a8ae !important; }
+
+html[data-dark] .glass-mask-fix, html[data-dark] [class*="bg-[radial-gradient"], html[data-dark] [class*="bg-[linear-gradient"]:not(button) { background: linear-gradient(160deg, #2c2f34, #2f3237) !important; }
+html[data-dark] [class*="bg-gradient-to"][class*="from-white"], html[data-dark] [class*="bg-gradient-to"][class*="from-slate-50"] { background: #2f3237 !important; }
+/* the soft colour glow behind phone pages: a faint accent glow on dark */
+html[data-dark] .page-glow { background: radial-gradient(120% 70% at 10% 0%, rgba(var(--g-accent-rgb),.16) 0%, transparent 60%), radial-gradient(90% 60% at 100% 10%, rgba(var(--g-accent-rgb),.08) 0%, transparent 60%) !important; }
+/* dimming layers stay dark */
+html[data-dark] [class*="bg-slate-900/"], html[data-dark] [class*="bg-black/"] { background-color: rgba(0,0,0,.55) !important; }
+html[data-dark] { background: #25282c !important; }
+html[data-dark] body { background: #25282c !important; }
+html[data-dark] body * { --page-flat: #25282c; }
+html[data-dark] body::before { background: #25282c !important; }
+/* phone page header: round white chips, title */
+html[data-dark] .hdr-blend .hdr-round, html[data-dark] .hdr-blend .hdr-chip > button { background: rgba(255,255,255,.08) !important; color: #e4e6ea !important; border-color: rgba(255,255,255,.1) !important; }
+html[data-dark] .hdr-blend, html[data-dark] .hdr-blend * { color: #e4e6ea; }
+html[data-dark] .hdr-blend.hdr-blend-scrolled { background: rgba(37,40,44,.85) !important; }
+html[data-dark] [style*="color: rgb(24, 24, 27)"], html[data-dark] [style*="color: rgb(30, 27, 46)"], html[data-dark] [style*="color: rgb(15, 23, 42)"] { color: #e4e6ea !important; }
+html[data-dark] .liquid-glass [class*="bg-white"], html[data-dark] .liquid-glass [class*="bg-slate-50"] { background-color: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.07) !important; }
+
+/* Sidebar, header and the phone bars: charcoal too; the open page marked with an accent line. */
+html[data-dark] { --g-sidebar-bg: #2b2e33 !important; --g-header-gradient: #2b2e33 !important; }
+html[data-dark] .gsidebar { background: #2b2e33 !important; border-right: 1px solid #353940 !important; box-shadow: none !important; }
+html[data-dark] .gsidebar [class*="text-white"] { color: #a3a8ae !important; }
+html[data-dark] .gsidebar [class*="text-white/4"], html[data-dark] .gsidebar [class*="text-white/5"] { color: #6b7178 !important; }
+html[data-dark] .gsidebar [class*="hover:text-white"]:hover { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] { background-color: #353940 !important; color: #e4e6ea !important; box-shadow: inset 3px 0 0 var(--g-accent) !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] svg { color: var(--g-accent) !important; }
+html[data-dark] .gsidebar [class*="bg-white/15"] [class*="text-white"] { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="bg-white/10"]:not(input), html[data-dark] .gsidebar [class*="bg-white/5"]:not(input) { background-color: transparent !important; }
+html[data-dark] .gsidebar input[class*="bg-white/10"], html[data-dark] .gsidebar [class*="bg-black/15"] { background-color: #22252a !important; }
+html[data-dark] .gsidebar [class*="hover:bg-white/10"]:hover, html[data-dark] .gsidebar [class*="hover:bg-white/5"]:hover { background-color: #31353a !important; }
+html[data-dark] .gsidebar input { color: #e4e6ea !important; }
+html[data-dark] .gsidebar [class*="border-white"] { border-color: #353940 !important; }
+html[data-dark] .gsidebar button.bg-white { background-color: #22252a !important; color: #c6cad0 !important; border: 1px solid #3a3e44 !important; }
+/* favourite tiles: flat wells */
+
+/* top header bar */
+html[data-dark] header.sticky { background: #2b2e33 !important; border-bottom-color: #353940 !important; }
+/* phone: Home banner and bottom bar */
+html[data-dark] path[fill="url(#welcomeBannerGradient)"] { fill: #2b2e33 !important; }
+html[data-dark] nav path[fill="var(--g-accent)"] { fill: #2b2e33 !important; }
+html[data-dark] nav [style*="background: var(--g-accent)"] { background: #2b2e33 !important; }
+html[data-dark] nav.fixed.bottom-0 svg[class*="drop-shadow"] { filter: drop-shadow(0 -6px 18px rgba(0,0,0,.45)) !important; }
+html[data-dark] nav.fixed.bottom-0 [class*="text-white"] { color: #8d939a !important; }
+/* muted accent: icons in accent, cards flat charcoal, hairline borders */
+html[data-dark] .shadow-sm, html[data-dark] [class*="shadow-["] { box-shadow: 0 1px 2px rgba(0,0,0,.25) !important; }
+html[data-dark] [class*="border-[#"] { border-color: #3a3e44 !important; }
+
+html[data-dark] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: #2b2e33 !important; border-bottom: 1px solid #353940; }
+html[data-dark] .gsidebar a[class*="rounded-xl"], html[data-dark] .gsidebar button[class*="rounded-xl"]:not(.bg-white) { background-color: transparent; }
+html[data-dark] .gsidebar [aria-current="page"], html[data-dark] .gsidebar [data-active="true"] { background-color: #353940 !important; }
+/* Variant / arbitrary whites the plain .bg-white rule above doesn't reach. */
+html[data-dark] [class*="odd:bg-white"]:nth-child(odd),
+html[data-dark] [class*="even:bg-white"]:nth-child(even),
+html[data-dark] [class*="hover:bg-white"]:hover,
+html[data-dark] [class*="focus:bg-white"]:focus { background-color: #2f3237 !important; }
+html[data-dark] :is([class*="bg-[#f"], [class*="bg-[#e"]):not([class*="bg-[#f6c"]):not([class*="bg-[#e8"]):not([class*="bg-[#e2"]):not([class*="bg-[#ef4"]) { background-color: #2c2f34 !important; }
+html[data-dark] [class*="bg-[#f6c58f]"] { background-color: #8a5a2b !important; }
+/* Inline whites (style={{ background: 'rgba(255,255,255,.45)' }} chips and wells) and dark inline text. */
+html[data-dark] [style*="background: rgba(255, 255, 255"], html[data-dark] [style*="background-color: rgba(255, 255, 255"],
+html[data-dark] [style*="background: rgb(255, 255, 255)"], html[data-dark] [style*="background-color: rgb(255, 255, 255)"] { background: rgba(255, 255, 255, 0.05) !important; }
+html[data-dark] [style*="border-color: rgba(255, 255, 255"] { border-color: rgba(255, 255, 255, 0.08) !important; }
+html[data-dark] :is([style*="color: rgb(63, 63, 70)"], [style*="color: rgb(39, 39, 42)"], [style*="color: rgb(51, 65, 85)"], [style*="color: rgb(30, 41, 59)"]) { color: #dcdfe3 !important; }
+/* --- Dark mode: fixes from the page-by-page check --- */
+/* Dark buttons / pills (bg-slate-800/900, zinc, gray, black) would turn light with the
+   neutral scale: they stay a dark raised grey with white text. */
+html[data-dark] :is(.bg-slate-700, .bg-slate-800, .bg-slate-900, .bg-zinc-800, .bg-zinc-900, .bg-gray-800, .bg-gray-900, .bg-neutral-900, .bg-black):not(.gsidebar *) { background-color: #4a4f56 !important; color: #ffffff !important; }
+html[data-dark] :is([class*="hover:bg-slate-900"], [class*="hover:bg-slate-800"], [class*="hover:bg-zinc-900"], [class*="hover:bg-gray-900"]):hover { background-color: #565c64 !important; }
+/* Faint text (text-slate-200/300 …) used for "not here / off": still faint, but readable. */
+html[data-dark] :is(.text-slate-200, .text-slate-300, .text-gray-200, .text-gray-300, .text-zinc-200, .text-zinc-300, .text-neutral-300) { color: #7a8088 !important; }
+/* sm: / md: / lg: whites (cards that are flat on a phone and white from a tablet up). */
+@media (min-width: 640px) { html[data-dark] [class*="sm:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 768px) { html[data-dark] [class*="md:bg-white"] { background-color: #2f3237 !important; } }
+@media (min-width: 1024px) { html[data-dark] [class*="lg:bg-white"] { background-color: #2f3237 !important; } }
+html[data-dark] [class*="bg-gradient-to"][class*="from-violet-100"], html[data-dark] [class*="bg-gradient-to"][class*="via-white"] { background: linear-gradient(160deg, #31353a, #2c2f34) !important; }
+/* Inline pastel badges (the Superadmin / Admin avatar and role badge in the header…). */
+html[data-dark] [style*="background: rgb(253, 232, 232)"] { background: rgba(239, 68, 68, 0.18) !important; color: #fca5a5 !important; }
+html[data-dark] [style*="background: rgb(254, 247, 224)"] { background: rgba(245, 158, 11, 0.18) !important; color: #fcd34d !important; }
+/* Inline dark colour text (trend lines, status words): their light counterparts. */
+html[data-dark] [style*="color: rgb(185, 28, 28)"], html[data-dark] [style*="color: rgb(155, 28, 28)"], html[data-dark] [style*="color: rgb(190, 18, 60)"], html[data-dark] [style*="color: rgb(220, 38, 38)"] { color: #f87171 !important; }
+html[data-dark] [style*="color: rgb(4, 120, 87)"], html[data-dark] [style*="color: rgb(21, 128, 61)"], html[data-dark] [style*="color: rgb(5, 150, 105)"] { color: #34d399 !important; }
+html[data-dark] [style*="color: rgb(180, 83, 9)"], html[data-dark] [style*="color: rgb(152, 100, 0)"] { color: #fbbf24 !important; }
+html[data-dark] [style*="color: rgb(29, 78, 216)"], html[data-dark] [style*="color: rgb(37, 99, 235)"] { color: #93c5fd !important; }
+html[data-dark] :is([style*="color: rgb(91, 85, 112)"], [style*="color: rgb(107, 101, 133)"], [style*="color: rgb(100, 116, 139)"], [style*="color: rgb(71, 85, 105)"], [style*="color: rgb(95, 99, 104)"]) { color: #a3a8ae !important; }
+/* Phone Admin Panel tab pills (html[data-admin-phone]). */
+html[data-dark][data-admin-phone] main :is(.flex.gap-1.border-b, .flex.border-b.overflow-x-auto, [role="tablist"].border-b) > button:not([class*="border-blue-600"]):not([class*="text-blue-600"]):not([aria-selected="true"]) { background: #2f3237 !important; color: #c6cad0 !important; box-shadow: none !important; }
+
+/* Dark coloured text (-700/-800/-900) reads as its light -300 on charcoal. Text only:
+   a bg-violet-700 button keeps its colour. */
+html[data-dark] :is(.text-red-700, .text-red-800, .text-red-900, .hover\:text-red-700:hover, .hover\:text-red-800:hover) { color: var(--color-red-300) !important; }
+html[data-dark] :is(.text-rose-700, .text-rose-800, .text-rose-900, .hover\:text-rose-700:hover, .hover\:text-rose-800:hover) { color: var(--color-rose-300) !important; }
+html[data-dark] :is(.text-orange-700, .text-orange-800, .text-orange-900, .hover\:text-orange-700:hover, .hover\:text-orange-800:hover) { color: var(--color-orange-300) !important; }
+html[data-dark] :is(.text-amber-700, .text-amber-800, .text-amber-900, .hover\:text-amber-700:hover, .hover\:text-amber-800:hover) { color: var(--color-amber-300) !important; }
+html[data-dark] :is(.text-yellow-700, .text-yellow-800, .text-yellow-900, .hover\:text-yellow-700:hover, .hover\:text-yellow-800:hover) { color: var(--color-yellow-300) !important; }
+html[data-dark] :is(.text-lime-700, .text-lime-800, .text-lime-900, .hover\:text-lime-700:hover, .hover\:text-lime-800:hover) { color: var(--color-lime-300) !important; }
+html[data-dark] :is(.text-green-700, .text-green-800, .text-green-900, .hover\:text-green-700:hover, .hover\:text-green-800:hover) { color: var(--color-green-300) !important; }
+html[data-dark] :is(.text-emerald-700, .text-emerald-800, .text-emerald-900, .hover\:text-emerald-700:hover, .hover\:text-emerald-800:hover) { color: var(--color-emerald-300) !important; }
+html[data-dark] :is(.text-teal-700, .text-teal-800, .text-teal-900, .hover\:text-teal-700:hover, .hover\:text-teal-800:hover) { color: var(--color-teal-300) !important; }
+html[data-dark] :is(.text-cyan-700, .text-cyan-800, .text-cyan-900, .hover\:text-cyan-700:hover, .hover\:text-cyan-800:hover) { color: var(--color-cyan-300) !important; }
+html[data-dark] :is(.text-sky-700, .text-sky-800, .text-sky-900, .hover\:text-sky-700:hover, .hover\:text-sky-800:hover) { color: var(--color-sky-300) !important; }
+html[data-dark] :is(.text-blue-700, .text-blue-800, .text-blue-900, .hover\:text-blue-700:hover, .hover\:text-blue-800:hover) { color: var(--color-blue-300) !important; }
+html[data-dark] :is(.text-indigo-700, .text-indigo-800, .text-indigo-900, .hover\:text-indigo-700:hover, .hover\:text-indigo-800:hover) { color: var(--color-indigo-300) !important; }
+html[data-dark] :is(.text-violet-700, .text-violet-800, .text-violet-900, .hover\:text-violet-700:hover, .hover\:text-violet-800:hover) { color: var(--color-violet-300) !important; }
+html[data-dark] :is(.text-purple-700, .text-purple-800, .text-purple-900, .hover\:text-purple-700:hover, .hover\:text-purple-800:hover) { color: var(--color-purple-300) !important; }
+html[data-dark] :is(.text-fuchsia-700, .text-fuchsia-800, .text-fuchsia-900, .hover\:text-fuchsia-700:hover, .hover\:text-fuchsia-800:hover) { color: var(--color-fuchsia-300) !important; }
+html[data-dark] :is(.text-pink-700, .text-pink-800, .text-pink-900, .hover\:text-pink-700:hover, .hover\:text-pink-800:hover) { color: var(--color-pink-300) !important; }
+
+/* ================================================================
+   Dark Glass (Appearance -> Mode -> Dark Glass; colorMode.ts sets
+   <html data-dark data-glass>). Everything from Dark mode above, plus: a
+   near-black page with soft accent / indigo / teal glows (body::before),
+   and the cards, sidebar, header, phone banner, bottom bar and liquid-glass
+   popups turned into frosted, see-through glass over those glows.
+   ================================================================ */
+html[data-dark][data-glass] { background: #101216 !important; }
+html[data-dark][data-glass] body { background: transparent !important; }
+html[data-dark][data-glass] body * { --page-flat: transparent; }
+html[data-dark][data-glass] body::before {
+  background:
+    radial-gradient(60% 45% at 8% 6%, rgba(var(--g-accent-rgb), .55), transparent 70%),
+    radial-gradient(50% 45% at 95% 30%, rgba(99, 102, 241, .38), transparent 70%),
+    radial-gradient(55% 50% at 40% 100%, rgba(var(--g-accent-rgb), .30), transparent 70%),
+    radial-gradient(45% 40% at 75% 85%, rgba(20, 184, 166, .22), transparent 70%),
+    #101216 !important;
+}
+html[data-dark][data-glass] .page-glow { background: transparent !important; }
+html[data-dark][data-glass] :is(.bg-white, [class*="bg-white/"]):not(.gsidebar *):not(button):not(.bg-white .bg-white):not(nav *) {
+  background: linear-gradient(160deg, rgba(255,255,255,.10), rgba(255,255,255,.04)) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  border-color: rgba(255,255,255,.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.04), 0 18px 40px -18px rgba(0,0,0,.7) !important;
+}
+html[data-dark][data-glass] .bg-white .bg-white, html[data-dark][data-glass] .bg-white [class*="bg-white/"] { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.10) !important; }
+html[data-dark][data-glass] .gsidebar {
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03)) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(170%); backdrop-filter: blur(30px) saturate(170%);
+  border-right: 1px solid rgba(255,255,255,.12) !important;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,.05) !important;
+}
+html[data-dark][data-glass] .gsidebar [class*="bg-white/15"] { background-color: rgba(255,255,255,.12) !important; }
+html[data-dark][data-glass] header.sticky {
+  background: rgba(20,22,26,.45) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  border-bottom-color: rgba(255,255,255,.10) !important;
+}
+html[data-dark][data-glass] nav path[fill="var(--g-accent)"] { fill: rgba(26,28,33,.9) !important; stroke: rgba(255,255,255,.12); stroke-width: 1; }
+html[data-dark][data-glass] nav.fixed.bottom-0 > div:has(svg) { -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.07) !important; }
+html[data-dark][data-glass] .liquid-glass {
+  background: linear-gradient(160deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.06) 55%, rgba(255,255,255,.09) 100%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  border-color: rgba(255,255,255,.18) !important;
+}
+html[data-dark][data-glass] .liquid-glass-backdrop { background: rgba(0,0,0,.35); }
+html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"],
+html[data-dark][data-glass] svg:has(path[fill="url(#welcomeBannerGradient)"]) { background: transparent !important; }
+html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.06) !important; stroke: rgba(255,255,255,.12); }
+html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: rgba(255,255,255,.06) !important; backdrop-filter: blur(24px); border-bottom: 1px solid rgba(255,255,255,.12); }
+/* Cards floating over a map (Employee Tracking's "Right now" and the map's
+   chips — the z-[1000] overlays): the light map would show through clear
+   glass and wash out the light text, so they are near-solid dark glass. */
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"]:is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
+html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
+  background: rgba(28, 30, 35, 0.9) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+/* The sidebar's "Search menu…" box: a dark well, not the open-item highlight
+   (its focus:bg-white/15 class matched that rule) tinted by the glow. */
+html[data-dark][data-glass] .gsidebar input[type="text"] { background-color: rgba(10, 12, 16, 0.45) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important; color: #e4e6ea !important; }
+html[data-dark][data-glass] .gsidebar input[type="text"]::placeholder { color: #8d939a; }
+
+/* Sign-in page in Dark / Dark Glass: no pale haze over the dark page — a
+   soft accent glow instead; the office animation stays on a clear
+   (transparent) background. */
+html[data-dark][data-dark] .auth-glow {
+  background:
+    radial-gradient(ellipse 760px 520px at 30% 50%, rgba(var(--g-accent-rgb), 0.22) 0%, rgba(var(--g-accent-rgb), 0.06) 45%, transparent 72%),
+    radial-gradient(ellipse 620px 480px at 78% 55%, rgba(99, 102, 241, 0.14) 0%, transparent 70%) !important;
 }
