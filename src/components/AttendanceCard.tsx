@@ -139,6 +139,41 @@ interface DayStatus {
 }
 
 // "at Project X" / "Office device · Head Office" under a time.
+// Web Dashboard: a faint clock face in the card's bottom-right corner,
+// fading out to the left so the text stays clear. Its hands show the time
+// now (moved once a minute). Colours from .att-clock in index.css (light and
+// dark). Decorative only; hidden on phones, whose card has its own glass look.
+const AttendanceClockBg: React.FC = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(t);
+  }, []);
+  const min = now.getMinutes();
+  const hourDeg = ((now.getHours() % 12) + min / 60) * 30;
+  const minDeg = min * 6;
+  return (
+    <svg
+      className="att-clock hidden md:block absolute inset-0 w-full h-full pointer-events-none -z-10"
+      viewBox="0 0 342 231"
+      preserveAspectRatio="xMaxYMax slice"
+      aria-hidden="true"
+      style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent 25%, #000 75%)', maskImage: 'linear-gradient(90deg, transparent 25%, #000 75%)' }}
+    >
+      <g transform="translate(300,205) scale(.8)">
+        <circle r="112" fill="var(--ac-face)" stroke="var(--ac-rim)" strokeWidth="2" />
+        {Array.from({ length: 60 }, (_, i) => (
+          <line key={i} x1="0" y1={i % 5 ? -96 : -90} x2="0" y2="-104" stroke="var(--ac-tick)" strokeWidth={i % 5 ? 1.5 : 3} transform={`rotate(${i * 6})`} />
+        ))}
+        <path d="M0 -104 A104 104 0 0 1 90 -52" stroke="var(--ac-accent)" strokeWidth="5" fill="none" strokeLinecap="round" opacity=".55" />
+        <path d="M0 0 L0 -62" stroke="var(--ac-tick)" strokeWidth="6" strokeLinecap="round" transform={`rotate(${hourDeg})`} />
+        <path d="M0 0 L0 -86" stroke="var(--ac-accent)" strokeWidth="3.5" strokeLinecap="round" transform={`rotate(${minDeg})`} />
+        <circle r="7" fill="var(--ac-accent)" />
+      </g>
+    </svg>
+  );
+};
+
 const placeLine = (source: string | null | undefined, place: string | null | undefined) => {
   const text =
     source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : source === 'offsite' ? `Off-site · ${place || 'outside the project area'}` : place ? `at ${place}` : '';
@@ -398,6 +433,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
       className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
     >
+      <AttendanceClockBg />
       {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
           — that opacity alone reads as a distinct panel even where a
           WebView skips the blur — with a light 8px blur on top. */}
