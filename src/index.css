@@ -1562,3 +1562,14 @@ html[data-dark][data-glass] .leave-card .leave-glow {
 }
 html[data-dark][data-glass] .leave-card .leave-head { background: transparent !important; }
 html[data-dark][data-glass] .leave-card .leave-num { color: #fdba74 !important; }
+
+/* A full-screen map (EmployeeTrackingPanel.tsx .map-fullscreen) is
+   position: fixed; a blur / transform on any box around it (Dark Glass gives
+   cards a backdrop blur) would trap it inside that box instead of covering
+   the screen. While it is open, the boxes around it drop those effects.
+   (Repeated attribute / class only to outrank the Dark Glass card rule.) */
+html[data-dark][data-glass][data-glass] :has(.map-fullscreen.map-fullscreen.map-fullscreen.map-fullscreen),
+html :has(> .map-fullscreen), html :has(.map-fullscreen) {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  filter: none !important; transform: none !important;
+}

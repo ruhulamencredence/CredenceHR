@@ -870,7 +870,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
         <div
           className={
             mapFull
-              ? 'fixed inset-0 z-[1040] bg-white isolate'
+              ? 'map-fullscreen fixed inset-0 z-[1040] bg-white isolate'
               : 'relative isolate rounded-2xl overflow-hidden border border-slate-200 h-[420px] sm:h-[480px] lg:h-[max(560px,calc(100vh-260px))]'
           }
         >
