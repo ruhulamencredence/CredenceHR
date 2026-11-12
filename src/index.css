@@ -1524,3 +1524,7 @@ html[data-dark] .trk-map { --trk-on: #10b981; --trk-on-hi: #6ee7b7; --trk-off: #
 .trk-pulse { transform-box: fill-box; transform-origin: center; animation: trk-pulse 2.6s ease-out infinite; }
 @keyframes trk-pulse { from { transform: scale(1); opacity: .75; } to { transform: scale(2.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .trk-pulse { animation: none; opacity: 0; } }
+
+/* My Asset card's shelf of office things (MyAssetCard.tsx). */
+.ast-shelf { --as-fill: #f8fafc; --as-line: #cbd5e1; }
+html[data-dark] .ast-shelf { --as-fill: rgba(255,255,255,.03); --as-line: rgba(255,255,255,.22); }
