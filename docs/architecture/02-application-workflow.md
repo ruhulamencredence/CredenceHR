@@ -557,6 +557,16 @@ HR Operations → Dashboard-এর "Coming up — next 60 days" (probation ও �
 - **Resignations & exits:** `exit_requests` (cancelled বাদ) — Period-এ জমা পড়া, এখন notice-এ (Settled নয় আর last working day পার হয়নি), ৩০ দিনের মধ্যে চলে যাবেন, Settled; প্রতিজনের last working day কত দিন বাকি, clearance কতটা হয়েছে (`exit_clearance_items`)। পাশে এ বছরের কারণ (Better offer / Higher study / Family / personal / Other — কারণের লেখা থেকে), Department অনুযায়ী সংখ্যা, আর turnover (এ বছর যাঁদের last working day পার হয়েছে ÷ এ বছর কর্মরত সবাই)। Type: Resignation / Termination। **কোনো টাকার অঙ্ক নেই** — settlement Exit / Offboarding আর Payroll-এই থাকে।
 - **Religion:** সক্রিয় কর্মী ধর্ম অনুযায়ী (সংখ্যা, %), "Not recorded" আলাদা লাল; একটা ধর্ম চাপলে তাঁদের তালিকা (উৎসব বোনাস / ছুটির জন্য), "Not recorded" চাপলে যাঁদের তথ্য বাকি। একই ধর্মের ভিন্ন বানান (Muslim / Islam, Hindu / Hinduism…) এক নামে গোনা হয়।
 
+**Quick reports-এ আরও ৫টা কার্ড** (মোট ১০টা; একই পাতা, একই অনুমতি — HR Operations + "Quick reports" layer; হিসাব Employee Reports-এর একই `buildFacts` থেকে, তাই সংখ্যা মেলে; **কোনো টাকার অঙ্ক নেই**):
+- **Attendance watch:** Period-এর মাসে হাজিরা ৮০%-এর নিচে, বা মাসে ৩ বারের বেশি দেরি — উপস্থিত / কাজের দিন, অনুপস্থিত, ছুটি, দেরি (extreme সহ), %।
+- **Leave watch:** Period-এর বছরে Casual বা Sick বাকি ২ দিন বা কম, বা Leave Without Pay নিয়েছেন।
+- **Contracts ending:** contract ৬০ দিনের মধ্যে শেষ, বা শেষ হয়ে গেছে (গত ৬ মাসে)।
+- **Headcount mix:** সক্রিয় কর্মী Gender / Branch / Project / Employment category অনুযায়ী (সংখ্যা, %, bar); bar চাপলে তাঁদের তালিকা; "male / Male" এক ধরা হয়।
+- **Records to fix:** মেয়াদ শেষ document, e-signature বাকি, app login নেই।
+Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (`AdminDashboardHrReports.tsx`, `hrQuickShared.ts`)।
+
+**Build your own → Ready Reports-এ আরও ২৫টা** (এক ক্লিকে, Report Builder-এর preset — `src/components/HrOpsReports.tsx` PRESETS; নতুন data লাগে না): পুরুষ / নারী; এ মাসে ও এ বছরে নতুন যোগদান; Contract শেষ হচ্ছে (৬০ দিন); গত ৯০ দিনে confirm; Branch / Project / Employment category / Job status অনুযায়ী লোকবল; Supervisor অনুযায়ী team; App login নেই; Exit চলছে; কম হাজিরা (৮০%-এর নিচে); ঘনঘন দেরি (মাসে ৩-এর বেশি); ছুটি প্রায় শেষ (Casual / Sick ২ দিন বা কম); Leave Without Pay; ১২ মাসে increment নেই, এ বছরের bonus, Grade অনুযায়ী বেতন (এই তিনটা বেতনের — payroll অনুমতি ছাড়া বেতনের ঘর আগের মতোই লুকানো); শৃঙ্খলাভঙ্গের রেকর্ড; Performance rating; কোনো training নেই; মেয়াদ শেষ document; সই বাকি document; claim অপেক্ষায়।
+
 **Admin Dashboard → "HR reports" কার্ড:** একই ৫টা সংখ্যা (probation ≤ ৩০ দিন ও overdue, এ মাসের joiner ও transfer, notice-এ থাকা resignation, ধর্ম অনুযায়ী সংখ্যা)। কার্ড চাপলে HR Operations → Reports → Quick reports-এ সেই রিপোর্টটা খোলে। শুধু যাঁদের HR Operations আর তার নতুন layer **"Quick reports"** আছে তাঁরাই দেখেন — layer-টা শুধু দেখার, তাই যাঁদের HR Operations-এ কোনো layer টিক করা নেই তাঁরা default-এ পান, আর যাঁদের আগে থেকে "HR Operations" (read) টিক ছিল তাঁরা একবার (startup marker `hr_quick_reports_grant`) পেয়েছেন; Module Access-এ untick করলে বন্ধ থাকে।
 
 ## Profile → My Service Book

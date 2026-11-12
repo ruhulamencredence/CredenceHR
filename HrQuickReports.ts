@@ -15,6 +15,13 @@
 //   resignations  exit_requests: submitted in the period, in notice now,
 //                 leaving within 30 days, settled; last working day,
 //                 clearance progress, reasons, turnover. No money.
+//   attendance    the period's month: attendance under 80%, late more than 3 times
+//   leave         the period's year: Casual / Sick left 2 days or less, leave without pay
+//   contracts     contracts ending within 60 days, or already ended
+//   headcount     active employees by gender, branch, project, employment category
+//   records       expired documents, awaiting e-signature, no app login
+// The last five read the same per-employee facts as Employee Reports
+// (buildFacts, HrOpsReportsRoutes.ts), so the numbers match it.
 //
 // Probation dates are worked out exactly as Employee Reports does
 // (HrOpsReportsRoutes.ts): Service Details' probation end, else joining date +
@@ -27,6 +34,7 @@
 import type { Express } from "express";
 import { loadEmployeeWorld, loadSettings, snapshotOf, toDate } from "./HROperationsRoutes";
 import { fallbackServiceStatus } from "./hrServiceStatus";
+import { buildFacts } from "./HrOpsReportsRoutes";
 import { getStartupMarker, setStartupMarker } from "./startupOnce";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -324,20 +332,146 @@ export function registerHrQuickReportsRoutes(app: Express, deps: HrQuickDeps) {
     };
   }
 
-  const REPORTS: Record<string, (q: any, today: string) => Promise<any>> = { probation, joiners, transfers, religion: (q) => religion(q), resignations };
+  // ---- the facts-based five (Employee Reports' facts) ----
+  const facts = async (stages: string[], month: string, year: number, today: string) => (await buildFacts(queryDB, today, new Set(["base", ...stages]) as any, month, year, false)) as any[];
+  const person = (f: any) => ({ id: f.employee_id, employee_id: f.employee_id, name: f.name, employee_code: f.employee_code, designation: f.designation, department: f.department });
 
-  // The five numbers for the cards (HR Operations and the Admin Dashboard).
+  async function attendance(q: any, today: string) {
+    const { from, to } = period(q, today);
+    const month = to.slice(0, 7);
+    const list = (await facts(["attendance"], month, Number(month.slice(0, 4)), today)).filter(inDept(q)).filter((f) => Number(f.att_working) > 0);
+    const rows = list
+      .map((f) => ({
+        ...person(f),
+        working: Number(f.att_working) || 0,
+        present: Number(f.att_present) || 0,
+        absent: Number(f.att_absent) || 0,
+        leave: Number(f.att_leave) || 0,
+        late: Number(f.att_late) || 0,
+        extreme_late: Number(f.att_extreme_late) || 0,
+        percent: f.att_percent == null ? null : Number(f.att_percent),
+        low: f.att_percent != null && Number(f.att_percent) < 80,
+        often_late: Number(f.att_late) > 3
+      }))
+      .filter((r) => r.low || r.often_late)
+      .sort((a, b) => (a.percent ?? 100) - (b.percent ?? 100) || b.late - a.late);
+    return { from, to, month, summary: { low: rows.filter((r) => r.low).length, often_late: rows.filter((r) => r.often_late).length, checked: list.length }, rows };
+  }
+
+  async function leave(q: any, today: string) {
+    const { to } = period(q, today);
+    const year = Number(to.slice(0, 4));
+    const list = (await facts(["leave"], to.slice(0, 7), year, today)).filter(inDept(q));
+    const rows = list
+      .map((f) => ({
+        ...person(f),
+        casual_taken: Number(f.casual_taken) || 0,
+        casual_balance: f.casual_balance == null ? null : Number(f.casual_balance),
+        sick_taken: Number(f.sick_taken) || 0,
+        sick_balance: f.sick_balance == null ? null : Number(f.sick_balance),
+        lwp: Number(f.lwp_taken) || 0,
+        last_leave: f.last_leave_date || null,
+        low: (f.casual_balance != null && Number(f.casual_balance) <= 2) || (f.sick_balance != null && Number(f.sick_balance) <= 2),
+        took_lwp: Number(f.lwp_taken) > 0
+      }))
+      .filter((r) => r.low || r.took_lwp)
+      .sort((a, b) => b.lwp - a.lwp || (a.casual_balance ?? 99) - (b.casual_balance ?? 99));
+    return { from: `${year}-01-01`, to: `${year}-12-31`, year, summary: { low: rows.filter((r) => r.low).length, lwp: rows.filter((r) => r.took_lwp).length }, rows };
+  }
+
+  async function contracts(q: any, today: string) {
+    const soon = addDays(today, 60);
+    const list = (await facts([], today.slice(0, 7), Number(today.slice(0, 4)), today)).filter(inDept(q));
+    const rows = list
+      .filter((f) => f.contract_end_date && f.contract_end_date <= soon && f.contract_end_date >= addDays(today, -183))
+      .map((f) => {
+        const days = daysBetween(today, f.contract_end_date);
+        return { ...person(f), joining_date: f.joining_date, contract_end_date: f.contract_end_date, employment_category: f.employment_category, days, state: days < 0 ? "ended" : "due" };
+      })
+      .sort((a, b) => a.days - b.days);
+    return { summary: { due_60: rows.filter((r) => r.state === "due").length, ended: rows.filter((r) => r.state === "ended").length }, rows };
+  }
+
+  async function headcount(q: any, today: string) {
+    const list = (await facts([], today.slice(0, 7), Number(today.slice(0, 4)), today)).filter(inDept(q));
+    const total = list.length;
+    const pct = (n: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
+    // "male" / "Male" / " MALE" count as one.
+    const tidy = (v: any) => {
+      const t = v == null ? "" : String(v).trim();
+      return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : null;
+    };
+    const dim = (key: string, none: string) => countBy(list.map((f) => (key === "gender" ? tidy(f[key]) : f[key] == null ? null : String(f[key]))), none).map((g) => ({ ...g, percent: pct(g.count) }));
+    const gender = dim("gender", "Not recorded");
+    const male = gender.find((g) => /^m/i.test(g.label))?.count || 0;
+    const female = gender.find((g) => /^f/i.test(g.label))?.count || 0;
+    return {
+      summary: { total, male, female },
+      dimensions: { gender, branch: dim("branch", "No branch"), project: dim("project", "No project"), category: dim("employment_category", "Not recorded") },
+      rows: list
+        .map((f) => ({ ...person(f), gender: tidy(f.gender), branch: f.branch || null, project: f.project || null, category: f.employment_category || null, age: f.age ?? null }))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    };
+  }
+
+  async function records(q: any, today: string) {
+    const list = (await facts(["documents"], today.slice(0, 7), Number(today.slice(0, 4)), today)).filter(inDept(q));
+    const rows = list
+      .map((f) => ({
+        ...person(f),
+        expired: Array.isArray(f.expired_documents) ? f.expired_documents : [],
+        unsigned: Number(f.unsigned_documents) || 0,
+        no_login: !f.has_login
+      }))
+      .filter((r) => r.expired.length || r.unsigned || r.no_login)
+      .sort((a, b) => b.expired.length - a.expired.length || b.unsigned - a.unsigned);
+    return {
+      summary: { expired: rows.filter((r) => r.expired.length).length, unsigned: rows.filter((r) => r.unsigned).length, no_login: rows.filter((r) => r.no_login).length },
+      rows
+    };
+  }
+
+  const REPORTS: Record<string, (q: any, today: string) => Promise<any>> = {
+    probation,
+    joiners,
+    transfers,
+    religion: (q) => religion(q),
+    resignations,
+    attendance,
+    leave,
+    contracts,
+    headcount,
+    records
+  };
+
+  // The cards' numbers (HR Operations and the Admin Dashboard).
   app.get("/api/hr-ops/quick/summary", ...gate, async (req: any, res: any) => {
     try {
       const today = todayInDhaka();
-      const [p, j, t, r, x] = await Promise.all([probation({}, today), joiners({}, today), transfers({}, today), religion({}), resignations({}, today)]);
+      const [p, j, t, r, x, at, lv, ct, hc, rc] = await Promise.all([
+        probation({}, today),
+        joiners({}, today),
+        transfers({}, today),
+        religion({}),
+        resignations({}, today),
+        attendance({}, today),
+        leave({}, today),
+        contracts({}, today),
+        headcount({}, today),
+        records({}, today)
+      ]);
       res.json({
         month: today.slice(0, 7),
         probation: p.summary,
         joiners: { joined: j.summary.joined, top: j.summary.by_department.slice(0, 3) },
         transfers: t.summary,
         religion: { ...r.summary, top: r.groups.filter((g: any) => g.label !== "Not recorded").slice(0, 4) },
-        resignations: { in_notice: x.summary.in_notice, leaving_30: x.summary.leaving_30, submitted: x.summary.submitted }
+        resignations: { in_notice: x.summary.in_notice, leaving_30: x.summary.leaving_30, submitted: x.summary.submitted },
+        attendance: at.summary,
+        leave: lv.summary,
+        contracts: ct.summary,
+        headcount: hc.summary,
+        records: rc.summary
       });
     } catch (err) {
       fail(res, err);

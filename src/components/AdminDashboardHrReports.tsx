@@ -18,9 +18,16 @@ const TONE: Record<QuickKind, string> = {
   joiners: 'bg-emerald-50 border-emerald-200 text-emerald-800',
   transfers: 'bg-blue-50 border-blue-200 text-blue-800',
   resignations: 'bg-rose-50 border-rose-200 text-rose-800',
-  religion: 'bg-violet-50 border-violet-200 text-violet-800'
+  religion: 'bg-violet-50 border-violet-200 text-violet-800',
+  attendance: 'bg-amber-50 border-amber-200 text-amber-800',
+  leave: 'bg-sky-50 border-sky-200 text-sky-800',
+  contracts: 'bg-orange-50 border-orange-200 text-orange-800',
+  headcount: 'bg-slate-50 border-slate-200 text-slate-800',
+  records: 'bg-rose-50 border-rose-200 text-rose-800'
 };
-const ORDER: QuickKind[] = ['probation', 'joiners', 'transfers', 'resignations', 'religion'];
+const ORDER: QuickKind[] = ['probation', 'joiners', 'transfers', 'resignations', 'religion', 'attendance', 'leave', 'contracts', 'headcount', 'records'];
+// The cards added later show their own card text (quickCardText).
+const NEWER = new Set<QuickKind>(['attendance', 'leave', 'contracts', 'headcount', 'records']);
 
 export const AdminDashboardHrReports: React.FC<{ token: string; onNavigate?: (tab: string) => void }> = ({ token, onNavigate }) => {
   const [s, setS] = useState<QuickSummary | null>(null);
@@ -65,14 +72,16 @@ export const AdminDashboardHrReports: React.FC<{ token: string; onNavigate?: (ta
               title={`Open ${title}`}
               className={`text-left rounded-2xl border p-3.5 flex flex-col gap-1 hover:shadow-md transition-shadow ${TONE[k]}`}
             >
-              <span className="text-[11px] font-bold">{k === 'probation' ? 'Probation ends ≤ 30 days' : k === 'resignations' ? 'Resignations in notice' : k === 'religion' ? 'Religion' : `${t.label} · this month`}</span>
+              <span className="text-[11px] font-bold">{NEWER.has(k) ? t.label : k === 'probation' ? 'Probation ends ≤ 30 days' : k === 'resignations' ? 'Resignations in notice' : k === 'religion' ? 'Religion' : `${t.label} · this month`}</span>
               {k === 'religion' ? (
                 <span className="text-xs leading-relaxed">{s.religion.top.length ? s.religion.top.map((g) => `${g.label} ${g.count}`).join(' · ') : 'Nothing recorded yet'}</span>
               ) : (
                 <b className="text-2xl">{t.big}</b>
               )}
               <span className="text-[11px] opacity-90">
-                {k === 'probation'
+                {NEWER.has(k)
+                  ? t.small
+                  : k === 'probation'
                   ? s.probation.overdue
                     ? `${s.probation.overdue} already overdue`
                     : 'none overdue'
