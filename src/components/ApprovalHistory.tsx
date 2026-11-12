@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { RequestDetailsButton } from './RequestDetails';
 import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, XCircle, History, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -18,6 +19,8 @@ interface HistoryItem {
   remarks: string | null;
   acted_at: string;
   step: number | null;
+  source_type?: string;
+  source_id?: number;
 }
 interface HistoryResponse {
   summary: { total: number; approved: number; rejected: number; by_type: Record<string, { approved: number; rejected: number }> };
@@ -182,6 +185,7 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
                       {i.title}
                     </div>
                     {i.remarks && <div className="text-[11px] text-slate-500 italic mt-0.5">“{i.remarks}”</div>}
+                    {i.source_type && i.source_id ? <RequestDetailsButton token={token} type={i.source_type} id={i.source_id} className="mt-1.5" /> : null}
                   </div>
                   <div className="text-[11px] text-slate-400 shrink-0 text-right">{fmtWhen(i.acted_at)}</div>
                 </div>

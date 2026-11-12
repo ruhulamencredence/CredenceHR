@@ -78,6 +78,7 @@ import { ensureNoticeV2Schema } from "./NoticeRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensurePepmTeamSchema } from "./PepmTeam";
+import { registerApprovalDetailsRoutes } from "./ApprovalDetailsRoutes";
 import { ensurePoImportSchema, registerPoImportRoutes } from "./PoImportRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
@@ -3766,6 +3767,8 @@ async function startServer() {
     setInterval(() => requestApprovalReconcile(0), 2 * 60 * 1000);
     setTimeout(() => requestApprovalReconcile(0), 20 * 1000);
   }
+  // "Details" of any request, for whoever approves it (ApprovalDetailsRoutes.ts).
+  registerApprovalDetailsRoutes(app, { authenticateToken, queryDB, getAdminModules, getApprovalChain, getCurrentStepApprovers, toDateOnlyString });
   registerApprovalRoutes(app, {
     rehomeAwaitingApprovals,
     reconcilePendingApprovals,

@@ -4,6 +4,7 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
+import { RequestDetailsButton } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus } from 'lucide-react';
@@ -581,6 +582,8 @@ useLiveRefresh(() => load(true));
                                   ? `${item.hr_action_details.action_label} — ${item.hr_action_details.employee_name || ''}`
                                   : sourceTitle(item.source_type)}
                           </span>
+                          {/* The whole request, for whoever decides it (RequestDetails.tsx). */}
+                          <RequestDetailsButton token={token} type={item.source_type} id={item.source_id} />
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {item.hr_action_details

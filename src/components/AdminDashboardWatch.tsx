@@ -13,6 +13,7 @@
 // whose module (or layer) the account doesn't have gets a 403 and is simply
 // not drawn — the same rule as the module's own page.
 
+import { RequestDetailsButton } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { Briefcase, ChevronRight, Clock, DoorOpen, Smartphone, UserPlus, Wallet } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -206,14 +207,19 @@ export const AdminDashboardWatch: React.FC<{ token: string; onNavigate?: (tab: s
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
                 {stuckList.map((it) => (
+                  // Row is itself a button, so the Details button sits beside it.
+                  <div key={`${it.kind}-${it.id}`} className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex-1 min-w-0">
                   <Row
-                    key={`${it.kind}-${it.id}`}
                     tone={it.days_waiting >= 7 ? 'red' : 'amber'}
                     onClick={go(it.tab)}
                     title={`${it.label} — ${it.requester}`}
                     right={<span className={it.days_waiting >= 7 ? 'text-rose-600' : 'text-amber-700'}>{daysText(it.days_waiting)}</span>}
                     sub={`${it.layer}${it.step && it.total_steps ? ` (${it.step}/${it.total_steps})` : ''} · ${it.approvers.join(' or ') || 'no approver set'}${it.detail ? ` · ${it.detail.replace(/\d{4}-\d{2}-\d{2}/g, (d) => shortDate(d))}` : ''}`}
                   />
+                  </div>
+                  <RequestDetailsButton token={token} type={it.kind} id={it.id} className="shrink-0" />
+                  </div>
                 ))}
               </div>
               {stuck.items.length > 6 && (

@@ -1093,7 +1093,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         const d = day(at);
         return (!from || d >= from) && (!to || d <= to);
       };
-      type Row = { key: string; type: string; title: string; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
+      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
       const rows: Row[] = [];
 
       // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
@@ -1162,6 +1162,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           const detail = detailOf(r);
           rows.push({
             key: `ar-${r.id}-${n}`,
+            source_type: r.source_type,
+            source_id: Number(r.source_id),
             type: TYPE_TITLE[r.source_type] || r.source_type,
             title: detail,
             requester_id: Number(r.requested_by) || null,
@@ -1190,6 +1192,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             const emp = emps.get(Number(a.employee_id));
             rows.push({
               key: `hr-${a.id}-${n}`,
+              source_type: "hr_action",
+              source_id: Number(a.id),
               type: "HR Action",
               title: `${String(a.action_type).replace(/_/g, " ")}${emp ? ` · ${emp.name}` : ""} · from ${day(a.effective_date)}`,
               requester_id: emp?.user_id ? Number(emp.user_id) : null,
@@ -1210,6 +1214,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (viaWorkflow.has(Number(la.id)) || Number(la.decided_by) !== myId || !inRange(la.decided_at)) continue;
         rows.push({
           key: `la-${la.id}`,
+          source_type: "leave_application",
+          source_id: Number(la.id),
           type: "Leave Application",
           title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`,
           requester_id: Number(la.user_id),
@@ -1227,6 +1233,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (!inRange(at)) continue;
         rows.push({
           key: `lr-${la.id}`,
+          source_type: "leave_application",
+          source_id: Number(la.id),
           type: "Leave (as Reliever)",
           title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)}`,
           requester_id: Number(la.user_id),
@@ -1246,6 +1254,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           const ex = exits.get(Number(c.exit_id));
           rows.push({
             key: `ec-${c.id}`,
+            source_type: "exit_clearance",
+            source_id: Number(c.id),
             type: "Exit Clearance",
             title: `${c.department}${c.item_label ? ` — ${c.item_label}` : ""}${ex ? ` · ${ex.exit_type}` : ""}`,
             requester_id: ex ? Number(ex.user_id) : null,

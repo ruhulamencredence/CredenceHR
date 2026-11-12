@@ -1,4 +1,5 @@
 import { activePeople } from '../lib/activePeople';
+import { RequestDetailsButton } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle
@@ -417,6 +418,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       {r.source_type === 'bill_claim' && r.source_category && (
                         <div className="text-xs text-slate-500">{r.source_category}</div>
                       )}
+                      <RequestDetailsButton token={token} type={r.source_type} id={r.source_id} className="mt-1.5" />
                     </td>
                     {hasClaims && (() => {
                       // Only a 'bill_claim' request finishing its LAST step is
