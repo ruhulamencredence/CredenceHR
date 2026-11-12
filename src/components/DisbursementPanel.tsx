@@ -440,7 +440,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     const sections = voucherSections(bill.items || []);
     const total = sections.reduce((s, sec) => s + sec.total, 0);
 
-    let y = drawStandardHeader(doc, co, 'Conveyance Payment Voucher', [
+    let y = drawStandardHeader(doc, co, 'Bill Payment Voucher', [
       ['Voucher No', bill.voucher_no || '-'],
       ['Employee Name', bill.user_name || '-'],
       ['Employee Code', bill.employee_code || '-'],
@@ -542,7 +542,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     finalizePdfPageNumbers(doc);
     const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
     if (mode === 'email') {
-      await emailReport(doc, { fileName: filename, title: 'Conveyance Payment Voucher' });
+      await emailReport(doc, { fileName: filename, title: 'Bill Payment Voucher' });
       return;
     }
     await savePdfCrossPlatform(doc, filename);
