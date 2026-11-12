@@ -7,8 +7,6 @@ import { useLiveTick } from '../lib/liveRefresh';
 import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
-import { Lottie, useLottieJson } from './LazyLottie';
-const loadRideAnimation = () => import('../assets/travel-app.json');
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';
 
@@ -70,9 +68,9 @@ const RideMap: React.FC = () => (
   <svg
     className="ride-map absolute inset-0 w-full h-full pointer-events-none"
     viewBox="0 0 420 258"
-    preserveAspectRatio="xMaxYMid slice"
+    preserveAspectRatio="xMidYMid slice"
     aria-hidden="true"
-    style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent 25%, #000 70%)', maskImage: 'linear-gradient(90deg, transparent 25%, #000 70%)' }}
+    style={{ opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 25%, #000 70%)', maskImage: 'linear-gradient(90deg, transparent 25%, #000 70%)' }}
   >
     <rect width="420" height="258" fill="var(--rm-land)" />
     <path d="M-10 190 C 80 170, 120 230, 210 205 S 330 150, 440 175 L440 215 C 330 190, 300 250, 210 245 S 80 210,-10 232Z" fill="var(--rm-water)" />
@@ -97,10 +95,10 @@ const RideMap: React.FC = () => (
       <path d="M347 -10 V160" />
       <path d="M20 270 C 60 200, 140 170, 181 146" strokeWidth="7" />
     </g>
-    <path d="M60 236 C 70 200, 120 160, 181 146 S 259 132, 300 112" stroke="var(--rm-route)" strokeWidth="3.5" fill="none" strokeDasharray="7 6" strokeLinecap="round" />
+    <path d="M60 236 C 70 200, 120 160, 181 146 S 259 112, 300 78" stroke="var(--rm-route)" strokeWidth="3.5" fill="none" strokeDasharray="7 6" strokeLinecap="round" />
     <circle cx="60" cy="236" r="6" fill="#fff" stroke="var(--rm-route)" strokeWidth="3" />
-    <path d="M300 112 c-8 -6 -13 -14 -13 -21 c0 -7 5 -13 13 -13 s13 6 13 13 c0 7 -5 15 -13 21z" fill="#ef4444" />
-    <circle cx="300" cy="91" r="4.5" fill="#fff" />
+    <path d="M300 56 c-8 0 -13 6 -13 13 c0 9 13 21 13 21 s13 -12 13 -21 c0 -7 -5 -13 -13 -13z" fill="#ef4444" />
+    <circle cx="300" cy="69" r="4.5" fill="#fff" />
   </svg>
 );
 
@@ -108,18 +106,12 @@ const RideMap: React.FC = () => (
 // "Where are you going?" shortcut plus this account's own current ride, if
 // any, so its status is one glance away.
 export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpen, className = '' }) => {
-  const rideAnimation = useLottieJson(loadRideAnimation);
   const active = (useActiveRides(token, userId) || []).slice(0, 2);
 
   return (
     <div className={`relative bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
       <RideMap />
-      {/* Decorative ride animation (a car driving past a skyline) in the
-          card's top-right corner. Purely visual — it never takes a tap. */}
-      <div className="absolute top-3 right-3 w-44 h-[47px] pointer-events-none" aria-hidden="true">
-        {rideAnimation && <Lottie src={rideAnimation} autoplay loop className="w-full h-full" />}
-      </div>
-      <div className="relative px-5 pt-5 pb-4 sm:px-6 pr-48 sm:pr-48 flex items-start justify-between gap-3">
+      <div className="relative px-5 pt-5 pb-4 sm:px-6 flex items-start justify-between gap-3">
         <div className="relative z-10">
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Car className="w-4 h-4 text-blue-600" /> Book a Ride
