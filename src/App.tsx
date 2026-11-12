@@ -143,6 +143,7 @@ import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSi
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
+import { isStandalone } from './components/AddToHomeScreen';
 import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
 export default function App() {
@@ -1339,7 +1340,10 @@ export default function App() {
     // Chat full screen inside the app — a new tab there is awkward, and from
     // a Home Screen app it would leave for Safari. A computer keeps its own tab.
     const phone = window.matchMedia?.('(max-width: 767px)').matches || document.documentElement.dataset.appShell === '1';
-    if (Capacitor.isNativePlatform() || phone) {
+    // Installed from the browser (PC taskbar / Start menu app): its window
+    // has no browser Back button, so Chat opens inside the app too, with its
+    // own Back (ChatPanel) — a /chat window there had no way back.
+    if (Capacitor.isNativePlatform() || phone || isStandalone()) {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setShowChat(true);
