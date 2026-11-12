@@ -1299,6 +1299,15 @@ html[data-dark] input::placeholder, html[data-dark] textarea::placeholder { colo
 html[data-dark] [class*="from-white"] { --tw-gradient-from: #2f3237 !important; }
 html[data-dark] [class*="via-white"] { --tw-gradient-via: #2f3237 !important; }
 html[data-dark] [class*="shadow"] { --tw-shadow-color: rgba(0,0,0,.5); }
+/* Chat (ChatPanel.tsx): the open conversation's pane is a fixed light grey
+   (bg-[#F7F8FA]) — a dark well in Dark. */
+html[data-dark] [class*="bg-[#F7F8FA]"] { background-color: #26292e !important; }
+/* …the messages: the chosen wallpaper is a light wash, so Dark has its own
+   dark one; own bubbles are the accent over dark (their inline style is a
+   light tint), the other person's a raised dark grey. */
+html[data-dark] .chat-thread { background: radial-gradient(90% 60% at 100% 100%, rgba(var(--g-accent-rgb), .07), transparent 70%), #26292e !important; }
+html[data-dark] .chat-bubble-me { background: linear-gradient(rgba(var(--g-accent-rgb), .30), rgba(var(--g-accent-rgb), .30)), #2f3237 !important; border-color: rgba(var(--g-accent-rgb), .35) !important; }
+html[data-dark] .chat-bubble-them { background: #363a40 !important; border-color: rgba(255, 255, 255, .06) !important; }
 /* Liquid glass in dark */
 html[data-dark] .liquid-glass-backdrop { background: rgba(0,0,0,.5); }
 html[data-dark] .liquid-glass {
@@ -1507,3 +1516,15 @@ html[data-dark] .ride-map { --rm-land: #262b33; --rm-water: #1f3447; --rm-park: 
 /* My Attendance card's background clock (AttendanceCard.tsx, web only). */
 .att-clock { --ac-face: #fff3e8; --ac-rim: #e2e8f0; --ac-tick: #cbd5e1; --ac-accent: #f97316; }
 html[data-dark] .att-clock { --ac-face: #2c2622; --ac-rim: #323843; --ac-tick: #3d4450; --ac-accent: #fb923c; }
+
+/* Chat popup in Dark Glass (App.tsx .chat-popup): near-solid dark glass, so
+   the page behind never washes out the names and messages; the chat inside
+   sits on it without a second glass layer. */
+html[data-dark][data-glass] .chat-popup {
+  background: rgba(26, 28, 33, 0.94) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+html[data-dark][data-glass] .chat-popup > .bg-white { background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-dark][data-glass] [class*="bg-[#F7F8FA]"] { background-color: rgba(0, 0, 0, 0.22) !important; }
+html[data-dark][data-glass] .chat-thread { background: transparent !important; }

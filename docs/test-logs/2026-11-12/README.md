@@ -61,3 +61,14 @@ typed-in, and one from 2025 disbursed).
 |---|---|
 | API (`disb-filters-api.mjs`): rows carry Employee ID / designation / department / branch; summary; Department, Designation, Branch, Search (name, Employee ID, CB-no, voucher no, `%` / `_` literal), Bill date, Disbursed date + by, Category (Food; Conveyance = Check In/Out and typed-in), Source, Amount from/to, several together, paging total, filter options; SQL-looking text is just text; no module 403, Disbursement module allowed | 25/25 |
 | Screen (`disb-filters-ui.mjs`): every filter in the toolbar; designation under the name; summary; Department, Search + Category, chips, Clear all, Disbursed date picked dates, Amount; phone fits, Filters sheet, card shows designation; no page errors | 15/15 |
+
+# Chat in Dark and Dark Glass
+
+Reported: the desktop Chat popup stayed light in Dark — names unreadable,
+message pane white. Causes: the popup's dim background was `bg-slate-950/60`
+(Dark turns slate round, so it became a light veil); the message pane
+(`bg-[#F7F8FA]`), the chosen wallpaper and own bubbles (inline styles) had no
+dark colours; in Dark Glass the popup was see-through over that light veil.
+Checked by screenshots (desktop popup and phone Chat, Light / Dark / Dark
+Glass, with a three-message conversation): list, names, both bubble kinds and
+the typing bar readable in Dark and Dark Glass; Light unchanged.

@@ -2056,11 +2056,11 @@ export default function App() {
           this needs its own close button + backdrop-click-to-close. */}
       {showChatPopup && chatOn && user && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+          className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-2 sm:p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
             style={{ height: '85vh', maxHeight: '720px' }}
           >
             <button
