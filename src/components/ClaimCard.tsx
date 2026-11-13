@@ -124,7 +124,7 @@ useLiveRefresh(() => fetchStatus(true));
       <div className="flex flex-col sm:flex-row sm:items-end gap-2">
         <div className="flex-1">
           <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-            Purpose / Where are you going
+            Purpose
           </label>
           <input
             type="text"

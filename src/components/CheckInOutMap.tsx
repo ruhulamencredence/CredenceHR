@@ -264,7 +264,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
 
       {kind === 'in' && open !== undefined && (
         <div>
-          <label className="block text-[12px] font-semibold text-slate-500 mb-1">Purpose / where are you going</label>
+          <label className="block text-[12px] font-semibold text-slate-500 mb-1">Purpose</label>
           <input
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
