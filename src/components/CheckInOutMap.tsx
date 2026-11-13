@@ -270,7 +270,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
             onChange={(e) => setPurpose(e.target.value)}
             maxLength={255}
             autoComplete="off"
-            placeholder="e.g. Bank visit — City Branch"
+            placeholder="e.g. Meeting"
             className="w-full text-[15px] px-3.5 py-2.5 bg-slate-100/80 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[color:var(--g-accent,#7F00FF)]"
           />
         </div>
