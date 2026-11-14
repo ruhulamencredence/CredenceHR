@@ -1,0 +1,30 @@
+// Pretend to be Safari: a Date that can't read "YYYY-MM-DD HH:MM:SS".
+const Real = Date;
+const bad = (v: any) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2} \d/.test(v);
+const SafariDate: any = function (this: any, ...a: any[]) {
+  if (!new.target) return Real();
+  if (a.length === 1 && bad(a[0])) return new Real(NaN);
+  return new (Real as any)(...a);
+};
+SafariDate.prototype = Real.prototype; SafariDate.parse = (s: string) => (bad(s) ? NaN : Real.parse(s)); SafariDate.UTC = Real.UTC; SafariDate.now = Real.now;
+(globalThis as any).Date = SafariDate;
+let pass = 0, fail = 0; const ok = (m: string, c: boolean) => { c ? pass++ : fail++; console.log((c ? 'PASS ' : 'FAIL ') + m); };
+ok('before: "Safari" gives Invalid Date for the server format', Number.isNaN(new Date('2026-11-14 09:00:00').getTime()));
+await import('/home/user/CredenceHR/src/lib/polyfills.ts');
+const d = new Date('2026-11-14 09:00:00');
+ok('after: reads it', !Number.isNaN(d.getTime()));
+ok('as local time 09:00 on 14 Nov', d.getFullYear() === 2026 && d.getMonth() === 10 && d.getDate() === 14 && d.getHours() === 9 && d.getMinutes() === 0);
+ok('time shown in the card format', /09:00/.test(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })));
+ok('Date.parse too', !Number.isNaN(Date.parse('2026-11-14 18:30:05')));
+ok('with milliseconds', !Number.isNaN(new Date('2026-11-14 09:00:00.123').getTime()));
+ok('without seconds', new Date('2026-11-14 09:05').getMinutes() === 5);
+ok('ISO with Z unchanged', new Date('2026-11-14T03:00:00.000Z').getTime() === Real.UTC(2026, 10, 14, 3));
+ok('date only unchanged (UTC midnight as before)', new Date('2026-11-14').getTime() === Real.UTC(2026, 10, 14));
+ok('numbers unchanged', new Date(0).getTime() === 0);
+ok('y, m, d form unchanged', new Date(2026, 0, 2).getDate() === 2);
+ok('new Date() is now', Math.abs(new Date().getTime() - Real.now()) < 1000);
+ok('Date() without new is a string', typeof (Date as any)() === 'string');
+ok('instanceof Date works', new Date('2026-11-14 09:00:00') instanceof Date && new Real() instanceof Date);
+ok('Date.now / Date.UTC there', typeof Date.now() === 'number' && Date.UTC(2026, 0, 1) === Real.UTC(2026, 0, 1));
+ok('nonsense stays Invalid', Number.isNaN(new Date('not a date').getTime()));
+console.log(`${pass}/${pass + fail}`);

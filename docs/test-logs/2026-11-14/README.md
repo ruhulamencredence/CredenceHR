@@ -130,3 +130,21 @@ yesterday, a double punch today). DB and server on Dhaka time for the check-out 
 - `scripts/device-ui.cjs <outdir>` — 10/10: Android browser card says use the app with the APK link and no
   Set Now; computer card says not from a computer; iPhone and iPad (Mac + touch) show Set Now and no notice;
   Session security shows the two Home Screen rows.
+
+## iPhone: "Invalid Date" on My Attendance; feedback screenshot opening behind the cards
+
+1. **"Invalid Date" on iPhone / iPad.** The server sends date-times as `2026-11-14 09:00:00` (mysql2
+   `dateStrings`). Chrome and Android read that as local time; Safari can't and shows "Invalid Date" — on the My
+   Attendance card and anywhere else a date-time is shown. Fixed once for the whole app in `src/lib/polyfills.ts`:
+   only in a browser that can't read that format, `Date` / `Date.parse` read it as `2026-11-14T09:00:00` (local
+   time, what Chrome already does). Other values and other browsers are untouched.
+2. **Feedback screenshot** (Admin Panel -> User Feedback). In Dark Glass the card's blur held the "fixed" picture
+   layer inside the card, so it showed through the cards. It is now put on the page body (`createPortal`).
+
+- `scripts/safari-date.test.mts` (tsx, `TZ=Asia/Dhaka`) — 16/16 with a Date that, like Safari, can't read the
+  format: before = Invalid Date; after it reads it as local 09:00 on 14 Nov, `Date.parse` too, with milliseconds,
+  without seconds; ISO-with-Z, date-only, numbers, `new Date(y, m, d)`, `new Date()`, `Date()` as a string,
+  `instanceof Date`, `Date.now` / `Date.UTC` all unchanged; nonsense stays Invalid. In Node / Chrome the polyfill
+  leaves `Date` alone. (No WebKit browser in this container, so not run in real Safari.)
+- `scripts/feedback-lightbox.cjs <outdir>` — 9/9: in Dark Glass, dark and light the big screenshot opens on the
+  page body, nothing covers its middle, clicking outside closes it.

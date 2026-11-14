@@ -10,6 +10,7 @@
 // also turns the question on/off and sets after how many days it is asked.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Star, Bug, Lightbulb, MessageSquareHeart, Loader2, RefreshCw, Search, Smartphone, Monitor, Tablet, Image as ImageIcon, X, Clock, CheckCircle2, RotateCcw, ArrowUpDown } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
@@ -104,7 +105,10 @@ const Shot: React.FC<{ id: number; token: string }> = ({ id, token }) => {
       <button type="button" onClick={() => setOpen(true)} className="shrink-0" aria-label="Open screenshot">
         <img src={url} alt="Screenshot" className="w-20 h-20 object-cover rounded-xl border border-slate-200" />
       </button>
-      {open && (
+      {open &&
+        // On document.body: a card with the Dark Glass blur would otherwise
+        // hold this "fixed" layer inside itself (behind the next cards).
+        createPortal(
         <div className="fixed inset-0 z-[300] liquid-glass-backdrop flex items-center justify-center p-4" onClick={() => setOpen(false)}>
           <div className="liquid-glass liquid-glass-in rounded-[32px] p-3 max-w-3xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-end mb-2">
@@ -116,8 +120,9 @@ const Shot: React.FC<{ id: number; token: string }> = ({ id, token }) => {
               <img src={url} alt="Screenshot" className="max-h-[75vh] w-full object-contain rounded-2xl" />
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </>
   );
 };
