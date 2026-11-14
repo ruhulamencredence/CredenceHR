@@ -6,6 +6,7 @@
 // Employee Directory (Admin Panel -> Employees) routes, moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { employeeFilterOptions, employeeMatches, loadBranchIndex, readEmployeeFilter } from "./EmployeeFilters";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { keptRecordsOf } from "./EmployeeRecordsGuard";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
@@ -80,8 +81,12 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       // ?department=<name> narrows to one department; "__none__" = no department set.
       const departmentFilter = String(req.query.department || "").trim().toLowerCase();
       const activeCount = allSorted.filter((e: any) => !!Number(e.is_active)).length;
+      // The Directory's Filters (EmployeeFilters.ts) — over the same rows.
+      const empFilter = readEmployeeFilter(req.query);
+      const branchIdx = paged ? await loadBranchIndex(queryDB) : null;
       const matched = paged
         ? allSorted.filter((e: any) => {
+            if (!employeeMatches(e, empFilter, branchIdx!)) return false;
             const active = !!Number(e.is_active);
             if (status === "active" && !active) return false;
             if (status === "inactive" && active) return false;
@@ -132,7 +137,15 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         });
       res.json(
         paged
-          ? { rows: shaped, total: matched.length, page: pageNo, limit: pageLimit, counts: { all: allSorted.length, active: activeCount, inactive: allSorted.length - activeCount } }
+          ? {
+              rows: shaped,
+              total: matched.length,
+              page: pageNo,
+              limit: pageLimit,
+              counts: { all: allSorted.length, active: activeCount, inactive: allSorted.length - activeCount },
+              // ?options=1 : the choices for each filter, from these rows.
+              ...(String(req.query.options || "") === "1" ? { options: employeeFilterOptions(allSorted, branchIdx!) } : {})
+            }
           : shaped
       );
     } catch (err: any) {

@@ -59,8 +59,17 @@ export function employeeLayer(user: { role?: string; module_permission_layers?: 
 }
 
 // Every employee's details as Excel, in the HR Data Import layout.
-export async function exportEmployees(token: string, source: 'employees' | 'hr', status: 'active' | 'inactive' | 'all' = 'all', dept = ''): Promise<number> {
-  const qs = new URLSearchParams({ status, ...(dept ? { department: dept } : {}) }).toString();
+// `extra`: the Directory's search and Filters (EmployeeFilters.ts), so the
+// file holds exactly the people the list shows.
+export async function exportEmployees(
+  token: string,
+  source: 'employees' | 'hr',
+  status: 'active' | 'inactive' | 'all' = 'all',
+  dept = '',
+  extra: Record<string, string> = {}
+): Promise<number> {
+  const qs = new URLSearchParams({ status, ...(dept ? { department: dept } : {}), ...extra }).toString();
+  const filtered = Object.keys(extra).length > 0;
   const r = await fetch(apiUrl(`${source === 'hr' ? '/api/hr-ops/employee-export' : '/api/employees/export'}?${qs}`), { headers: { Authorization: `Bearer ${token}` } });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || 'Could not export');
@@ -73,14 +82,14 @@ export async function exportEmployees(token: string, source: 'employees' | 'hr',
     ['Employee export'],
     [''],
     ['Rows', String(d.rows.length)],
-    ['Employees', `${statusLabel}${dept ? ` · ${dept}` : ''}`],
+    ['Employees', `${statusLabel}${dept ? ` · ${dept === '__none__' ? 'No department' : dept}` : ''}${filtered ? ` · ${Object.entries(extra).map(([k, v]) => `${k}: ${v}`).join(', ')}` : ''}`],
     ['Made', today()],
     ['Import back', 'Same columns as HR Data Import -> Employee Details: correct cells and import this file; empty cells keep what is saved. "Office / Project" is for reading only.'],
     ['Not included', 'Login ID, Password and salary payment accounts.']
   ]);
   info['!cols'] = [{ wch: 14 }, { wch: 110 }];
   XLSX.utils.book_append_sheet(wb, info, 'Instructions');
-  await saveWorkbookCrossPlatform(wb, `Employees_${statusLabel}${dept ? `_${dept.replace(/[^\w]+/g, '_')}` : ''}_${today()}.xlsx`);
+  await saveWorkbookCrossPlatform(wb, `Employees_${statusLabel}${dept && dept !== '__none__' ? `_${dept.replace(/[^\w]+/g, '_')}` : ''}${filtered ? '_filtered' : ''}_${today()}.xlsx`);
   return d.rows.length;
 }
 

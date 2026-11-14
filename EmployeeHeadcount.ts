@@ -19,6 +19,7 @@
 
 import type { Express } from "express";
 import { IMPORT_KINDS } from "./DataImportRoutes";
+import { employeeMatches, loadBranchIndex, norm, placeOf, readEmployeeFilter, type PlaceKind } from "./EmployeeFilters";
 
 type Query = (sql: string, params?: any[]) => Promise<any>;
 
@@ -30,9 +31,7 @@ interface Deps {
   queryDB: Query;
 }
 
-export type PlaceKind = "Head Office" | "Project" | "Not set";
-
-const norm = (v: any) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+export type { PlaceKind } from "./EmployeeFilters";
 
 // Columns of the export: Employee Details' import columns up to "Active".
 const EXPORT_FIELDS = (() => {
@@ -44,33 +43,23 @@ const EXPORT_FIELDS = (() => {
 export function registerEmployeeHeadcountRoutes(app: Express, deps: Deps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB } = deps;
 
+  // Export also takes the Directory's filters (EmployeeFilters.ts).
   async function load(q: any) {
-    const [emps, branches]: any[] = await Promise.all([
-      queryDB("SELECT * FROM all_employees ORDER BY name"),
-      queryDB("SELECT id, branch_name, branch_type FROM branches").catch(() => [])
-    ]);
-    const byId = new Map<number, any>((branches || []).map((b: any) => [Number(b.id), b]));
-    const byName = new Map<string, any>((branches || []).map((b: any) => [norm(b.branch_name), b]));
+    const [emps, idx]: any[] = await Promise.all([queryDB("SELECT * FROM all_employees ORDER BY name"), loadBranchIndex(queryDB)]);
     const status = q.status === "inactive" ? "inactive" : q.status === "all" ? "all" : "active";
     const dept = norm(q.department);
+    const f = readEmployeeFilter(q);
     return (emps || [])
       .filter((e: any) => (status === "all" ? true : status === "active" ? Number(e.is_active ?? 1) !== 0 : Number(e.is_active ?? 1) === 0))
-      .filter((e: any) => !dept || norm(e.department) === dept)
+      .filter((e: any) => !dept || (dept === "__none__" ? !norm(e.department) : norm(e.department) === dept))
+      .filter((e: any) => employeeMatches(e, f, idx))
+      .filter((e: any) => {
+        const t = norm(q.q);
+        return !t || [e.name, e.employee_id, e.designation, e.department, e.branch, e.email, e.phone].some((v) => norm(v).includes(t));
+      })
       .map((e: any) => {
-        const b = (e.branch_id && byId.get(Number(e.branch_id))) || (e.branch ? byName.get(norm(e.branch)) : null);
-        // The Branch's type; an imported Branch not in Branches falls back
-        // to its Division text ("Project", "Head Office / Corporate").
-        const div = norm(e.division);
-        const kind: PlaceKind = b
-          ? b.branch_type === "project_site"
-            ? "Project"
-            : "Head Office"
-          : /project|site/.test(div)
-            ? "Project"
-            : /head|corporate|office/.test(div)
-              ? "Head Office"
-              : "Not set";
-        return { e, kind, branch: (b?.branch_name || e.branch || "").trim() || "No branch" };
+        const p = placeOf(e, idx);
+        return { e, kind: p.kind, branch: p.branch || "No branch" };
       });
   }
 
