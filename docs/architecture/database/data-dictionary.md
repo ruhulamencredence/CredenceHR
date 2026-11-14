@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬২টি টেবিল, ২৮৩৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬২টি টেবিল, ২৮৪২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -951,6 +951,9 @@ Unique: `uniq_hr_reminder`(company_id,kind,employee_id,ref_key,ref_date,lead_day
 | `expires_at` | datetime | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `login_emailed_to` | varchar(255) | হ্যাঁ |  | |
+| `login_emailed_at` | datetime | হ্যাঁ |  | |
+| `login_emailed_by` | int(11) | হ্যাঁ |  | |
 
 Unique: `uq_onb_code`(onb_code)
 
