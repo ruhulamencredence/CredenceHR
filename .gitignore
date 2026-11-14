@@ -39,3 +39,6 @@ docs/architecture/database/diagrams/full-application-er.pdf
 
 # Chat attachments saved on this machine (chatFiles.ts) — never in git.
 /uploads/
+
+# Output of tests/qa/run-all.sh (screenshots, JSON, server log)
+qa-results/
