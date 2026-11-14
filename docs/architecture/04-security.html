@@ -179,11 +179,6 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>FeedbackRoutes.ts</code></td>
 </tr>
 <tr>
-<td>Browser থেকে attendance</td>
-<td>Check In / Out (অফিসের বাইরের punch আর "Set again" সহ) শুধু অ্যাপ (APK) বা iPhone / iPad-এর browser থেকে; Android browser আর computer-এ server 403 দেয় (<code>ATTENDANCE_APP_ONLY</code> / <code>ATTENDANCE_NOT_ON_COMPUTER</code>), কার্ডে বোতাম লুকানো আর কারণ লেখা। অ্যাপকে চেনা হয় server-এর দেওয়া sign-in দিয়ে; বাকিটা User-Agent দেখে — কেউ ইচ্ছে করে browser-এর পরিচয় বদলালে পার পেতে পারে, সাধারণ ব্যবহারকারী পারে না। Timesheet-এর সংশোধন আবেদন (approval-এ যায়) সব জায়গা থেকে চলে</td>
-<td><code>clientDevice.ts</code>, <code>AttendanceRoutes.ts</code></td>
-</tr>
-<tr>
 <td>অফিস মেশিনের ডাবল punch নিয়ম</td>
 <td>দেখতে Office Attendance module; বদলাতে আলাদা layer <code>punch_rules</code> ("Double punch rule", explicit-only — কারও আপনাআপনি নেই), না হলে API 403। বদল শুধু আজ থেকে লাগে, আগের দিনের হিসাব বদলানো যায় না; কে, কবে বদলাল তা <code>zk_punch_rules</code>-এ থাকে। মেশিনের punch কখনো মোছা হয় না</td>
 <td><code>zkPunchRule.ts</code>, <code>OfficeAttendanceRoutes.ts</code></td>
