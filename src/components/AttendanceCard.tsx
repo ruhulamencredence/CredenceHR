@@ -8,7 +8,7 @@ import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
-import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, Smartphone } from 'lucide-react';
+import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { retryImport } from '../lib/chunkReload';
@@ -17,7 +17,6 @@ const AttendanceMapConfirm = lazy(retryImport(() => import('./AttendanceMapConfi
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
-import { attendanceBlock, isTouchMac } from '../lib/deviceKind';
 
 interface AttendanceCardProps {
   token: string;
@@ -248,10 +247,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const selectedProject = projects.find((p) => String(p.id) === projectId) || null;
   const waiting = status?.pending_offsite || null;
   const hasCheckedIn = !!status?.check_in_at || !!waiting?.in_at;
-  // Attendance from a browser only on an iPhone / iPad (the server refuses the
-  // rest too, clientDevice.ts): an Android browser is sent to the app, a
-  // computer can't give it. Times already given still show.
-  const block = attendanceBlock();
 
   // Late warning: this month's own Delay / Extreme Delay counts against the
   // Late Attendance Policy (same /api/my-attendance-summary figures the
@@ -334,9 +329,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           remarks: remarks || undefined,
           // From the APK's own fix (lib/attendanceFix.ts); the server refuses a mock one.
           ...(coords.mock !== undefined ? { mock: coords.mock, accuracy_m: coords.accuracy ?? null } : {}),
-          ...(pending.offsite ? { offsite: true } : {}),
-          // An iPad calls itself a Mac: this tells the server it's a touch screen (clientDevice.ts).
-          ...(isTouchMac() ? { touch_device: true } : {})
+          ...(pending.offsite ? { offsite: true } : {})
         })
       });
       const data = await res.json();
@@ -484,8 +477,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
               </div>
               <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
             </>
-          ) : block ? (
-            <div className="mt-0.5 text-xs font-semibold text-slate-400">—</div>
           ) : (
             <button
               type="button"
@@ -521,7 +512,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
               {/* Gave it too early, or the office machine took a stray punch as
                   the Out? The same day it can be given again
                   (users.can_update_check_out — off unless ticked). */}
-              {status?.can_update_check_out && !block && (
+              {status?.can_update_check_out && (
                 <button
                   type="button"
                   onClick={async () => {
@@ -540,8 +531,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 </button>
               )}
             </>
-          ) : block ? (
-            <div className="mt-0.5 text-xs font-semibold text-slate-400">—</div>
           ) : (
             <button
               type="button"
@@ -555,24 +544,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           )}
         </div>
       </div>
-
-      {block && (
-        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 flex items-start gap-2" role="note">
-          <Smartphone className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            {block === 'android' ? (
-              <>
-                <p>On Android, attendance is given from the app only — so your location is recorded properly.</p>
-                <a href="/downloads/CredenceHR.apk" download="CredenceHR.apk" className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-600 px-3 py-1 font-semibold text-white">
-                  Get the app (APK)
-                </a>
-              </>
-            ) : (
-              <p>Attendance can't be given from a computer. Use the app on your phone, or an iPhone / iPad.</p>
-            )}
-          </div>
-        </div>
-      )}
 
       {!loadingStatus && (
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">

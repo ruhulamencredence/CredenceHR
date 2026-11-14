@@ -166,3 +166,8 @@ app (CSS injected), approved, then built.
 - `scripts/lightglass-shots.cjs` (fresh DB after a container restart, Superadmin): Dashboard, Employees, Monthly
   Attendance Report, Employee Tracking (cards over the map), chat popup, Profile, phone More popup, phone Employees,
   phone Appearance — all readable; the phone header keeps its colour and white logo.
+
+> **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
+> kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
+> `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
+> iPhone Home Screen sign-in (30 / 7 days) stays on the main branch.

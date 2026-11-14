@@ -33,8 +33,6 @@ import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { restrictedAttendanceProjects } from "./AttendanceProjects";
 import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
-// Attendance from a browser only on an iPhone / iPad; Android needs the app, a computer can't (clientDevice.ts).
-import { requireAttendanceDevice } from "./clientDevice";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -467,7 +465,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     return true;
   }
 
-  app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, requireAttendanceDevice, async (req: any, res) => {
+  app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       if (await refuseMockFix(req, res, "in")) return;
       if (req.body?.offsite === true && (await offsitePunch(req, res, "in"))) return;
@@ -548,7 +546,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     return Number(rows[0]?.can_update_check_out) === 1;
   };
 
-  app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, requireAttendanceDevice, async (req: any, res) => {
+  app.post("/api/attendance/check-out", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       if (await refuseMockFix(req, res, "out")) return;
       if (req.body?.offsite === true && (await offsitePunch(req, res, "out"))) return;
