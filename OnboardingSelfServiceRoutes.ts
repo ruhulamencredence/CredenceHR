@@ -36,6 +36,7 @@ import { setAccountBlocked } from "./AccountBlock";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { requiredDocuments, missingDocuments } from "./HrOps360Routes";
 import { createAlert } from "./Alerts";
+import { sendMail, isMailerConfigured } from "./mailer";
 import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -90,6 +91,14 @@ export async function ensureOnboardingSchema(dbPool: any) {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+    // Who the login was emailed to and when (never the password itself).
+    for (const [name, def] of [["login_emailed_to", "VARCHAR(255) NULL"], ["login_emailed_at", "DATETIME NULL"], ["login_emailed_by", "INT NULL"]] as [string, string][]) {
+      try {
+        await dbPool.query(`ALTER TABLE onboarding_applications ADD COLUMN ${name} ${def}`);
+      } catch (err: any) {
+        if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add onboarding_applications.${name} column: ` + err.message);
+      }
+    }
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS onboarding_documents (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -611,6 +620,54 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       ]);
       await endAllSessions(queryDB, Number(a.user_id), "password");
       res.json({ login_id: a.onb_code, password });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+
+  // Email the joiner their login (link, Login ID, temporary password). The
+  // password is not stored, so the page sends back the one it is showing and
+  // the server only mails it if it is still the account's current password —
+  // this route can't be used to mail arbitrary text under the company's name.
+  // Needs the same layer as opening an application; the password is never
+  // logged, only who it went to and when.
+  app.post("/api/hr-ops/joiner-onboarding/:id/email-login", ...hr("onboarding_create"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      if (!["draft", "rejected"].includes(a.status)) throw bad("This application is closed.");
+      const to = clean(req.body?.email, 255) || clean(a.email, 255);
+      if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw bad("Type a valid email address for the joiner.");
+      const password = String(req.body?.password || "");
+      const users: any[] = await queryDB("/*unscoped*/ SELECT id, password_hash, group_id, TIMESTAMPDIFF(SECOND, NOW(), onboarding_expires_at) AS secs FROM users WHERE id = ? AND is_onboarding = 1", [Number(a.user_id)]);
+      const u = users.find((r: any) => Number(r.id) === Number(a.user_id));
+      if (!u || !password || !(await bcrypt.compare(password, String(u.password_hash || "")))) {
+        throw bad("That password is no longer the current one. Use \"New password\" and email the new one.", 409);
+      }
+      if (!isMailerConfigured()) throw bad("Email isn't set up on the server, so the login can't be mailed. Copy it and send it yourself.", 503);
+      const groups: any[] = await queryDB("/*unscoped*/ SELECT id, name, short_name, workspace_code FROM company_groups WHERE id = ?", [Number(u.group_id || 1)]).catch(() => []);
+      const g = groups.find((r: any) => Number(r.id) === Number(u.group_id || 1)) || {};
+      const envBase = String(process.env.PUBLIC_APP_URL || "").trim().replace(/\/+$/, "");
+      const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0];
+      const host = String(req.headers["x-forwarded-host"] || req.get?.("host") || "").split(",")[0];
+      const base = envBase || `${proto}://${host}`;
+      const link = `${base}/?${g.workspace_code ? `workspace=${encodeURIComponent(g.workspace_code)}&` : ""}login=${encodeURIComponent(a.onb_code)}`;
+      const esc = (v: any) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+      const days = u.secs != null && Number(u.secs) > 0 ? Math.max(1, Math.ceil(Number(u.secs) / 86400)) : null;
+      const company = String(g.short_name || g.name || "the company");
+      const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#0f172a;max-width:560px">
+<p style="margin:0 0 12px;font-size:18px;font-weight:bold">Welcome to ${esc(company)}, ${esc(a.name)}</p>
+<p style="margin:0 0 12px;line-height:1.5">Please sign in with the details below and fill in your joining information.</p>
+<p style="margin:0 0 12px"><a href="${esc(link)}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;padding:10px 18px;border-radius:999px;font-weight:bold">Open the login page</a></p>
+<p style="margin:0 0 12px;color:#64748b;word-break:break-all">${esc(link)}</p>
+<table style="border-collapse:collapse;margin:0 0 12px"><tr><td style="padding:4px 14px 4px 0;color:#64748b">Login ID</td><td style="font-family:Consolas,monospace;font-weight:bold">${esc(a.onb_code)}</td></tr>
+<tr><td style="padding:4px 14px 4px 0;color:#64748b">Temporary password</td><td style="font-family:Consolas,monospace;font-weight:bold">${esc(password)}</td></tr></table>
+<p style="margin:0 0 6px;line-height:1.5">You will be asked to set your own password the first time you sign in.${days ? ` This login works for ${days} more day${days === 1 ? "" : "s"}.` : ""}</p>
+<p style="margin:0;color:#64748b;font-size:12px">If you were not expecting this email, please ignore it.</p></div>`;
+      const sent = await sendMail({ to, subject: `Your ${company} joining login`, html });
+      if (!sent.success) throw bad(`Couldn't email ${to}: ${sent.error}`, 502);
+      await queryDB("/*unscoped*/ UPDATE onboarding_applications SET login_emailed_to = ?, login_emailed_at = NOW(), login_emailed_by = ?, email = COALESCE(email, ?) WHERE id = ?", [to, Number(req.user.id), to, Number(a.id)]).catch(() => {});
+      res.json({ success: true, emailed_to: to, link });
     } catch (err) {
       fail(res, err);
     }

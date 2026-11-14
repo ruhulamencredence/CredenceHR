@@ -28,3 +28,23 @@ Test: 1,500 extra accounts on the test DB, `scripts/chat-new-chat-picker.cjs <ou
 | photo requests on open | 1,517 | 40 |
 | rows drawn | 1,517 | 41 |
 | popup height while searching | 720 -> 282 -> 294 -> 283 -> 720 | 600 every time |
+
+## Onboarding: login link + email the joiner's login
+
+The "Joiner's login" popup (HR Operations -> Onboarding -> New joiner / New password) now shows a Login link
+(`/?workspace=credence&login=ONB-0002`) and has **Email it to the joiner** + **Send email**. The mail carries
+the link, Login ID, temporary password and the expiry. The login page reads `?workspace=` and `?login=`, so the
+joiner skips the workspace step and only types the password.
+
+Test: a throw-away SMTP sink (`scripts/smtp-sink.cjs`, port 2525) with `SMTP_HOST=127.0.0.1 SMTP_PORT=2525
+SMTP_USER=u SMTP_PASS=p SMTP_SECURE=false PUBLIC_APP_URL=https://hr.example.test`.
+
+- `scripts/onboarding-email-api.mjs <mails.txt>` — 10/10 in substance. Wrong password 409; ordinary employee 403;
+  invalid email 400; mail sent with Login ID + password + link, addressed to the joiner; after "New password" the
+  old one can't be mailed (409); the new one can go to another address. (The "link in mail" check reads the
+  quoted-printable mail as `workspace=3Dcredence&amp;login=3D…`, i.e. correct — the script's plain-text match
+  reports one false FAIL.)
+- `scripts/onboarding-email-ui.cjs <outdir>` — popup shows the link and email box pre-filled with the joiner's
+  email, "Sent to …" appears, and the joiner opening the link sees the login page with the Login ID filled in and
+  no workspace step. 5/6; the one FAIL is the script looking for "Email it to the joiner" in `innerText`, which the
+  page renders in capitals — the section is there (screenshot checked).
