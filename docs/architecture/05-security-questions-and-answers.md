@@ -213,3 +213,5 @@
 
 **প্রশ্ন: কর্মী কি নিজের Login ID (username) বদলে ফেলতে পারেন?**
 উত্তর: শুরুতে না — Profile-এ Change Username দেখায় না, আর server-ও (`PUT /api/profile/username`) ফিরিয়ে দেয়। Superadmin চাইলে Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করতে পারেন; তখন বর্তমান password দিয়ে বদলানো যায়। বন্ধ থাকলে দরকারে HR Users থেকে বদলে দেয় (Users module-এর Edit/Add layer লাগে)।
+
+**প্রশ্ন: "Their Branch" দিলে কেউ কি অন্য Branch-এর project-এ হাজিরা দিতে পারবেন?** না। প্রতিটা check in / out আর Correct Attendance-এ server নিজেই কর্মীর Employee record-এর Branch থেকে Project বের করে (`checkInProjectsFor`, `AttendanceProjects.ts`), app-এর পাঠানো project মানে না। Branch-এ Project যুক্ত না থাকলে কোথাও হাজিরা হয় না। এই অপশন শুধু Users module-এর edit_add layer আছে এমন Admin চালু করতে পারেন; কর্মীর Branch বদলানো যায় Employees module থেকে, তাই দুটো আলাদা অনুমতির ভেতরে থাকে।

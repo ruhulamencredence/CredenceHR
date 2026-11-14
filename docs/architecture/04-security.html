@@ -318,6 +318,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>GroupCallRoutes.ts</code></td>
 </tr>
 <tr>
+<td>কর্মী অন্য project-এ হাজিরা দেবেন</td>
+<td>Module Access-এ "Only these projects" বা "Their Branch" থাকলে server নিজে যাচাই করে কোন Project-এ check in / out / correction দেওয়া যায় — Their Branch-এ শুধু কর্মীর Employee record-এর Branch-এ যুক্ত Project (<code>branches.project_id</code>); Branch-এ Project না থাকলে কোথাও না। App থেকে পাঠানো project_id দিয়ে এটা এড়ানো যায় না। শুধু Users module + edit_add layer থাকা Admin বদলাতে পারেন; Admin-এর account শুধু Superadmin।</td>
+<td><code>AttendanceProjects.ts</code> <code>checkInProjectsFor</code>, <code>AttendanceRoutes.ts</code> <code>getAllowedProjectIds</code></td>
+</tr>
+<tr>
 <td>Project-এর বাইরে থেকে হাজিরা</td>
 <td>নিজের check-in project-এর radius-এর বাইরে দেওয়া In / Out সরাসরি হাজিরা হয় না; কারণ সহ approval-এর অনুরোধ হয়ে Timesheet-এর approval chain পার হলে তবেই <code>attendance</code>-এ লেখা হয়। জায়গা (GPS) ও দূরত্ব অনুরোধে থাকে, approver দেখেন। Server নিজে GPS দিয়ে আবার মাপে, তাই app-এর পাঠানো "offsite" দিয়ে কেউ নিজের project-এর নিয়ম এড়াতে পারে না (ভেতরে থাকলে সাধারণ হাজিরা)।</td>
 <td><code>AttendanceRoutes.ts</code> <code>offsitePunch</code>, <code>finalizeAttendanceCorrection</code></td>
