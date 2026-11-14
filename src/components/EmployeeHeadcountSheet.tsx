@@ -13,7 +13,7 @@ import * as XLSX from 'xlsx';
 import { Building2, ChevronRight, FileSpreadsheet, HardHat, Loader2, MapPin, Search, Users, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-import { SearchSelect } from './Combobox';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { useIsPhone } from '../lib/useScrolling';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
@@ -41,7 +41,14 @@ interface Data {
   total: number;
   groups: Group[];
   departments: string[];
+  department_counts?: Record<string, number>;
 }
+
+// Column filters of the people table: text for Employee / Phone, a pick-many
+// list for Branch / Designation / Department.
+type ColFilters = { who: string; phone: string; branch: string[]; designation: string[]; department: string[] };
+const NO_COL_FILTERS: ColFilters = { who: '', phone: '', branch: [], designation: [], department: [] };
+const blank = (v: string) => (v || '').trim() || 'Not set';
 
 const KIND_ICON = { 'Head Office': Building2, Project: HardHat, 'Not set': MapPin } as const;
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date());
@@ -59,8 +66,21 @@ export function employeeLayer(user: { role?: string; module_permission_layers?: 
 }
 
 // Every employee's details as Excel, in the HR Data Import layout.
-export async function exportEmployees(token: string, source: 'employees' | 'hr', status: 'active' | 'inactive' | 'all' = 'all', dept = ''): Promise<number> {
-  const qs = new URLSearchParams({ status, ...(dept ? { department: dept } : {}) }).toString();
+// `extra`: the Directory's search and Filters (EmployeeFilters.ts), so the
+// file holds exactly the people the list shows.
+export async function exportEmployees(
+  token: string,
+  source: 'employees' | 'hr',
+  status: 'active' | 'inactive' | 'all' = 'all',
+  dept: string | string[] = '',
+  extra: Record<string, string> = {}
+): Promise<number> {
+  const params = new URLSearchParams({ status, ...extra });
+  const depts = ([] as string[]).concat(dept).filter(Boolean);
+  for (const d of depts) params.append('department', d);
+  const qs = params.toString();
+  dept = depts.length > 1 ? `${depts.length} departments` : depts[0] || '';
+  const filtered = Object.keys(extra).length > 0;
   const r = await fetch(apiUrl(`${source === 'hr' ? '/api/hr-ops/employee-export' : '/api/employees/export'}?${qs}`), { headers: { Authorization: `Bearer ${token}` } });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || 'Could not export');
@@ -73,14 +93,14 @@ export async function exportEmployees(token: string, source: 'employees' | 'hr',
     ['Employee export'],
     [''],
     ['Rows', String(d.rows.length)],
-    ['Employees', `${statusLabel}${dept ? ` · ${dept}` : ''}`],
+    ['Employees', `${statusLabel}${dept ? ` · ${dept === '__none__' ? 'No department' : dept}` : ''}${filtered ? ` · ${Object.entries(extra).map(([k, v]) => `${k}: ${v}`).join(', ')}` : ''}`],
     ['Made', today()],
     ['Import back', 'Same columns as HR Data Import -> Employee Details: correct cells and import this file; empty cells keep what is saved. "Office / Project" is for reading only.'],
     ['Not included', 'Login ID, Password and salary payment accounts.']
   ]);
   info['!cols'] = [{ wch: 14 }, { wch: 110 }];
   XLSX.utils.book_append_sheet(wb, info, 'Instructions');
-  await saveWorkbookCrossPlatform(wb, `Employees_${statusLabel}${dept ? `_${dept.replace(/[^\w]+/g, '_')}` : ''}_${today()}.xlsx`);
+  await saveWorkbookCrossPlatform(wb, `Employees_${statusLabel}${dept && dept !== '__none__' ? `_${dept.replace(/[^\w]+/g, '_')}` : ''}${filtered ? '_filtered' : ''}_${today()}.xlsx`);
   return d.rows.length;
 }
 
@@ -94,7 +114,10 @@ export const EmployeeHeadcountSheet: React.FC<{
 }> = ({ token, source, canExport, onClose, onOpenEmployee }) => {
   const phone = useIsPhone();
   const [status, setStatus] = useState<'active' | 'inactive' | 'all'>('active');
-  const [dept, setDept] = useState('');
+  const [depts, setDepts] = useState<string[]>([]);
+  // Search in the left list (Head Office / Project and Branch names).
+  const [placeQ, setPlaceQ] = useState('');
+  const [cols, setCols] = useState<ColFilters>(NO_COL_FILTERS);
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -104,7 +127,11 @@ export const EmployeeHeadcountSheet: React.FC<{
 
   const base = source === 'hr' ? '/api/hr-ops' : '/api/employees';
   const exportPath = source === 'hr' ? '/api/hr-ops/employee-export' : '/api/employees/export';
-  const qs = useMemo(() => new URLSearchParams({ status, ...(dept ? { department: dept } : {}) }).toString(), [status, dept]);
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ status });
+    for (const d of depts) p.append('department', d);
+    return p.toString();
+  }, [status, depts]);
 
   useEffect(() => {
     let alive = true;
@@ -130,11 +157,43 @@ export const EmployeeHeadcountSheet: React.FC<{
     if (!g) return null;
     const list = pick.branch ? g.branches.find((b) => b.branch === pick.branch)?.people || [] : g.branches.flatMap((b) => b.people.map((p) => ({ ...p, _branch: b.branch })));
     const t = q.trim().toLowerCase();
+    const who = cols.who.trim().toLowerCase();
+    const ph = cols.phone.replace(/\D/g, '');
+    const all = list as (Person & { _branch?: string })[];
+    // Each column's choices, with how many rows have it (before the column filters).
+    const choices = (get: (p: Person & { _branch?: string }) => string) => {
+      const m = new Map<string, number>();
+      for (const p of all) m.set(blank(get(p)), (m.get(blank(get(p))) || 0) + 1);
+      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count }));
+    };
     return {
       title: pick.branch ? `${pick.branch} · ${g.kind}` : `${g.kind} — all branches`,
-      people: (list as (Person & { _branch?: string })[]).filter((p) => !t || [p.name, p.employee_id, p.designation, p.department, p.phone].some((v) => String(v || '').toLowerCase().includes(t)))
+      total: all.length,
+      options: { branch: choices((p) => p._branch || ''), designation: choices((p) => p.designation), department: choices((p) => p.department) },
+      people: all.filter(
+        (p) =>
+          (!t || [p.name, p.employee_id, p.designation, p.department, p.phone].some((v) => String(v || '').toLowerCase().includes(t))) &&
+          (!who || [p.name, p.employee_id].some((v) => String(v || '').toLowerCase().includes(who))) &&
+          (!ph || String(p.phone || '').replace(/\D/g, '').includes(ph)) &&
+          (!cols.branch.length || cols.branch.includes(blank(p._branch || ''))) &&
+          (!cols.designation.length || cols.designation.includes(blank(p.designation))) &&
+          (!cols.department.length || cols.department.includes(blank(p.department)))
+      )
     };
-  }, [data, pick, q]);
+  }, [data, pick, q, cols]);
+  // A new place starts with no column filters.
+  useEffect(() => setCols(NO_COL_FILTERS), [pick?.kind, pick?.branch]);
+  const colFiltersOn = !!(cols.who || cols.phone || cols.branch.length || cols.designation.length || cols.department.length);
+
+  // The left list, narrowed by its search.
+  const groups = useMemo(() => {
+    if (!data) return [];
+    const t = placeQ.trim().toLowerCase();
+    if (!t) return data.groups;
+    return data.groups
+      .map((g) => (g.kind.toLowerCase().includes(t) ? g : { ...g, branches: g.branches.filter((b) => b.branch.toLowerCase().includes(t)) }))
+      .filter((g) => g.branches.length > 0);
+  }, [data, placeQ]);
 
   const statusLabel = status === 'active' ? 'Active' : status === 'inactive' ? 'Inactive' : 'All';
 
@@ -162,7 +221,7 @@ export const EmployeeHeadcountSheet: React.FC<{
     setBusy(true);
     setError('');
     try {
-      await exportEmployees(token, source, status, dept);
+      await exportEmployees(token, source, status, depts);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -174,8 +233,14 @@ export const EmployeeHeadcountSheet: React.FC<{
     <div className="flex flex-col min-h-0 h-full">
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <h4 className="text-sm font-bold text-slate-900 flex-1 min-w-0 truncate">
-          {picked.title} <span className="text-slate-400 font-semibold">({picked.people.length})</span>
+          {picked.title}{' '}
+          <span className="text-slate-400 font-semibold">({picked.people.length === picked.total ? picked.total : `${picked.people.length} of ${picked.total}`})</span>
         </h4>
+        {colFiltersOn && (
+          <button type="button" onClick={() => setCols(NO_COL_FILTERS)} className="text-[11px] font-semibold text-slate-500 underline hover:text-slate-800">
+            Clear column filters
+          </button>
+        )}
         <label className="flex items-center gap-2 liquid-glass-inset rounded-full px-3 py-1.5 w-56">
           <Search className="w-3.5 h-3.5 text-slate-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="bg-transparent text-xs outline-none flex-1 min-w-0" />
@@ -190,6 +255,25 @@ export const EmployeeHeadcountSheet: React.FC<{
               <th className="px-3 py-2 font-semibold">Designation</th>
               <th className="px-3 py-2 font-semibold">Department</th>
               <th className="px-3 py-2 font-semibold">Phone</th>
+            </tr>
+            <tr className="text-left" data-testid="hc-col-filters">
+              <th className="px-3 pb-2">
+                <input value={cols.who} onChange={(e) => setCols((c) => ({ ...c, who: e.target.value }))} placeholder="Name or ID" aria-label="Filter by name or ID" className="w-full bg-white/90 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-normal outline-none focus:ring-2 focus:ring-blue-500" />
+              </th>
+              {!pick?.branch && (
+                <th className="px-3 pb-2">
+                  <MultiSelectFilter label="Branch" options={picked.options.branch} selected={cols.branch} onChange={(v) => setCols((c) => ({ ...c, branch: v }))} />
+                </th>
+              )}
+              <th className="px-3 pb-2">
+                <MultiSelectFilter label="Designation" options={picked.options.designation} selected={cols.designation} onChange={(v) => setCols((c) => ({ ...c, designation: v }))} />
+              </th>
+              <th className="px-3 pb-2">
+                <MultiSelectFilter label="Department" options={picked.options.department} selected={cols.department} onChange={(v) => setCols((c) => ({ ...c, department: v }))} />
+              </th>
+              <th className="px-3 pb-2">
+                <input value={cols.phone} onChange={(e) => setCols((c) => ({ ...c, phone: e.target.value }))} placeholder="Phone" inputMode="tel" aria-label="Filter by phone" className="w-full bg-white/90 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-normal outline-none focus:ring-2 focus:ring-blue-500" />
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -250,16 +334,15 @@ export const EmployeeHeadcountSheet: React.FC<{
                 </button>
               ))}
             </div>
-            <div className="w-52">
-              <SearchSelect value={dept} onChange={(e) => setDept(e.target.value)} className="w-full text-xs px-3 py-1.5 rounded-full bg-white/80 border border-white">
-                <option value="">— All departments —</option>
-                {(data?.departments || []).map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </SearchSelect>
-            </div>
+            <MultiSelectFilter
+              label={depts.length ? 'Departments' : 'All departments'}
+              options={[
+                ...(data?.departments || []).map((d) => ({ value: d, label: d, count: data?.department_counts?.[d] })),
+                ...(data?.department_counts?.__none__ ? [{ value: '__none__', label: 'No department', count: data.department_counts.__none__ }] : [])
+              ]}
+              selected={depts}
+              onChange={setDepts}
+            />
             <span className="flex items-center gap-2 ml-auto">
               <button type="button" onClick={downloadCounts} disabled={!data} className="liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
                 <FileSpreadsheet className="w-3.5 h-3.5" /> Headcount Excel
@@ -286,8 +369,23 @@ export const EmployeeHeadcountSheet: React.FC<{
             ) : (
               <>
                 <div className={`${phone ? 'flex-1' : 'w-[380px] shrink-0'} overflow-y-auto space-y-3 pr-1`}>
-                  {data.groups.length === 0 && <p className="text-sm text-slate-500 text-center py-16">Nobody.</p>}
-                  {data.groups.map((g) => {
+                  <label className="flex items-center gap-2 liquid-glass-inset rounded-full px-3 py-2 sticky top-0 z-[1]">
+                    <Search className="w-3.5 h-3.5 text-slate-400" />
+                    <input
+                      value={placeQ}
+                      onChange={(e) => setPlaceQ(e.target.value)}
+                      placeholder="Search project / branch…"
+                      aria-label="Search project or branch"
+                      className="bg-transparent text-xs outline-none flex-1 min-w-0"
+                    />
+                    {placeQ && (
+                      <button type="button" onClick={() => setPlaceQ('')} aria-label="Clear search">
+                        <X className="w-3 h-3 text-slate-400" />
+                      </button>
+                    )}
+                  </label>
+                  {groups.length === 0 && <p className="text-sm text-slate-500 text-center py-16">{placeQ ? 'No project or branch matches.' : 'Nobody.'}</p>}
+                  {groups.map((g) => {
                     const Icon = KIND_ICON[g.kind];
                     return (
                       <div key={g.kind} className="liquid-glass-inset rounded-2xl p-3">

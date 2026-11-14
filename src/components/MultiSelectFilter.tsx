@@ -83,7 +83,7 @@ export const MultiSelectFilter: React.FC<{
         <ChevronDown className="w-3.5 h-3.5" />
       </button>
       {open && createPortal(
-        <div ref={panel} className="fixed z-[90] bg-white border border-slate-200 shadow-xl rounded-xl" style={{ width, top: pos.top, left: pos.left }}>
+        <div ref={panel} className="fixed z-[95] bg-white border border-slate-200 shadow-xl rounded-xl" style={{ width, top: pos.top, left: pos.left }}>
           <div className="p-2.5 border-b border-slate-100">
             <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg">
               <Search className="w-3.5 h-3.5 text-slate-400" />

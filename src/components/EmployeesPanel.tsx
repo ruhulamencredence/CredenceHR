@@ -19,6 +19,7 @@ import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
 import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
 import { EmployeeHeadcountSheet, employeeLayer, exportEmployees } from './EmployeeHeadcountSheet';
+import { EmployeeFilterBar } from './EmployeeFilterBar';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
@@ -327,7 +328,7 @@ const EmployeesTableSkeleton: React.FC = () => {
 // Where the list was (search, filters, page, scroll) when a row's key button
 // opened Module Access; read back once when Back returns here.
 const RETURN_VIEW_KEY = 'credence_employees_return_view';
-interface EmployeesReturnView { search: string; status: 'all' | 'active' | 'inactive'; dept: string; page: number; pageSize: number; scrollY: number }
+interface EmployeesReturnView { search: string; status: 'all' | 'active' | 'inactive'; dept: string; filters?: Record<string, string>; page: number; pageSize: number; scrollY: number }
 function takeReturnView(): EmployeesReturnView | null {
   try {
     const raw = sessionStorage.getItem(RETURN_VIEW_KEY);
@@ -351,6 +352,15 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(rv?.status ?? 'all');
   // Department filter: '' = all, '__none__' = no department, else the department's name.
   const [deptFilter, setDeptFilter] = useState(rv?.dept ?? '');
+  // The rest of the Filters (EmployeeFilters.ts on the server): key -> value.
+  const [filters, setFilters] = useState<Record<string, string>>(rv?.filters ?? {});
+  const [filterOptions, setFilterOptions] = useState<Record<string, { value: string; count?: number; label?: string }[]>>({});
+  const setFilter = (k: string, v: string) => setFilters((f) => {
+    const n = { ...f };
+    if (v) n[k] = v;
+    else delete n[k];
+    return n;
+  });
   // Office / Project & Branch headcount (EmployeeHeadcountSheet) and Export —
   // each its own Employees layer.
   const canHeadcount = employeeLayer(user, 'employees', 'headcount');
@@ -365,7 +375,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // Who's who for the Supervisor / Transfer pickers (light: id, code, name…).
   const [pickerEmployees, setPickerEmployees] = useState<Employee[]>([]);
   const empReq = useRef(0);
-  const listQuery = useRef({ page: 1, pageSize: 50, q: '', status: 'all', department: '' });
+  const listQuery = useRef<{ page: number; pageSize: number; q: string; status: string; department: string; filters: Record<string, string> }>({ page: 1, pageSize: 50, q: '', status: 'all', department: '', filters: {} });
   // Directory (the employee table) vs. all-employees Change History.
   const [view, setView] = useState<'directory' | 'history'>('directory');
 
@@ -501,10 +511,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // One page of the directory, as the search / status / page currently say.
   const fetchEmployees = useCallback(async () => {
     const req = ++empReq.current;
-    const { page: p, pageSize: size, q, status, department } = listQuery.current;
+    const { page: p, pageSize: size, q, status, department, filters: fl } = listQuery.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(p), limit: String(size), q, status });
+      const params = new URLSearchParams({ page: String(p), limit: String(size), q, status, options: '1', ...fl });
       if (department) params.set('department', department);
       const res = await fetch(apiUrl(`/api/employees?${params.toString()}`), { headers: authHeaders });
       if (req !== empReq.current) return; // a newer request is on its way
@@ -513,6 +523,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         setEmployees(Array.isArray(data) ? data : data.rows || []);
         setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
         if (data.counts) setCounts(data.counts);
+        if (data.options) setFilterOptions(data.options);
       }
     } catch {
       setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
@@ -1256,7 +1267,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       return;
     }
     setPage(1);
-  }, [appliedSearch, statusFilter, deptFilter, pageSize]);
+  }, [appliedSearch, statusFilter, deptFilter, filters, pageSize]);
   // Back at the same place in the list once it has loaded.
   const restoreScroll = useRef(rv?.scrollY ?? 0);
   useEffect(() => {
@@ -1266,9 +1277,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
     requestAnimationFrame(() => window.scrollTo({ top: y }));
   }, [loading]);
   useEffect(() => {
-    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter };
+    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter, department: deptFilter, filters };
     fetchEmployees();
-  }, [page, pageSize, appliedSearch, statusFilter, deptFilter, fetchEmployees]);
+  }, [page, pageSize, appliedSearch, statusFilter, deptFilter, filters, fetchEmployees]);
   const filtered = employees;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -1305,7 +1316,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               onClick={async () => {
                 setExporting(true);
                 try {
-                  const n = await exportEmployees(token, 'employees', statusFilter, deptFilter && deptFilter !== '__none__' ? deptFilter : '');
+                  const n = await exportEmployees(token, 'employees', statusFilter, deptFilter, { ...filters, ...(appliedSearch ? { q: appliedSearch } : {}) });
                   setMessage({ type: 'success', text: `Exported ${n} employees.` });
                 } catch (e: any) {
                   setMessage({ type: 'error', text: e.message });
@@ -1314,7 +1325,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                 }
               }}
               className="flex items-center justify-center gap-1.5 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap disabled:opacity-50"
-              title="Every employee shown by the Status / Department filters, as Excel in the HR Data Import layout"
+              title="Every employee the search and filters show (all pages), as Excel in the HR Data Import layout"
             >
               <FileSpreadsheet className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export'}
             </button>
@@ -1365,41 +1376,25 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       </div>
 
       {view === 'directory' && (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search employees"
-              placeholder="Search by name, ID, designation, department, branch, email, phone…"
-              className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            />
-          </div>
-          <select
-            aria-label="Status filter"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-          >
-            <option value="all">All ({counts.all})</option>
-            <option value="active">Active ({counts.active})</option>
-            <option value="inactive">Inactive ({counts.inactive})</option>
-          </select>
-          <SearchSelect
-            aria-label="Department filter"
-            value={deptFilter}
-            onChange={(e) => setDeptFilter(e.target.value)}
-            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-          >
-            <option value="">All departments</option>
-            {[...new Set(departments.map((d) => d.name))].sort((a, b) => a.localeCompare(b)).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-            <option value="__none__">No department</option>
-          </SearchSelect>
-        </div>
+        <EmployeeFilterBar
+          search={search}
+          onSearch={setSearch}
+          status={statusFilter}
+          onStatus={setStatusFilter}
+          counts={counts}
+          total={total}
+          dept={deptFilter}
+          onDept={setDeptFilter}
+          departments={[...new Set(departments.map((d) => d.name))].sort((a, b) => a.localeCompare(b))}
+          filters={filters}
+          onFilter={setFilter}
+          options={filterOptions}
+          onClearAll={() => {
+            setSearch('');
+            setDeptFilter('');
+            setFilters({});
+          }}
+        />
       )}
 
       {unlinkedOpen && <UnlinkedLoginsPopup token={token} onClose={() => setUnlinkedOpen(false)} onLinked={() => void fetchEmployees()} />}
@@ -1512,7 +1507,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                               type="button"
                               onClick={() => {
                                 try {
-                                  sessionStorage.setItem(RETURN_VIEW_KEY, JSON.stringify({ search, status: statusFilter, dept: deptFilter, page, pageSize, scrollY: window.scrollY }));
+                                  sessionStorage.setItem(RETURN_VIEW_KEY, JSON.stringify({ search, status: statusFilter, dept: deptFilter, filters, page, pageSize, scrollY: window.scrollY }));
                                 } catch {
                                   // storage unavailable — Back opens the list from the top
                                 }
