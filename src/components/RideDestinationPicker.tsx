@@ -81,9 +81,11 @@ export const GLASS_CARD =
 interface RideDestinationPickerProps {
   initial?: RidePlaces | null;
   onDone: (places: RidePlaces) => void;
+  // In a popup (the Dashboard's Book a Ride): a shorter map.
+  compact?: boolean;
 }
 
-export function RideDestinationPicker({ initial, onDone }: RideDestinationPickerProps) {
+export function RideDestinationPicker({ initial, onDone, compact = false }: RideDestinationPickerProps) {
   const [pickup, setPickup] = useState(initial?.pickup_location || '');
   const [locating, setLocating] = useState(false);
   const [query, setQuery] = useState(initial?.destination || '');
@@ -467,7 +469,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
     <div className={wideWeb ? 'grid grid-cols-[minmax(0,1fr)_400px] gap-5 items-start' : 'max-w-xl'}>
       {wideWeb && (
         <RideBookingMap
-          className="h-[calc(100vh-230px)] min-h-[480px] !rounded-[28px] !border-white/80 shadow-[0_18px_40px_-24px_rgba(85,0,170,0.45)]"
+          className={`${compact ? 'h-[min(62vh,560px)] min-h-[380px]' : 'h-[calc(100vh-230px)] min-h-[480px]'} !rounded-[28px] !border-white/80 shadow-[0_18px_40px_-24px_rgba(85,0,170,0.45)]`}
           here={here}
           pickup={pickupCoords}
           destination={destPlace && destPlace.lat != null && destPlace.lng != null ? { lat: destPlace.lat, lng: destPlace.lng } : null}
@@ -478,7 +480,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
           onPickProject={pickProject}
         />
       )}
-      <div className={wideWeb ? `${RIDE_CARD} p-5 lg:max-h-[calc(100vh-230px)] lg:overflow-y-auto` : `p-3 ${GLASS_CARD}`}>
+      <div className={wideWeb ? `${RIDE_CARD} p-5 ${compact ? 'lg:max-h-[min(62vh,560px)]' : 'lg:max-h-[calc(100vh-230px)]'} lg:overflow-y-auto` : `p-3 ${GLASS_CARD}`}>
       {wideWeb && (
         <div className="flex items-center gap-2.5 mb-4">
           <span className="w-9 h-9 rounded-xl bg-[var(--g-accent-soft)] flex items-center justify-center">

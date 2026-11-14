@@ -96,7 +96,7 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
   // number of Android WebViews.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+      className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
         paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
@@ -106,22 +106,23 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
         role="dialog"
         aria-modal="true"
         aria-label="New Requisition"
-        className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col"
+        className="liquid-glass liquid-glass-in rounded-[32px] max-w-2xl w-full overflow-hidden flex flex-col"
         style={{ maxHeight: '100%' }}
       >
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
+        <div className="px-5 pt-5 pb-3 flex items-center justify-between shrink-0">
           <h3 className="text-base font-bold text-slate-900">New Requisition</h3>
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-40"
+            aria-label="Close"
+            className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600 disabled:opacity-40"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form id="new-asset-requisition-form" onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto min-h-0">
+        <form id="new-asset-requisition-form" onSubmit={handleSubmit} className="px-5 py-2 space-y-4 overflow-y-auto min-h-0">
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Items</label>
@@ -133,7 +134,7 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
                 + Add Item
               </button>
             </div>
-            <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+            <div className="liquid-glass-inset rounded-2xl divide-y divide-slate-100">
               {/* Column header — shown once, only where the grid actually
                   lays out side-by-side (sm+). Below that, columns stack
                   full-width, so each row keeps its own compact label
@@ -239,12 +240,12 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
           )}
         </form>
 
-        <div className="p-5 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
+        <div className="px-5 pt-3 pb-5 flex items-center justify-end gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
+            className="liquid-glass-chip px-5 py-2.5 disabled:opacity-50 text-slate-700 text-sm font-semibold rounded-full"
           >
             Cancel
           </button>
@@ -252,7 +253,7 @@ export const NewAssetRequisitionModal: React.FC<NewAssetRequisitionModalProps> =
             type="submit"
             form="new-asset-requisition-form"
             disabled={submitting}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-colors"
+            className="liquid-glass-button px-5 py-2.5 disabled:opacity-50 font-semibold rounded-full text-sm"
           >
             {submitting ? 'Submitting…' : 'Submit Request'}
           </button>

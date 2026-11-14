@@ -167,6 +167,21 @@ app (CSS injected), approved, then built.
   Attendance Report, Employee Tracking (cards over the map), chat popup, Profile, phone More popup, phone Employees,
   phone Appearance — all readable; the phone header keeps its colour and white logo.
 
+## Dashboard: Book a Ride and My Asset requisition in a popup
+
+On the computer Dashboard, "Where are you going?" (Book a Ride card) and "New requisition" (My Asset card) now
+open a liquid-glass popup over the Dashboard instead of going to the page. The ride booking is one component,
+`RideBookingFlow.tsx`, used by both the popup and Self Service -> Book a Ride, so the two can't drift apart. The
+New Requisition popup moved to the liquid-glass house style. No new API or permission: same requests, same cards.
+
+- `scripts/dashboard-popups.cjs` (Superadmin, 1440x900): **17/17** — the asset popup opens on the Dashboard,
+  submits, closes and the card's "Open requests" count updates without a reload; the ride popup shows the two
+  steps, Continue goes to step 2 inside it, Submit saves the ride, closes, and the card shows the ride without a
+  reload; Esc closes; "Ride Status" still opens the Vehicle page; booking on the Vehicle page still works (success
+  notice, switches to Ride Status). No page errors.
+- 1280x720 and 820-wide windows: popup fits, no sideways scroll; narrow windows get the phone-style picker.
+- Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

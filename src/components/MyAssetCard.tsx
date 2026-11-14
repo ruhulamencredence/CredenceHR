@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useLiveTick } from '../lib/liveRefresh';
+import { useLiveTick, RECORDS_CHANGED_EVENT } from '../lib/liveRefresh';
+import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
 import { Package, Plus, ChevronRight } from 'lucide-react';
@@ -96,6 +97,7 @@ const AssetShelfBg: React.FC = () => (
 );
 
 export const MyAssetCard: React.FC<MyAssetCardProps> = ({ token, onOpen, className = '' }) => {
+  const [showNew, setShowNew] = useState(false);
   const summary = useMyAssetSummary(token);
   const stats: { label: string; value: number | null; target: MyAssetTarget; warn?: boolean }[] = [
     { label: 'Assets held', value: summary?.held ?? null, target: 'my-assets' },
@@ -134,7 +136,9 @@ export const MyAssetCard: React.FC<MyAssetCardProps> = ({ token, onOpen, classNa
         </div>
         <button
           type="button"
-          onClick={() => onOpen('new')}
+          // The New Requisition popup opens right here on the Dashboard; on
+          // submit the counts above refresh (no trip to the My Asset page).
+          onClick={() => setShowNew(true)}
           className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200 text-left hover:border-blue-300 hover:bg-white transition-colors"
         >
           <Plus className="w-5 h-5 text-blue-600 shrink-0" />
@@ -142,6 +146,16 @@ export const MyAssetCard: React.FC<MyAssetCardProps> = ({ token, onOpen, classNa
           <ChevronRight className="w-4 h-4 text-slate-400" />
         </button>
       </div>
+      {showNew && (
+        <NewAssetRequisitionModal
+          onClose={() => setShowNew(false)}
+          onSubmitted={() => {
+            setShowNew(false);
+            // The counts (Open requests…) and any other screen listening refresh now.
+            window.dispatchEvent(new CustomEvent(RECORDS_CHANGED_EVENT, { detail: { type: 'asset_requisition', related_type: 'asset_requisition', related_id: null } }));
+          }}
+        />
+      )}
     </div>
   );
 };
