@@ -132,7 +132,7 @@ function formatMoney(n: number): string {
 function formatTime(ts: string | null | undefined): string {
   if (!ts) return '—';
   try {
-    return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   } catch {
     return '—';
   }
