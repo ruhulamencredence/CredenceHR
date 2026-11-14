@@ -1003,3 +1003,7 @@ CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 
 ### অপেক্ষায় থাকা আবেদনের বিস্তারিত — যেখানে দেখা যায় সেখানেই (১২ নভেম্বর)
 
 যেখানে কোনো আবেদন কারও approval-এর অপেক্ষায় দেখা যায়, সেখানে শুধু নাম নয় — আবেদনের পুরো বিস্তারিত (কী চাওয়া, কত টাকা / কত দিন, কারণ, সংযুক্ত ফাইল) সারির নিচেই খোলে (`RequestDetailsInline`, `RequestDetails.tsx`): Dashboard-এর Pending Approvals কার্ড, ঘণ্টা (My Approvals bell), Admin Panel → Approvals, Admin Dashboard-এর "Stuck for 3+ days"। Admin Dashboard-এর "Pending Advance Salary" আর "Pending Asset Requisition" টাইল এখন তালিকার popup খোলে — প্রতিটি আবেদনের বিস্তারিতসহ, আর সেখান থেকে Payroll / Asset Management-এ যাওয়ার পথ। History-তে আগের মতো "Details" বোতাম। বিস্তারিত কে দেখতে পারেন তা 04-security.md-এ।
+
+## Superadmin যোগ করা (Platform → Workspaces)
+
+System owner একটা workspace-এর Superadmins-এ **Add a Superadmin**-এ email দেন। Email নতুন হলে নাম আর পাসওয়ার্ড দিয়ে নতুন account তৈরি হয়। Email যদি ঐ workspace-এর কারও account-এর হয় (User বা Admin), সেই account-ই Superadmin হয়ে যায় — পাসওয়ার্ড, ছবি, হাজিরা, ছুটি সব আগের মতো; তাঁকে একবার আবার লগইন করতে হয়। অন্য workspace-এর account হলে বা আগে থেকেই Superadmin হলে বার্তা দেখায়। Remove দিলে account Admin হিসেবে থেকে যায় (`CompanyRoutes.ts`, `PlatformWorkspaces.tsx`)।

@@ -1308,6 +1308,11 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     return { u, others: rows.filter((r) => Number(r.group_id ?? DEFAULT_GROUP_ID) === groupId && r.role === "superadmin" && Number(r.id) !== userId) };
   };
 
+  // Add a Superadmin. A new email makes a new account (name + password). An
+  // email that already has an account in THIS workspace makes that account a
+  // Superadmin instead — same login, password and history; its sign-ins are
+  // ended so the new rights apply at once. An account of another workspace is
+  // refused (an account belongs to one workspace).
   app.post("/api/platform/workspaces/:id/superadmins", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
     try {
       const groupId = Number(req.params.id);
@@ -1316,12 +1321,35 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const name = String(req.body?.name || "").trim().slice(0, 100);
       const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 150);
       const password = String(req.body?.password || "");
-      if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Enter the name and a valid email.");
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Enter a valid email.");
+      const companies = await companiesOfGroup(queryDB, groupId);
+      const mother = companies.find((c) => Number(c.is_mother) === 1) || companies[0];
+      const allUsers: any[] = (await queryDB("/*unscoped*/ SELECT id, name, email, role, group_id FROM users").catch(() => [])) || [];
+      const existing = allUsers.find((u) => String(u.email || "").toLowerCase() === email);
+      if (existing) {
+        const uid = Number(existing.id);
+        if (Number(existing.group_id ?? DEFAULT_GROUP_ID) !== groupId) {
+          throw bad("That email belongs to an account in another workspace — an account can be in one workspace only.");
+        }
+        if (existing.role === "superadmin") throw bad(`${existing.name || email} is already a Superadmin of this workspace.`);
+        await queryDB("/*unscoped*/ UPDATE users SET role = 'superadmin' WHERE id = ?", [uid]);
+        if (mother) {
+          const access: any[] = (await queryDB("/*unscoped*/ SELECT company_id FROM user_company_access WHERE user_id = ?", [uid]).catch(() => [])) || [];
+          if (!access.some((a) => Number(a.company_id) === Number(mother.id))) {
+            await queryDB(
+              "/*unscoped*/ INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE user_id = user_id",
+              [uid, Number(mother.id), access.length ? 0 : 1]
+            ).catch(() => {});
+          }
+        }
+        invalidateCompanyAccess(uid);
+        await endAllSessions(queryDB, uid, "signed_out");
+        return void res.json({ success: true, id: uid, promoted: true, name: existing.name || email });
+      }
+      if (!name) throw bad("Enter the name — this email has no account yet, so a new one is made.");
       const pwBadS = passwordProblem(password, { email, name });
       if (pwBadS) throw bad(pwBadS);
       await assertEmailFree(email);
-      const companies = await companiesOfGroup(queryDB, groupId);
-      const mother = companies.find((c) => Number(c.is_mother) === 1) || companies[0];
       const hash = await bcrypt.hash(password, 10);
       const u: any = await queryDB("INSERT INTO users (name, email, password_hash, role, group_id) VALUES (?, ?, ?, 'superadmin', ?)", [name, email, hash, groupId]);
       if (mother) await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [Number(u.insertId), Number(mother.id), 1]);

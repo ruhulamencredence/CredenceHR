@@ -114,6 +114,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>কাউকে Superadmin কে বানাতে পারেন? যিনি আগে থেকেই User/Admin, তাঁকে?</td>
+<td>শুধু system owner, Platform → Workspaces → Superadmins থেকে। ঐ workspace-এর কারও email দিলে তাঁর পুরনো account-ই Superadmin হয় (পাসওয়ার্ড একই, সব sign-in শেষ — আবার লগইন করতে হয়); অন্য workspace-এর account দেওয়া যায় না; সাধারণ Superadmin বা Admin কাউকে Superadmin করতে পারেন না (403)। টেস্ট (১৪ নভেম্বর): পুরনো account → Superadmin, পুরনো token 401; আবার → "already"; অন্য workspace → আটকায়; system owner নন → 403।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়?</td>
 <td>তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)।</td>
 <td>✅</td>
