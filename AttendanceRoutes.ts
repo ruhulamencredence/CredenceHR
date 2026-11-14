@@ -32,6 +32,7 @@ import { loadRoster } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { restrictedAttendanceProjects } from "./AttendanceProjects";
 import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
+import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -261,8 +262,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             : { at: r.check_out_at, source: "remote", place: (r.check_out_project_id != null ? r.check_out_project_name : r.project_name) || null, project_id: pid, row: r };
         }
       }
+      // A machine punch only a few minutes after the In is the same arrival
+      // tapped twice, not the Out (zkPunchRule.ts).
+      const gap = (await loadPunchGap(queryDB))(day);
       for (const pu of punches) {
-        if (!(t(pu.punch_time) > inT)) continue;
+        if (!(t(pu.punch_time) > inT) || !farEnoughFromIn(gap, inS.at, pu.punch_time)) continue;
         if (!outS || t(pu.punch_time) > t(outS.at)) outS = { at: pu.punch_time, source: "office", place: pu.device_name || null, project_id: null, row: null };
       }
     }
@@ -730,8 +734,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         check_out_approval: outRow?.check_out_approval ?? null,
         check_out_first_at: outRow?.check_out_first_at ?? null,
         check_out_update_count: Number(outRow?.check_out_update_count || 0),
-        // An Out Time given here (not by the office device) can be given again today.
-        can_update_check_out: !!outRow && (await canUpdateCheckOut(req.user))
+        // An Out Time — given here or taken from the office machine — can be
+        // given again today by an account allowed to (users.can_update_check_out).
+        // The machine's punch is never changed: the new Out comes later, so it
+        // becomes the day's Out (the last punch after the In).
+        can_update_check_out: !!outS && (await canUpdateCheckOut(req.user))
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -773,7 +780,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!remoteRow && !office) return res.json(null);
 
       const check_in_at = remoteRow?.check_in_at || office?.check_in_at || null;
-      const check_out_at = remoteRow?.check_out_at || office?.check_out_at || null;
+      // Office machine double punch: a punch within N minutes of the In isn't the Out.
+      const officeOut = office?.check_out_at && farEnoughFromIn((await loadPunchGap(queryDB))(today), check_in_at, office.check_out_at) ? office.check_out_at : null;
+      const check_out_at = remoteRow?.check_out_at || officeOut || null;
 
       res.json({
         id: remoteRow?.id ?? null,
@@ -792,12 +801,13 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         check_out_remarks: remoteRow?.check_out_remarks ?? null,
         check_out_first_at: remoteRow?.check_out_first_at ?? null,
         check_out_update_count: Number(remoteRow?.check_out_update_count || 0),
-        // An Out Time given here (not by the office device) can be given again today.
-        can_update_check_out: !!remoteRow?.check_out_at && (await canUpdateCheckOut(req.user)),
+        // An Out Time — given here or taken from the office machine — can be
+        // given again today by an account allowed to (users.can_update_check_out).
+        can_update_check_out: !!check_out_at && (await canUpdateCheckOut(req.user)),
         check_in_approval: remoteRow?.check_in_approval ?? null,
         check_out_approval: remoteRow?.check_out_approval ?? null,
         check_in_source: remoteRow?.check_in_at ? "remote" : office?.check_in_at ? "office" : null,
-        check_out_source: remoteRow?.check_out_at ? "remote" : office?.check_out_at ? "office" : null
+        check_out_source: remoteRow?.check_out_at ? "remote" : officeOut ? "office" : null
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -845,6 +855,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           [emp[0].zk_device_pin]
         );
         const t = (v: any) => (v ? new Date(v).getTime() : NaN);
+        // Office machine double punch: a punch within N minutes of the In isn't the Out.
+        const punchGap = await loadPunchGap(queryDB);
         for (const o of officeRows) {
           const dateStr = String(o.attendance_date).slice(0, 10);
           if (datesWithRemote.has(dateStr)) {
@@ -856,7 +868,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             const firstIn = ins.length ? Math.min(...ins) : NaN;
             const earlierIn = !(t(o.check_in_at) >= firstIn) ? o.check_in_at : null;
             const dayIn = earlierIn ? t(earlierIn) : firstIn;
-            const laterPunch = [o.last_punch, o.check_in_at].find((p) => t(p) > dayIn) || null;
+            const laterPunch = [o.last_punch, o.check_in_at].find((p) => t(p) > dayIn && farEnoughFromIn(punchGap(dateStr), dayIn, p)) || null;
             if (!earlierIn && !laterPunch) continue;
             mapped.push({
               id: -Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 1000),
@@ -881,7 +893,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             project_name: 'Office Attendance',
             attendance_date: dateStr,
             check_in_at: o.check_in_at,
-            check_out_at: o.check_out_at
+            check_out_at: o.check_out_at && farEnoughFromIn(punchGap(dateStr), o.check_in_at, o.check_out_at) ? o.check_out_at : null
           });
         }
       }
@@ -1415,6 +1427,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     // device isn't wrongly counted Absent. Skipped entirely when filtering by
     // project_id, since Office Attendance has no project of its own.
     const officeByUserDate = new Map<string, any>();
+    // Office machine double punch: a punch within N minutes of the In isn't the Out.
+    const punchGap = await loadPunchGap(queryDB);
     if (!project_id) {
       const employees = await queryDB(
         "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
@@ -1541,10 +1555,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           const t = (v: any) => (v ? new Date(v).getTime() : NaN);
           if (!rec || !rec.check_in_at) {
             if (!hasIn) {
+              const officeOut = office.check_out_at && farEnoughFromIn(punchGap(dateStr), office.check_in_at, office.check_out_at) ? office.check_out_at : null;
               hasIn = true;
-              hasOut = !!office.check_out_at;
+              hasOut = !!officeOut;
               checkInAt = office.check_in_at;
-              checkOutAt = office.check_out_at;
+              checkOutAt = officeOut;
               projectName = rec ? projectName : null;
               source = "office";
             }
@@ -1555,7 +1570,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             }
             const inT = t(checkInAt);
             for (const p of [office.check_in_at, office.last_punch]) {
-              if (t(p) > inT && (!checkOutAt || t(p) > t(checkOutAt))) checkOutAt = p;
+              if (t(p) > inT && farEnoughFromIn(punchGap(dateStr), checkInAt, p) && (!checkOutAt || t(p) > t(checkOutAt))) checkOutAt = p;
             }
             hasOut = !!checkOutAt;
           }
@@ -1723,6 +1738,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // row on this date. Remote Attendance rows above are never overridden.
       // Skipped when filtering by project_id, since Office Attendance has none.
       const officeByUserId = new Map<number, any>();
+      // Office machine double punch: a punch within N minutes of the In isn't the Out.
+      const dayGap = (await loadPunchGap(queryDB))(date);
       if (!project_id) {
         const officeRows = await queryDB(
           // Same single-punch guard — see the other zk_attendance_logs
@@ -1757,7 +1774,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
                 inAt = o.check_in_at;
                 src = "office";
               }
-              for (const p of [o.check_in_at, o.last_punch]) if (t(p) > t(inAt) && (!outAt || t(p) > t(outAt))) outAt = p;
+              for (const p of [o.check_in_at, o.last_punch]) if (t(p) > t(inAt) && farEnoughFromIn(dayGap, inAt, p) && (!outAt || t(p) > t(outAt))) outAt = p;
             }
             return {
               user_id: u.id,
@@ -1782,7 +1799,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             department: departmentByUserId.get(u.id) || null,
             project_name: null,
             check_in_at: o.check_in_at || null,
-            check_out_at: o.check_out_at || null,
+            check_out_at: o.check_out_at && farEnoughFromIn(dayGap, o.check_in_at, o.check_out_at) ? o.check_out_at : null,
             check_in_distance_m: null,
             check_out_distance_m: null,
             check_in_remarks: null,

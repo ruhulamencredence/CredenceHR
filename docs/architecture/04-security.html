@@ -179,6 +179,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>FeedbackRoutes.ts</code></td>
 </tr>
 <tr>
+<td>অফিস মেশিনের ডাবল punch নিয়ম</td>
+<td>দেখতে Office Attendance module; বদলাতে আলাদা layer <code>punch_rules</code> ("Double punch rule", explicit-only — কারও আপনাআপনি নেই), না হলে API 403। বদল শুধু আজ থেকে লাগে, আগের দিনের হিসাব বদলানো যায় না; কে, কবে বদলাল তা <code>zk_punch_rules</code>-এ থাকে। মেশিনের punch কখনো মোছা হয় না</td>
+<td><code>zkPunchRule.ts</code>, <code>OfficeAttendanceRoutes.ts</code></td>
+</tr>
+<tr>
 <td>onboarding লগইন mail করা</td>
 <td>HR joiner-এর অস্থায়ী login (link, Login ID, password) mail করতে পারে, শুধু <code>onboarding_create</code> layer থাকলে। Password জমা থাকে না — popup যেটা দেখাচ্ছে সেটা server বর্তমান hash-এর সাথে মিলিয়ে নেয়, তাই ভুল বা পুরোনো password পাঠানো যায় না (409) আর কোম্পানির নামে যা খুশি লেখা mail করা যায় না। লগে শুধু প্রাপক, সময় ও কে পাঠাল, password নয়। Mail অন্য কারো হাতে পড়লেও login শুধু "My Onboarding"-এ সীমিত, মেয়াদ আছে, প্রথম login-এ password বদলাতে হয়</td>
 <td><code>OnboardingSelfServiceRoutes.ts</code></td>

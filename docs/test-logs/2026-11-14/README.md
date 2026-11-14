@@ -69,3 +69,42 @@ SMTP_USER=u SMTP_PASS=p SMTP_SECURE=false PUBLIC_APP_URL=https://hr.example.test
   "Longest waiting", "Pending · …", Mark done -> note -> "Done · took …", Done filter + Reopen, no sideways scroll
   on a phone. (A real Ctrl+V can't be driven from the test browser, so the paste event is dispatched with an
   image on it; the handler is the same.)
+
+## Office machine double punch: not the Out; "Set again" on a machine Out
+
+**Problem.** The ZKTeco machine has no In / Out key: first punch = In, last = Out. Tapping twice on arrival gave
+an Out seconds after the In, and the app then had no way to give the real Out.
+
+**Step 2 — the rule (`zkPunchRule.ts`).** A machine punch is the day's Out only if it is at least N minutes after
+the day's In (the earliest In, machine or app). Earlier punches stay on record; they just aren't the Out.
+N = 5 by default, changed in Office Attendance -> **Double punch** (0 = off) with the new layer `punch_rules`
+(explicit only). Each rule has an "effective from" date and a change always starts **today**, so earlier days —
+closed months, sent reports — keep the rule they had; a day before the first rule keeps the old behaviour.
+Applied in every place that turns machine punches into an Out: My Attendance card (`dayPicture`), `/status`,
+My Attendance history (`/mine`), Monthly and Daily reports, Office Attendance report, HR 360 days, Site Attendance
+machine suggestion. Payroll uses only the first In and present days, so it is untouched; OT is untouched.
+
+**Step 1.** With "Remote Attendance — update Out Time" (`users.can_update_check_out`), the card offers
+**Set again** when the Out came from the machine too. The new Out is given now from the app and goes for
+approval; the machine punch is never changed — the later time simply becomes the day's Out.
+
+Setup: `scripts/double-punch-setup.sql` (Tanvir, machine PIN 102: a normal day 2 days ago, a double punch
+yesterday, a double punch today). DB and server on Dhaka time for the check-out steps.
+
+- **Old vs new on the same data** — `scripts/double-punch-capture.mjs` run on the old code (stash) and on the
+  new code, compared with `scripts/double-punch-diff.mjs`: 10 differences, **all today's double punch**
+  (Out 09:01:30 -> none) in the monthly report, daily report, HR 360, My Attendance history, card and `/status`.
+  Yesterday's double punch (before the rule) still has its 09:01 Out; last month is identical.
+- `scripts/double-punch-api.mjs` — 36/36: rule starts at 5 min today; Superadmin can edit; HR with Office
+  Attendance sees it but can't change it (403) until given the layer; employee 403; bad values 400; 09:00 + 09:04
+  -> no Out in card / Office report (2 punches shown) / daily / monthly / HR 360; exactly 5 minutes later IS the
+  Out; a real 18:00 punch is still the Out everywhere; set to 0 -> old behaviour back today; saving twice the same
+  day doesn't stack; history shows who; yesterday keeps 09:01; after a double punch the employee gives the Out
+  from the app with no special permission and the machine punches stay; machine Out 13:00 -> "Set again" only
+  with the permission, `/status` agrees, it saves, the app Out becomes the day's Out, goes for approval, the 13:00
+  punch is still there.
+- `scripts/double-punch-ui.cjs` — 6/6: phone card shows "Set Now" after a double punch; a machine Out 01:00 PM
+  shows "Set again" and the confirm says the machine punch stays on record; Office Attendance shows
+  "Double punch: 5 min" and the popup; no sideways scroll on a phone.
+- Not covered by a test: the Site Attendance machine suggestion (needs a supervisor team set up); it uses the
+  same helper.

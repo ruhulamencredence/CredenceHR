@@ -40,6 +40,7 @@ import type { Express } from "express";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
 import { loadRoster, lateThresholds, nightShiftCheckIn, type RosterIndex } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
+import { loadPunchGap, farEnoughFromIn, type PunchGap } from "./zkPunchRule";
 import { buildServiceBook, loadEmployeeWorld, loadSettings, snapshotOf, currentValues, toDate, num, monthsBetween } from "./HROperationsRoutes";
 import { fallbackServiceStatus } from "./hrServiceStatus";
 
@@ -387,6 +388,10 @@ export interface AttendanceData {
   policies: any[];
   // Duty Roster (RosterRoutes.ts): Off days and rostered shifts.
   roster: RosterIndex;
+  // Office machine double punch (zkPunchRule.ts): a punch within N minutes of
+  // the In isn't the Out. Optional so a caller building this by hand keeps
+  // the old behaviour.
+  punchGap?: PunchGap;
 }
 
 const indexBy = <K>(rows: any[], key: (r: any) => K | null) => {
@@ -434,7 +439,8 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
     waiversByEmployee: indexBy<number>(waivers, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
     siteByEmployee: indexBy<number>(site, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
     policies,
-    roster
+    roster,
+    punchGap: await loadPunchGap(queryDB)
   };
 }
 
@@ -450,6 +456,13 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
 
   const firstIn = new Map<string, Date>();
   const lastOut = new Map<string, Date>();
+  // The last office machine punch of each day, kept apart: it is the Out only
+  // if it is far enough after the day's In (double punch rule).
+  const lastMachine = new Map<string, Date>();
+  const keepMachine = (d: string, t: Date) => {
+    const cur = lastMachine.get(d);
+    if (!cur || t > cur) lastMachine.set(d, t);
+  };
   const source = new Map<string, Set<string>>();
   const note = (d: string, s: string) => {
     if (!source.has(d)) source.set(d, new Set());
@@ -489,10 +502,10 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
       // the early-morning punches are the previous night's check-out.
       if (!nightPunches.has(d)) nightPunches.set(d, []);
       nightPunches.get(d)!.push(t);
-      keepOut(d, t);
+      keepMachine(d, t);
     } else {
       keepIn(d, t);
-      keepOut(d, t);
+      keepMachine(d, t);
     }
     note(d, "Office device");
   }
@@ -547,7 +560,9 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     const d = ymd(dt);
     const hol = holidays.get(d) || null;
     const inAt = firstIn.get(d) || null;
-    const outAt = lastOut.get(d) || null;
+    let outAt = lastOut.get(d) || null;
+    const machine = lastMachine.get(d) || null;
+    if (machine && (!outAt || machine > outAt) && (!inAt || farEnoughFromIn(data.punchGap ? data.punchGap(d) : 0, inAt, machine))) outAt = machine;
     let status: AttendanceDay["status"];
     if (joining && d < joining) status = "not_joined";
     else if (lastDay && d > lastDay) status = "separated";

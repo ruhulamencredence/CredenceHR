@@ -509,13 +509,18 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 <span className="text-[11px] align-middle">{outParts.meridiem}</span>
               </div>
               {placeLine(status?.check_out_source, status?.check_out_place)}
-              {/* Gave it too early? The same day it can be given again
+              {/* Gave it too early, or the office machine took a stray punch as
+                  the Out? The same day it can be given again
                   (users.can_update_check_out — off unless ticked). */}
               {status?.can_update_check_out && (
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!(await confirmDialog(`Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`))) return;
+                    const msg =
+                      status?.check_out_source === 'office'
+                        ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
+                        : `Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`;
+                    if (!(await confirmDialog(msg))) return;
                     void handleMark('out');
                   }}
                   disabled={busy}
