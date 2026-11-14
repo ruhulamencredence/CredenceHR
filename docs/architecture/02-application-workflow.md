@@ -1008,3 +1008,7 @@ CredenceHR → 360 ERP-এর (`Erp360SsoRoutes.ts`) উল্টো দিক, 
 ## Superadmin যোগ করা (Platform → Workspaces)
 
 System owner একটা workspace-এর Superadmins-এ **Add a Superadmin**-এ email দেন। Email নতুন হলে নাম আর পাসওয়ার্ড দিয়ে নতুন account তৈরি হয়। Email যদি ঐ workspace-এর কারও account-এর হয় (User বা Admin), সেই account-ই Superadmin হয়ে যায় — পাসওয়ার্ড, ছবি, হাজিরা, ছুটি সব আগের মতো; তাঁকে একবার আবার লগইন করতে হয়। অন্য workspace-এর account হলে বা আগে থেকেই Superadmin হলে বার্তা দেখায়। Remove দিলে account Admin হিসেবে থেকে যায় (`CompanyRoutes.ts`, `PlatformWorkspaces.tsx`)।
+
+## HR Operations → Monthly Report: On Probation card (১৪ নভেম্বর)
+
+Monthly Report-এর উপরের card-গুলোর শেষে **On Probation**: মাসের শেষ দিনে (চলতি মাস হলে আজ) চাকরিতে থাকা কতজন probation-এ আছেন। চাপলে নিচে তালিকা: নাম, ID, Designation, Department, যোগদানের তারিখ, probation শেষের তারিখ (আগে যাঁর শেষ হচ্ছে তিনি আগে)। Status নেওয়া হয় Service Details থেকে, না থাকলে Job Base / Job Status থেকে (`fallbackServiceStatus`, Employees তালিকার একই নিয়ম)। "Only show"-এর filter মানে, PDF-এর সারাংশে আর Excel-এর Summary ও আলাদা sheet-এ আসে। নতুন permission নেই — Monthly Report যাঁরা দেখেন তাঁরাই (HR Operations module, একই `/api/hr-ops/reports/monthly`); এই তথ্য Employees তালিকা আর "Coming up"-এ আগেই তাঁদের দেখা।

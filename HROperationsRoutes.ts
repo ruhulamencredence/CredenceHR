@@ -2827,6 +2827,29 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       }
       const opening = scoped.filter((e: any) => activeOn(e, addDays(mStart, -1))).length;
       const closing = scoped.filter((e: any) => activeOn(e, mEnd)).length;
+      // On probation at the end of the month (or today, for the running
+      // month): Service Details status, else what Job Base / Job Status say
+      // (same fallback as the Employees list, hrServiceStatus.ts).
+      const probAsOf = mEnd < today ? mEnd : today;
+      const onProbation = scoped
+        .filter((e: any) => activeOn(e, probAsOf))
+        .filter((e: any) => {
+          const st = snaps.get(Number(e.id))?.service?.service_status || fallbackServiceStatus(e);
+          return st === "probation";
+        })
+        .map((e: any) => {
+          const sv = snaps.get(Number(e.id))?.service;
+          return {
+            employee_id: Number(e.id),
+            name: e.name,
+            employee_code: e.employee_id,
+            designation: e.designation,
+            department: e.department,
+            joining_date: joinDate(e),
+            date: toDate(sv?.probation_end_date) || null
+          };
+        })
+        .sort((x: any, y: any) => (x.date || "9999").localeCompare(y.date || "9999") || String(x.name).localeCompare(String(y.name)));
       const avg = (opening + closing) / 2;
 
       const listAction = (a: any) => ({
@@ -2912,6 +2935,7 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
           increments: revisions.filter((r) => r.difference > 0).length,
           increment_total: revisions.filter((r) => r.difference > 0).reduce((s, r) => s + r.difference, 0),
           confirmations: ofType("confirmation").length,
+          on_probation: onProbation.length,
           other_actions: monthActions.filter((a: any) => !["promotion", "transfer", "confirmation", "increment", "salary_adjustment"].includes(a.action_type)).length,
           turnover_pct: avg > 0 ? Number(((separated.length / avg) * 100).toFixed(2)) : 0,
           letters_issued: letters.filter((l: any) => l.status === "issued" && inMonth(toDate(l.letter_date)) && inScope(Number(l.employee_id))).length,
@@ -2952,6 +2976,7 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
           ],
           increments: revisions.filter((r) => r.difference > 0),
           confirmations: ofType("confirmation").map(listAction),
+          on_probation: onProbation,
           other_actions: monthActions.filter((a: any) => !["promotion", "transfer", "confirmation", "increment", "salary_adjustment"].includes(a.action_type)).map((a: any) => ({ ...listAction(a), type: ACTION_LABEL.get(a.action_type) }))
         },
         groups: Array.from(groups.values()).sort((a, b) => a.key.localeCompare(b.key)),
