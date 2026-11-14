@@ -340,6 +340,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [showLinkGroup, setShowLinkGroup] = useState(false);
   const [directory, setDirectory] = useState<ChatDirectoryUser[]>([]);
+  const [dirLoaded, setDirLoaded] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   // Live-measured viewport size/offset (window.visualViewport), NOT a CSS
   // vh/dvh guess or a hardcoded Navbar-height subtraction — both of those
@@ -397,6 +398,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       if (res.ok) setDirectory(await res.json());
     } catch {
       // Offline — pickers just show nothing until the next open.
+    } finally {
+      setDirLoaded(true);
     }
   }, [token]);
 
@@ -2187,6 +2190,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         <NewRoomModal
           type={showNewChatModal}
           directory={directory}
+          loaded={dirLoaded}
           onClose={() => setShowNewChatModal(null)}
           onCreate={createRoom}
         />
@@ -2196,6 +2200,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       {showAddMembers && activeRoom && (
         <MemberPickerModal
           directory={directory.filter((d) => !members.some((m) => m.user_id === d.id))}
+          loaded={dirLoaded}
           title="Add Members"
           onClose={() => setShowAddMembers(false)}
           onConfirm={async (ids) => {
@@ -2243,6 +2248,7 @@ const deptOptionsOf = (people: ChatDirectoryUser[]) => {
 
 // Shared "pick people from the directory" list used by both the New Chat/
 // Group/Community modal and the Add Members modal below.
+const PICKER_BATCH = 40;
 const MemberPickerModal: React.FC<{
   directory: ChatDirectoryUser[];
   title: string;
@@ -2251,7 +2257,8 @@ const MemberPickerModal: React.FC<{
   single?: boolean;
   onClose: () => void;
   onConfirm: (ids: number[]) => void;
-}> = ({ directory, title, confirmLabel = 'Add', single = false, onClose, onConfirm }) => {
+  loaded?: boolean;
+}> = ({ directory, title, confirmLabel = 'Add', single = false, loaded = true, onClose, onConfirm }) => {
   const [search, setSearch] = useState('');
   const [depts, setDepts] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -2266,6 +2273,12 @@ const MemberPickerModal: React.FC<{
       (!depts.length || depts.includes((d.department || '').trim())) &&
       `${d.name} ${d.employee_code || ''} ${d.department || ''} ${d.designation || ''}`.toLowerCase().includes(q)
   );
+  // Only the first batch is drawn: a company-wide list is hundreds of rows,
+  // and each row asks the server for that person's photo — drawing them all
+  // at once made "New chat" hang. Typing narrows the list; "Show more" adds.
+  const [shown, setShown] = useState(PICKER_BATCH);
+  useEffect(() => setShown(PICKER_BATCH), [search, depts]);
+  const visible = filtered.slice(0, shown);
   const allShownOn = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
   const toggleAllShown = () =>
     setSelected((prev) => {
@@ -2286,16 +2299,18 @@ const MemberPickerModal: React.FC<{
     >
       <div
         className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
-        style={{ maxHeight: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : '80dvh' }}
+        // Fixed height (not max-height): the popup used to grow and shrink
+        // with every letter typed in the search box, so it jumped around.
+        style={{ height: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : 'min(80dvh, 600px)', maxHeight: '80dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 pt-4 pb-3 flex items-center justify-between">
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between shrink-0">
           <h3 className="font-bold text-slate-900">{title}</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-600">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="px-3 pb-3">
+        <div className="px-3 pb-3 shrink-0">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -2318,8 +2333,9 @@ const MemberPickerModal: React.FC<{
           </div>
         </div>
         <div className="liquid-glass-inset mx-3 rounded-2xl flex-1 min-h-0 overflow-y-auto">
-            {filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
-          {filtered.map((d) => {
+          {!loaded && directory.length === 0 && <div className="p-6 text-center text-sm text-slate-400">Loading people…</div>}
+          {loaded && filtered.length === 0 && <div className="p-6 text-center text-sm text-slate-400">No one matches.</div>}
+          {visible.map((d) => {
             const isSelected = selected.has(d.id);
             return (
               <button
@@ -2348,8 +2364,13 @@ const MemberPickerModal: React.FC<{
               </button>
             );
           })}
+          {filtered.length > visible.length && (
+            <button type="button" onClick={() => setShown((n) => n + PICKER_BATCH)} className="w-full py-2.5 text-xs font-semibold text-emerald-700 hover:underline">
+              Showing {visible.length} of {filtered.length} — type to search, or show more
+            </button>
+          )}
         </div>
-        <div className="p-3">
+        <div className="p-3 shrink-0">
           <button
             type="button"
             disabled={selected.size === 0}
@@ -2367,9 +2388,10 @@ const MemberPickerModal: React.FC<{
 const NewRoomModal: React.FC<{
   type: 'direct' | 'group' | 'community';
   directory: ChatDirectoryUser[];
+  loaded?: boolean;
   onClose: () => void;
   onCreate: (type: 'direct' | 'group' | 'community', title: string, memberIds: number[]) => void;
-}> = ({ type, directory, onClose, onCreate }) => {
+}> = ({ type, directory, loaded = true, onClose, onCreate }) => {
   const [title, setTitle] = useState('');
   const [step, setStep] = useState<'members' | 'details'>('members');
   const [pendingIds, setPendingIds] = useState<number[]>([]);
@@ -2378,6 +2400,7 @@ const NewRoomModal: React.FC<{
     return (
       <MemberPickerModal
         directory={directory}
+        loaded={loaded}
         title="New Chat"
         confirmLabel="Start Chat"
         single
@@ -2391,6 +2414,7 @@ const NewRoomModal: React.FC<{
     return (
       <MemberPickerModal
         directory={directory}
+        loaded={loaded}
         title={type === 'group' ? 'New Group: Add Members' : 'New Community: Add Members'}
         confirmLabel="Next"
         onClose={onClose}
