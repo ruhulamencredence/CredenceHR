@@ -1613,3 +1613,81 @@ html :has(> .map-fullscreen), html :has(.map-fullscreen) {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   filter: none !important; transform: none !important;
 }
+
+/* ================================================================
+   Light Glass (Appearance -> Mode -> Light Glass; colorMode.ts sets
+   <html data-lglass>, never together with data-dark). The light page with
+   the Dark Glass idea: soft accent / indigo / teal glows (body::before)
+   behind frosted white cards, a frosted sidebar, and on a computer a
+   frosted header. Text stays the light theme's dark text. On a phone the
+   coloured header and bottom bar keep their colour (their logo / icons are
+   white), only see-through.
+   ================================================================ */
+html[data-lglass] { background: #eef1f7 !important; }
+html[data-lglass] body { background: transparent !important; }
+html[data-lglass] body * { --page-flat: transparent; }
+html[data-lglass] body::before {
+  background:
+    radial-gradient(55% 45% at 6% 4%, rgba(var(--g-accent-rgb), .30), transparent 70%),
+    radial-gradient(50% 45% at 96% 28%, rgba(99, 102, 241, .22), transparent 70%),
+    radial-gradient(55% 50% at 40% 100%, rgba(var(--g-accent-rgb), .18), transparent 70%),
+    radial-gradient(45% 40% at 78% 88%, rgba(20, 184, 166, .16), transparent 70%),
+    #eef1f7 !important;
+}
+html[data-lglass] .page-glow { background: transparent !important; }
+html[data-lglass] :is(.bg-white, [class*="bg-white/"]):not(.gsidebar *):not(button):not(.bg-white .bg-white):not(nav *) {
+  background: linear-gradient(160deg, rgba(255,255,255,.72), rgba(255,255,255,.48)) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  border-color: rgba(255,255,255,.85) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 18px 40px -22px rgba(30,41,59,.35) !important;
+}
+html[data-lglass] .bg-white .bg-white, html[data-lglass] .bg-white [class*="bg-white/"] { background: rgba(255,255,255,.55) !important; border-color: rgba(15,23,42,.06) !important; }
+/* Sidebar: frosted white instead of the accent colour; its white text turns
+   slate, the open item an accent tint. */
+html[data-lglass] .gsidebar {
+  background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.35)) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  border-right: 1px solid rgba(255,255,255,.8) !important;
+}
+html[data-lglass] .gsidebar [class*="text-white"] { color: #334155 !important; }
+html[data-lglass] .gsidebar :is([class*="bg-white/15"], [class*="bg-white/20"]) { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
+html[data-lglass] .gsidebar input[type="text"] { color: #334155 !important; background-color: rgba(255,255,255,.6) !important; box-shadow: inset 0 0 0 1px rgba(15,23,42,.06) !important; }
+html[data-lglass] .gsidebar input[type="text"]::placeholder { color: #94a3b8 !important; }
+html[data-lglass] .gsidebar svg[class*="text-white"] { color: #64748b !important; }
+@media (min-width: 768px) {
+  html[data-lglass] header.sticky {
+    background: rgba(255,255,255,.55) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+    border-bottom-color: rgba(255,255,255,.8) !important;
+  }
+}
+@media (max-width: 767px) {
+  html[data-lglass] header.sticky { -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%); }
+}
+html[data-lglass] .liquid-glass {
+  background: linear-gradient(160deg, rgba(255,255,255,.80) 0%, rgba(255,255,255,.55) 55%, rgba(255,255,255,.70) 100%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+}
+/* My Attendance / Leave Summary draw their own background (see Dark Glass). */
+html[data-lglass] .att-card, html[data-lglass] .leave-card {
+  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  border-color: rgba(255,255,255,.85) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 18px 40px -22px rgba(30,41,59,.35) !important;
+}
+/* Cards over a map, pickers over a form, the chat popup: near-solid white,
+   so what is underneath never shows through the text. */
+html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"]:is(.bg-white, [class*="bg-white/"]),
+html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
+html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
+  background: rgba(255, 255, 255, 0.92) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+}
+html[data-lglass][data-lglass] .solid-pop.solid-pop.solid-pop.solid-pop {
+  background: rgba(255, 255, 255, 0.97) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+}
+html[data-lglass] .chat-popup {
+  background: rgba(255, 255, 255, 0.95) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+}
+html[data-lglass] .chat-popup > .bg-white { background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }

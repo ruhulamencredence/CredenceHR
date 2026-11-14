@@ -9,15 +9,18 @@
 // bars, popups) on top of whichever background theme is picked; the accent
 // colour stays. Dark Glass is Dark plus <html data-glass>: a near-black page
 // with soft accent glows behind frosted, see-through cards and bars
-// (index.css "Dark Glass"). "Like this device" follows the device with
-// plain Dark.
+// (index.css "Dark Glass"). Light Glass is the light page with the same
+// idea — <html data-lglass>: soft accent glows behind frosted white cards and
+// a frosted sidebar / header (index.css "Light Glass"); it is not dark.
+// "Like this device" follows the device with plain Dark.
 // Per device, like the other Appearance choices (localStorage). index.html
 // applies it before the first paint so a dark page doesn't flash light.
 import { useEffect, useState } from 'react';
 
-export type ColorMode = 'light' | 'dark' | 'glass' | 'system';
+export type ColorMode = 'light' | 'lightglass' | 'dark' | 'glass' | 'system';
 export const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: 'light', label: 'Light' },
+  { id: 'lightglass', label: 'Light Glass' },
   { id: 'dark', label: 'Dark' },
   { id: 'glass', label: 'Dark Glass' },
   { id: 'system', label: 'Like this device' }
@@ -30,7 +33,7 @@ export const DARK_PAGE = '#25282c';
 export function getSavedColorMode(): ColorMode {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === 'light' || v === 'dark' || v === 'glass' || v === 'system') return v;
+    if (v === 'light' || v === 'lightglass' || v === 'dark' || v === 'glass' || v === 'system') return v;
   } catch {
     // storage unavailable — light
   }
@@ -55,6 +58,9 @@ function paint(dark: boolean, glass = false) {
   else root.removeAttribute('data-dark');
   if (dark && glass) root.setAttribute('data-glass', '');
   else root.removeAttribute('data-glass');
+  // Light Glass: the light page, frosted (data-lglass).
+  if (!dark && glass) root.setAttribute('data-lglass', '');
+  else root.removeAttribute('data-lglass');
   // The browser's own bar (Android Chrome, iPhone Safari / Home Screen app).
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
@@ -83,7 +89,7 @@ export function applyColorMode(mode: ColorMode, remember = false): void {
       mql = null;
     }
   }
-  paint(mode === 'dark' || mode === 'glass' || (mode === 'system' && systemDark()), mode === 'glass');
+  paint(mode === 'dark' || mode === 'glass' || (mode === 'system' && systemDark()), mode === 'glass' || mode === 'lightglass');
   if (!remember) return;
   try {
     localStorage.setItem(KEY, mode);
