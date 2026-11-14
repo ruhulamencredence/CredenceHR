@@ -67,6 +67,7 @@ import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScheduleSchema, registerTrackingScheduleRoutes } from "./TrackingSchedule";
+import { registerEmployeeHeadcountRoutes } from "./EmployeeHeadcount";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
 import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
@@ -460,7 +461,7 @@ const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
-const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
+const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history", "sim_inventory"] as const;
 // Office Attendance: "read" = the module as it was; "link_pins" = Unlinked
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
@@ -481,7 +482,7 @@ const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // explicit-only — the no-saved-layers default is "read" alone.
 // "reminders_receive" (explicit-only too): HR reminders of probation,
 // contract, document, retirement and increment dates (HrRemindersRoutes.ts).
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot"] as const;
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot", "hr_headcount", "hr_emp_export"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -542,7 +543,7 @@ const VEHICLE_LAYER_KEYS = ["read", "manage_drivers", "manage_vehicles"] as cons
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
-const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete"] as const;
+const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete", "emp_headcount", "emp_export"] as const;
 // Document Vault: "read" = everything it did before (upload, view, send a
 // document for its own employee's signature); "sign_request" = ask anyone
 // else / several people in order to sign (ESignRoutes.ts). Explicit-only.
@@ -3197,7 +3198,9 @@ async function startServer() {
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
           : moduleKey === "hr_operations"
-            ? ["read", "quick_reports", "quick_ot"]
+            ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
+          : moduleKey === "employees"
+            ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
             : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
@@ -3235,7 +3238,9 @@ async function startServer() {
       : moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
       : moduleKey === "hr_operations"
-        ? ["read", "quick_reports", "quick_ot"]
+        ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
+      : moduleKey === "employees"
+        ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
         : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
@@ -3809,6 +3814,7 @@ async function startServer() {
   registerDebugRoutes(app, { authenticateToken, queryDB, requireSuperAdmin, resolveSupervisorApprover });
 
   // Employee Directory routes (Admin Panel -> Employees) live in EmployeeRoutes.ts.
+  registerEmployeeHeadcountRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
   // Notices routes live in NoticeRoutes.ts.

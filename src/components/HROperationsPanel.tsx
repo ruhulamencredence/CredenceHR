@@ -14,7 +14,8 @@
 // account that also holds that module.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel, CreditCard } from 'lucide-react';
+import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel, CreditCard, Building2 } from 'lucide-react';
+import { EmployeeHeadcountSheet, exportEmployees } from './EmployeeHeadcountSheet';
 import { HrOpsBodySkeleton } from './HrOpsSkeleton';
 import { useHrApi, Notice, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { HrOpsDashboard } from './HrOpsDashboard';
@@ -54,13 +55,19 @@ export const REPORTS_VIEW_STORAGE_KEY = 'hr_ops_reports_view';
 // Fired with the open tab, so the sidebar can highlight its own item for it.
 export const HR_OPS_ACTIVE_EVENT = 'credence:hr-ops-active';
 
-export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean; canQuickReports?: boolean; canQuickOt?: boolean }> = ({
-  token,
-  canGrievance = false,
-  canRequisitions = false,
-  canQuickReports = false,
-  canQuickOt = false
-}) => {
+export const HROperationsPanel: React.FC<{
+  token: string;
+  canGrievance?: boolean;
+  canRequisitions?: boolean;
+  canQuickReports?: boolean;
+  canQuickOt?: boolean;
+  // HR Operations layers "hr_headcount" / "hr_emp_export" (EmployeeHeadcount.ts).
+  canHeadcount?: boolean;
+  canExportEmployees?: boolean;
+}> = ({ token, canGrievance = false, canRequisitions = false, canQuickReports = false, canQuickOt = false, canHeadcount = false, canExportEmployees = false }) => {
+  const [headcountOpen, setHeadcountOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
   const api = useHrApi(token);
   // A tab only for an account with its permission (grievance module / "requisitions" layer).
   const allowed = (t: HrOpsTab) => (t !== 'grievance' || canGrievance) && (t !== 'requisitions' || canRequisitions);
@@ -148,13 +155,50 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
           <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
             <Briefcase className="w-5 h-5 text-blue-600" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h1 className="text-lg font-semibold text-slate-800">HR Operations</h1>
             <p className="text-xs text-slate-500 mt-0.5 max-w-xl">
               Promotions, increments, transfers and every other change to an employee — approved, recorded in their service book, with letters and a monthly report.
             </p>
+            {exportMsg && <p className="text-xs text-rose-600 mt-1">{exportMsg}</p>}
           </div>
+          {(canHeadcount || canExportEmployees) && (
+            <div className="flex flex-wrap gap-2 shrink-0">
+              {canHeadcount && (
+                <button
+                  type="button"
+                  onClick={() => setHeadcountOpen(true)}
+                  className="flex items-center gap-1.5 py-2 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-xs"
+                  title="How many work at each Head Office / Project and Branch, with the list"
+                >
+                  <Building2 className="w-3.5 h-3.5" /> Office / Project
+                </button>
+              )}
+              {canExportEmployees && (
+                <button
+                  type="button"
+                  disabled={exportBusy}
+                  onClick={async () => {
+                    setExportBusy(true);
+                    setExportMsg('');
+                    try {
+                      await exportEmployees(token, 'hr', 'all');
+                    } catch (e: any) {
+                      setExportMsg(e.message);
+                    } finally {
+                      setExportBusy(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 py-2 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-xs disabled:opacity-50"
+                  title="Every employee's details as Excel, in the HR Data Import layout"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> {exportBusy ? 'Exporting…' : 'Export employees'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
+        {headcountOpen && <EmployeeHeadcountSheet token={token} source="hr" canExport={canExportEmployees} onClose={() => setHeadcountOpen(false)} />}
         <div className="flex gap-1 mt-5 overflow-x-auto -mb-px">
           {tabs.map((t) => (
             <button

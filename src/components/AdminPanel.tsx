@@ -5037,7 +5037,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* TAB: DATA IMPORT — employees, leave, claims and attendance history from Excel/CSV (DataImport.tsx). */}
       {activeTab === 'data_import' && canSeeDataImport && <DataImport token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
-      {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} canRequisitions={hrOpsLayer('requisitions')} canQuickReports={hrOpsLayer('quick_reports')} canQuickOt={hrOpsLayer('quick_ot')} />}
+      {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} canRequisitions={hrOpsLayer('requisitions')} canQuickReports={hrOpsLayer('quick_reports')} canQuickOt={hrOpsLayer('quick_ot')} canHeadcount={hrOpsLayer('hr_headcount')} canExportEmployees={hrOpsLayer('hr_emp_export')} />}
       {activeTab === 'task_management' && <TaskManagement token={token} user={user} />}
       {activeTab === 'target_reports' && <TargetReports token={token} user={user} />}
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}

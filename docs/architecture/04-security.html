@@ -318,6 +318,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>GroupCallRoutes.ts</code></td>
 </tr>
 <tr>
+<td>সব কর্মীর তথ্য একবারে বের করা (Export)</td>
+<td>Employees / HR Operations-এর Export শুধু আলাদা explicit-only layer (<code>emp_export</code> / <code>hr_emp_export</code>) থাকলে; layer ছাড়া API 403। ফাইলে Login ID, Password, বেতনের ব্যাংক / MFS হিসাব নেই; কর্মী আসে নিজের Department / কোম্পানি সীমা থেকে।</td>
+<td><code>EmployeeHeadcount.ts</code></td>
+</tr>
+<tr>
 <td>কাজের সময়ের বাইরে কর্মীর location</td>
 <td>Employee Tracking → Schedule-এ যাঁর Fixed hours বা Duty Roster নিয়ম, তাঁর সময়ের বাইরে server কোনো location জমা রাখে না (<code>/api/tracking/ping</code> উত্তরে শুধু <code>off_schedule</code>), Live Follow / Live all-ও সেই সময় follow করে না; নতুন APK সেই সময় tracking বন্ধ রাখে, notification-ও থাকে না। নিয়ম বদলাতে Employee Tracking module + "Tracking Schedule" layer (explicit-only) লাগে, আর শুধু নিজের tracking scope-এর লোকদের জন্য।</td>
 <td><code>TrackingSchedule.ts</code>, <code>EmployeeTrackingRoutes.ts</code>, <code>LiveTrackingRoutes.ts</code></td>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
-  Landmark, GraduationCap
+  Landmark, GraduationCap, FileSpreadsheet
 } from 'lucide-react';
 import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { UserAvatar } from './UserAvatar';
@@ -18,6 +18,7 @@ import { useMyCompanies } from '../lib/company';
 import { DateInput } from './DateInput';
 import { SearchSelect } from './Combobox';
 import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
+import { EmployeeHeadcountSheet, employeeLayer, exportEmployees } from './EmployeeHeadcountSheet';
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
@@ -350,6 +351,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(rv?.status ?? 'all');
   // Department filter: '' = all, '__none__' = no department, else the department's name.
   const [deptFilter, setDeptFilter] = useState(rv?.dept ?? '');
+  // Office / Project & Branch headcount (EmployeeHeadcountSheet) and Export —
+  // each its own Employees layer.
+  const canHeadcount = employeeLayer(user, 'employees', 'headcount');
+  const canExportEmployees = employeeLayer(user, 'employees', 'export');
+  const [headcountOpen, setHeadcountOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(rv?.page ?? 1);
   const [pageSize, setPageSize] = useState(rv?.pageSize ?? 50);
   // The server pages and searches the directory; `employees` is just the page on screen.
@@ -1269,6 +1276,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
 
   return (
     <div className="space-y-5">
+      {headcountOpen && <EmployeeHeadcountSheet token={token} source="employees" canExport={canExportEmployees} onClose={() => setHeadcountOpen(false)} />}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
@@ -1280,6 +1288,37 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canHeadcount && (
+            <button
+              type="button"
+              onClick={() => setHeadcountOpen(true)}
+              className="flex items-center justify-center gap-1.5 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap"
+              title="How many work at each Head Office / Project and Branch, with the list"
+            >
+              <Building2 className="w-4 h-4" /> Office / Project
+            </button>
+          )}
+          {canExportEmployees && (
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const n = await exportEmployees(token, 'employees', statusFilter, deptFilter && deptFilter !== '__none__' ? deptFilter : '');
+                  setMessage({ type: 'success', text: `Exported ${n} employees.` });
+                } catch (e: any) {
+                  setMessage({ type: 'error', text: e.message });
+                } finally {
+                  setExporting(false);
+                }
+              }}
+              className="flex items-center justify-center gap-1.5 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl shadow-sm transition-all text-sm whitespace-nowrap disabled:opacity-50"
+              title="Every employee shown by the Status / Department filters, as Excel in the HR Data Import layout"
+            >
+              <FileSpreadsheet className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setUnlinkedOpen(true)}
