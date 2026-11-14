@@ -365,6 +365,10 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
   }, [api]);
 
   const kind = kinds?.find((k) => k.key === kindKey) || null;
+  // Attendance imports need a written reason; every import is logged (Import history).
+  const needsReason = !!kind && REASON_KINDS.includes(kind.key);
+  const [reason, setReason] = useState('');
+  const [historyTick, setHistoryTick] = useState(0);
   const missingRequired = kind ? kind.fields.filter((f) => f.required && !matched.some((m) => m.field.key === f.key)) : [];
 
   const reset = () => {
@@ -565,7 +569,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
         const p = await parseFile(batch[i].file, kind);
         const missing = kind.fields.filter((f) => f.required && !p.matched.some((m) => m.field.key === f.key));
         if (missing.length) throw new Error(`Missing column: ${missing.map((f) => f.label).join(', ')}`);
-        const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows: p.rows, dry_run: dry });
+        const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows: p.rows, dry_run: dry, reason: reason.trim(), file_name: batch[i].file.name });
         const firstError = d.results.find((r) => r.status === 'error');
         set(i, { state: 'ok', ...d.summary, message: firstError ? `Row ${firstError.row}: ${firstError.message}` : '' });
       } catch (e: any) {
@@ -578,6 +582,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
       if (stopRef.current) break;
     }
     setBatchRun('');
+    if (!dry) setHistoryTick((t) => t + 1);
   };
   const stopRef = useRef(false);
   useEffect(() => {
@@ -592,9 +597,12 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     longTask.start(dry ? `Checking ${kind.title}` : `Importing ${kind.title}`, dry ? `Checking ${n} — nothing is saved yet…` : `Saving ${n}…`);
     longTask.creep(95, undefined, rows.length * (dry ? 6 : 15));
     try {
-      const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows, dry_run: dry });
+      const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows, dry_run: dry, reason: reason.trim(), file_name: fileName });
       if (dry) setCheck(d);
-      else setDone(d);
+      else {
+        setDone(d);
+        setHistoryTick((t) => t + 1);
+      }
       setFilter(d.summary.error > 0 ? 'error' : 'all');
       await longTask.finish();
     } catch (e: any) {
@@ -736,6 +744,8 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             </div>
           )}
 
+          {needsReason && (batch.length > 0 || rows.length > 0) && !done && <ReasonBox value={reason} onChange={setReason} />}
+
           {batch.length > 0 && (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -759,10 +769,12 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
                       </button>
                       <button
                         type="button"
+                        disabled={needsReason && !reason.trim()}
+                        title={needsReason && !reason.trim() ? 'Write the reason first' : undefined}
                         onClick={async () => {
                           if (await confirmDialog(`Import all ${batch.length} files now, one after another? Rows already in the system are skipped.`)) runBatch(false);
                         }}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                       >
                         Import all files
                       </button>
@@ -825,7 +837,8 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
                 {check && !done && (
                   <button
                     type="button"
-                    disabled={willWrite === 0 || !!busy}
+                    disabled={willWrite === 0 || !!busy || (needsReason && !reason.trim())}
+                    title={needsReason && !reason.trim() ? 'Write the reason first' : undefined}
                     onClick={async () => {
                       if ((await confirmDialog(`Import ${willWrite} row(s) into ${kind.title}? Rows marked Skip or Error are left out.`))) run(false);
                     }}
@@ -927,6 +940,175 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
               )}
             </div>
           )}
+        </div>
+      )}
+      {kind && <ImportHistory token={token} kind={kind.key} title={kind.title} tick={historyTick} />}
+    </div>
+  );
+};
+
+const REASON_KINDS = ['remote_attendance', 'office_attendance'];
+
+const ReasonBox: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
+  <label className="block">
+    <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+      Reason for this attendance import <span className="text-rose-500">*</span>
+    </span>
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={2}
+      maxLength={1000}
+      required
+      placeholder="e.g. Device was down 3–5 Nov; attendance from the site register"
+      className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+    />
+    <span className="block text-[10px] text-slate-400 mt-0.5">Kept in Import history with the file, who imported it and when.</span>
+  </label>
+);
+
+// HR Data Import -> Import history (data_import_runs): every real import of
+// this kind — when, who, file, reason, counts — and each one's row results.
+const ImportHistory: React.FC<{ token: string; kind: string; title: string; tick: number }> = ({ token, kind, title, tick }) => {
+  const api = useHrApi(token);
+  const [runs, setRuns] = useState<any[] | null>(null);
+  const [open, setOpen] = useState<any | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<any[]>(`/api/data-import/runs?kind=${encodeURIComponent(kind)}`)
+      .then((r) => alive && setRuns(r))
+      .catch(() => alive && setRuns([]));
+    return () => {
+      alive = false;
+    };
+  }, [api, kind, tick]);
+  const when = (v: string) => {
+    const d = new Date(String(v).replace(' ', 'T'));
+    return isNaN(d.getTime()) ? v : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+  };
+  const view = async (id: number) => {
+    try {
+      setOpen(await api.get<any>(`/api/data-import/runs/${id}`));
+    } catch {
+      setOpen(null);
+    }
+  };
+  const excel = () => {
+    if (!open) return;
+    const wb = XLSX.utils.book_new();
+    const info = XLSX.utils.aoa_to_sheet([
+      ['Import', open.kind_title || open.kind],
+      ['When', when(open.imported_at)],
+      ['By', open.imported_by_name || ''],
+      ['File', open.file_name || ''],
+      ['Reason', open.reason || ''],
+      ['Rows', `${open.total} · ${open.created} added · ${open.updated} updated · ${open.skipped} skipped · ${open.errors} errors`]
+    ]);
+    info['!cols'] = [{ wch: 10 }, { wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, info, 'Import');
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet((open.results || []).map((r: any) => ({ 'Sheet Row': r.row, Employee: r.employee || '', Result: STATUS[r.status as RowResult['status']]?.label || r.status, Message: r.message }))),
+      'Rows'
+    );
+    void saveWorkbookCrossPlatform(wb, `Import_log_${String(open.kind_title || open.kind).replace(/[^A-Za-z0-9]+/g, '_')}_${open.id}.xlsx`);
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <Clock className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-bold text-slate-900">Import history — {title}</h3>
+        {runs && <span className="text-xs text-slate-400">({runs.length})</span>}
+      </div>
+      {!runs ? (
+        <Spinner size={14} />
+      ) : runs.length === 0 ? (
+        <p className="text-xs text-slate-500">No import of this kind yet.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-xs" data-phone-card>
+            <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 font-semibold">When</th>
+                <th className="px-3 py-2 font-semibold">By</th>
+                <th className="px-3 py-2 font-semibold">File</th>
+                <th className="px-3 py-2 font-semibold">Reason</th>
+                <th className="px-3 py-2 font-semibold">Rows</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100 align-top">
+                  <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{when(r.imported_at)}</td>
+                  <td className="px-3 py-2 text-slate-700">{r.imported_by_name || '—'}</td>
+                  <td className="px-3 py-2 text-slate-600 break-all">{r.file_name || '—'}</td>
+                  <td className="px-3 py-2 text-slate-600 max-w-[320px]">{r.reason || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                    {r.created} added · {r.updated} updated · {r.skipped} skipped{r.errors ? ` · ${r.errors} errors` : ''}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button type="button" onClick={() => void view(r.id)} className="text-[11px] font-semibold text-blue-600 hover:underline">
+                      Rows
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {open && (
+        <div className="fixed inset-0 z-[90]" role="dialog" aria-modal="true" aria-label="Import rows">
+          <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => setOpen(null)} />
+          <div className="absolute inset-0 sm:inset-6 flex">
+            <div className="liquid-glass liquid-glass-in rounded-none sm:rounded-[32px] w-full h-full flex flex-col overflow-hidden">
+              <div className="flex items-start gap-3 px-5 pt-5 pb-3 shrink-0">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base font-bold text-slate-900">{open.kind_title || open.kind}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {when(open.imported_at)} · {open.imported_by_name || '—'}
+                    {open.file_name ? ` · ${open.file_name}` : ''}
+                  </p>
+                  {open.reason && <p className="text-xs text-slate-700 mt-1">Reason: {open.reason}</p>}
+                </div>
+                <button type="button" onClick={excel} className="liquid-glass-chip rounded-full px-3 h-9 text-xs font-semibold flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5" /> Excel
+                </button>
+                <button type="button" onClick={() => setOpen(null)} className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto px-5 pb-5">
+                <div className="liquid-glass-inset rounded-2xl overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-white/80 text-left text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Sheet row</th>
+                        <th className="px-3 py-2 font-semibold">Employee</th>
+                        <th className="px-3 py-2 font-semibold">Result</th>
+                        <th className="px-3 py-2 font-semibold">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(open.results || []).slice(0, 1000).map((r: any, i: number) => (
+                        <tr key={i} className="border-t border-slate-200/60 align-top">
+                          <td className="px-3 py-1.5 text-slate-500">{r.row}</td>
+                          <td className="px-3 py-1.5 text-slate-800">{r.employee || '—'}</td>
+                          <td className="px-3 py-1.5">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${STATUS[r.status as RowResult['status']]?.tone || ''}`}>{STATUS[r.status as RowResult['status']]?.label || r.status}</span>
+                          </td>
+                          <td className="px-3 py-1.5 text-slate-600">{r.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {(open.results || []).length > 1000 && <p className="text-[11px] text-slate-500 mt-2">Showing 1000 of {open.results.length} — Excel has all.</p>}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

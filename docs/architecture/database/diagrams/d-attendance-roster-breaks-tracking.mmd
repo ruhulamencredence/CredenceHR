@@ -46,6 +46,15 @@ erDiagram
     int allowed_minutes
     int max_breaks
   }
+  data_import_runs {
+    int id PK
+    int company_id
+    varchar kind
+    varchar kind_title
+    varchar file_name
+    varchar reason
+    int total
+  }
   duty_roster {
     int id PK
     int employee_id FK

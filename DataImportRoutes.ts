@@ -355,6 +355,38 @@ interface RowResult {
 const IMPORTED = "Imported from Excel";
 const IMPORTED_DEDUCTED = "Imported from Excel (balance deducted)";
 
+// Attendance imports need a written reason; every real import (not a check)
+// is kept in data_import_runs: who, when, which file, the reason, the counts
+// and each row's result — HR Data Import -> Import history.
+export const REASON_KINDS = new Set(["remote_attendance", "office_attendance"]);
+const MAX_LOGGED_ROWS = 5000;
+
+export async function ensureDataImportLogSchema(dbPool: any): Promise<void> {
+  try {
+    await dbPool.query(
+      `CREATE TABLE IF NOT EXISTS data_import_runs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        company_id INT NOT NULL DEFAULT 1,
+        kind VARCHAR(40) NOT NULL,
+        kind_title VARCHAR(100) NULL,
+        file_name VARCHAR(255) NULL,
+        reason VARCHAR(1000) NULL,
+        total INT NOT NULL DEFAULT 0,
+        created INT NOT NULL DEFAULT 0,
+        updated INT NOT NULL DEFAULT 0,
+        skipped INT NOT NULL DEFAULT 0,
+        errors INT NOT NULL DEFAULT 0,
+        results MEDIUMTEXT NULL,
+        imported_by INT NULL,
+        imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_data_import_runs_kind (company_id, kind, imported_at)
+      )`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure data_import_runs: " + err.message);
+  }
+}
+
 export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
   const { authenticateToken, requireAdmin, queryDB, getAdminModules, hasModuleLayer, today, adjustLeaveTypeBalance, ensureDefaultLeaveBalances } = deps;
 
@@ -389,13 +421,63 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       if (rows.length === 0) return res.status(400).json({ error: "The sheet has no rows." });
       if (rows.length > MAX_ROWS) return res.status(400).json({ error: `At most ${MAX_ROWS} rows at a time — split the sheet.` });
       const dryRun = req.body?.dry_run !== false;
-      const results = await runImport(kind, rows, dryRun, req.user);
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 1000) : "";
+      const fileName = typeof req.body?.file_name === "string" ? req.body.file_name.trim().slice(0, 255) : "";
+      if (!dryRun && REASON_KINDS.has(kind.key) && !reason) return res.status(400).json({ error: "Write the reason for this attendance import." });
+      const results = await runImport(kind, rows, dryRun, req.user, reason);
       const count = (s: string) => results.filter((r) => r.status === s).length;
-      res.json({
-        dry_run: dryRun,
-        summary: { total: results.length, create: count("create"), update: count("update"), skip: count("skip"), error: count("error") },
-        results
-      });
+      const summary = { total: results.length, create: count("create"), update: count("update"), skip: count("skip"), error: count("error") };
+      let runId: number | null = null;
+      if (!dryRun) {
+        const r: any = await queryDB(
+          `INSERT INTO data_import_runs (company_id, kind, kind_title, file_name, reason, total, created, updated, skipped, errors, results, imported_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [activeCompanyId(), kind.key, kind.title, fileName || null, reason || null, summary.total, summary.create, summary.update, summary.skip, summary.error, JSON.stringify(results.slice(0, MAX_LOGGED_ROWS)), Number(req.user.id) || null]
+        ).catch((e: any) => {
+          console.warn("⚠️ Could not log the import: " + e.message);
+          return null;
+        });
+        runId = r?.insertId ? Number(r.insertId) : null;
+      }
+      res.json({ dry_run: dryRun, summary, results, run_id: runId });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  // Import history: the runs of the imports this account may do.
+  app.get("/api/data-import/runs", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      const kinds = (await allowedKinds(req.user)).map((k) => k.key);
+      const want = String(req.query.kind || "");
+      const list = want ? kinds.filter((k) => k === want) : kinds;
+      if (!list.length) return res.json([]);
+      const rows: any[] =
+        (await queryDB(
+          `SELECT r.id, r.kind, r.kind_title, r.file_name, r.reason, r.total, r.created, r.updated, r.skipped, r.errors, r.imported_at, u.name AS imported_by_name
+             FROM data_import_runs r LEFT JOIN users u ON u.id = r.imported_by
+            WHERE r.company_id = ? AND r.kind IN (${list.map(() => "?").join(",")})
+            ORDER BY r.id DESC LIMIT 200`,
+          [activeCompanyId(), ...list]
+        ).catch(() => [])) || [];
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get("/api/data-import/runs/:id(\\d+)", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      const r: any = ((await queryDB("SELECT r.*, u.name AS imported_by_name FROM data_import_runs r LEFT JOIN users u ON u.id = r.imported_by WHERE r.id = ? AND r.company_id = ?", [Number(req.params.id), activeCompanyId()])) as any[])[0];
+      if (!r) return res.status(404).json({ error: "Import not found." });
+      if (!(await allowedKinds(req.user)).some((k) => k.key === r.kind)) return res.status(403).json({ error: "You don't have access to this import." });
+      let results: any[] = [];
+      try {
+        results = JSON.parse(r.results || "[]");
+      } catch {
+        results = [];
+      }
+      res.json({ ...r, results });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || String(err) });
     }
@@ -403,7 +485,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
 
   // ---------------------------------------------------------------------
 
-  async function runImport(kind: Kind, rawRows: any[], dryRun: boolean, user: any): Promise<RowResult[]> {
+  async function runImport(kind: Kind, rawRows: any[], dryRun: boolean, user: any, reason = ""): Promise<RowResult[]> {
     // Employees of the company being worked in, by Employee ID.
     const employees: any[] = (await queryDB("SELECT * FROM all_employees")) || [];
     const byCode = new Map<string, any>();
@@ -411,7 +493,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
 
     const rows = rawRows.map((r, i) => ({ n: Number(r?.__row) || i + 2, v: r || {} }));
     const out: RowResult[] = [];
-    const ctx = { dryRun, user, byCode, employees };
+    const ctx = { dryRun, user, byCode, employees, reason };
     const handler = HANDLERS[kind.key];
     const prepared = handler.prepare ? await handler.prepare(ctx) : {};
     for (const { n, v } of rows) {
@@ -429,7 +511,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     return out;
   }
 
-  type Ctx = { dryRun: boolean; user: any; byCode: Map<string, any>; employees: any[] };
+  type Ctx = { dryRun: boolean; user: any; byCode: Map<string, any>; employees: any[]; reason?: string };
   type Handler = {
     prepare?: (ctx: Ctx) => Promise<any>;
     row: (v: any, ctx: Ctx, prep: any) => Promise<Omit<RowResult, "row">>;
@@ -1041,7 +1123,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         if (same) {
           // Only fills a missing check out — never replaces recorded times.
           if (!same.check_out_at && tout) {
-            if (!ctx.dryRun) await queryDB("UPDATE attendance SET check_out_at = ?, check_out_remarks = ? WHERE id = ?", [`${date} ${tout}`, str(v.remarks) || "Imported from Excel", Number(same.id)]);
+            if (!ctx.dryRun) await queryDB("UPDATE attendance SET check_out_at = ?, check_out_remarks = ? WHERE id = ?", [`${date} ${tout}`, str(v.remarks) || (ctx.reason ? `Imported: ${ctx.reason}` : "Imported from Excel"), Number(same.id)]);
             same.check_out_at = `${date} ${tout}`;
             return { status: "update", message: `Adds the missing check out ${tout.slice(0, 5)}.`, employee: who };
           }
@@ -1051,7 +1133,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           await queryDB(
             `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_in_remarks, check_out_at, check_out_remarks)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [userId, Number(project.id), date, `${date} ${tin}`, str(v.remarks) || "Imported from Excel", tout ? `${date} ${tout}` : null, null]
+            [userId, Number(project.id), date, `${date} ${tin}`, str(v.remarks) || (ctx.reason ? `Imported: ${ctx.reason}` : "Imported from Excel"), tout ? `${date} ${tout}` : null, null]
           );
         }
         prep.existing.push({ user_id: userId, project_id: Number(project.id), attendance_date: date, check_in_at: `${date} ${tin}`, check_out_at: tout ? `${date} ${tout}` : null });
