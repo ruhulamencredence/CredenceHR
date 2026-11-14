@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬২টি টেবিল, ২৮৪৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৩টি টেবিল, ২৮৫১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1577,6 +1577,16 @@ Unique: `uq_zk_device_employee`(device_id,employee_id), `uq_zk_device_pin`(devic
 | `offline_alerted_at` | timestamp | হ্যাঁ |  | |
 
 Unique: `unique_device_ip_port`(ip_address,port)
+
+### `zk_punch_rules`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `double_punch_minutes` | int(11) | না |  | |
+| `effective_from` | date | না |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ## A. Accounts, Access & Security
 

@@ -11,7 +11,7 @@ pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:
 img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
 details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="on" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="data-dictionary-credencehr">Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)</h1>
 <blockquote>
-<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৬২টি টেবিল, ২৮৪৬টি কলাম)।
+<p>স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের <code>information_schema</code> থেকে (MariaDB, ২৬৩টি টেবিল, ২৮৫১টি কলাম)।
 <code>PK</code> = প্রাইমারি কী, <code>FK</code> = ঘোষিত foreign key (→ কোন টেবিল), <code>logical</code> = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।</p>
 </blockquote>
 <h2 id="k-communication-notices-chat-mail-assistant-feedback">K. Communication: Notices, Chat, Mail, Assistant, Feedback</h2>
@@ -8406,6 +8406,55 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <p>Unique: <code>unique_device_ip_port</code>(ip_address,port)</p>
+<h3 id="zk_punch_rules"><code>zk_punch_rules</code></h3>
+<table>
+<thead>
+<tr>
+<th>কলাম</th>
+<th>ধরন</th>
+<th>Null</th>
+<th>মান/কী</th>
+<th>সম্পর্ক</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td>PK auto_increment</td>
+<td></td>
+</tr>
+<tr>
+<td><code>double_punch_minutes</code></td>
+<td>int(11)</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>effective_from</code></td>
+<td>date</td>
+<td>না</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_by</code></td>
+<td>int(11)</td>
+<td>হ্যাঁ</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamp</td>
+<td>হ্যাঁ</td>
+<td>default current_timestamp()</td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <h2 id="a-accounts-access-security">A. Accounts, Access &amp; Security</h2>
 <p>লগইন অ্যাকাউন্ট (<code>users</code>), সেশন, ডিভাইস, Module Access (কে কোন মডিউল/layer পাবে), পাসওয়ার্ড রিসেট, লগইন চেষ্টার লক। পুরো সিস্টেমের কেন্দ্র <code>users</code> টেবিল।</p>
 <h3 id="access_templates"><code>access_templates</code></h3>
