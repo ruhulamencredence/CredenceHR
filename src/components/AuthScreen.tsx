@@ -1,3 +1,4 @@
+import { signInDeviceFields } from '../lib/deviceKind';
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -243,7 +244,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       // The fingerprint first, then (app) the location the password sign-in
       // also needs — so the phone's fingerprint window opens at once.
       const extra = async () => {
-        const base: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
+        const base: Record<string, any> = { ...(ownerMode ? { system: true } : { workspace: workspace?.code }), ...signInDeviceFields() };
         if (!isNativeApp) return base;
         const device = await appDeviceInfo();
         setLocating(true);
@@ -340,7 +341,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         body: JSON.stringify(
           coords
             ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}), trusted_devices: trustedDeviceTokens() }
-            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens() }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens(), ...signInDeviceFields() }
         ),
       });
 

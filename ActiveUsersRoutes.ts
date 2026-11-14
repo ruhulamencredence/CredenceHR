@@ -112,7 +112,7 @@ export function touchSession(queryDB: QueryDB, req: any, token: string, user: an
     }
     const ua = String(req.headers?.["user-agent"] || "").slice(0, 400) || null;
     const dev = user?.dev ? Number(user.dev) : null;
-    const client = dev || /;\s*wv\)/.test(ua || "") ? "app" : "web";
+    const client = dev || /;\s*wv\)/.test(ua || "") ? "app" : user?.cl === "pwa" ? "pwa" : "web";
     const signedIn = Number(user?.iat) ? new Date(Number(user.iat) * 1000) : null;
     const at = new Date(now);
     void queryDB(
@@ -201,7 +201,7 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
             name: u?.name || "Unknown",
             login: u?.email || u?.username || null,
             role: u?.role || null,
-            client: r.client === "app" ? "app" : "web",
+            client: r.client === "app" ? "app" : r.client === "pwa" ? "pwa" : "web",
             device_name: r.device_row_id ? devName.get(Number(r.device_row_id)) || null : null,
             browser,
             os,
@@ -213,8 +213,9 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
           };
         });
 
+      // "On website" counts the iPhone Home Screen app too — it is the website, saved to the phone.
       const usersIn = (from: number, client?: string) =>
-        new Set(rows.filter((r) => seen(r) >= from && (!client || r.client === client)).map((r) => Number(r.user_id))).size;
+        new Set(rows.filter((r) => seen(r) >= from && (!client || r.client === client || (client === "web" && r.client === "pwa"))).map((r) => Number(r.user_id))).size;
       res.json({
         range,
         online_minutes: ONLINE_MS / 60000,

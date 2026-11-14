@@ -472,6 +472,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Android-এর browser বা computer থেকে attendance দেওয়া যায় কি?</td>
+<td>না। Check In / Out শুধু অ্যাপ (APK) বা iPhone / iPad-এর browser (Home Screen সহ) থেকে — server-ই 403 দেয়, শুধু বোতাম লুকানো নয় (টেস্ট করা: Android browser, computer, Mac-এ আটকায়; iPhone, iPad, Home Screen, APK-তে চলে)। কারণ: browser থেকে লোকেশন ঠিক রাখা ও ট্র্যাক করা যায় না। পরিচয় User-Agent থেকে, তাই ইচ্ছে করে বদলালে ফাঁকি সম্ভব। টেস্ট: <code>docs/test-logs/2026-11-14/scripts/device-*.mjs</code>।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>iPhone Home Screen অ্যাপে sign-in কতদিন থাকে?</td>
+<td>৩০ দিন, আর ৭ দিন না খুললে sign out (Active Users → Session security, Superadmin বদলাতে পারেন)। শুধু iPhone / iPad-এর browser থেকে এই লম্বা sign-in দেওয়া হয়, computer চাইলেও পায় না। Logout, Superadmin-এর sign-out আর password বদলালে আগের মতোই সাথে সাথে শেষ হয়।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>অফিস মেশিনের ডাবল punch নিয়ম কে বদলাতে পারে, আর তাতে পুরোনো হিসাব বদলায় কি?</td>
 <td>শুধু Office Attendance-এর <code>punch_rules</code> layer যাঁর আছে (ডিফল্টে কারও নেই; Superadmin সবসময়) — বাকিরা দেখতে পারেন, বদলাতে গেলে 403 (টেস্ট করা)। বদল সবসময় আজ থেকে; আগের দিন আগের নিয়মে থাকে — পুরোনো আর নতুন code-এ একই ডাটা দিয়ে সব রিপোর্ট মিলিয়ে দেখা হয়েছে: আজকের আগের কোনো দিন বদলায়নি। Salary, Present / Absent, দেরি Out ব্যবহার করে না। টেস্ট: <code>docs/test-logs/2026-11-14/scripts/double-punch-*.mjs</code>।</td>
 <td>✅</td>

@@ -108,3 +108,25 @@ yesterday, a double punch today). DB and server on Dhaka time for the check-out 
   "Double punch: 5 min" and the popup; no sideways scroll on a phone.
 - Not covered by a test: the Site Attendance machine suggestion (needs a supervisor team set up); it uses the
   same helper.
+
+## iPhone Home Screen sign-in; attendance from a browser only on iPhone / iPad
+
+1. **Home Screen sign-in** (`SessionSecurity.ts` client `pwa`): the iPhone / iPad "Add to Home Screen" app sends
+   `platform: "pwa"` at sign-in and gets its own sign-in — 30 days, signed out after 7 days not opened
+   (Active Users -> Session security, two new rows). The 60-minute website idle sign-out doesn't apply to it.
+   Believed only from an iPhone / iPad browser (User-Agent, or "Macintosh" + touch screen = iPad); a computer
+   asking for it stays a website. Active Users shows it as "Home Screen" and counts it under "On website".
+2. **Attendance by device** (`clientDevice.ts`): Check In / Check Out (incl. off-site and Set again) only from the
+   app (APK, recognised by its server-issued sign-in) or an iPhone / iPad browser. Android browser -> 403
+   `ATTENDANCE_APP_ONLY`, computer -> 403 `ATTENDANCE_NOT_ON_COMPUTER`; the card hides Set Now and says why
+   (Android gets a "Get the app (APK)" link). Timesheet corrections still work from anywhere.
+
+- `scripts/device-api.mjs a` then (move last-seen back, restart) `b` — 24/24 + 3/3: iPhone / iPad (Mac+touch)
+  Home Screen -> `pwa`, 30 days, page told no minute-idle; a computer or a Mac without touch claiming it -> web
+  12 h; Safari tab -> web 12 h / 60 min; Session security shows 30/7, saves 20/5, an older page without the new
+  fields keeps them, out of range 400; Android browser Check In / Check Out / off-site 403; computer 403; Mac 403;
+  iPad, iPhone, Home Screen, APK Check In 200; iPhone Check Out 200; computer correction 201; Home Screen unused
+  6 days still in, 8 days out (401); website unused 2 hours out (401, as before).
+- `scripts/device-ui.cjs <outdir>` — 10/10: Android browser card says use the app with the APK link and no
+  Set Now; computer card says not from a computer; iPhone and iPad (Mac + touch) show Set Now and no notice;
+  Session security shows the two Home Screen rows.

@@ -23,7 +23,7 @@ interface Session {
   name: string;
   login: string | null;
   role: string | null;
-  client: 'app' | 'web';
+  client: 'app' | 'pwa' | 'web';
   device_name: string | null;
   browser: string;
   os: string;
@@ -46,6 +46,8 @@ interface Policy {
   web_idle_minutes: number;
   app_days: number;
   app_idle_days: number;
+  pwa_days: number;
+  pwa_idle_days: number;
 }
 type PolicyKey = keyof Policy;
 const POLICY_FIELDS: [PolicyKey, string, string][] = [
@@ -53,6 +55,9 @@ const POLICY_FIELDS: [PolicyKey, string, string][] = [
   ['web_idle_minutes', 'Website signs out when unused for', 'minutes (0 = never)'],
   ['app_days', 'App sign-in lasts', 'days'],
   ['app_idle_days', 'App signs out when not opened for', 'days (0 = never)'],
+  // iPhone / iPad "Add to Home Screen" (Safari in a normal tab stays a website).
+  ['pwa_days', 'iPhone Home Screen sign-in lasts', 'days'],
+  ['pwa_idle_days', 'iPhone Home Screen signs out when not opened for', 'days (0 = never)'],
 ];
 
 // How long a sign-in lasts. Changes apply to sign-ins already open too.
@@ -174,11 +179,11 @@ const StatusDot: React.FC<{ s: Session }> = ({ s }) => (
 const ClientBadge: React.FC<{ s: Session }> = ({ s }) => (
   <span
     className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-      s.client === 'app' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'
+      s.client === 'app' ? 'bg-violet-50 text-violet-700' : s.client === 'pwa' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'
     }`}
   >
-    {s.client === 'app' ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
-    {s.client === 'app' ? 'App' : 'Web'}
+    {s.client === 'web' ? <Monitor className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
+    {s.client === 'app' ? 'App' : s.client === 'pwa' ? 'Home Screen' : 'Web'}
   </span>
 );
 
