@@ -1,0 +1,47 @@
+import { execSync } from 'child_process';
+const B='http://localhost:3200';
+const sql=(q)=>execSync(`mysql -N -ucred -pcredpass admin_ui -e "${q.replace(/"/g,'\\"')}"`).toString().trim();
+const call=async(t,m,u,b)=>{const r=await fetch(B+u,{method:m,headers:{...(t?{authorization:'Bearer '+t}:{}),'content-type':'application/json'},body:b?JSON.stringify(b):undefined});return {s:r.status,j:await r.json().catch(()=>({}))}};
+const login=async e=>(await call(null,'POST','/api/auth/login',{email:e,password:'ProbePass123',workspace:'credence'})).j?.token;
+let pass=0,fail=0;const ok=(m,c)=>{c?pass++:fail++;console.log((c?'PASS ':'FAIL ')+m)};
+sql("DELETE FROM app_feedback WHERE message LIKE 'QA fb%' OR source='prompt'");
+sql("INSERT IGNORE INTO admin_module_permissions (user_id, module_key, company_id) VALUES (133,'user_feedback',1)");
+sql("DELETE FROM admin_module_permission_layers WHERE user_id=133 AND module_key='user_feedback'");
+sql("UPDATE users SET can_give_feedback=1 WHERE id IN (132)");
+const sa=await login('admin@credence.test'), hr=await login('roster.hr@credence.test'), emp=await login('tanvir.r@credence.test');
+// an employee sends feedback; one old (made 20 days old), one 3 hours old, one rating-only answer to the question
+const a=await call(emp,'POST','/api/feedback',{kind:'bug',message:'QA fb old problem',rating:2}); ok('employee can send feedback (201)',a.s===201);
+const b=await call(emp,'POST','/api/feedback',{kind:'idea',message:'QA fb new idea'});
+const c=await call(emp,'POST','/api/feedback',{kind:'general',rating:5,source:'prompt'});
+sql(`UPDATE app_feedback SET created_at = NOW() - INTERVAL 20 DAY WHERE id=${a.j.id}`);
+sql(`UPDATE app_feedback SET created_at = NOW() - INTERVAL 3 HOUR WHERE id=${b.j.id}`);
+let l=(await call(sa,'GET','/api/feedback')).j;
+const ra=l.rows.find(r=>r.id===a.j.id), rb=l.rows.find(r=>r.id===b.j.id), rc=l.rows.find(r=>r.id===c.j.id);
+ok('new feedback starts Pending', ra.status==='pending'&&rb.status==='pending');
+ok('rating-only answer to the question is "na", not pending', rc.status==='na');
+ok('age of the old one is about 20 days', Math.abs(ra.age_minutes-20*1440)<5);
+ok('age of the new one is about 3 hours', Math.abs(rb.age_minutes-180)<5);
+ok('follow_up counts pending', l.follow_up.pending>=2 && l.follow_up.oldest_pending_minutes>=20*1440-5);
+ok('Superadmin can_resolve is true', l.can_resolve===true);
+// admin with the module but no layer
+ok('HR admin (module, no layer) can read the list', (await call(hr,'GET','/api/feedback')).s===200);
+ok('...but can_resolve is false', (await call(hr,'GET','/api/feedback')).j.can_resolve===false);
+ok('...and cannot mark done (403)', (await call(hr,'PUT',`/api/feedback/${a.j.id}/status`,{status:'done'})).s===403);
+ok('an ordinary employee cannot (403)', (await call(emp,'PUT',`/api/feedback/${a.j.id}/status`,{status:'done'})).s===403);
+sql("INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (133,'user_feedback','read'),(133,'user_feedback','feedback_resolve')");
+// mark done
+let r=await call(hr,'PUT',`/api/feedback/${a.j.id}/status`,{status:'done',note:'QA fixed in v2'}); ok('HR with the layer marks it done (200)', r.s===200);
+r=await call(hr,'PUT',`/api/feedback/${a.j.id}/status`,{status:'done'}); ok('marking it done twice is refused (409)', r.s===409);
+l=(await call(sa,'GET','/api/feedback?status=done')).j; const d=l.rows.find(x=>x.id===a.j.id);
+ok('Done filter lists it, with who/when/note', d&&d.status==='done'&&d.resolved_by_name&&d.resolve_note==='QA fixed in v2'&&d.resolved_at);
+ok('time taken is frozen at about 20 days (not still growing)', Math.abs(d.age_minutes-20*1440)<5);
+ok('Done filter hides the pending ones', l.rows.every(x=>x.status==='done'));
+l=(await call(sa,'GET','/api/feedback?status=pending')).j; ok('Pending filter: no done rows', l.rows.every(x=>x.status==='pending') && !l.rows.some(x=>x.id===a.j.id));
+l=(await call(sa,'GET','/api/feedback?sort=oldest')).j; ok('Oldest first puts the oldest at the top', l.rows[0].id<=l.rows[l.rows.length-1].id);
+r=await call(hr,'PUT',`/api/feedback/${c.j.id}/status`,{status:'done'}); ok('a rating-only answer cannot be marked done (400)', r.s===400);
+r=await call(hr,'PUT',`/api/feedback/999999/status`,{status:'done'}); ok('unknown id is 404', r.s===404);
+r=await call(hr,'PUT',`/api/feedback/${a.j.id}/status`,{status:'nonsense'}); ok('bad status value is 400', r.s===400);
+r=await call(hr,'PUT',`/api/feedback/${a.j.id}/status`,{status:'pending'}); ok('Reopen puts it back to Pending (200)', r.s===200);
+l=(await call(sa,'GET','/api/feedback')).j; const re=l.rows.find(x=>x.id===a.j.id); ok('reopened row has no resolver or note', re.status==='pending'&&!re.resolved_by_name&&!re.resolve_note);
+sql("DELETE FROM admin_module_permission_layers WHERE user_id=133 AND module_key='user_feedback'");
+console.log(`${pass}/${pass+fail}`);

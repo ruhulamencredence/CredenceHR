@@ -48,3 +48,24 @@ SMTP_USER=u SMTP_PASS=p SMTP_SECURE=false PUBLIC_APP_URL=https://hr.example.test
   email, "Sent to …" appears, and the joiner opening the link sees the login page with the Login ID filled in and
   no workspace step. 5/6; the one FAIL is the script looking for "Email it to the joiner" in `innerText`, which the
   page renders in capitals — the section is there (screenshot checked).
+
+## Feedback: paste a screenshot, mark Done, how long it has been pending
+
+1. **Give feedback popup** — Ctrl+V (a copied image) now works anywhere in the popup; images can also be dropped
+   on the screenshot box; a pasted image over 3 MB is shrunk to a JPEG instead of being refused. Pasting text is
+   untouched.
+2. **User Feedback admin page** — Pending / Done chips with counts, "Longest waiting", Newest / Oldest first,
+   "Pending · 20 days" on each open item (amber at 7 days, red at 14), "Done · took 3 days · by X · note" on closed
+   ones, **Mark done** (popup with a note) and **Reopen**. New layer `feedback_resolve` (explicit only) gates
+   the buttons and `PUT /api/feedback/:id/status`. Rating-only answers to the 7-day question are `na` (nothing to
+   follow up).
+
+- `scripts/feedback-status-api.mjs` — 23/23: starts Pending, `na` for the rating-only answer, ages (20 days / 3
+  hours) right, counts and "oldest pending", HR with the module but not the layer can read but gets 403 on Done
+  (and `can_resolve:false`), an employee 403, Done with note/who/when, time-taken frozen (not still growing),
+  Done / Pending / Oldest-first filters, double Done 409, `na` 400, unknown id 404, bad value 400, Reopen clears it.
+- `scripts/feedback-ui.cjs <outdir>` — 15/15: image paste taken (text paste left alone), works with focus outside
+  the text box, a 23 MB pasted image is accepted (shrunk), feedback sent with it; admin page shows chips,
+  "Longest waiting", "Pending · …", Mark done -> note -> "Done · took …", Done filter + Reopen, no sideways scroll
+  on a phone. (A real Ctrl+V can't be driven from the test browser, so the paste event is dispatched with an
+  image on it; the handler is the same.)

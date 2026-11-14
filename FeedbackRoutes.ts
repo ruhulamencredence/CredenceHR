@@ -17,7 +17,11 @@
 //   turn the question off, or change the 7 days (feedback_settings).
 //
 //   Admin Panel -> User Feedback (module "user_feedback"): every piece of
-//   feedback with its screenshot, filters and the average rating.
+//   feedback with its screenshot, filters and the average rating. Each piece
+//   that needs follow-up (not a rating-only answer to the 7-day question) is
+//   Pending until someone with the layer "feedback_resolve" (explicit only)
+//   marks it Done; the page shows how long it has been pending, or how long
+//   it took.
 
 import type { Express } from "express";
 
@@ -27,6 +31,8 @@ interface Deps {
   requireAdmin: any;
   requireSuperAdmin: any;
   requireModule: (key: any) => any;
+  requireModuleLayer: (moduleKey: any, layer: any) => any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   queryDB: QueryDB;
 }
 
@@ -79,11 +85,18 @@ export async function ensureFeedbackSchema(dbPool: any): Promise<void> {
     )
   `);
   await run("INSERT IGNORE INTO feedback_settings (id, prompt_enabled, prompt_after_days) VALUES (1, 1, 7)");
+  // Follow-up: pending -> done (and back); 'na' = nothing to do (the rating-only
+  // answer to "How do you like the app?").
+  await run("ALTER TABLE app_feedback ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'pending'", ["ER_DUP_FIELDNAME"]);
+  await run("ALTER TABLE app_feedback ADD COLUMN resolved_at DATETIME NULL", ["ER_DUP_FIELDNAME"]);
+  await run("ALTER TABLE app_feedback ADD COLUMN resolved_by INT NULL", ["ER_DUP_FIELDNAME"]);
+  await run("ALTER TABLE app_feedback ADD COLUMN resolve_note VARCHAR(500) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("UPDATE app_feedback SET status = 'na' WHERE source = 'prompt' AND status = 'pending'");
   await run("ALTER TABLE users ADD COLUMN can_give_feedback TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 export function registerFeedbackRoutes(app: Express, deps: Deps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB } = deps;
   const str = (v: any, max: number) => (v === null || v === undefined ? "" : String(v).trim().slice(0, max));
   const settings = async () =>
     ((await queryDB("/*unscoped*/ SELECT prompt_enabled, prompt_after_days FROM feedback_settings WHERE id = 1").catch(() => [])) || [])[0] || { prompt_enabled: 1, prompt_after_days: 7 };
@@ -152,8 +165,8 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
       }
       const source = b.source === "prompt" ? "prompt" : "button";
       const r: any = await queryDB(
-        `INSERT INTO app_feedback (user_id, rating, kind, module, message, screenshot_mimetype, screenshot_data, page, device, client, app_version, user_agent, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO app_feedback (user_id, rating, kind, module, message, screenshot_mimetype, screenshot_data, page, device, client, app_version, user_agent, source, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.user.id,
           rating,
@@ -167,7 +180,8 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
           b.client === "app" ? "app" : "web",
           str(b.app_version, 40) || null,
           str(req.headers["user-agent"], 255) || null,
-          source
+          source,
+          source === "prompt" ? "na" : "pending"
         ]
       );
       // Answering "How do you like the app?" means it was asked.
@@ -183,7 +197,8 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
 
   // ---- Admin Panel -> User Feedback ----
   const adminGate = [authenticateToken, requireAdmin, requireModule("user_feedback")];
-  // ?kind=&rating=&from=&to=&q=  — newest first (500 at most) and a summary.
+  // ?kind=&rating=&status=pending|done&sort=oldest&from=&to=&q=  — newest first
+  // (500 at most) and a summary.
   app.get("/api/feedback", ...adminGate, async (req: any, res) => {
     try {
       const where: string[] = ["1 = 1"];
@@ -191,6 +206,10 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
       if (KINDS.includes(String(req.query.kind))) {
         where.push("f.kind = ?");
         params.push(String(req.query.kind));
+      }
+      if (["pending", "done"].includes(String(req.query.status))) {
+        where.push("f.status = ?");
+        params.push(String(req.query.status));
       }
       const rating = Number(req.query.rating);
       if (rating >= 1 && rating <= 5) {
@@ -213,9 +232,12 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
       const rows: any[] =
         (await queryDB(
           `SELECT f.id, f.user_id, u.name AS user_name, u.email AS user_email, f.rating, f.kind, f.module, f.message,
-                  (f.screenshot_data IS NOT NULL) AS has_screenshot, f.page, f.device, f.client, f.app_version, f.source, f.created_at
-             FROM app_feedback f JOIN users u ON u.id = f.user_id
-            WHERE ${where.join(" AND ")} ORDER BY f.id DESC LIMIT 500`,
+                  (f.screenshot_data IS NOT NULL) AS has_screenshot, f.page, f.device, f.client, f.app_version, f.source, f.created_at,
+                  f.status, f.resolved_at, f.resolve_note, ru.name AS resolved_by_name,
+                  -- by the database clock, so it matches whatever created_at was stamped with
+                  TIMESTAMPDIFF(MINUTE, f.created_at, COALESCE(f.resolved_at, NOW())) AS age_minutes
+             FROM app_feedback f JOIN users u ON u.id = f.user_id LEFT JOIN users ru ON ru.id = f.resolved_by
+            WHERE ${where.join(" AND ")} ORDER BY f.id ${req.query.sort === "oldest" ? "ASC" : "DESC"} LIMIT 500`,
           params
         )) || [];
       const rated = rows.filter((r) => r.rating);
@@ -225,8 +247,48 @@ export function registerFeedbackRoutes(app: Express, deps: Deps) {
         byStars: [1, 2, 3, 4, 5].map((s) => rated.filter((r) => Number(r.rating) === s).length),
         byKind: Object.fromEntries(KINDS.map((k) => [k, rows.filter((r) => r.kind === k).length]))
       };
+      // How many are waiting / finished overall (not just under the filters),
+      // and how long the longest-waiting one has been waiting.
+      const counts: any[] = (await queryDB("SELECT status, COUNT(*) AS n, MIN(created_at) AS oldest, TIMESTAMPDIFF(MINUTE, MIN(created_at), NOW()) AS oldest_minutes FROM app_feedback GROUP BY status").catch(() => [])) || [];
+      const countOf = (st: string) => Number(counts.find((c) => c.status === st)?.n || 0);
+      const follow_up = { pending: countOf("pending"), done: countOf("done"), oldest_pending_minutes: counts.find((c) => c.status === "pending")?.oldest_minutes != null ? Number(counts.find((c) => c.status === "pending").oldest_minutes) : null };
       res.setHeader("Cache-Control", "no-store");
-      res.json({ summary, rows: rows.map((r) => ({ ...r, has_screenshot: !!Number(r.has_screenshot) })), settings: await settings() });
+      res.json({
+        summary,
+        follow_up,
+        // Shows the Mark done / Reopen buttons.
+        can_resolve: await hasModuleLayer(req.user, "user_feedback", "feedback_resolve"),
+        rows: rows.map((r) => ({ ...r, has_screenshot: !!Number(r.has_screenshot), age_minutes: Number(r.age_minutes || 0) })),
+        settings: await settings()
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // Mark a piece of feedback Done (with an optional note) or Pending again.
+  // { status: 'done' | 'pending', note? } — needs the layer "feedback_resolve".
+  app.put("/api/feedback/:id/status", authenticateToken, requireAdmin, requireModule("user_feedback"), requireModuleLayer("user_feedback", "feedback_resolve"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const to = req.body?.status === "pending" ? "pending" : req.body?.status === "done" ? "done" : null;
+      if (!to) return res.status(400).json({ error: "Status must be done or pending." });
+      const from = to === "done" ? "pending" : "done";
+      const note = str(req.body?.note, 500) || null;
+      // One atomic UPDATE: only a row that is in the other state changes, so two
+      // people clicking at once can't both "finish" it.
+      const r: any = await queryDB(
+        to === "done"
+          ? "UPDATE app_feedback SET status = 'done', resolved_at = NOW(), resolved_by = ?, resolve_note = ? WHERE id = ? AND status = ?"
+          : "UPDATE app_feedback SET status = 'pending', resolved_at = NULL, resolved_by = NULL, resolve_note = NULL WHERE id = ? AND status = ?",
+        to === "done" ? [req.user.id, note, id, from] : [id, from]
+      );
+      if (!Number(r?.affectedRows)) {
+        const row: any = ((await queryDB("SELECT status FROM app_feedback WHERE id = ?", [id])) || [])[0];
+        if (!row) return res.status(404).json({ error: "Feedback not found." });
+        if (row.status === "na") return res.status(400).json({ error: "This is a rating only — there is nothing to follow up." });
+        return res.status(409).json({ error: row.status === to ? `It is already ${to === "done" ? "Done" : "Pending"}.` : "Could not change it." });
+      }
+      res.json({ success: true, status: to });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

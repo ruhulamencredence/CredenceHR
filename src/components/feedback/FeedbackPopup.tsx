@@ -50,6 +50,31 @@ async function context() {
   return { page: `${window.location.pathname}${window.location.search}`.slice(0, 255), device, client: native ? 'app' : 'web', app_version: version };
 }
 
+// A screenshot bigger than the 3 MB limit (a retina screen pasted from the
+// clipboard often is) is shrunk to a JPEG instead of being refused.
+async function fitImage(f: File): Promise<File> {
+  if (f.size <= 3 * 1024 * 1024) return f;
+  try {
+    const bmp = await createImageBitmap(f);
+    for (const maxSide of [2000, 1500, 1100]) {
+      const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k);
+      c.height = Math.round(bmp.height * k);
+      const ctx = c.getContext('2d');
+      if (!ctx) break;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(bmp, 0, 0, c.width, c.height);
+      const blob: Blob | null = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+      if (blob && blob.size <= 3 * 1024 * 1024) return new File([blob], (f.name || 'screenshot').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+    }
+  } catch {
+    // can't shrink it — the size message below says so
+  }
+  return f;
+}
+
 export async function sendFeedback(token: string, body: Record<string, any>) {
   const res = await fetch(apiUrl('/api/feedback'), {
     method: 'POST',
@@ -84,15 +109,36 @@ export const FeedbackPopup: React.FC<{ token: string; onClose: () => void }> = (
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => void (shot && URL.revokeObjectURL(shot.url)), [shot]);
 
-  const pickShot = (f?: File | null) => {
+  const pickShot = async (file?: File | null) => {
     setError('');
-    if (!f) return;
-    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(f.type)) return setError('The screenshot must be an image (PNG / JPG / WEBP).');
-    if (f.size > 3 * 1024 * 1024) return setError('The screenshot must be under 3 MB.');
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) return setError('The screenshot must be an image (PNG / JPG / WEBP).');
+    const f = await fitImage(file);
+    if (f.size > 3 * 1024 * 1024) return setError('The screenshot is too big (over 3 MB). Try a smaller one.');
     const reader = new FileReader();
-    reader.onload = () => setShot({ base64: String(reader.result).split(',')[1] || '', mime: f.type, url: URL.createObjectURL(f), name: f.name });
+    reader.onload = () => setShot({ base64: String(reader.result).split(',')[1] || '', mime: f.type, url: URL.createObjectURL(f), name: f.name || 'Pasted screenshot' });
     reader.readAsDataURL(f);
   };
+  // Ctrl+V / paste anywhere in the popup (not only in a field) takes a copied
+  // image — a screenshot from the clipboard, or an image copied from a page.
+  // Pasting text still goes into the text box as usual.
+  const imageIn = (data: DataTransfer | null) => {
+    if (!data) return null;
+    for (const it of Array.from(data.items || [])) if (it.kind === 'file' && it.type.startsWith('image/')) return it.getAsFile();
+    return Array.from(data.files || []).find((f) => f.type.startsWith('image/')) || null;
+  };
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const f = imageIn(e.clipboardData);
+      if (!f) return;
+      e.preventDefault();
+      void pickShot(f);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [dragging, setDragging] = useState(false);
   const ready = kind === 'bug' ? !!message.trim() : !!rating || !!message.trim();
   const send = async () => {
     setBusy(true);
@@ -180,8 +226,12 @@ export const FeedbackPopup: React.FC<{ token: string; onClose: () => void }> = (
             placeholder={kind === 'bug' ? 'What were you doing, and what happened?' : kind === 'idea' ? 'What would make your work easier?' : ''}
           />
         </div>
-        <div>
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => pickShot(e.target.files?.[0])} />
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); void pickShot(imageIn(e.dataTransfer)); }}
+        >
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => { void pickShot(e.target.files?.[0]); e.target.value = ''; }} />
           {shot ? (
             <div className="liquid-glass-inset rounded-[20px] p-2 flex items-center gap-3">
               <img src={shot.url} alt="Screenshot" className="w-16 h-16 object-cover rounded-xl" />
@@ -191,8 +241,9 @@ export const FeedbackPopup: React.FC<{ token: string; onClose: () => void }> = (
               </button>
             </div>
           ) : (
-            <button type="button" onClick={() => fileRef.current?.click()} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-slate-300 text-sm text-slate-600 hover:bg-white/60">
-              <ImagePlus className="w-4 h-4" /> Add a screenshot (optional)
+            <button type="button" onClick={() => fileRef.current?.click()} className={`w-full flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border border-dashed text-sm text-slate-600 hover:bg-white/60 ${dragging ? 'border-violet-500 bg-violet-50/60' : 'border-slate-300'}`}>
+              <span className="flex items-center gap-2"><ImagePlus className="w-4 h-4" /> Add a screenshot (optional)</span>
+              <span className="text-[11px] text-slate-500 hidden sm:block">Choose a file, drop one here, or press Ctrl+V to paste a copied image</span>
             </button>
           )}
         </div>

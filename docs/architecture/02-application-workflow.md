@@ -1077,3 +1077,9 @@ Attendance Reports module-এর নতুন layer **"Edit attendance (give In 
 - **Employee Directory** (Self Service): শুধু চাকরিতে আছেন এমন কর্মী।
 
 আগে থেকেই active-only ছিল: Department Summary, Late list, Custom Report (Attendance Report Builder), HR Operations-এর Quick reports ও Employee Reports (include_inactive না দিলে), Employee Tracking, Management Dashboard, Admin Dashboard-এর জন্মদিন। ইচ্ছা করে বদলানো হয়নি: **Payroll** (চলে যাওয়া কর্মীরও শেষ মাসের বেতন হয়), আর লেনদেনের ইতিহাস (ছুটির আবেদন, Bill Claim, SIM bill) — সেগুলো যা ঘটেছে তার হিসাব। মাসের মাঝে চলে যাওয়া কারো সেই মাসের হাজিরা দেখতে Status-এ "All" বা "Inactive" বাছুন।
+
+### ফিডব্যাক: স্ক্রিনশট paste, আর Done / Pending
+
+**"Give feedback" popup:** স্ক্রিনশট দেওয়া যায় ফাইল বেছে, ছবি টেনে ফেলে, অথবা কপি করা ছবি **Ctrl+V** দিয়ে — popup-এর ভেতরে কোথায় ফোকাস আছে তা লাগে না (লেখা paste করলে আগের মতো লেখাই বসে)। ৩ MB-র বেশি ছবি (retina স্ক্রিনের কপি প্রায়ই বড় হয়) refuse না করে আপনাআপনি ছোট করে JPEG বানানো হয়; তবু না হলে "too big" বার্তা (`FeedbackPopup.tsx`)।
+
+**Admin Panel -> MIS -> User Feedback:** যে ফিডব্যাকে কিছু করার আছে (প্রতিটা ফিডব্যাক, শুধু "How do you like the app?"-র তারা-রেটিং ছাড়া) তার অবস্থা **Pending** → **Done**। Pending-এ দেখায় কতদিন ধরে পড়ে আছে ("Pending · 5 days"; ৭ দিনে হলুদ, ১৪ দিনে লাল), Done-এ দেখায় কতদিনে হলো, কে করল, কখন, আর নোট। উপরে All / Pending (সংখ্যা) / Done (সংখ্যা), "Longest waiting: …" আর Newest / Oldest first। **Mark done** (নোটসহ popup) আর **Reopen** শুধু ওই module-এর `feedback_resolve` layer যাঁর আছে (ডিফল্টে কারও নেই, Superadmin সবসময়) — না থাকলে বোতাম লুকানো আর `PUT /api/feedback/:id/status` 403। সময় ধরা হয় database ঘড়িতে; একই সময়ে দুজন চাপলে একটাই লাগে (এক UPDATE, দ্বিতীয়টা 409)। রেটিং-শুধু উত্তরের অবস্থা `na`, তাকে Done করা যায় না (400) (`FeedbackRoutes.ts`)।
