@@ -193,12 +193,12 @@ const SuperadminsModal: React.FC<{ token: string; ws: Workspace; onClose: () => 
   const [reset, setReset] = useState<{ id: number; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
-  const run = async (fn: () => Promise<any>, ok: string) => {
+  const run = async (fn: () => Promise<any>, ok: string | ((r: any) => string)) => {
     setBusy(true);
     setMsg(null);
     try {
-      await fn();
-      setMsg({ type: 'success', text: ok });
+      const r = await fn();
+      setMsg({ type: 'success', text: typeof ok === 'function' ? ok(r) : ok });
       onChanged();
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
@@ -275,13 +275,14 @@ const SuperadminsModal: React.FC<{ token: string; ws: Workspace; onClose: () => 
         </div>
         <div>
           <div className="text-xs font-semibold text-slate-700 mb-1">Add a Superadmin</div>
+          <p className="text-[11px] text-slate-500 mb-1.5">An email that already has an account in this workspace makes that account a Superadmin (its password stays). A new email makes a new account.</p>
           <div className="grid sm:grid-cols-3 gap-2">
             <input className={inputCls} placeholder="Name" value={add.name} onChange={(e) => setAdd((a) => ({ ...a, name: e.target.value }))} />
             <input className={inputCls} placeholder="Email" value={add.email} onChange={(e) => setAdd((a) => ({ ...a, email: e.target.value }))} />
             <input
               className={inputCls}
               type="password"
-              placeholder="Password (8+)"
+              placeholder="Password (8+, new account only)"
               value={add.password}
               onChange={(e) => setAdd((a) => ({ ...a, password: e.target.value }))}
             />
@@ -291,7 +292,13 @@ const SuperadminsModal: React.FC<{ token: string; ws: Workspace; onClose: () => 
             className={`${btnPrimary} mt-2`}
             disabled={busy}
             onClick={() =>
-              run(() => api.post(`/api/platform/workspaces/${ws.id}/superadmins`, add), `${add.name} can now sign in to "${ws.code}" as Superadmin.`).then(() =>
+              run(
+                () => api.post(`/api/platform/workspaces/${ws.id}/superadmins`, add),
+                (r) =>
+                  r?.promoted
+                    ? `${r.name}'s existing account is now a Superadmin of "${ws.code}" — same password; they sign in once more to get it.`
+                    : `${add.name} can now sign in to "${ws.code}" as Superadmin.`
+              ).then(() =>
                 setAdd({ name: '', email: '', password: '' })
               )
             }

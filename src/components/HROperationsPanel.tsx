@@ -54,11 +54,12 @@ export const REPORTS_VIEW_STORAGE_KEY = 'hr_ops_reports_view';
 // Fired with the open tab, so the sidebar can highlight its own item for it.
 export const HR_OPS_ACTIVE_EVENT = 'credence:hr-ops-active';
 
-export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean; canQuickReports?: boolean }> = ({
+export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean; canRequisitions?: boolean; canQuickReports?: boolean; canQuickOt?: boolean }> = ({
   token,
   canGrievance = false,
   canRequisitions = false,
-  canQuickReports = false
+  canQuickReports = false,
+  canQuickOt = false
 }) => {
   const api = useHrApi(token);
   // A tab only for an account with its permission (grievance module / "requisitions" layer).
@@ -215,7 +216,7 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
                 ))}
               </div>
             )}
-            {showQuick ? <HrQuickReports key={reportsOpened} token={token} onOpenEmployee={openEmployee} /> : <HrOpsReports token={token} onOpenEmployee={openEmployee} />}
+            {showQuick ? <HrQuickReports key={reportsOpened} token={token} onOpenEmployee={openEmployee} canOt={canQuickOt} /> : <HrOpsReports token={token} onOpenEmployee={openEmployee} />}
           </div>
         ) : tab === 'increments' ? (
           <HrOpsIncrements

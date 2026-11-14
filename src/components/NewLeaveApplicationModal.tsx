@@ -285,25 +285,26 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
   // sidesteps that ancestor entirely.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+      className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
         paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
       <div
-        className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col"
+        className="liquid-glass liquid-glass-in rounded-[32px] max-w-3xl w-full overflow-hidden flex flex-col"
         style={{ maxHeight: '100%' }}
       >
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
+        <div className="p-5 border-b border-slate-200/70 flex items-center justify-between shrink-0">
           <h3 className="text-base font-bold text-slate-900">New Leave Application</h3>
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-40"
+            className="liquid-glass-chip p-1.5 rounded-full text-slate-600 transition-colors disabled:opacity-40"
+            aria-label="Close"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -485,7 +486,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           )}
         </div>
 
-        <div className="p-5 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+        <div className="p-5 border-t border-slate-200/70 flex items-center justify-between gap-2 shrink-0">
           <span className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500">
             <CalendarDays className="w-3.5 h-3.5" /> Apply Date: <span className="font-bold text-slate-800">{formatDate(today)}</span>
           </span>

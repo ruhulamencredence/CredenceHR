@@ -1334,7 +1334,7 @@ html[data-dark] [class*="bg-gradient-to"][class*="from-white"], html[data-dark] 
 /* the soft colour glow behind phone pages: a faint accent glow on dark */
 html[data-dark] .page-glow { background: radial-gradient(120% 70% at 10% 0%, rgba(var(--g-accent-rgb),.16) 0%, transparent 60%), radial-gradient(90% 60% at 100% 10%, rgba(var(--g-accent-rgb),.08) 0%, transparent 60%) !important; }
 /* dimming layers stay dark */
-html[data-dark] [class*="bg-slate-900/"], html[data-dark] [class*="bg-black/"] { background-color: rgba(0,0,0,.55) !important; }
+html[data-dark] [class*="bg-slate-900/"], html[data-dark] [class*="bg-slate-950/"], html[data-dark] [class*="bg-black/"] { background-color: rgba(0,0,0,.55) !important; }
 html[data-dark] { background: #25282c !important; }
 html[data-dark] body { background: #25282c !important; }
 html[data-dark] body * { --page-flat: #25282c; }
@@ -1413,6 +1413,31 @@ html[data-dark] [style*="color: rgb(29, 78, 216)"], html[data-dark] [style*="col
 html[data-dark] :is([style*="color: rgb(91, 85, 112)"], [style*="color: rgb(107, 101, 133)"], [style*="color: rgb(100, 116, 139)"], [style*="color: rgb(71, 85, 105)"], [style*="color: rgb(95, 99, 104)"]) { color: #a3a8ae !important; }
 /* Phone Admin Panel tab pills (html[data-admin-phone]). */
 html[data-dark][data-admin-phone] main :is(.flex.gap-1.border-b, .flex.border-b.overflow-x-auto, [role="tablist"].border-b) > button:not([class*="border-blue-600"]):not([class*="text-blue-600"]):not([aria-selected="true"]) { background: #2f3237 !important; color: #c6cad0 !important; box-shadow: none !important; }
+/* Phone Admin Panel cards: the inner cards (made white 86% above, e.g.
+   Employee Tracking's "Right now" / "Not tracked" / "Phone status") and the
+   table rows shown as cards — charcoal in Dark, clear glass in Dark Glass. */
+@media (max-width: 767px) {
+  html[data-dark][data-admin-phone] main :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) {
+    background: #2f3237 !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.6) !important;
+  }
+  html[data-dark][data-glass][data-admin-phone] main :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.04)) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 40px -18px rgba(0, 0, 0, 0.7) !important;
+  }
+  html[data-dark][data-admin-phone] table[data-phone-card] > tbody > tr {
+    background: #2f3237 !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.6);
+  }
+  html[data-dark][data-glass][data-admin-phone] table[data-phone-card] > tbody > tr {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)) !important;
+    border-color: rgba(255, 255, 255, 0.13) !important;
+  }
+}
 
 /* Dark coloured text (-700/-800/-900) reads as its light -300 on charcoal. Text only:
    a bg-violet-700 button keeps its colour. */
@@ -1495,6 +1520,21 @@ html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]
   -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
   border-color: rgba(255, 255, 255, 0.14) !important;
 }
+/* Pickers that float over a form (the leave calendar…, class "solid-pop"):
+   clear glass would show the fields underneath through the dates, so they
+   are near-solid dark glass. */
+html[data-dark][data-dark][data-glass][data-glass] .solid-pop.solid-pop.solid-pop.solid-pop {
+  background: rgba(28, 30, 35, 0.96) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+/* Alerts popup: an unread alert stands out — white in light mode, a soft
+   wash of the accent in dark (AlertsBell.tsx). */
+.liquid-glass-inset.alert-unread { background: rgba(255, 255, 255, 0.8); }
+html[data-dark] .liquid-glass-inset.alert-unread {
+  background: rgba(var(--g-accent-rgb), 0.13);
+  border-color: rgba(var(--g-accent-rgb), 0.32);
+}
 /* The sidebar's "Search menu…" box: a dark well, not the open-item highlight
    (its focus:bg-white/15 class matched that rule) tinted by the glow. */
 html[data-dark][data-glass] .gsidebar input[type="text"] { background-color: rgba(10, 12, 16, 0.45) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important; color: #e4e6ea !important; }
@@ -1562,3 +1602,14 @@ html[data-dark][data-glass] .leave-card .leave-glow {
 }
 html[data-dark][data-glass] .leave-card .leave-head { background: transparent !important; }
 html[data-dark][data-glass] .leave-card .leave-num { color: #fdba74 !important; }
+
+/* A full-screen map (EmployeeTrackingPanel.tsx .map-fullscreen) is
+   position: fixed; a blur / transform on any box around it (Dark Glass gives
+   cards a backdrop blur) would trap it inside that box instead of covering
+   the screen. While it is open, the boxes around it drop those effects.
+   (Repeated attribute / class only to outrank the Dark Glass card rule.) */
+html[data-dark][data-glass][data-glass] :has(.map-fullscreen.map-fullscreen.map-fullscreen.map-fullscreen),
+html :has(> .map-fullscreen), html :has(.map-fullscreen) {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  filter: none !important; transform: none !important;
+}

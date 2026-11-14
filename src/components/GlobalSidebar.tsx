@@ -574,7 +574,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
   // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
   // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
-  // (Check In/Out, Bill Claim, Conveyance Disbursement, My
+  // (Check In/Out, Bill Claim, Bill Disbursement, My
   // Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
   // World-class HRM extension modules (Exit/Offboarding, Performance,
@@ -1357,7 +1357,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
         </nav>
 
-        <div className="p-3 pb-[calc(var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+12px)] space-y-2">
+        {/* Logout: phones only — on a computer it is the header's icon
+            (Navbar.tsx, top right), so the sidebar has none. */}
+        <div className="md:hidden p-3 pb-[calc(var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+12px)] space-y-2">
           <button
             type="button"
             onClick={() => selectAndClose(onLogout)}

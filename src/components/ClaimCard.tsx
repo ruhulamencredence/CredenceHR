@@ -124,7 +124,7 @@ useLiveRefresh(() => fetchStatus(true));
       <div className="flex flex-col sm:flex-row sm:items-end gap-2">
         <div className="flex-1">
           <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-            Purpose / Where are you going
+            Purpose
           </label>
           <input
             type="text"
@@ -132,7 +132,8 @@ useLiveRefresh(() => fetchStatus(true));
             onChange={(e) => setPurpose(e.target.value)}
             disabled={hasOpenClaim}
             maxLength={255}
-            placeholder="e.g. Bank visit — City Branch"
+            autoComplete="off"
+            placeholder="e.g. Meeting"
             className="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:outline-none disabled:opacity-70"
           />
         </div>
