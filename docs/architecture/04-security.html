@@ -318,6 +318,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>GroupCallRoutes.ts</code></td>
 </tr>
 <tr>
+<td>HR হাতে হাজিরা বসানো</td>
+<td>Monthly Attendance Report থেকে In / Out বসানো শুধু Attendance Reports-এর explicit-only layer <code>attendance_edit</code> দিয়ে; কারণ বাধ্যতামূলক, সারিতে "HR edit: …" আর <code>attendance_admin_edits</code>-এ আগের / নতুন সময়, কে, কখন; বেতন বন্ধ মাসে হয় না; Department সীমার বাইরের কর্মী হয় না। অফিস মেশিনের punch মোছা যায় না — punch থাকা ZK machine delete আটকানো (মুছলে CASCADE-এ punch যেত)।</td>
+<td><code>AttendanceAdminEdit.ts</code>, <code>OfficeAttendanceRoutes.ts</code></td>
+</tr>
+<tr>
 <td>সব কর্মীর তথ্য একবারে বের করা (Export)</td>
 <td>Employees / HR Operations-এর Export শুধু আলাদা explicit-only layer (<code>emp_export</code> / <code>hr_emp_export</code>) থাকলে; layer ছাড়া API 403। ফাইলে Login ID, Password, বেতনের ব্যাংক / MFS হিসাব নেই; কর্মী আসে নিজের Department / কোম্পানি সীমা থেকে।</td>
 <td><code>EmployeeHeadcount.ts</code></td>

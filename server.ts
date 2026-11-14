@@ -69,6 +69,7 @@ import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScheduleSchema, registerTrackingScheduleRoutes } from "./TrackingSchedule";
 import { registerEmployeeHeadcountRoutes } from "./EmployeeHeadcount";
 import { registerSimInventoryRoutes } from "./SimInventory";
+import { registerAttendanceAdminEditRoutes } from "./AttendanceAdminEdit";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
 import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
@@ -502,7 +503,7 @@ const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
 // a day or a month): plain reading, so the no-saved-layers default is
 // "read" + "dept_summary". "custom_report" = Monthly Attendance Report ->
 // Custom Report (the Attendance Report Builder) — reading too, also default.
-const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary", "custom_report"] as const;
+const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary", "custom_report", "attendance_edit"] as const;
 // Mail Administration (MailRoutes.ts): "read" = the list of everyone's
 // connected Credence Mail mailboxes; "mail_open" = open someone's mailbox
 // (read only); "mail_password" = see a mailbox's saved password. Both
@@ -3663,6 +3664,7 @@ async function startServer() {
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer });
   registerSimInventoryRoutes(app, { authenticateToken, queryDB, hasModuleLayer });
+  registerAttendanceAdminEditRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
   // Self Service loan / salary advance requests — ride the Dynamic Approval
   // Engine (request_type 'loan'); Payroll creates the loan.
   registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });

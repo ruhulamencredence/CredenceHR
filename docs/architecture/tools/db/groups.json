@@ -68,6 +68,7 @@
  ],
  "D. Attendance, Roster, Breaks & Tracking": [
   "attendance",
+  "attendance_admin_edits",
   "attendance_corrections",
   "attendance_mock_attempts",
   "attendance_report_department_access",

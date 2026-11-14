@@ -31,6 +31,7 @@ import { ensureLoanPlanSchema } from "./LoanPlan";
 import { ensureProfilePhotoRequestSchema } from "./profileRoutes";
 import { ensureMobileBillSchema } from "./MobileBillRoutes";
 import { ensureSimInventorySchema } from "./SimInventory";
+import { ensureAttendanceAdminEditSchema } from "./AttendanceAdminEdit";
 import { ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
 import { ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { ensurePayrollSchema } from "./PayrollRoutes";
@@ -140,6 +141,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureTargetSchema(dbPool);
   await ensureMobileBillSchema(dbPool);
   await ensureSimInventorySchema(dbPool);
+  await ensureAttendanceAdminEditSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
   // HR Operations (personnel actions, letters, onboarding, service book) —
   // HROperationsRoutes.ts.

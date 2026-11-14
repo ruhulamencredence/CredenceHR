@@ -8,6 +8,15 @@ erDiagram
     decimal check_in_lat
     decimal check_in_lng
   }
+  attendance_admin_edits {
+    int id PK
+    int user_id FK
+    int attendance_id FK
+    int project_id FK
+    date attendance_date
+    datetime old_check_in_at
+    datetime old_check_out_at
+  }
   attendance_corrections {
     int id PK
     int user_id FK
@@ -284,6 +293,9 @@ erDiagram
   }
   projects ||--o{ attendance : "project_id"
   users ||--o{ attendance : "user_id"
+  users ||..o{ attendance_admin_edits : "user_id"
+  attendance ||..o{ attendance_admin_edits : "attendance_id"
+  projects ||..o{ attendance_admin_edits : "project_id"
   projects ||--o{ attendance_corrections : "project_id"
   users ||--o{ attendance_corrections : "user_id"
   users ||--o{ attendance_mock_attempts : "user_id"

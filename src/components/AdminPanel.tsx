@@ -1,3 +1,4 @@
+import { AttendanceEditPopup } from './AttendanceEditPopup';
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -3068,6 +3069,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const saved = user.module_permission_layers?.attendance_reports;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
+  // Monthly Attendance Report: tap a day to give / fix In / Out (AttendanceEditPopup).
+  const canEditAttendance = attendanceReportsLayer('attendance_edit');
+  const [editAttendance, setEditAttendance] = useState<{ userId: number; userName: string; date: string } | null>(null);
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -4592,11 +4596,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 : d.leave_type
                                   ? `${d.date} — ${d.leave_type} leave`
                                   : d.date;
+                          // Attendance Reports layer "attendance_edit": tap a day to give / fix In / Out.
+                          const editable = canEditAttendance && !d.future && !d.before_joining;
+                          const editProps = editable
+                            ? {
+                                onClick: () => setEditAttendance({ userId: Number(u.user_id), userName: u.user_name, date: d.date }),
+                                role: 'button' as const,
+                                tabIndex: 0,
+                                onKeyDown: (e: React.KeyboardEvent) => e.key === 'Enter' && setEditAttendance({ userId: Number(u.user_id), userName: u.user_name, date: d.date })
+                              }
+                            : {};
+                          const editCls = editable ? ' cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-blue-200' : '';
+                          const titleWithEdit = editable ? `${cellTitle} — click to edit` : cellTitle;
                           if (monthlyCellDisplay === 'times') {
                             const inTime = shortTime(d.check_in_at);
                             const outTime = shortTime(d.check_out_at);
                             return (
-                              <td key={d.date} title={cellTitle} className="px-1 py-2 text-center align-middle">
+                              <td key={d.date} title={titleWithEdit} {...editProps} className={`px-1 py-2 text-center align-middle${editCls}`}>
                                 {d.present ? (
                                   <div className={`leading-tight text-[9px] font-bold ${colorClass}`}>
                                     <div>{inTime}</div>
@@ -4611,8 +4627,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           return (
                             <td
                               key={d.date}
-                              title={cellTitle}
-                              className={`px-1 py-3 text-center text-[10px] font-bold ${colorClass}`}
+                              title={titleWithEdit}
+                              {...editProps}
+                              className={`px-1 py-3 text-center text-[10px] font-bold ${colorClass}${editCls}`}
                             >
                               {label}
                             </td>
@@ -4627,13 +4644,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </tbody>
                 </table>
                 <PagerBar page={monthGridPage} pageSize={monthGridPageSize} total={monthlyReportTotal(monthlyReport)} onPage={(p) => fetchMonthlyReport(p)} onPageSize={(n) => { setMonthGridPageSize(n); fetchMonthlyReport(1, n); }} />
+                {editAttendance && (
+                  <AttendanceEditPopup
+                    token={token}
+                    userId={editAttendance.userId}
+                    userName={editAttendance.userName}
+                    date={editAttendance.date}
+                    onClose={() => setEditAttendance(null)}
+                    onSaved={() => {
+                      setEditAttendance(null);
+                      void fetchMonthlyReport(monthGridPage);
+                    }}
+                  />
+                )}
                 <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-[10px] text-slate-500 border-t border-slate-100">
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Present — GPS (Remote Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500" /> Present — ZKT (Office Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-violet-500" /> W — Weekend</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> H — Holiday</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-300" /> Absent</span>
-                  <span className="text-slate-400">Hover a day for check-in time, project, source and remarks.</span>
+                  <span className="text-slate-400">Hover a day for check-in time, project, source and remarks.{canEditAttendance ? ' Click a day to edit its attendance.' : ''}</span>
                 </div>
               </div>
             )

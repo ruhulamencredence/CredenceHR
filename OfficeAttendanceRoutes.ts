@@ -197,6 +197,15 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
 
   app.delete("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
     try {
+      // Deleting a machine would take every punch pulled from it with it
+      // (zk_attendance_logs ... ON DELETE CASCADE) — attendance and payroll
+      // history. A machine with punches is turned off (Inactive) instead.
+      const used: any[] = (await queryDB("SELECT COUNT(*) AS n FROM zk_attendance_logs WHERE device_id = ?", [req.params.id])) || [];
+      const n = Number(used[0]?.n || 0);
+      if (n > 0)
+        return res.status(400).json({
+          error: `This machine has ${n} punch${n === 1 ? "" : "es"} saved — deleting it would delete them too. Edit it and turn it off (Inactive) instead; its punches stay.`
+        });
       await queryDB("DELETE FROM zk_devices WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {
