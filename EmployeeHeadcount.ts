@@ -47,11 +47,12 @@ export function registerEmployeeHeadcountRoutes(app: Express, deps: Deps) {
   async function load(q: any) {
     const [emps, idx]: any[] = await Promise.all([queryDB("SELECT * FROM all_employees ORDER BY name"), loadBranchIndex(queryDB)]);
     const status = q.status === "inactive" ? "inactive" : q.status === "all" ? "all" : "active";
-    const dept = norm(q.department);
+    // ?department= may repeat (several Departments); "__none__" = no department.
+    const depts = new Set(([] as any[]).concat(q.department ?? []).map(norm).filter(Boolean));
     const f = readEmployeeFilter(q);
     return (emps || [])
       .filter((e: any) => (status === "all" ? true : status === "active" ? Number(e.is_active ?? 1) !== 0 : Number(e.is_active ?? 1) === 0))
-      .filter((e: any) => !dept || (dept === "__none__" ? !norm(e.department) : norm(e.department) === dept))
+      .filter((e: any) => !depts.size || depts.has(norm(e.department) || "__none__"))
       .filter((e: any) => employeeMatches(e, f, idx))
       .filter((e: any) => {
         const t = norm(q.q);
@@ -91,8 +92,15 @@ export function registerEmployeeHeadcountRoutes(app: Express, deps: Deps) {
             .sort((a, b) => b.count - a.count || a.branch.localeCompare(b.branch));
           return { kind: k, count: branches.reduce((s, b) => s + b.count, 0), branches };
         });
-      const departments = Array.from(new Set(rows.map((r: any) => String(r.e.department || "").trim()).filter(Boolean))).sort();
-      res.json({ total: rows.length, groups, departments });
+      // Every Department to pick from (with how many), not only the picked ones.
+      const deptCount = new Map<string, number>();
+      for (const r of req.query?.department ? await load({ ...req.query, department: undefined }) : rows) {
+        const d = String(r.e.department || "").trim() || "__none__";
+        deptCount.set(d, (deptCount.get(d) || 0) + 1);
+      }
+      const departments = [...deptCount.keys()].filter((d) => d !== "__none__").sort();
+      const department_counts = Object.fromEntries(deptCount);
+      res.json({ total: rows.length, groups, departments, department_counts });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
