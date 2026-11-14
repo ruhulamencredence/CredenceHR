@@ -83,7 +83,8 @@ await dep.fill('hr');
 await page.getByRole('option', { name: /^HR\b/ }).first().click();
 await page.getByPlaceholder('name@company.com').fill('ui.form.person@credence.test');
 await page.getByPlaceholder('e.g. 01877772209').fill('01711000222');
-const dates = page.locator('input[type=date]');
+// Only the form's own date fields — the Employees page also has Joining date filter boxes.
+const dates = page.locator('form:has(button:has-text("Add Employee")) input[type=date]');
 await dates.nth(0).fill('2026-10-01');
 await dates.nth(1).fill(day(-365 * 10)); // ten years old
 await page.getByRole('button', { name: 'Add Employee' }).click();
