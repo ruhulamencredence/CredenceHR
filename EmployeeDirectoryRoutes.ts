@@ -18,6 +18,8 @@
 // deliberately no requireAdmin/requireModule gate. Because of that, the
 // SELECT below only ever returns directory-safe columns (name, designation,
 // department, work contact info, office location, supervisor) — it never
+// exposes the personal mobile number (all_employees.mobile, Employee Info ->
+// Personal Contact): only the office Contact No. (phone) is listed. It never
 // exposes the Employee Info/Status/Contact tab's more personal fields (NID,
 // date of birth, religion, marital status, blood group, home addresses)
 // that a plain 'user' account has no business seeing about a colleague.
@@ -62,7 +64,7 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
       }
       const load = () => queryDB(
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
-                e.email, e.phone, e.mobile, e.telephone, e.branch, e.division, e.unit,
+                e.email, e.phone, e.telephone, e.branch, e.division, e.unit,
                 e.is_active, e.user_id, e.company_id,
                 sup.name AS supervisor_name
          FROM all_employees e
@@ -96,7 +98,6 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
           department_id: r.department_id,
           email: r.email,
           phone: r.phone,
-          mobile: r.mobile,
           telephone: r.telephone,
           branch: r.branch,
           division: r.division,

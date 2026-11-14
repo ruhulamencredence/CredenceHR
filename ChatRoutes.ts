@@ -1572,7 +1572,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         )) || [])[0];
         if (other) {
           const emp = ((await queryDB(
-            "/*unscoped*/ SELECT designation, department, email, phone, mobile, branch, employee_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1",
+            "/*unscoped*/ SELECT designation, department, email, phone, branch, employee_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1",
             [other.id]
           ).catch(() => [])) || [])[0];
           person = {
@@ -1581,7 +1581,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
             username: other.username || "",
             about: other.chat_about || "",
             email: emp?.email || other.email || "",
-            phone: emp?.mobile || emp?.phone || "",
+            // Office Contact No. only; the personal mobile stays in Employees.
+            phone: emp?.phone || "",
             designation: emp?.designation || "",
             department: emp?.department || "",
             branch: emp?.branch || "",

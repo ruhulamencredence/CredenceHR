@@ -473,7 +473,6 @@ export interface EmployeeDirectoryEntry {
   department_id: number | null;
   email: string | null;
   phone: string | null;
-  mobile: string | null;
   telephone: string | null;
   branch: string | null;
   division: string | null;
