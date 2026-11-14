@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The page's side of clientDevice.ts (server): which device this is, for the
-// iPhone Home Screen app's own sign-in. It tells the server what it can't see
-// (an iPad calls itself a Mac).
+// The page's side of clientDevice.ts (server): which device this is, for
+// "attendance from a browser only on an iPhone / iPad" and for the iPhone
+// Home Screen app's own sign-in. The server decides; this only shows the
+// right thing and tells the server what it can't see (an iPad calls itself
+// a Mac).
 
 import { Capacitor } from '@capacitor/core';
 
@@ -31,4 +33,11 @@ export const signInDeviceFields = (): Record<string, any> => {
     ...(isAppleMobile() && isStandalone() ? { platform: 'pwa' } : {}),
     ...(isTouchMac() ? { touch_device: true } : {})
   };
+};
+
+// Why this device can't give attendance, or null when it can.
+export type AttendanceBlock = 'android' | 'computer' | null;
+export const attendanceBlock = (): AttendanceBlock => {
+  if (isNativeApp() || isAppleMobile()) return null;
+  return /Android/i.test(ua()) ? 'android' : 'computer';
 };
