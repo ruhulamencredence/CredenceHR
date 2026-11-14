@@ -1154,7 +1154,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportDepartmentFilter, setReportDepartmentFilter] = useState('');
   const [reportDepartments, setReportDepartments] = useState<string[]>([]);
   // Active / Inactive employees (by their Employee record); '' = everyone.
-  const [reportStatusFilter, setReportStatusFilter] = useState<'' | 'active' | 'inactive'>('');
+  // Active by default (the server's default too); Inactive / All when picked.
+  const [reportStatusFilter, setReportStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   // Month Wise grid cell display — 'symbol' is the original compact P/A/H/W
   // per day (times only on hover); 'times' widens each day column and prints
   // the actual Check In/Out time stacked in the cell, for when the Admin
@@ -1259,7 +1260,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
     if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
-    if (reportStatusFilter) filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : 'Inactive employees']);
+    filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : reportStatusFilter === 'inactive' ? 'Inactive employees' : 'All employees']);
     return filters;
   };
 
@@ -4416,12 +4417,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Status</label>
                 <SearchSelect
                   value={reportStatusFilter}
-                  onChange={(e) => setReportStatusFilter(e.target.value as '' | 'active' | 'inactive')}
+                  onChange={(e) => setReportStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[140px]"
                 >
-                  <option value="">All Employees</option>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
+                  <option value="all">All Employees</option>
                 </SearchSelect>
               </div>
 
