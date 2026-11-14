@@ -457,8 +457,8 @@ public class DutyTrackingService extends Service {
         Intent open = new Intent(this, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Employee Tracking active")
-            .setContentText("Reporting your location for Employee Tracking. Tap to open the app.")
+            .setContentTitle("Tracking is active")
+            .setContentText("Your location is getting tracked")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(pi)

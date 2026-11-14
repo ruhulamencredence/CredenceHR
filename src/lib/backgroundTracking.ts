@@ -231,8 +231,8 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
   }
   watcherId = await BackgroundGeolocation.addWatcher(
     {
-      backgroundTitle: 'Employee Tracking active',
-      backgroundMessage: 'Reporting your location for Employee Tracking. Tap to open the app.',
+      backgroundTitle: 'Tracking is active',
+      backgroundMessage: 'Your location is getting tracked',
       requestPermissions: true,
       stale: false,
       distanceFilter: distanceFilterM

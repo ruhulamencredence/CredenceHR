@@ -707,7 +707,7 @@ Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (<cod
 <h2 id="employee-tracking-location">Employee Tracking: অ্যাপ বন্ধ থাকলেও location যায়</h2>
 <p>আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, <code>DutyTrackingService.java</code>:</p>
 <ul>
-<li>এটা একটা foreground service ("Employee Tracking active" notification দেখায়)। নিজেই GPS fix জমায় আর <code>POST /api/tracking/ping</code>-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় <code>/api/tracking/state</code>-এ।</li>
+<li>এটা একটা foreground service ("Tracking is active" — "Your location is getting tracked" notification দেখায়; ১৪ নভেম্বরের আগে "Employee Tracking active")। নিজেই GPS fix জমায় আর <code>POST /api/tracking/ping</code>-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় <code>/api/tracking/state</code>-এ।</li>
 <li>অ্যাপ background-এ থাকলে বা Recent apps থেকে সরালেও চলে। Android service বন্ধ করে দিলে নিজে আবার চালু হয় (<code>START_STICKY</code>)। ফোন restart বা অ্যাপ update হলে <code>BootReceiver</code> আবার চালু করে।</li>
 <li>সার্ভার "live" বললে (Live Follow, ride) <code>LiveTrackingService</code> চালু হয়, আগের মতোই।</li>
 <li>থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা <code>clearTrackingSession</code> ডাকে), বা সার্ভার sign-in না মানলে (401/403)।</li>

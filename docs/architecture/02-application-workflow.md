@@ -809,7 +809,7 @@ Admin Panel → Users → Module Access-এ প্রতিটা module আর 
 
 আগে প্রতিদিনের location পাঠানো হতো পাতার (WebView) timer দিয়ে। অ্যাপ background-এ গেলে Android সেই timer থামিয়ে দেয়, আর Recent apps থেকে সরালে পাতাটাই বন্ধ হয়ে যায়, তাই tracking বন্ধ হয়ে যেত। এখন নতুন APK-তে কাজটা করে Android-এর নিজের service, `DutyTrackingService.java`:
 
-- এটা একটা foreground service ("Employee Tracking active" notification দেখায়)। নিজেই GPS fix জমায় আর `POST /api/tracking/ping`-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় `/api/tracking/state`-এ।
+- এটা একটা foreground service ("Tracking is active" — "Your location is getting tracked" notification দেখায়; ১৪ নভেম্বরের আগে "Employee Tracking active")। নিজেই GPS fix জমায় আর `POST /api/tracking/ping`-এ পাঠায়: চলাফেরার সময় প্রতি ৩ মিনিটে, ১৫ মিনিট এক জায়গায় থাকলে প্রতি ১০ মিনিটে, পুরো পথের সব point একসাথে। প্রতি ২ মিনিটে ফোনের অবস্থা (Location on, অনুমতি, battery) যায় `/api/tracking/state`-এ।
 - অ্যাপ background-এ থাকলে বা Recent apps থেকে সরালেও চলে। Android service বন্ধ করে দিলে নিজে আবার চালু হয় (`START_STICKY`)। ফোন restart বা অ্যাপ update হলে `BootReceiver` আবার চালু করে।
 - সার্ভার "live" বললে (Live Follow, ride) `LiveTrackingService` চালু হয়, আগের মতোই।
 - থামে logout হলে, tracking-এর অনুমতি তুলে নিলে (পাতা `clearTrackingSession` ডাকে), বা সার্ভার sign-in না মানলে (401/403)।
