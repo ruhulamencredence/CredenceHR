@@ -4,6 +4,7 @@
  */
 
 import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
@@ -249,9 +250,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const waiting = status?.pending_offsite || null;
   const hasCheckedIn = !!status?.check_in_at || !!waiting?.in_at;
   // Attendance from a browser only on an iPhone / iPad (the server refuses the
-  // rest too, clientDevice.ts): an Android browser is sent to the app, a
-  // computer can't give it. Times already given still show.
+  // rest too, clientDevice.ts). The card looks as usual; tapping Set Now /
+  // Set again on an Android browser or a computer opens a popup saying why
+  // (with the APK on Android) instead of asking for the location.
   const block = attendanceBlock();
+  // Shown only when someone taps Set Now / Set again on such a device.
+  const [showBlock, setShowBlock] = useState(false);
 
   // Late warning: this month's own Delay / Extreme Delay counts against the
   // Late Attendance Policy (same /api/my-attendance-summary figures the
@@ -281,6 +285,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
   const handleMark = async (kind: 'in' | 'out') => {
+    // A device that can't give attendance (Android browser / computer): say why, send nothing.
+    if (block) {
+      setShowBlock(true);
+      return;
+    }
     // The Project is the one whose area you're standing in — for the In and
     // for the Out alike (they may be different Projects). With one Project
     // it's simply that one (the server still checks the distance).
@@ -484,8 +493,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
               </div>
               <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
             </>
-          ) : block ? (
-            <div className="mt-0.5 text-xs font-semibold text-slate-400">—</div>
           ) : (
             <button
               type="button"
@@ -521,10 +528,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
               {/* Gave it too early, or the office machine took a stray punch as
                   the Out? The same day it can be given again
                   (users.can_update_check_out — off unless ticked). */}
-              {status?.can_update_check_out && !block && (
+              {status?.can_update_check_out && (
                 <button
                   type="button"
                   onClick={async () => {
+                    if (block) return setShowBlock(true);
                     const msg =
                       status?.check_out_source === 'office'
                         ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
@@ -540,8 +548,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 </button>
               )}
             </>
-          ) : block ? (
-            <div className="mt-0.5 text-xs font-semibold text-slate-400">—</div>
           ) : (
             <button
               type="button"
@@ -556,23 +562,40 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         </div>
       </div>
 
-      {block && (
-        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 flex items-start gap-2" role="note">
-          <Smartphone className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            {block === 'android' ? (
-              <>
-                <p>On Android, attendance is given from the app only — so your location is recorded properly.</p>
-                <a href="/downloads/CredenceHR.apk" download="CredenceHR.apk" className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-600 px-3 py-1 font-semibold text-white">
-                  Get the app (APK)
-                </a>
-              </>
-            ) : (
-              <p>Attendance can't be given from a computer. Use the app on your phone, or an iPhone / iPad.</p>
-            )}
-          </div>
-        </div>
-      )}
+      {block && showBlock &&
+        // On document.body, like every popup (a card's glass blur would hold it inside the card).
+        createPortal(
+          <div className="fixed inset-0 z-[400] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={() => setShowBlock(false)} role="presentation">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-sm p-5 text-left" role="dialog" aria-modal="true" aria-labelledby="att-block-title" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start gap-3">
+                <span className="liquid-glass-inset w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 text-amber-600">
+                  <Smartphone className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <h3 id="att-block-title" className="text-base font-bold text-slate-900">
+                    {block === 'android' ? 'Use the app for attendance' : "Attendance can't be given here"}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {block === 'android'
+                      ? 'On Android, attendance is given from the app only — so your location is recorded properly.'
+                      : 'Attendance can\'t be given from a computer. Use the app on your phone, or an iPhone / iPad.'}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button type="button" onClick={() => setShowBlock(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                  Close
+                </button>
+                {block === 'android' && (
+                  <a href="/downloads/CredenceHR.apk" download="CredenceHR.apk" className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold text-center">
+                    Get the app (APK)
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {!loadingStatus && (
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
