@@ -44,6 +44,7 @@
 // reads are full-table `SELECT * FROM x` filtered in JS (the only shape the
 // in-memory fallback DB understands) and writes only ever use `WHERE id = ?`.
 
+import { fallbackServiceStatus } from "./hrServiceStatus";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
@@ -1650,7 +1651,10 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
               contract_end_date: toDate(snap.service?.contract_end_date),
               service_status:
                 snap.service?.service_status ||
-                (Number(e.is_active ?? 1) === 0 ? "separated" : e.job_base === "Permanent" ? "confirmed" : e.job_base === "Contractual" ? "contract" : "probation")
+                // Not set in Service Details: what the record says (Job Base
+                // Permanent / Probation / Contractual…), else unknown — not
+                // "probation" for everyone (hrServiceStatus.ts).
+                fallbackServiceStatus(e)
             };
           })
           .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))

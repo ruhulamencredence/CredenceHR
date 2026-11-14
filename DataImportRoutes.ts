@@ -39,6 +39,19 @@ import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { activeCompanyId, activeGroupId } from "./companyContext";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
+
+// Edit Employee's Job Base choices; common spellings are read as them.
+const JOB_BASES: [RegExp, string][] = [
+  [/^(permanent|confirmed|regular)$/, "Permanent"],
+  [/^(probation|probationary|on probation)$/, "Probation"],
+  [/^(contractual|contract|contract basis)$/, "Contractual"],
+  [/^(intern|internship|interns?hip)$/, "Intern"]
+];
+export const jobBaseOf = (v: unknown): string | null => {
+  const t = String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  for (const [re, name] of JOB_BASES) if (re.test(t)) return name;
+  return null;
+};
 import { leaveDayCount } from "./leaveDayCount";
 import { employeeIdConflict } from "./EmployeeLoginId";
 
@@ -108,9 +121,9 @@ export const IMPORT_KINDS: Kind[] = [
       { key: "nationality", label: "Nationality", type: "text" },
       { key: "religion", label: "Religion", type: "text" },
       { key: "marital_status", label: "Marital Status", type: "text" },
-      { key: "job_status", label: "Job Status", type: "text", example: "Permanent" },
+      { key: "job_status", label: "Job Status", type: "text", example: "Active" },
       { key: "employment_category", label: "Employment Category", type: "text" },
-      { key: "job_base", label: "Job Base", type: "text" },
+      { key: "job_base", label: "Job Base", type: "text", example: "Permanent", note: "Permanent, Probation, Contractual or Intern" },
       { key: "division", label: "Division", type: "text" },
       { key: "unit", label: "Unit", type: "text" },
       { key: "present_address", label: "Present Address", type: "text" },
@@ -540,6 +553,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         // fail the whole row on Import even though the preview passed.
         const maxLen: Record<string, number> = { gender: 20, blood_group: 10, nid_ssn: 50, nationality: 100, marital_status: 30, religion: 50 };
         for (const k of textKeys) if (str(v[k])) set[k] = str(v[k]).slice(0, k.endsWith("_address") ? 2000 : maxLen[k] || 255);
+        // Job Base is the kind of employment (Edit Employee's list), never a
+        // place — "Head Office" / "Project" belong in Division / Branch.
+        if (set.job_base) {
+          const jb = jobBaseOf(set.job_base);
+          if (jb) set.job_base = jb;
+          else {
+            notes.push(`Job Base "${str(v.job_base)}" isn't Permanent, Probation, Contractual or Intern — not changed`);
+            delete set.job_base;
+          }
+        }
         if (set.blood_group) {
           // "B+", "b +ve", "AB(-)", "O positive" -> B+ / AB- / O+; anything else ("Not Defined") is left empty
           const m = String(set.blood_group).toUpperCase().replace(/\s+/g, "").match(/^(AB|A|B|O)\(?(\+|-|\+VE|-VE|POSITIVE|NEGATIVE|POS|NEG)\)?$/);
