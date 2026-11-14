@@ -29,6 +29,7 @@
 // carry company_id (companyScope.ts OWN_TABLES); mobile_sim_events hangs off
 // a SIM (LINKED_TABLES).
 
+import { recordSimHolder } from "./SimInventory";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 
@@ -52,7 +53,7 @@ interface MobileBillRouteDeps {
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   // Mobile Bill's permission layers (server.ts MOBILE_BILL_LAYER_KEYS):
   // "read" = the module as it was, "limit_history" = Reports -> Limit changes.
-  hasModuleLayer: (user: any, moduleKey: "mobile_bill", layer: "read" | "limit_history") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "mobile_bill", layer: "read" | "limit_history" | "sim_inventory") => Promise<boolean>;
 }
 
 export const MOBILE_OPERATORS = ["Grameenphone", "Robi", "Airtel", "Banglalink", "Teletalk"] as const;
@@ -455,6 +456,7 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         hr: await isHr(req.user),
         self: await hasSelf(req.user),
         limit_history: await hasModuleLayer(req.user, "mobile_bill", "limit_history"),
+        sim_inventory: await hasModuleLayer(req.user, "mobile_bill", "sim_inventory"),
         operators: MOBILE_OPERATORS
       });
     } catch (err: any) {
@@ -622,6 +624,8 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         [f.phone, f.operator, f.packageName, f.employeeId, f.dutyLocation, f.limit, f.limitSource, f.status, f.issued, f.note, req.user.id]
       );
       const id = Number(r.insertId);
+      // SIM Inventory: who has it, where, from when (SimInventory.ts).
+      await recordSimHolder(queryDB, id, f.emp ? { id: f.emp.id, name: f.emp.name } : null, f.dutyLocation, f.issued);
       await logSim(queryDB, id, "added", `SIM added${f.emp ? ` and given to ${f.emp.name}` : " (not given to anyone yet)"}, limit ৳${f.limit}.`, Number(req.user.id), {
         old_limit: null,
         new_limit: f.limit,
@@ -655,6 +659,9 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         [f.phone, f.operator, f.packageName, f.employeeId, f.dutyLocation, f.limit, f.limitSource, f.status, f.issued, f.note, id]
       );
       const actor = Number(req.user.id);
+      if (old.employee_id !== f.employeeId || (old.duty_location || null) !== (f.dutyLocation || null)) {
+        await recordSimHolder(queryDB, id, f.emp ? { id: f.emp.id, name: f.emp.name } : null, f.dutyLocation);
+      }
       if (old.employee_id !== f.employeeId) {
         await logSim(queryDB, id, "assigned", f.emp ? `Given to ${f.emp.name}${old.employee ? ` (was ${old.employee.name})` : ""}.` : `Taken back from ${old.employee?.name || "the employee"}.`, actor);
         if (f.emp?.user_id) {
@@ -740,6 +747,7 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
             "INSERT INTO mobile_sims (phone_number, operator, employee_id, duty_location, limit_amount, limit_source, status, created_by) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
             [r.phone_number, r.operator, r.employee_id, r.duty_location, r.limit_amount, r.limit_source, req.user.id]
           );
+          await recordSimHolder(queryDB, Number(ins.insertId), r.employee_id ? { id: Number(r.employee_id), name: r.employee_name } : null, r.duty_location);
           await logSim(queryDB, Number(ins.insertId), "added", `Imported${r.employee_name ? ` for ${r.employee_name}` : ""}, limit ৳${r.limit_amount}.`, Number(req.user.id), {
             old_limit: null,
             new_limit: Number(r.limit_amount),

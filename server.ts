@@ -68,6 +68,7 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureTrackingScheduleSchema, registerTrackingScheduleRoutes } from "./TrackingSchedule";
 import { registerEmployeeHeadcountRoutes } from "./EmployeeHeadcount";
+import { registerSimInventoryRoutes } from "./SimInventory";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
 import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
@@ -3661,6 +3662,7 @@ async function startServer() {
   // Employee Tracking -> Stay Report (time at each place, day by day).
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer });
+  registerSimInventoryRoutes(app, { authenticateToken, queryDB, hasModuleLayer });
   // Self Service loan / salary advance requests — ride the Dynamic Approval
   // Engine (request_type 'loan'); Payroll creates the loan.
   registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });

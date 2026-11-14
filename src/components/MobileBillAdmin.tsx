@@ -18,7 +18,7 @@ import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { readWorkbook } from '../lib/readWorkbook';
-import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, History, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
@@ -49,13 +49,14 @@ import {
   tk
 } from './MobileBillParts';
 import { MobileBillReports } from './MobileBillReports';
+import { SimInventoryTab } from './SimInventory';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
-type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
+type Tab = 'bills' | 'sims' | 'inventory' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
 
 export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
@@ -69,10 +70,18 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
   useEffect(() => {
     refreshPending();
   }, [refreshPending]);
+  // SIM Inventory tab: the Mobile Bill module's "SIM Inventory" layer.
+  const [canInventory, setCanInventory] = useState(false);
+  useEffect(() => {
+    mbApi<{ sim_inventory?: boolean }>(token, '/api/mobile-bill/access')
+      .then((a) => setCanInventory(!!a.sim_inventory))
+      .catch(() => setCanInventory(false));
+  }, [token]);
 
   const tabs: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[] = [
     { key: 'bills', label: 'Monthly Bills', icon: Receipt },
     { key: 'sims', label: 'SIMs', icon: Smartphone },
+    ...(canInventory ? [{ key: 'inventory' as Tab, label: 'SIM Inventory', icon: History }] : []),
     { key: 'limits', label: 'Limits', icon: SlidersHorizontal },
     { key: 'requests', label: 'Limit Requests', icon: Inbox, count: pending },
     { key: 'reports', label: 'Reports', icon: BarChart3 }
@@ -98,6 +107,7 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {tab === 'bills' && <BillsTab token={token} />}
       {tab === 'sims' && <SimsTab token={token} />}
+      {tab === 'inventory' && canInventory && <SimInventoryTab token={token} />}
       {tab === 'limits' && <LimitsTab token={token} />}
       {tab === 'requests' && <RequestsTab token={token} onChange={refreshPending} />}
       {tab === 'reports' && <MobileBillReports token={token} />}
