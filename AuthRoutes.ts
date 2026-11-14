@@ -6,7 +6,7 @@
 // Sign-in routes (/api/auth/register, /api/auth/login, /api/auth/me), moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
-import { listAttendanceProjects } from "./AttendanceProjects";
+import { checkInProjectsFor } from "./AttendanceProjects";
 import { checkWorkspaceLogin } from "./CompanyRoutes";
 import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
@@ -118,13 +118,14 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       // when there's exactly one, so screens that drop their picker for a
       // single Project keep working.
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
-      const checkIn = u.role === "superadmin" ? [] : await listAttendanceProjects(queryDB, Number(req.user.id), today).catch(() => []);
-      const activeCheckIn = checkIn.filter((r) => r.active);
+      const rule = await checkInProjectsFor(queryDB, Number(req.user.id), u.role, today).catch(() => ({ limited: false, byBranch: false, rows: [] as any[] }));
+      const checkIn = rule.rows;
+      const activeCheckIn = checkIn.filter((r: any) => r.active);
       res.json({
         ...u,
         has_employee: ownEmployee.length > 0,
         attendance_projects: activeCheckIn.map((r) => ({ id: r.project_id, name: r.project_name, valid_to: r.valid_to })),
-        attendance_projects_limited: checkIn.length > 0,
+        attendance_projects_limited: rule.limited,
         active_company_id: activeCompanyId(),
         pepm_enabled: pepmEnabled(activeGroupId()),
         is_onboarding: !!Number(u.is_onboarding || 0),
@@ -133,7 +134,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit) && pepmEnabled(activeGroupId()),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
-        attendance_project_id: checkIn.length > 0 && activeCheckIn.length === 1 ? activeCheckIn[0].project_id : null,
+        attendance_project_id: rule.limited && activeCheckIn.length === 1 ? activeCheckIn[0].project_id : null,
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
         can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,

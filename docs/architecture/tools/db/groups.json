@@ -95,6 +95,8 @@
   "tracking_device_state",
   "tracking_employee_access",
   "tracking_notice_recipients",
+  "tracking_schedule_settings",
+  "tracking_schedules",
   "user_attendance_projects",
   "vehicle_ride_settings",
   "zk_attendance_logs",

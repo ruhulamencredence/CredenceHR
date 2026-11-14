@@ -303,8 +303,6 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
       fields = F([
         ["Date", d(r.attendance_date)],
         ["Project", proj],
-        ["Asked check in", r.requested_check_in_at ? dt(r.requested_check_in_at) : null],
-        ["Asked check out", r.requested_check_out_at ? dt(r.requested_check_out_at) : null],
         ["Check in was off site", yesNo(r.offsite_in)],
         ["Check out was off site", yesNo(r.offsite_out)],
         ["Check in place", r.in_place],
@@ -317,6 +315,44 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
       loc("Check in", r.in_lat, r.in_lng, r.in_place);
       loc("Check out", r.out_lat, r.out_lng, r.out_place);
       if (r.file_name) attachments = [{ label: r.file_name }];
+      // What the day had before → what is asked for. Once approved the day
+      // already shows the new times, so the copy kept at approval is used
+      // (server.ts finalizeAttendanceCorrection); a request approved before
+      // that copy existed shows "Not kept".
+      const day = d(r.attendance_date);
+      let wasIn: any = null;
+      let wasOut: any = null;
+      let known = true;
+      if (Number(r.prev_recorded)) {
+        wasIn = r.prev_check_in_at;
+        wasOut = r.prev_check_out_at;
+      } else if (r.status === "pending") {
+        const now = await one("SELECT MIN(check_in_at) AS i, MAX(check_out_at) AS o FROM attendance WHERE user_id = ? AND attendance_date = ?", [Number(r.user_id), day]);
+        wasIn = now?.i;
+        wasOut = now?.o;
+      } else known = false;
+      const was = (v: any, none: string) => (!known ? "Not kept" : v ? dt(v)! : none);
+      const asked = (v: any) => (v ? dt(v)! : "No change");
+      table = {
+        columns: ["", "Before", "Asked for"],
+        rows: [
+          ["Check in", was(wasIn, "No check-in"), asked(r.requested_check_in_at)],
+          ["Check out", was(wasOut, "No check-out"), asked(r.requested_check_out_at)]
+        ]
+      };
+      // The office machine's punches that day, if the person has a PIN.
+      const emp = await one("SELECT id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1", [Number(r.user_id)]);
+      if (emp && day) {
+        const p = await one(
+          `SELECT MIN(l.punch_time) AS a, MAX(l.punch_time) AS b, COUNT(*) AS n FROM zk_attendance_logs l
+            WHERE l.punch_time >= ? AND l.punch_time < DATE_ADD(?, INTERVAL 1 DAY)
+              AND (l.device_user_pin = ? OR EXISTS (SELECT 1 FROM zk_device_pins z WHERE z.device_id = l.device_id AND z.pin = l.device_user_pin AND z.employee_id = ?))`,
+          [day, day, emp.zk_device_pin || "__none__", Number(emp.id)]
+        );
+        const hm = (v: any) => String(v || "").slice(11, 16);
+        const n = Number(p?.n || 0);
+        if (emp.zk_device_pin || n) fields.push({ label: "Office machine that day", value: n ? (n === 1 ? `${hm(p.a)} (1 punch)` : `${hm(p.a)} – ${hm(p.b)} (${n} punches)`) : "No punch" });
+      }
     } else if (t === "leave_application") {
       title = `${leaveTypeLabel(r.leave_type)} leave — ${Number(r.day_count)} day${Number(r.day_count) === 1 ? "" : "s"}`;
       fields = F([

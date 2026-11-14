@@ -82,7 +82,18 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
     "ALTER TABLE attendance_corrections ADD COLUMN out_lat DECIMAL(10,7) NULL",
     "ALTER TABLE attendance_corrections ADD COLUMN out_lng DECIMAL(10,7) NULL",
     "ALTER TABLE attendance_corrections ADD COLUMN out_distance_m INT NULL",
-    "ALTER TABLE attendance_corrections ADD COLUMN out_place VARCHAR(255) NULL"
+    "ALTER TABLE attendance_corrections ADD COLUMN out_place VARCHAR(255) NULL",
+    // What the day's In / Out were just before an approved correction
+    // replaced them, so the request keeps showing "was → asked for" after it
+    // is approved (server.ts finalizeAttendanceCorrection; ApprovalDetailsRoutes.ts).
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_recorded TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_check_in_at DATETIME NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_check_out_at DATETIME NULL",
+    // "Their Branch": check in only at the Project the person's Branch
+    // (Employees -> Branch, Admin Panel -> Branches -> linked Project) is
+    // tied to — follows the Branch when it changes. The stored list stays
+    // but isn't used while this is on.
+    "ALTER TABLE users ADD COLUMN attendance_projects_by_branch TINYINT(1) NOT NULL DEFAULT 0"
   ]) {
     await dbPool.query(sql).catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Attendance: " + err.message);
@@ -119,13 +130,56 @@ export async function listAttendanceProjects(queryDB: Query, userId: number, ymd
   }));
 }
 
-// The Projects an account is limited to on `ymd`, or null when it isn't
-// limited (no list, or a Superadmin).
-export async function restrictedAttendanceProjects(queryDB: Query, userId: number, role: string, ymd: string): Promise<Set<number> | null> {
-  if (role === "superadmin") return null;
+export interface BranchProject {
+  branch_name: string | null;
+  project_id: number | null;
+  project_name: string | null;
+}
+
+// The person's Branch (their Employee record) and the Project that Branch is
+// linked to in Admin Panel -> Branches. Branch name text from an import that
+// isn't linked by id is matched by name.
+export async function branchProjectOf(queryDB: Query, userId: number): Promise<BranchProject> {
+  const e: any = ((await queryDB("SELECT branch, branch_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC, id LIMIT 1", [userId]).catch(() => [])) as any[])[0];
+  if (!e) return { branch_name: null, project_id: null, project_name: null };
+  const b: any = e.branch_id
+    ? ((await queryDB("SELECT b.branch_name, b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE b.id = ?", [Number(e.branch_id)]).catch(() => [])) as any[])[0]
+    : e.branch
+      ? ((await queryDB("SELECT b.branch_name, b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE LOWER(TRIM(b.branch_name)) = LOWER(TRIM(?)) LIMIT 1", [String(e.branch)]).catch(() => [])) as any[])[0]
+      : null;
+  return {
+    branch_name: b?.branch_name || e.branch || null,
+    project_id: b?.project_id && b?.project_name ? Number(b.project_id) : null,
+    project_name: b?.project_id ? b?.project_name || null : null
+  };
+}
+
+const byBranchOn = async (queryDB: Query, userId: number) =>
+  !!Number((((await queryDB("SELECT attendance_projects_by_branch AS v FROM users WHERE id = ?", [userId]).catch(() => [])) as any[])[0] || {}).v);
+
+// What one account may check in at on `ymd`: limited or not, and the
+// Projects that count. "Their Branch" gives the Branch's Project (none when
+// the Branch has no linked Project — then nowhere).
+export async function checkInProjectsFor(queryDB: Query, userId: number, role: string, ymd: string): Promise<{ limited: boolean; byBranch: boolean; rows: AttendanceProjectRow[] }> {
+  if (role === "superadmin") return { limited: false, byBranch: false, rows: [] };
+  if (await byBranchOn(queryDB, userId)) {
+    const bp = await branchProjectOf(queryDB, userId);
+    return {
+      limited: true,
+      byBranch: true,
+      rows: bp.project_id ? [{ project_id: bp.project_id, project_name: bp.project_name || "", valid_from: null, valid_to: null, active: true }] : []
+    };
+  }
   const rows = await listAttendanceProjects(queryDB, userId, ymd);
-  if (!rows.length) return null;
-  return new Set(rows.filter((r) => r.active).map((r) => r.project_id));
+  return { limited: rows.length > 0, byBranch: false, rows };
+}
+
+// The Projects an account is limited to on `ymd`, or null when it isn't
+// limited (no list and not "Their Branch", or a Superadmin).
+export async function restrictedAttendanceProjects(queryDB: Query, userId: number, role: string, ymd: string): Promise<Set<number> | null> {
+  const r = await checkInProjectsFor(queryDB, userId, role, ymd);
+  if (!r.limited) return null;
+  return new Set(r.rows.filter((x) => x.active).map((x) => x.project_id));
 }
 
 interface Deps {
@@ -180,6 +234,8 @@ async function cleanList(queryDB: Query, input: any): Promise<{ rows: { project_
 }
 
 async function replaceList(queryDB: Query, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) {
+  // Picking projects (or Any project) turns "Their Branch" off.
+  await queryDB("UPDATE users SET attendance_projects_by_branch = 0 WHERE id = ?", [userId]).catch(() => {});
   await queryDB("DELETE FROM user_attendance_projects WHERE user_id = ?", [userId]);
   for (const r of rows) {
     await queryDB(
@@ -195,28 +251,41 @@ async function replaceList(queryDB: Query, userId: number, rows: { project_id: n
 export function registerAttendanceProjectRoutes(app: Express, deps: Deps): { replaceAttendanceProjects: typeof replaceList } {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka } = deps;
   const gate = [authenticateToken, requireAdmin, requireModule("users")];
+  // One account's settings for Module Access: the stored list, whether
+  // "Their Branch" is on, and that Branch with its Project.
+  const describe = async (userId: number) => ({
+    today: todayInDhaka(),
+    projects: await listAttendanceProjects(queryDB, userId, todayInDhaka()),
+    by_branch: await byBranchOn(queryDB, userId),
+    branch: await branchProjectOf(queryDB, userId)
+  });
 
   // One account's list (Module Access -> Remote Attendance).
   app.get("/api/users/:id(\\d+)/attendance-projects", ...gate, async (req: any, res) => {
     try {
       const target = await guardTarget(queryDB, req, res, Number(req.params.id));
       if (!target) return;
-      res.json({ today: todayInDhaka(), projects: await listAttendanceProjects(queryDB, Number(req.params.id), todayInDhaka()) });
+      res.json(await describe(Number(req.params.id)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Replace one account's list ([] = any project again).
+  // Replace one account's list ([] = any project again), or { by_branch: true }
+  // for "Their Branch".
   app.put("/api/users/:id(\\d+)/attendance-projects", ...gate, requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const userId = Number(req.params.id);
       const target = await guardTarget(queryDB, req, res, userId);
       if (!target) return;
+      if (req.body?.by_branch === true) {
+        await queryDB("UPDATE users SET attendance_projects_by_branch = 1 WHERE id = ?", [userId]);
+        return res.json(await describe(userId));
+      }
       const clean = await cleanList(queryDB, req.body?.projects);
       if ("error" in clean) return res.status(400).json({ error: clean.error });
       await replaceList(queryDB, userId, clean.rows, Number(req.user.id));
-      res.json({ today: todayInDhaka(), projects: await listAttendanceProjects(queryDB, userId, todayInDhaka()) });
+      res.json(await describe(userId));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -226,19 +295,24 @@ export function registerAttendanceProjectRoutes(app: Express, deps: Deps): { rep
   // the whole list. Accounts the caller may not change are skipped and named.
   app.put("/api/users/attendance-projects/bulk", ...gate, requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
-      const mode = req.body?.mode === "remove" ? "remove" : req.body?.mode === "replace" ? "replace" : "add";
+      const mode = req.body?.mode === "remove" ? "remove" : req.body?.mode === "replace" ? "replace" : req.body?.mode === "branch" ? "branch" : "add";
       const ids = Array.isArray(req.body?.user_ids) ? [...new Set(req.body.user_ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] : [];
       if (!ids.length) return res.status(400).json({ error: "Pick at least one person." });
       if (ids.length > 1000) return res.status(400).json({ error: "Too many people at once." });
-      const clean = await cleanList(queryDB, req.body?.projects);
+      const clean = mode === "branch" ? { rows: [] as { project_id: number; valid_from: string | null; valid_to: string | null }[] } : await cleanList(queryDB, req.body?.projects);
       if ("error" in clean) return res.status(400).json({ error: clean.error });
-      if (mode !== "replace" && !clean.rows.length) return res.status(400).json({ error: "Pick at least one project." });
+      if (mode !== "replace" && mode !== "branch" && !clean.rows.length) return res.status(400).json({ error: "Pick at least one project." });
       const users: any[] = await queryDB(`SELECT id, name, role FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
       let changed = 0;
       const skipped: string[] = [];
       for (const u of users) {
         if (u.role === "superadmin" || (u.role === "admin" && req.user.role !== "superadmin")) {
           skipped.push(String(u.name));
+          continue;
+        }
+        if (mode === "branch") {
+          await queryDB("UPDATE users SET attendance_projects_by_branch = 1 WHERE id = ?", [Number(u.id)]);
+          changed++;
           continue;
         }
         const current = await listAttendanceProjects(queryDB, Number(u.id), todayInDhaka());

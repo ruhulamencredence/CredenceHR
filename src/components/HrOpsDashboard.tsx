@@ -13,7 +13,7 @@ import React, { useEffect, useState } from 'react';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { FileDown, FileSpreadsheet, UserPlus, UserMinus, TrendingUp, ArrowLeftRight, BadgeCheck, Users, AlertTriangle } from 'lucide-react';
+import { FileDown, FileSpreadsheet, UserPlus, UserMinus, TrendingUp, ArrowLeftRight, BadgeCheck, Users, AlertTriangle, Hourglass } from 'lucide-react';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
@@ -106,7 +106,8 @@ export const HrOpsDashboard: React.FC<{
     { key: 'promotions', label: 'Promotions', value: s.promotions ?? 0, icon: TrendingUp, tint: 'bg-violet-50 text-violet-700' },
     { key: 'transfers', label: 'Transfers', value: s.transfers ?? 0, icon: ArrowLeftRight, tint: 'bg-sky-50 text-sky-700' },
     { key: 'increments', label: 'Increments', value: s.increments ?? 0, icon: TrendingUp, tint: 'bg-amber-50 text-amber-700', sub: `${taka(s.increment_total ?? 0)} / month added` },
-    { key: 'confirmations', label: 'Confirmations', value: s.confirmations ?? 0, icon: BadgeCheck, tint: 'bg-teal-50 text-teal-700' }
+    { key: 'confirmations', label: 'Confirmations', value: s.confirmations ?? 0, icon: BadgeCheck, tint: 'bg-teal-50 text-teal-700' },
+    { key: 'on_probation', label: 'On Probation', value: s.on_probation ?? 0, icon: Hourglass, tint: 'bg-orange-50 text-orange-700', sub: 'At the end of the month' }
   ];
 
   const LISTS: { key: string; label: string; cols: [string, string][] }[] = [
@@ -117,12 +118,13 @@ export const HrOpsDashboard: React.FC<{
     { key: 'transfers', label: 'Transfers', cols: [['name', 'Employee'], ['employee_code', 'ID'], ['summary', 'Change'], ['effective_date', 'Effective']] },
     { key: 'increments', label: 'Increments', cols: [['name', 'Employee'], ['employee_code', 'ID'], ['old_gross', 'Old Gross'], ['new_gross', 'New Gross'], ['difference', 'Increase'], ['effective_date', 'Effective']] },
     { key: 'confirmations', label: 'Confirmations', cols: [['name', 'Employee'], ['employee_code', 'ID'], ['effective_date', 'Confirmed On']] },
+    { key: 'on_probation', label: 'On Probation', cols: [['name', 'Employee'], ['employee_code', 'ID'], ['designation', 'Designation'], ['department', 'Department'], ['joining_date', 'Joining Date'], ['date', 'Probation Ends']] },
     { key: 'other_actions', label: 'Other HR Actions', cols: [['name', 'Employee'], ['type', 'Action'], ['summary', 'Change'], ['effective_date', 'Effective']] }
   ];
   const cell = (row: any, key: string) => {
     const v = row[key];
     if (['old_gross', 'new_gross', 'difference'].includes(key)) return taka(v);
-    if (['date', 'effective_date', 'last_working_day'].includes(key)) return fmtDate(v);
+    if (['date', 'effective_date', 'last_working_day', 'joining_date'].includes(key)) return fmtDate(v);
     return v ?? '—';
   };
 
@@ -140,8 +142,8 @@ export const HrOpsDashboard: React.FC<{
       autoTable(doc, {
       theme: 'grid',
         startY: y,
-        head: [['Opening', 'Closing', 'Joined', 'Separated', 'Turnover %', 'Promotions', 'Transfers', 'Increments', 'Increment Total', 'Confirmations']],
-        body: [[s.opening, s.closing, s.joined, s.separated, s.turnover_pct, s.promotions, s.transfers, s.increments, taka(s.increment_total), s.confirmations].map(String)],
+        head: [['Opening', 'Closing', 'Joined', 'Separated', 'Turnover %', 'Promotions', 'Transfers', 'Increments', 'Increment Total', 'Confirmations', 'On Probation']],
+        body: [[s.opening, s.closing, s.joined, s.separated, s.turnover_pct, s.promotions, s.transfers, s.increments, taka(s.increment_total), s.confirmations, s.on_probation ?? 0].map(String)],
         styles: { ...STD_STYLES, fontSize: 8.5, halign: 'center' },
         headStyles: { ...STD_HEAD }
       });
@@ -276,7 +278,7 @@ export const HrOpsDashboard: React.FC<{
         <LoadingBlock />
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
             {tiles.map((t) => (
               <button
                 key={t.key}

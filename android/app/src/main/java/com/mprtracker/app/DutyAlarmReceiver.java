@@ -10,7 +10,12 @@ public class DutyAlarmReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        // The tracking time has started (Tracking Schedule).
+        if (intent != null && DutyTrackingService.ACTION_RESUME.equals(intent.getAction())) {
+            DutyTrackingService.resume(context);
+            return;
+        }
         DutyTrackingService.wake(context);
-        DutyTrackingService.scheduleAlarm(context);
+        if (!DutyTrackingService.paused(context)) DutyTrackingService.scheduleAlarm(context);
     }
 }

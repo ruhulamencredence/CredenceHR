@@ -967,6 +967,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       let projectId = Number(project_id);
       if (!attendance_date) return res.status(400).json({ error: "Date is required." });
+      if (typeof remarks !== "string" || !remarks.trim()) return res.status(400).json({ error: "Write the reason." });
       // An account with its own check-in list (Module Access -> Remote
       // Attendance) can only correct a day at a Project on that list for that
       // date; with exactly one, that one is used whatever the client sent

@@ -1129,8 +1129,8 @@ const TOOLS: Tool[] = [
         [e.name, e.employee_id, e.designation].some((v) => String(v || "").toLowerCase().includes(q))
       ).slice(0, 5);
       if (!hits.length) return { ok: true, text: `"${args.query}" নামে কাউকে পাওয়া যায়নি।`, data: { results: [] }, actions: [{ label: "Employee Directory খুলুন", nav: "self:employeeDirectory" }] };
-      const lines = hits.map((e: any) => `• **${e.name}** (${e.employee_id || "-"}) — ${e.designation || "-"}${e.department ? `, ${e.department}` : ""}${e.mobile || e.phone ? ` · 📞 ${e.mobile || e.phone}` : ""}${e.email ? ` · ${e.email}` : ""}`).join("\n");
-      return { ok: true, text: lines, data: { results: hits.map((e: any) => ({ name: e.name, id: e.employee_id, designation: e.designation, department: e.department, mobile: e.mobile || e.phone, email: e.email, supervisor: e.supervisor_name })) }, actions: [{ label: "Employee Directory খুলুন", nav: "self:employeeDirectory" }] };
+      const lines = hits.map((e: any) => `• **${e.name}** (${e.employee_id || "-"}) — ${e.designation || "-"}${e.department ? `, ${e.department}` : ""}${e.phone ? ` · 📞 ${e.phone}` : ""}${e.email ? ` · ${e.email}` : ""}`).join("\n");
+      return { ok: true, text: lines, data: { results: hits.map((e: any) => ({ name: e.name, id: e.employee_id, designation: e.designation, department: e.department, phone: e.phone || null, email: e.email, supervisor: e.supervisor_name })) }, actions: [{ label: "Employee Directory খুলুন", nav: "self:employeeDirectory" }] };
     }
   },
   {

@@ -66,6 +66,7 @@ import { registerCallRoutes, setupCallSocket, callAccess } from "./CallRoutes";
 import { setupGroupCallSocket } from "./GroupCallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureTrackingScheduleSchema, registerTrackingScheduleRoutes } from "./TrackingSchedule";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
 import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
@@ -298,6 +299,7 @@ async function initDB() {
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    await ensureTrackingScheduleSchema(dbPool);
     await ensureOvertimeSchema(dbPool);
     await ensureGuardSchema(dbPool);
     await ensureDepartmentTeamsSchema(dbPool);
@@ -416,9 +418,9 @@ const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approva
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
-const TRACKING_LAYER_KEYS = ["read", "stay_report", "live"] as const;
+const TRACKING_LAYER_KEYS = ["read", "stay_report", "live", "tracking_schedule"] as const;
 // What an account with the tracking module but no saved layers gets — Live
-// Follow ("live") is explicit-only, so it is left out.
+// Follow ("live") and Tracking Schedule are explicit-only, so they are left out.
 const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // Payroll's layers: "read" = the whole Payroll module as it was (runs,
 // payslips, salary setup, late policy…); "salary_month" = changing the day
@@ -2009,6 +2011,13 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     );
   }
 
+  // Keep what the day had before (none when there was no row) for the
+  // request's "was → asked for".
+  await queryDB("UPDATE attendance_corrections SET prev_recorded = 1, prev_check_in_at = ?, prev_check_out_at = ? WHERE id = ?", [
+    existing[0]?.check_in_at ?? null,
+    existing[0]?.check_out_at ?? null,
+    correctionId
+  ]).catch(() => undefined);
   await queryDB("UPDATE attendance_corrections SET status = 'approved', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [
     remarks,
     approvedBy,
@@ -3507,6 +3516,7 @@ async function startServer() {
 
   // Employee Tracking routes live in EmployeeTrackingRoutes.ts.
   registerEmployeeTrackingRoutes(app, { announceNotice, authenticateToken, getAdminModules, liveTracking, queryDB, requireAdmin, requireModule, requireModuleLayer, requireTrackingAccess });
+  registerTrackingScheduleRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
   registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });

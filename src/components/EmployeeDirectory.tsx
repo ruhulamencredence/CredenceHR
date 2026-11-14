@@ -82,8 +82,9 @@ function cardTintClass(name: string): string {
 // all_employees has to a physical "sitting place" (Status tab); Division/
 // Unit are appended when on file, since a department alone doesn't say
 // where someone actually sits.
-// The first of the person's numbers (cells can hold several).
-const firstPhoneOf = (emp: EmployeeDirectoryEntry) => phonesOf(emp.mobile, emp.phone)[0]?.number || '';
+// The first office number (the cell can hold several). Only the office
+// Contact No. is listed here; the personal mobile stays in Admin Panel -> Employees.
+const firstPhoneOf = (emp: EmployeeDirectoryEntry) => phonesOf(null, emp.phone)[0]?.number || '';
 
 function officeLocationOf(emp: EmployeeDirectoryEntry): string | null {
   const parts = [emp.branch, emp.division, emp.unit].filter((p) => p && p.trim());
@@ -167,7 +168,7 @@ const EmployeeContactCard: React.FC<{
   showCompany: boolean;
   onClose: () => void;
 }> = ({ emp, token, canChat, showCompany, onClose }) => {
-  const phones = phonesOf(emp.mobile, emp.phone);
+  const phones = phonesOf(null, emp.phone);
   const office = officeLocationOf(emp);
   const [note, setNote] = useState<string | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
@@ -367,7 +368,7 @@ const EmployeeContactCard: React.FC<{
                 <div key={p.number} className={row}>
                   <Smartphone className="w-4 h-4 text-slate-400 shrink-0" />
                   <a href={telHref(p.number)} className="min-w-0 flex-1 text-sm text-slate-800 tabular-nums hover:underline">
-                    {formatPhone(p.number)} <span className="text-[10px] text-slate-400 ml-1">{p.label}</span>
+                    {formatPhone(p.number)} <span className="text-[10px] text-slate-400 ml-1">Office</span>
                   </a>
                   <button type="button" onClick={() => void copy(p.number.replace(/[^\d+]/g, ''), 'Number')} className={`${iconBtn} text-slate-400 hover:bg-white/70`} aria-label="Copy number">
                     <Copy className="w-4 h-4" />
@@ -942,7 +943,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                             <Mail className="w-3.5 h-3.5" />
                           </a>
                         )}
-                        {(emp.mobile || emp.phone) && (
+                        {emp.phone && (
                           <a
                             href={telHref(firstPhoneOf(emp))}
                             onClick={(e) => e.stopPropagation()}
@@ -965,7 +966,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                           <Mail className="w-3 h-3 text-slate-400 shrink-0" /> <span className="truncate">{emp.email}</span>
                         </a>
                       )}
-                      {(emp.mobile || emp.phone) && (
+                      {emp.phone && (
                         <a
                           href={telHref(firstPhoneOf(emp))}
                           onClick={(e) => e.stopPropagation()}
@@ -974,7 +975,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                           <Phone className="w-3 h-3 text-slate-400 shrink-0" /> {formatPhone(firstPhoneOf(emp))}
                         </a>
                       )}
-                      {!emp.email && !emp.mobile && !emp.phone && <p className="text-slate-400">No contact info on file</p>}
+                      {!emp.email && !emp.phone && <p className="text-slate-400">No contact info on file</p>}
                     </div>
                   </button>
                 ))}
@@ -989,7 +990,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                       {multiCompany && <th className="px-3 py-2 font-semibold">Company</th>}
                       <th className="px-3 py-2 font-semibold">Department</th>
                       <th className="px-3 py-2 font-semibold">Email</th>
-                      <th className="px-3 py-2 font-semibold">Mobile</th>
+                      <th className="px-3 py-2 font-semibold">Contact No.</th>
                       <th className="px-3 py-2 font-semibold">Extension</th>
                       <th className="px-3 py-2 font-semibold text-right">Action</th>
                     </tr>
@@ -1017,7 +1018,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                           {emp.email ? <a href={`mailto:${emp.email}`} className="hover:text-blue-600">{emp.email}</a> : '—'}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">
-                          {emp.mobile || emp.phone ? <a href={telHref(firstPhoneOf(emp))} className="hover:text-blue-600">{formatPhone(firstPhoneOf(emp))}</a> : '—'}
+                          {emp.phone ? <a href={telHref(firstPhoneOf(emp))} className="hover:text-blue-600">{formatPhone(firstPhoneOf(emp))}</a> : '—'}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">{emp.telephone || '—'}</td>
                         <td className="px-3 py-2.5 text-right">

@@ -40,6 +40,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
 import { RequestDetailsInline } from './RequestDetails';
+import { DashboardListSheet, type SheetRow } from './DashboardListSheet';
 import { useMyCompanies } from '../lib/company';
 
 interface AdminDashboardProps {
@@ -53,6 +54,7 @@ interface AdminDashboardProps {
 interface ListRow {
   key: string;
   name: string;
+  user_id?: number | null;
   sub: string | null;
   right: string | null;
   // Pending attendance rows: how this account may approve it (server-decided;
@@ -130,7 +132,7 @@ function formatMoney(n: number): string {
 function formatTime(ts: string | null | undefined): string {
   if (!ts) return '—';
   try {
-    return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   } catch {
     return '—';
   }
@@ -315,7 +317,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
   const [holidays, setHolidays] = useState<any[] | null>(null);
   const [latePolicy, setLatePolicy] = useState<any | null>(null);
   const [extras, setExtras] = useState<Extras | null>(null);
-  const [openList, setOpenList] = useState<{ key?: string; title: string; rows: ListRow[]; tab?: string | null } | null>(null);
+  const [openList, setOpenList] = useState<{ key?: string; title: string; rows: ListRow[]; tab?: string | null; subLabel?: string; rightLabel?: string; subtitle?: string } | null>(null);
   // "Approve selected" in the pending attendance popups.
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -477,6 +479,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       return { label, claimSum, disbursedSum };
     });
   }, [last3Months, billClaims, conveyanceBills]);
+
+  const monthClaims = useMemo(() => (billClaims || []).filter((c) => monthKey(c.claim_date) === thisMonth), [billClaims, thisMonth]);
+  const monthDisbursed = useMemo(() => (conveyanceBills || []).filter((b) => b.is_disbursed && monthKey(b.bill_date) === thisMonth), [conveyanceBills, thisMonth]);
 
   const monthlyClaimAmount = useMemo(() => {
     if (!billClaims) return null;
@@ -785,8 +790,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       right: `${b.days_away === 0 ? 'Today' : shortDate(b.date)} · turns ${b.turning}`,
     }), 'Upcoming Birthdays (next 7 days)'),
     listTile('attendance_approval', 'Pending Attendance Approval', Fingerprint, extras?.attendance_approvals, attendanceRow('a'), 'Remote check-in/out waiting for approval', 'approvals', true),
-    { key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null, onClick: go('bill_claim') },
-    { key: 'disburse_amount', label: 'Monthly Disburse Amount', icon: Banknote, value: monthlyDisburseAmount != null ? formatMoney(monthlyDisburseAmount) : null, onClick: go('disbursement') },
+    {
+      key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null,
+      onClick: billClaims
+        ? () => setOpenList({
+            key: 'claim_amount', title: 'Bill claims this month', tab: 'bill_claim', subLabel: 'Details', rightLabel: 'Amount',
+            subtitle: `${monthClaims.length} claim${monthClaims.length === 1 ? '' : 's'} · ${formatMoney(monthlyClaimAmount ?? 0)}`,
+            rows: monthClaims.map((c: any) => ({
+              key: `bc-${c.id}`, name: c.user_name || `User #${c.user_id}`, user_id: Number(c.user_id) || null,
+              sub: [c.employee_code, c.department, c.category, shortDate(String(c.claim_date || '').slice(0, 10)), c.status].filter(Boolean).join(' · ') || null,
+              right: formatMoney(Number(c.amount || 0)), detail: { type: 'bill_claim', id: Number(c.id) },
+            })),
+          })
+        : go('bill_claim'),
+    },
+    {
+      key: 'disburse_amount', label: 'Monthly Disburse Amount', icon: Banknote, value: monthlyDisburseAmount != null ? formatMoney(monthlyDisburseAmount) : null,
+      onClick: conveyanceBills
+        ? () => setOpenList({
+            key: 'disburse_amount', title: 'Disbursed this month', tab: 'disbursement', subLabel: 'Details', rightLabel: 'Amount',
+            subtitle: `${monthDisbursed.length} bill${monthDisbursed.length === 1 ? '' : 's'} · ${formatMoney(monthlyDisburseAmount ?? 0)}`,
+            rows: monthDisbursed.map((b: any) => ({
+              key: `cb-${b.id}`, name: b.user_name || `User #${b.user_id}`, user_id: Number(b.user_id) || null,
+              sub: [b.employee_code, b.department, `Bill ${shortDate(String(b.bill_date || '').slice(0, 10))}`].filter(Boolean).join(' · ') || null,
+              right: formatMoney(Number(b.total_amount || 0)),
+            })),
+          })
+        : go('disbursement'),
+    },
     listTile('attendance_recon', 'Pending Attendance Recon.', ShieldAlert, extras?.attendance_corrections, attendanceRow('c'), 'Attendance corrections waiting for review', undefined, true),
     listTile('status_effective', 'Status To Be Effective', UserCog, extras?.status_effective, (a) => ({
       key: `s-${a.id}`, name: a.name, sub: `${a.action}${a.status === 'pending' ? ' (awaiting approval)' : ''}`, right: shortDate(a.date),
@@ -1525,168 +1556,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         const approvable = openList.rows.filter((r) => r.approve);
         const allPicked = approvable.length > 0 && approvable.every((r) => picked.has(r.key));
         const nPicked = approvable.filter((r) => picked.has(r.key)).length;
+        const rows: SheetRow[] = openList.rows.map((r) => ({
+          key: r.key, name: r.name, user_id: r.user_id ?? null, sub: r.sub, right: r.right, detail: r.detail, selectable: !!r.approve,
+        }));
+        const showFooter = approvable.length > 0 || (openList.tab && onNavigate);
         return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={openList.title}>
-          <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => !bulkBusy && setOpenList(null)} />
-          <div className="relative w-full max-w-md">
-          <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 shrink-0">
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-slate-900">{openList.title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">{openList.rows.length} total</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenList(null)}
-                disabled={bulkBusy}
-                className="liquid-glass-chip w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-600 active:scale-95 transition-transform"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {approvable.length > 0 && (
-              <label className="mx-5 mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700 select-none cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={allPicked}
-                  onChange={() => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.key)))}
-                  className="w-4 h-4 accent-[var(--g-accent)]"
-                />
-                Select all you can approve ({approvable.length})
-              </label>
-            )}
-            <div className="overflow-y-auto px-5 pb-4 space-y-1.5 min-h-0">
-              {openList.rows.length === 0 && <p className="text-xs text-slate-500 text-center py-6">Nothing is waiting.</p>}
-              {openList.rows.map((r) => {
-                const content = (
-                  <>
-                    <UserAvatar userId={(r as any).user_id} name={r.name} className="w-6 h-6 text-[9px]" color={avatarColorFor(r.name.length)} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
-                      {r.sub && <span className="block text-[10px] text-slate-500 truncate">{r.sub}</span>}
-                    </span>
-                    {r.right && <span className="text-[10px] font-semibold text-blue-600 shrink-0">{r.right}</span>}
-                  </>
-                );
-                const details = r.detail ? <RequestDetailsInline token={token} type={r.detail.type} id={r.detail.id} className="mt-0 max-w-none" /> : null;
-                return r.approve ? (
-                  <div key={r.key} className="liquid-glass-inset rounded-xl px-2.5 py-2 space-y-2">
-                  <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={picked.has(r.key)}
-                      onChange={() =>
-                        setPicked((cur) => {
-                          const next = new Set(cur);
-                          if (next.has(r.key)) next.delete(r.key);
-                          else next.add(r.key);
-                          return next;
-                        })
-                      }
-                      aria-label={`Select ${r.name}`}
-                      className="w-4 h-4 shrink-0 accent-[var(--g-accent)]"
-                    />
-                    {content}
-                  </label>
-                  {details}
-                  </div>
-                ) : (
-                  <div key={r.key} className="liquid-glass-inset rounded-xl px-2.5 py-2 space-y-2">
-                    <div className="flex items-center gap-2 text-xs">{content}</div>
-                    {details}
-                  </div>
-                );
-              })}
-            </div>
-            {bulkMsg && (
-              <p className={`mx-5 mb-2 text-xs font-semibold ${bulkMsg.ok ? 'text-emerald-700' : 'text-rose-700'}`} role="status">{bulkMsg.text}</p>
-            )}
-            {(approvable.length > 0 || (openList.tab && onNavigate)) && (
-              <div className="px-5 py-3 border-t border-white/60 flex items-center justify-between gap-3 shrink-0">
-                {approvable.length > 0 ? (
-                  <button
-                    type="button"
-                    disabled={nPicked === 0 || bulkBusy}
-                    onClick={async () => {
-                      if (!(await confirmDialog(`Approve ${nPicked} selected request${nPicked === 1 ? '' : 's'}?`, { confirmLabel: 'Approve', tone: 'default' }))) return;
-                      void approveSelected();
-                    }}
-                    className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                    Approve selected{nPicked > 0 ? ` (${nPicked})` : ''}
-                  </button>
-                ) : <span />}
-                {openList.tab && onNavigate && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const tab = openList.tab!;
-                      setOpenList(null);
-                      onNavigate(tab);
-                    }}
-                    className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1"
-                  >
-                    Open <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          </div>
-        </div>
+          <DashboardListSheet
+            token={token}
+            title={openList.title}
+            subtitle={openList.subtitle}
+            rows={rows}
+            subLabel={openList.subLabel}
+            rightLabel={openList.rightLabel}
+            picked={picked}
+            onTogglePick={(k) =>
+              setPicked((cur) => {
+                const next = new Set(cur);
+                if (next.has(k)) next.delete(k);
+                else next.add(k);
+                return next;
+              })
+            }
+            onToggleAll={() => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.key)))}
+            busy={bulkBusy}
+            onClose={() => setOpenList(null)}
+            message={bulkMsg ? <p className={`text-xs font-semibold ${bulkMsg.ok ? 'text-emerald-700' : 'text-rose-700'}`} role="status">{bulkMsg.text}</p> : undefined}
+            footer={
+              showFooter ? (
+                <>
+                  {approvable.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={nPicked === 0 || bulkBusy}
+                      onClick={async () => {
+                        if (!(await confirmDialog(`Approve ${nPicked} selected request${nPicked === 1 ? '' : 's'}?`, { confirmLabel: 'Approve', tone: 'default' }))) return;
+                        void approveSelected();
+                      }}
+                      className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      Approve selected{nPicked > 0 ? ` (${nPicked})` : ''}
+                    </button>
+                  ) : <span />}
+                  {openList.tab && onNavigate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tab = openList.tab!;
+                        setOpenList(null);
+                        onNavigate(tab);
+                      }}
+                      className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1"
+                    >
+                      Open <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
+                </>
+              ) : undefined
+            }
+          />
         );
       })()}
 
       {openBreakdown && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center liquid-glass-backdrop p-4"
-          onClick={() => setOpenBreakdown(null)}
-        >
-          <div
-            className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/60 shrink-0">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">{openBreakdown.title}</h3>
-                <p className="text-xs text-slate-400 mt-0.5">{openBreakdown.entries.length} total &middot; by Department</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenBreakdown(null)}
-                className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="overflow-y-auto px-5 py-4 space-y-4">
-              {groupByDepartment(openBreakdown.entries).map((g) => (
-                <div key={g.department}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-semibold text-slate-700">{g.department}</span>
-                    <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">
-                      {g.entries.length}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    {g.entries.map((e, idx) => (
-                      <div key={`${e.user_id}-${idx}`} className="liquid-glass-inset text-xs px-2.5 py-2 rounded-xl">
-                        <div className="flex items-center gap-2">
-                          <UserAvatar userId={e.user_id} name={e.name} className="w-5 h-5 text-[9px]" color={avatarColorFor(e.user_id)} />
-                          <span className="text-slate-700 font-medium truncate">{e.name}</span>
-                        </div>
-                        {e.leave_id ? <RequestDetailsInline token={token} type="leave_application" id={e.leave_id} className="max-w-none" /> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <DashboardListSheet
+          token={token}
+          title={openBreakdown.title}
+          subtitle={`${openBreakdown.entries.length} total · by Department`}
+          rows={groupByDepartment(openBreakdown.entries).flatMap((g) =>
+            g.entries.map((e, idx) => ({
+              key: `${g.department}-${e.user_id}-${e.leave_id ?? idx}`,
+              name: e.name,
+              user_id: e.user_id,
+              sub: null,
+              right: null,
+              group: g.department,
+              detail: e.leave_id ? { type: 'leave_application', id: e.leave_id } : undefined,
+            }))
+          )}
+          emptyText="Nobody."
+          onClose={() => setOpenBreakdown(null)}
+        />
       )}
     </div>
   );

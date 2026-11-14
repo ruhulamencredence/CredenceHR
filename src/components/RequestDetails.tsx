@@ -45,7 +45,12 @@ const nice = (v: string) => {
   // Plain dates ("2026-11-03", "2026-11-02 to 2026-11-05") read as 03-Nov-2026.
   if (!ISO.test(v)) return v.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, y, mo, d) => (MON[Number(mo) - 1] ? `${d}-${MON[Number(mo) - 1]}-${y}` : m));
   const d = new Date(v);
-  return isNaN(d.getTime()) ? v : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (isNaN(d.getTime())) return v;
+  // 14 Nov 2026, 08:05 PM
+  const h = d.getHours();
+  const hh = String(h % 12 || 12).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${String(d.getDate()).padStart(2, '0')} ${MON[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm} ${h < 12 ? 'AM' : 'PM'}`;
 };
 const statusTone = (s: string | null) =>
   s === 'approved' || s === 'fulfilled' || s === 'completed'

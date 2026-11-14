@@ -34,6 +34,8 @@ interface TrackingRow {
   last_ping: string | null;
   minutes_ago: number | null;
   standing_still?: boolean;
+  // Outside their Tracking Schedule right now (not counted as Not Tracked).
+  off_schedule?: boolean;
   reason: string | null;
 }
 // Dashboard card background: a faint street map (blocks, a park, a river)
@@ -120,6 +122,8 @@ export interface TrackingStatus {
   live_minutes: number;
   tracked: number;
   not_tracked: number;
+  // Outside their Tracking Schedule right now.
+  off_schedule?: number;
   // Accounts with the Notices module may send a notice from the Not Tracked list.
   can_send_notice?: boolean;
   // Location updates per minute over the last 30 minutes, oldest first.
@@ -275,7 +279,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
     if (!data || !open) return [];
     const q = query.trim().toLowerCase();
     const rows = data.employees
-      .filter((r) => (open === 'tracked' ? r.tracked : !r.tracked))
+      .filter((r) => (open === 'tracked' ? r.tracked : !r.tracked && !r.off_schedule))
       .filter((r) => !q || [r.name, r.employee_id, r.designation, r.department, r.reason || ''].some((v) => v.toLowerCase().includes(q)));
     const map = new Map<string, TrackingRow[]>();
     for (const r of rows) {
@@ -340,7 +344,14 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
           {(
             [
               ['tracked', 'Currently Under Tracking', data.tracked, `Sent a location in the last ${data.live_minutes} min`, 'bg-emerald-50 border-emerald-200 text-emerald-700', 'bg-emerald-500'],
-              ['not_tracked', 'Currently Not Tracked', data.not_tracked, 'Tracking off, Location off, or app not running', 'bg-slate-50 border-slate-200 text-slate-700', 'bg-slate-400']
+              [
+                'not_tracked',
+                'Currently Not Tracked',
+                data.not_tracked,
+                `Tracking off, Location off, or app not running${data.off_schedule ? ` · ${data.off_schedule} off schedule (not counted)` : ''}`,
+                'bg-slate-50 border-slate-200 text-slate-700',
+                'bg-slate-400'
+              ]
             ] as const
           ).map(([key, label, count, hint, cls, dot]) => (
             <button

@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৭টি টেবিল, ২৭৮৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৯টি টেবিল, ২৮০৪টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1029,6 +1029,9 @@ Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 | `out_lng` | decimal(10,7) | হ্যাঁ |  | |
 | `out_distance_m` | int(11) | হ্যাঁ |  | |
 | `out_place` | varchar(255) | হ্যাঁ |  | |
+| `prev_recorded` | tinyint(1) | না | default 0 | |
+| `prev_check_in_at` | datetime | হ্যাঁ |  | |
+| `prev_check_out_at` | datetime | হ্যাঁ |  | |
 
 ### `attendance_mock_attempts`
 
@@ -1435,6 +1438,27 @@ Unique: `unique_user_employee`(user_id,employee_pk)
 | `last_ping` | datetime | হ্যাঁ |  | |
 | `sent_by` | int(11) | হ্যাঁ |  | |
 | `sent_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `tracking_schedule_settings`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK  | |
+| `buffer_minutes` | int(11) | না | default 30 | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+### `tracking_schedules`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `user_id` | int(11) | না | PK  | FK → `users.id` |
+| `mode` | varchar(10) | না | default 'always' | |
+| `days` | varchar(20) | হ্যাঁ |  | |
+| `start_time` | time | হ্যাঁ |  | |
+| `end_time` | time | হ্যাঁ |  | |
+| `updated_by` | int(11) | হ্যাঁ |  | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 ### `user_attendance_projects`
 
@@ -1973,6 +1997,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_view_payslip` | tinyint(1) | না | default 0 | |
 | `can_email_reports` | tinyint(1) | না | default 0 | |
 | `can_update_check_out` | tinyint(1) | না | default 0 | |
+| `attendance_projects_by_branch` | tinyint(1) | না | default 0 | |
 | `can_request_items` | tinyint(1) | না | default 0 | |
 
 Unique: `email`(email), `username`(username)

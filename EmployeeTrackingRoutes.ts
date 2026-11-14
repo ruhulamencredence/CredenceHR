@@ -9,6 +9,7 @@
 import { autoLinkByEmployeeId } from "./EmployeeLoginId";
 import { wallMinutes } from "./TrackingStayReport";
 import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
+import { trackingWindowFor, trackingWindowsFor } from "./TrackingSchedule";
 import type { Express } from "express";
 
 export interface RegisterEmployeeTrackingRoutesDeps {
@@ -54,6 +55,13 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         return res.status(400).json({ error: "lat/lng are required." });
       }
+      // Outside this person's Tracking Schedule nothing is stored; the phone
+      // is told to stop until the next start (TrackingSchedule.ts).
+      const win = await trackingWindowFor(queryDB, Number(req.user.id)).catch(() => null);
+      if (win && !win.on) {
+        await saveTrackingState(Number(req.user.id), { mode: "off_sched" });
+        return res.json({ success: true, off_schedule: true, next_start: win.next_start });
+      }
       const accuracy_m = req.body.accuracy_m != null && Number.isFinite(Number(req.body.accuracy_m)) ? Math.round(Number(req.body.accuracy_m)) : null;
       const battery_pct = req.body.battery_pct != null && Number.isFinite(Number(req.body.battery_pct)) ? Math.round(Number(req.body.battery_pct)) : null;
       const recorded_at = req.body.recorded_at ? new Date(req.body.recorded_at) : new Date();
@@ -89,7 +97,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       }
       await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
       const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat, mock: !!is_mock });
-      res.json({ success: true, live_until });
+      res.json({ success: true, live_until, schedule_until: win?.until ?? null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -99,8 +107,9 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   // comes back to the front — works even with no GPS fix (e.g. Location off).
   app.post("/api/tracking/state", authenticateToken, requireTrackingAccess, async (req: any, res) => {
     try {
-      await saveTrackingState(Number(req.user.id), req.body || {});
-      res.json({ success: true });
+      const win = await trackingWindowFor(queryDB, Number(req.user.id)).catch(() => null);
+      await saveTrackingState(Number(req.user.id), win && !win.on ? { ...(req.body || {}), mode: "off_sched" } : req.body || {});
+      res.json(win && !win.on ? { success: true, off_schedule: true, next_start: win.next_start } : { success: true, schedule_until: win?.until ?? null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -167,6 +176,11 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         []
       ).catch(() => [])) || [];
     const stateByUser = new Map<number, any>(states.map((x) => [Number(x.user_id), x]));
+    // Tracking Schedule: who is outside their tracking time right now.
+    const windows = await trackingWindowsFor(
+      queryDB,
+      employees.filter((e) => e.user_id).map((e) => ({ user_id: Number(e.user_id), employee_pk: Number(e.id) }))
+    ).catch(() => new Map());
     const rows = employees.map((e) => {
       const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
       const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
@@ -190,9 +204,13 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       // now" (before, a fresh location could still be left out here when
       // the phone's last heartbeat said otherwise or the switch was off, so
       // the two disagreed).
-      const tracked = pingFresh || (enabled && !locOff && !noPerm && alive);
+      const win: any = e.user_id ? windows.get(Number(e.user_id)) : null;
+      const offSchedule = enabled && !!win && !win.on;
+      const tracked = !offSchedule && (pingFresh || (enabled && !locOff && !noPerm && alive));
       const reason = tracked
         ? null
+        : offSchedule
+        ? "Off schedule (not tracked at this time)"
         : !e.user_id
         ? "No login account"
         : !enabled
@@ -221,6 +239,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         last_ping: p?.last_ping || null,
         minutes_ago: minutesAgo,
         standing_still: standing,
+        off_schedule: offSchedule,
+        next_start: offSchedule ? win.next_start : null,
         reason
       };
     });
@@ -247,6 +267,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
             last_ping: p.last_ping,
             minutes_ago: Number(p.minutes_ago),
             standing_still: false,
+            off_schedule: false,
+            next_start: null,
             reason: null
           });
         }
@@ -280,7 +302,8 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       res.json({
         live_minutes: TRACKING_LIVE_MIN,
         tracked: rows.filter((r) => r.tracked).length,
-        not_tracked: rows.filter((r) => !r.tracked).length,
+        not_tracked: rows.filter((r: any) => !r.tracked && !r.off_schedule).length,
+        off_schedule: rows.filter((r: any) => r.off_schedule).length,
         can_send_notice: await canSendTrackingNotice(req.user),
         updates_per_minute: perMinute,
         employees: rows

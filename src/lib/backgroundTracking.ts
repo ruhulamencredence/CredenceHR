@@ -130,6 +130,78 @@ const STATE_INTERVAL_MS = 2 * 60 * 1000;
 let stateTimer: ReturnType<typeof setInterval> | null = null;
 let onVisible: (() => void) | null = null;
 
+// Tracking Schedule (TrackingSchedule.ts on the server): outside the
+// person's tracking time nothing runs and no notification shows; one timer
+// starts tracking again at the next start (or looks again later when that
+// isn't known), and while tracking, one timer looks again when the window ends.
+const RECHECK_MS = 60 * 60 * 1000;
+const MAX_TIMER_MS = 6 * 60 * 60 * 1000;
+let scheduleTimer: ReturnType<typeof setTimeout> | null = null;
+let pausedForSchedule = false;
+type ScheduleWindow = { on: boolean; until: string | null; next_start: string | null };
+
+const clearScheduleTimer = () => {
+  if (scheduleTimer) clearTimeout(scheduleTimer);
+  scheduleTimer = null;
+};
+
+async function fetchSchedule(token: string): Promise<ScheduleWindow | null> {
+  try {
+    const r = await fetch(apiUrl('/api/tracking/schedule/me'), { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    return (await r.json()) as ScheduleWindow;
+  } catch {
+    return null; // offline / older server: track as before
+  }
+}
+
+const delayTo = (iso: string | null, fallback: number) => {
+  const t = iso ? Date.parse(iso) : NaN;
+  const ms = Number.isFinite(t) ? t - Date.now() : fallback;
+  return Math.min(Math.max(ms, 30 * 1000), MAX_TIMER_MS);
+};
+
+// Stop (no notification) until the next start, then try again.
+async function pauseForSchedule(token: string, nextStart: string | null): Promise<void> {
+  await stopBackgroundTracking();
+  requestedToken = token;
+  pausedForSchedule = true;
+  // A new APK keeps the pause itself (it comes back on its own at the next
+  // start, even with the app closed); an older one has no such call.
+  if (isAndroidApp()) {
+    try {
+      await LocationAccess.setTrackingSession({ token, baseUrl: window.location.origin });
+      const at = nextStart ? Date.parse(nextStart) : 0;
+      await LocationAccess.pauseDutyTracking({ resumeAt: Number.isFinite(at) ? at : 0 });
+    } catch {
+      // older APK — the page's own timer below brings tracking back
+    }
+  }
+  clearScheduleTimer();
+  scheduleTimer = setTimeout(() => {
+    scheduleTimer = null;
+    if (requestedToken === token) void startBackgroundTracking(token);
+  }, delayTo(nextStart, RECHECK_MS));
+}
+
+// While tracking: look again when this window ends.
+function watchWindowEnd(token: string, until: string | null) {
+  clearScheduleTimer();
+  if (!until) return;
+  scheduleTimer = setTimeout(async () => {
+    scheduleTimer = null;
+    if (currentToken !== token) return;
+    const w = await fetchSchedule(token);
+    if (w && !w.on) await pauseForSchedule(token, w.next_start);
+    else watchWindowEnd(token, w?.until ?? null);
+  }, delayTo(until, RECHECK_MS));
+}
+
+// A ping / state answer: outside the tracking time now.
+function onServerAnswer(data: any) {
+  if (data?.off_schedule && currentToken) void pauseForSchedule(currentToken, data.next_start ?? null);
+}
+
 // Best-effort battery percentage — the Web Battery API isn't in every
 // WebView, so this silently returns null rather than ever blocking a ping.
 async function readBatteryPct(): Promise<number | null> {
@@ -181,6 +253,7 @@ async function sendPing() {
       pendingFixes = pendingFixes.filter((f) => f.time > sentUpTo);
     }
     const data = await res.json().catch(() => null);
+    if (data?.off_schedule) return onServerAnswer(data);
     if (data && 'live_until' in data) setLiveUntil(data.live_until);
   } catch {
     // Offline or server unreachable — the fixes stay queued and go out with
@@ -194,7 +267,7 @@ async function sendState() {
   const access = await getLocationAccess();
   const battery_pct = await readBatteryPct();
   try {
-    await fetch(apiUrl('/api/tracking/state'), {
+    const res = await fetch(apiUrl('/api/tracking/state'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
       body: JSON.stringify({
@@ -206,6 +279,7 @@ async function sendState() {
         battery_pct
       })
     });
+    onServerAnswer(await res.json().catch(() => null));
   } catch {
     // Offline — the next heartbeat tries again.
   }
@@ -231,8 +305,8 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
   }
   watcherId = await BackgroundGeolocation.addWatcher(
     {
-      backgroundTitle: 'Employee Tracking active',
-      backgroundMessage: 'Reporting your location for Employee Tracking. Tap to open the app.',
+      backgroundTitle: 'Tracking is active',
+      backgroundMessage: 'Your location is getting tracked',
       requestPermissions: true,
       stale: false,
       distanceFilter: distanceFilterM
@@ -292,6 +366,15 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   if (getLocationConsent() !== 'accepted') return;
   if ((watcherId || nativeDuty) && currentToken === token) return; // already running for this account
   if (watcherId || nativeDuty) await stopBackgroundTracking();
+  // Tracking Schedule: outside this person's tracking time, don't start.
+  const win = await fetchSchedule(token);
+  if (requestedToken !== token) return; // signed out meanwhile
+  if (win && !win.on) {
+    await pauseForSchedule(token, win.next_start);
+    return;
+  }
+  pausedForSchedule = false;
+  clearScheduleTimer();
 
   currentToken = token;
   mode = 'active';
@@ -311,6 +394,7 @@ export async function startBackgroundTracking(token: string): Promise<void> {
         await LocationAccess.startDutyTracking();
         nativeDuty = true;
         void askBatteryExemptionOnce();
+        watchWindowEnd(token, win?.until ?? null);
         return;
       } catch {
         nativeDuty = false; // an older APK: the page reports, as before
@@ -338,6 +422,7 @@ export async function startBackgroundTracking(token: string): Promise<void> {
         void switchMode('idle');
       }
     }, 60 * 1000);
+    watchWindowEnd(token, win?.until ?? null);
   } catch {
     // Permission denied or plugin unavailable — Employee Tracking simply
     // won't report for this session; every other feature keeps working.
@@ -368,6 +453,8 @@ async function askBatteryExemptionOnce(): Promise<void> {
 }
 
 export async function stopBackgroundTracking(): Promise<void> {
+  clearScheduleTimer();
+  pausedForSchedule = false;
   if (idleCheckTimer) {
     clearInterval(idleCheckTimer);
     idleCheckTimer = null;
@@ -458,6 +545,8 @@ interface LocationAccessPlugin {
   // APKs with native everyday tracking (DutyTrackingService.java) only.
   startDutyTracking(): Promise<void>;
   stopDutyTracking(): Promise<void>;
+  // APKs with Tracking Schedule only: stopped, no notification, until resumeAt.
+  pauseDutyTracking(o: { resumeAt: number }): Promise<void>;
   getBatteryStatus(): Promise<{ unrestricted: boolean }>;
   requestBatteryExemption(): Promise<void>;
 }
@@ -507,4 +596,9 @@ export async function openPhoneLocationSwitch(): Promise<void> {
 
 export function isBackgroundTrackingActive(): boolean {
   return watcherId !== null || nativeDuty;
+}
+
+// Outside the person's Tracking Schedule right now (nothing is reported).
+export function isPausedForSchedule(): boolean {
+  return pausedForSchedule;
 }

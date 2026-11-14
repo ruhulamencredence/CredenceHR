@@ -174,6 +174,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   const validate = (): string | null => {
     if (projectId === '' || projectId === null || projectId === undefined) return 'Select a Project.';
     if (!checkInTime && !checkOutTime) return 'Enter an In Time or Out Time to correct.';
+    if (!remarks.trim()) return 'Write the reason.';
     return null;
   };
 
@@ -204,7 +205,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
           attendance_date: dateStr,
           check_in_at: checkInTime ? `${dateStr} ${checkInTime}:00` : undefined,
           check_out_at: checkOutTime ? `${outNextDay ? nextDate(dateStr) : dateStr} ${checkOutTime}:00` : undefined,
-          remarks: remarks.trim() || undefined,
+          remarks: remarks.trim(),
           ...(file_base64 ? { file_base64, file_name: file!.name, file_mimetype: file!.type } : {})
         })
       });
@@ -300,12 +301,16 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Reason for editing (optional)</label>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                  Reason <span className="text-rose-500">*</span>
+                </label>
                 <textarea
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
                   rows={3}
                   maxLength={1000}
+                  required
+                  aria-required="true"
                   placeholder="e.g. Forgot to Check Out after the site visit"
                   className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"
                 />
