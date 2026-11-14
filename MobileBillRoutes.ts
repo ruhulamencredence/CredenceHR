@@ -761,6 +761,74 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
     }
   });
 
+  // Office SIMs from the Employees' own "Contact No." (all_employees.phone):
+  // every active employee's office number not yet in the SIM list becomes a
+  // SIM given to them, operator from the number, limit from their employee
+  // type (Limits), duty location = their Branch. dry_run (default) only
+  // shows what would happen; numbers already listed are never changed.
+  app.post("/api/mobile-bill/sims/from-employees", authenticateToken, hrOnly, async (req: any, res: any) => {
+    try {
+      const dryRun = req.body?.dry_run !== false;
+      const [emps, pols, sims, raw]: any[] = await Promise.all([
+        employees(),
+        policies(),
+        loadSims(),
+        queryDB("SELECT id, phone FROM all_employees WHERE is_active = 1 AND phone IS NOT NULL AND TRIM(phone) <> ''")
+      ]);
+      const empById = new Map<number, any>(emps.map((e: any) => [e.id, e]));
+      const simByPhone = new Map<string, any>(sims.map((x: any) => [x.phone_number, x]));
+      const people = (raw || []).map((r: any) => ({ emp: empById.get(Number(r.id)), raw: String(r.phone), phone: normalizeMobile(r.phone) })).filter((r: any) => r.emp);
+      const count = new Map<string, number>();
+      for (const r of people) if (r.phone) count.set(r.phone, (count.get(r.phone) || 0) + 1);
+      const rows = people
+        .map((r: any) => {
+          const out: any = {
+            employee_id: r.emp.id,
+            employee_code: r.emp.employee_code,
+            name: r.emp.name,
+            department: r.emp.department,
+            phone_number: r.phone || r.raw,
+            duty_location: r.emp.work_station || null
+          };
+          const have = r.phone ? simByPhone.get(r.phone) : null;
+          if (!r.phone) return { ...out, status: "invalid", note: "Not a mobile number (01XXXXXXXXX)" };
+          if ((count.get(r.phone) || 0) > 1) return { ...out, status: "shared", note: "The same number is on more than one employee" };
+          if (have && have.employee_id === r.emp.id) return { ...out, status: "already", note: "Already in the SIM list for them" };
+          if (have) return { ...out, status: "other", note: have.employee ? `In the SIM list for ${have.employee.name}` : "In the SIM list, not given to anyone" };
+          out.operator = operatorOf(r.phone);
+          out.limit_amount = typeLimit(pols, r.emp.employee_type);
+          if (!out.operator) return { ...out, status: "invalid", note: "Operator not known from the number" };
+          if (out.limit_amount == null) return { ...out, status: "no_limit", note: `No limit for ${r.emp.employee_type ? `"${r.emp.employee_type}"` : "their employee type"} and no default — set one under Limits` };
+          return { ...out, status: "new", note: null };
+        })
+        .sort((a: any, b: any) => String(a.status).localeCompare(String(b.status)) || String(a.name).localeCompare(String(b.name)));
+      const add = rows.filter((r: any) => r.status === "new");
+      if (!dryRun) {
+        for (const r of add) {
+          const ins: any = await queryDB(
+            "INSERT INTO mobile_sims (phone_number, operator, employee_id, duty_location, limit_amount, limit_source, status, created_by) VALUES (?, ?, ?, ?, ?, 'type', 'active', ?)",
+            [r.phone_number, r.operator, r.employee_id, r.duty_location, r.limit_amount, req.user.id]
+          );
+          const simId = Number(ins.insertId);
+          await recordSimHolder(queryDB, simId, { id: r.employee_id, name: r.name }, r.duty_location);
+          await logSim(queryDB, simId, "added", `From Employees (Contact No.) for ${r.name}, limit ৳${r.limit_amount}.`, Number(req.user.id), {
+            old_limit: null,
+            new_limit: Number(r.limit_amount),
+            change_kind: "added"
+          });
+        }
+      }
+      const by = (st: string) => rows.filter((r: any) => r.status === st).length;
+      res.json({
+        dry_run: dryRun,
+        summary: { new: add.length, already: by("already"), other: by("other"), shared: by("shared"), invalid: by("invalid"), no_limit: by("no_limit") },
+        rows
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- limit requests ----------------------------------------------------
   app.get("/api/mobile-bill/requests", authenticateToken, hrOnly, async (_req: any, res: any) => {
     try {

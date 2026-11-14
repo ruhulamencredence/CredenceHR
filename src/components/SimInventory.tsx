@@ -427,3 +427,138 @@ const SimStorySheet: React.FC<{ token: string; id: number; onClose: () => void }
 };
 
 export default SimInventoryTab;
+
+// SIMs tab -> "From Employees": office SIMs from each employee's own
+// "Contact No." (POST /api/mobile-bill/sims/from-employees). First a preview
+// — new / already listed / listed for someone else / not a number / no
+// limit — then "Add" creates only the new ones (confirmDialog).
+type FromEmpRow = {
+  employee_id: number;
+  employee_code: string | null;
+  name: string;
+  department: string | null;
+  phone_number: string;
+  duty_location: string | null;
+  operator?: string | null;
+  limit_amount?: number | null;
+  status: 'new' | 'already' | 'other' | 'shared' | 'invalid' | 'no_limit';
+  note: string | null;
+};
+const FROM_EMP_LABEL: Record<FromEmpRow['status'], string> = {
+  new: 'Will be added',
+  already: 'Already listed',
+  other: 'Listed for someone else',
+  shared: 'Same number on two people',
+  invalid: 'Not a mobile number',
+  no_limit: 'No limit set'
+};
+export const SimsFromEmployeesSheet: React.FC<{ token: string; onClose: () => void; onDone: (n: number) => void }> = ({ token, onClose, onDone }) => {
+  const [data, setData] = useState<{ summary: Record<string, number>; rows: FromEmpRow[] } | null>(null);
+  const [show, setShow] = useState<FromEmpRow['status'] | ''>('new');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useBackButtonClose(true, () => !busy && onClose());
+  useEffect(() => {
+    mbApi<any>(token, '/api/mobile-bill/sims/from-employees', 'POST', { dry_run: true })
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, [token]);
+  const rows = (data?.rows || []).filter((r) => !show || r.status === show);
+  const add = async () => {
+    if (!data?.summary.new) return;
+    const { confirmDialog } = await import('../lib/confirmDialog');
+    if (!(await confirmDialog(`Add ${data.summary.new} SIM${data.summary.new === 1 ? '' : 's'} from the employees' Contact No., each given to that employee with their type's limit?`, { confirmLabel: 'Add SIMs', tone: 'default' }))) return;
+    setBusy(true);
+    setError('');
+    try {
+      const r = await mbApi<any>(token, '/api/mobile-bill/sims/from-employees', 'POST', { dry_run: false });
+      onDone(r.summary?.new ?? 0);
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[90]" role="dialog" aria-modal="true" aria-label="SIMs from Employees">
+      <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => !busy && onClose()} />
+      <div className="absolute inset-0 sm:inset-4 lg:inset-6 flex">
+        <div className="liquid-glass liquid-glass-in rounded-none sm:rounded-[32px] w-full h-full flex flex-col overflow-hidden">
+          <div className="flex items-start gap-3 px-4 sm:px-6 pt-[max(1rem,env(safe-area-inset-top))] sm:pt-5 pb-3 shrink-0">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-bold text-slate-900">Office SIMs from Employees</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Each active employee’s Contact No. (Employees → Contact No.) not yet in the SIM list is added as their SIM — operator from the number, limit from their employee type (Limits), duty location = their Branch. Numbers already listed are left as they are.
+              </p>
+            </div>
+            <button type="button" onClick={onClose} disabled={busy} className="liquid-glass-chip w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-600" aria-label="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-4 sm:px-6 pb-3 flex flex-wrap gap-1.5 shrink-0">
+            {(['new', 'already', 'other', 'shared', 'invalid', 'no_limit'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setShow(show === k ? '' : k)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold ${show === k ? 'bg-slate-900 text-white' : 'liquid-glass-chip text-slate-700'}`}
+              >
+                {FROM_EMP_LABEL[k]} · {data ? data.summary[k] ?? 0 : '…'}
+              </button>
+            ))}
+          </div>
+          {error && <p className="mx-4 sm:mx-6 mb-2 text-xs font-semibold text-rose-700">{error}</p>}
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 pb-4">
+            {!data ? (
+              !error && (
+                <div className="flex justify-center py-16">
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                </div>
+              )
+            ) : rows.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-16">Nobody here.</p>
+            ) : (
+              <div className="liquid-glass-inset rounded-2xl overflow-x-auto">
+                <table className="w-full text-xs" data-phone-card>
+                  <thead className="bg-white/80">
+                    <tr className="text-left text-slate-500">
+                      <th className="px-3 py-2 font-semibold">Employee</th>
+                      <th className="px-3 py-2 font-semibold">Contact No.</th>
+                      <th className="px-3 py-2 font-semibold">Duty location</th>
+                      <th className="px-3 py-2 font-semibold text-right">Limit</th>
+                      <th className="px-3 py-2 font-semibold">What happens</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={`${r.employee_id}-${r.phone_number}`} className="border-t border-slate-200/60">
+                        <td className="px-3 py-2">
+                          <span className="block font-semibold text-slate-800">{r.name}</span>
+                          <span className="block text-[11px] text-slate-500">{[r.employee_code, r.department].filter(Boolean).join(' · ')}</span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
+                          {r.phone_number} {r.operator && <OperatorBadge op={r.operator} />}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{r.duty_location || '—'}</td>
+                        <td className="px-3 py-2 text-right text-slate-700">{r.limit_amount != null ? tk(r.limit_amount) : '—'}</td>
+                        <td className={`px-3 py-2 ${r.status === 'new' ? 'text-emerald-700 font-semibold' : r.status === 'already' ? 'text-slate-500' : 'text-amber-700'}`}>
+                          {r.note || FROM_EMP_LABEL[r.status]}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="px-4 sm:px-6 py-3 border-t border-white/60 shrink-0 flex items-center gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <span className="text-xs text-slate-500 flex-1">Nothing changes until you press Add.</span>
+            <button type="button" onClick={() => void add()} disabled={busy || !data?.summary.new} className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5">
+              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Add {data?.summary.new ?? 0} SIMs
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
