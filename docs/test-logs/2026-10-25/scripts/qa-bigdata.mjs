@@ -114,7 +114,8 @@ for (const [id, url, waitFor] of [['BD-13', '/admin/employees', /BIG-\d{5}/], ['
   // Typing in the search box: how long until the list narrows down.
   let searchMs = null;
   if (id === 'BD-13' && shown) {
-    const box = page.getByPlaceholder(/Search by name/);
+    // The Employees search box (its placeholder changed with the Directory filters, 8414345).
+    const box = page.getByPlaceholder(/Search by name|Name, Employee ID/).first();
     const s2 = performance.now();
     const lastCode = `BIG-${String(N - 1).padStart(5, '0')}`;
     await box.fill(lastCode);

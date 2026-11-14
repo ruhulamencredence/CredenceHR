@@ -166,6 +166,8 @@ const times = page.locator('input[type=time]');
 await times.nth(0).fill('22:00');
 await times.nth(1).fill('06:00');
 const hint = await page.getByText(/Next day \(/).isVisible().catch(() => false);
+// Reason is required (Correct Attendance, since 3ed41b7).
+await page.getByPlaceholder('e.g. Forgot to Check Out after the site visit').fill('Night shift at the site');
 await page.getByRole('button', { name: 'Apply' }).click();
 await page.waitForTimeout(2500);
 const corr = sql(`SELECT DATE_FORMAT(requested_check_in_at,'%Y-%m-%d %H:%i'), DATE_FORMAT(requested_check_out_at,'%Y-%m-%d %H:%i') FROM attendance_corrections WHERE user_id=${uid} ORDER BY id DESC LIMIT 1`);
