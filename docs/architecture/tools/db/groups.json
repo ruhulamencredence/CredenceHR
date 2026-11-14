@@ -103,7 +103,8 @@
   "vehicle_ride_settings",
   "zk_attendance_logs",
   "zk_device_pins",
-  "zk_devices"
+  "zk_devices",
+  "zk_punch_rules"
  ],
  "A. Accounts, Access & Security": [
   "access_templates",
