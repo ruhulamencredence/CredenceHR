@@ -82,7 +82,13 @@ export async function ensureAttendanceProjectsSchema(dbPool: any): Promise<void>
     "ALTER TABLE attendance_corrections ADD COLUMN out_lat DECIMAL(10,7) NULL",
     "ALTER TABLE attendance_corrections ADD COLUMN out_lng DECIMAL(10,7) NULL",
     "ALTER TABLE attendance_corrections ADD COLUMN out_distance_m INT NULL",
-    "ALTER TABLE attendance_corrections ADD COLUMN out_place VARCHAR(255) NULL"
+    "ALTER TABLE attendance_corrections ADD COLUMN out_place VARCHAR(255) NULL",
+    // What the day's In / Out were just before an approved correction
+    // replaced them, so the request keeps showing "was → asked for" after it
+    // is approved (server.ts finalizeAttendanceCorrection; ApprovalDetailsRoutes.ts).
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_recorded TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_check_in_at DATETIME NULL",
+    "ALTER TABLE attendance_corrections ADD COLUMN prev_check_out_at DATETIME NULL"
   ]) {
     await dbPool.query(sql).catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Attendance: " + err.message);

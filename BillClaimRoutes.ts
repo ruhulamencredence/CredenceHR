@@ -216,9 +216,11 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       if (String(req.query.slim || "") === "1") {
         const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
         const slim = await queryDB(
-          `SELECT b.id, b.user_id, b.bill_date, b.is_disbursed,
-              (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
-           FROM conveyance_bills b
+          `SELECT b.id, b.user_id, u.name AS user_name, b.bill_date, b.is_disbursed,
+              (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount,
+              (SELECT e.employee_id FROM all_employees e WHERE e.user_id = b.user_id LIMIT 1) AS employee_code,
+              (SELECT e.department FROM all_employees e WHERE e.user_id = b.user_id LIMIT 1) AS department
+           FROM conveyance_bills b LEFT JOIN users u ON u.id = b.user_id
            WHERE b.is_disbursed = 1 ${since ? "AND b.bill_date >= ?" : ""}
            ORDER BY b.id DESC`,
           since ? [since] : []
@@ -1568,13 +1570,18 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       if (String(req.query.slim || "") === "1") {
         const [slimRows, slimEmployees] = await Promise.all([
           queryDB(
-            `SELECT id, user_id, claim_date, amount, status FROM bill_claims ${since ? "WHERE claim_date >= ?" : ""} ORDER BY id DESC`,
+            `SELECT c.id, c.user_id, u.name AS user_name, c.claim_date, c.category, c.amount, c.status
+               FROM bill_claims c LEFT JOIN users u ON u.id = c.user_id ${since ? "WHERE c.claim_date >= ?" : ""} ORDER BY c.id DESC`,
             since ? [since] : []
           ),
-          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+          queryDB("SELECT user_id, department, employee_id FROM all_employees WHERE user_id IS NOT NULL")
         ]);
         const slimDept = new Map<number, string>();
-        for (const e of slimEmployees) if (e.user_id != null && e.department) slimDept.set(Number(e.user_id), e.department);
+        const slimCode = new Map<number, string>();
+        for (const e of slimEmployees) {
+          if (e.user_id != null && e.department) slimDept.set(Number(e.user_id), e.department);
+          if (e.user_id != null && e.employee_id) slimCode.set(Number(e.user_id), e.employee_id);
+        }
         const slimScope = req.user.role === "superadmin" ? null : await getBillClaimDeptScope(req.user.id);
         return res.json(
           slimRows
@@ -1583,7 +1590,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
               const dept = slimDept.get(Number(r.user_id)) || null;
               return !!dept && slimScope.includes(dept);
             })
-            .map((r: any) => ({ ...r, amount: Number(r.amount) }))
+            .map((r: any) => ({ ...r, amount: Number(r.amount), department: slimDept.get(Number(r.user_id)) || null, employee_code: slimCode.get(Number(r.user_id)) || null }))
         );
       }
       const [rows, employees] = await Promise.all([

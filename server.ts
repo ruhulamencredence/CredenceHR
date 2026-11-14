@@ -2009,6 +2009,13 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     );
   }
 
+  // Keep what the day had before (none when there was no row) for the
+  // request's "was → asked for".
+  await queryDB("UPDATE attendance_corrections SET prev_recorded = 1, prev_check_in_at = ?, prev_check_out_at = ? WHERE id = ?", [
+    existing[0]?.check_in_at ?? null,
+    existing[0]?.check_out_at ?? null,
+    correctionId
+  ]).catch(() => undefined);
   await queryDB("UPDATE attendance_corrections SET status = 'approved', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [
     remarks,
     approvedBy,
