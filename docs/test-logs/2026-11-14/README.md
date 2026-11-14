@@ -148,3 +148,21 @@ yesterday, a double punch today). DB and server on Dhaka time for the check-out 
   leaves `Date` alone. (No WebKit browser in this container, so not run in real Safari.)
 - `scripts/feedback-lightbox.cjs <outdir>` — 9/9: in Dark Glass, dark and light the big screenshot opens on the
   page body, nothing covers its middle, clicking outside closes it.
+
+## Appearance: Light Glass
+
+Profile -> Settings -> Appearance -> Mode now has five choices: Light, **Light Glass**, Dark, Dark Glass, Like this
+device. Light Glass (`colorMode.ts` -> `<html data-lglass>`, index.css "Light Glass"): a light page with soft accent /
+indigo / teal glows, frosted white cards and popups, a frosted sidebar (slate text, the open item an accent tint) and,
+on a computer, a frosted header; on a phone the coloured header and bottom bar stay (white logo / icons). Cards over
+a map, pickers over a form and the chat popup are near-solid white so nothing shows through text. Per device, like
+the other Appearance choices; `index.html` applies it before the first paint. Shown first as a mockup on the real
+app (CSS injected), approved, then built.
+
+- Page walk (`docs/test-logs/2026-11-12/scripts/crawl.mjs`, `MODE=lightglass`, Superadmin + employee, computer +
+  phone): 192 pages, no page errors, no 5xx, no sideways overflow, no blank page. ("nan" flags = the letters in
+  "Finance", as before.) Three 4xx unrelated to this CSS-only change: Approvals `GET /api/approval-details` 404 and
+  an employee's `GET /api/vehicles/places/saved` 403 — to look at separately.
+- `scripts/lightglass-shots.cjs` (fresh DB after a container restart, Superadmin): Dashboard, Employees, Monthly
+  Attendance Report, Employee Tracking (cards over the map), chat popup, Profile, phone More popup, phone Employees,
+  phone Appearance — all readable; the phone header keeps its colour and white logo.
