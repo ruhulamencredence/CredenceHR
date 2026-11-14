@@ -25,6 +25,7 @@ export interface AttendanceProjectPick {
   active?: boolean;
 }
 type ProjectOption = { id: number; project_name: string };
+type BranchInfo = { branch_name: string | null; project_id: number | null; project_name: string | null };
 
 const fmt = (d: string | null) => {
   if (!d) return '';
@@ -176,9 +177,17 @@ export const AttendanceProjectsEditor: React.FC<{
   onChanged?: () => void;
 }> = ({ token, userId, projects, disabled, onChanged }) => {
   const [picks, setPicks] = useState<AttendanceProjectPick[] | null>(null);
-  const [limited, setLimited] = useState(false);
+  // 'any' | 'list' (Only these projects) | 'branch' (Their Branch's Project).
+  const [mode, setMode] = useState<'any' | 'list' | 'branch'>('any');
+  const limited = mode === 'list';
+  const [branch, setBranch] = useState<BranchInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const apply = (d: any) => {
+    setPicks(d.projects || []);
+    setBranch(d.branch || null);
+    setMode(d.by_branch ? 'branch' : (d.projects || []).length > 0 ? 'list' : 'any');
+  };
   useEffect(() => {
     let alive = true;
     fetch(apiUrl(`/api/users/${userId}/attendance-projects`), { headers: { Authorization: `Bearer ${token}` } })
@@ -186,8 +195,7 @@ export const AttendanceProjectsEditor: React.FC<{
       .then(({ ok, d }) => {
         if (!alive) return;
         if (!ok) throw new Error(d?.error || 'Could not load');
-        setPicks(d.projects || []);
-        setLimited((d.projects || []).length > 0);
+        apply(d);
       })
       .catch((e) => alive && (setError(e.message), setPicks([])));
     return () => {
@@ -195,18 +203,21 @@ export const AttendanceProjectsEditor: React.FC<{
     };
   }, [token, userId]);
 
-  const save = async (next: AttendanceProjectPick[]) => {
+  const save = async (next: AttendanceProjectPick[] | 'branch', keepList = false) => {
     setBusy(true);
     setError('');
     try {
       const r = await fetch(apiUrl(`/api/users/${userId}/attendance-projects`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ projects: next.map((p) => ({ project_id: p.project_id, valid_from: p.valid_from, valid_to: p.valid_to })) })
+        body: JSON.stringify(next === 'branch' ? { by_branch: true } : { projects: next.map((p) => ({ project_id: p.project_id, valid_from: p.valid_from, valid_to: p.valid_to })) })
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Could not save');
-      setPicks(d.projects || []);
+      if (keepList) {
+        setPicks(d.projects || []);
+        setBranch(d.branch || null);
+      } else apply(d);
       onChanged?.();
     } catch (e: any) {
       setError(e.message);
@@ -222,22 +233,28 @@ export const AttendanceProjectsEditor: React.FC<{
       <div className="flex rounded-full bg-slate-100 p-0.5 text-[11px] font-semibold" role="radiogroup" aria-label="Allowed projects for check-in">
         {(
           [
-            [false, 'Any project'],
-            [true, 'Only these projects']
+            ['any', 'Any project'],
+            ['list', 'Only these projects'],
+            ['branch', 'Their Branch']
           ] as const
         ).map(([v, label]) => (
           <button
             key={label}
             type="button"
             role="radio"
-            aria-checked={limited === v}
+            aria-checked={mode === v}
             disabled={disabled || busy}
             onClick={() => {
-              if (v === limited) return;
-              setLimited(v);
-              if (!v && picks.length) void save([]);
+              if (v === mode) return;
+              const was = mode;
+              setMode(v);
+              if (v === 'branch') void save('branch', true);
+              // From "Their Branch": the stored list (if any) counts again.
+              else if (v === 'list') {
+                if (was === 'branch') void save(picks, true);
+              } else if (picks.length || was === 'branch') void save([]);
             }}
-            className={`flex-1 py-1.5 rounded-full transition-colors ${limited === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+            className={`flex-1 py-1.5 rounded-full transition-colors ${mode === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
           >
             {label}
           </button>
@@ -250,6 +267,18 @@ export const AttendanceProjectsEditor: React.FC<{
             <p className="text-[11px] text-amber-700">{picks.length ? 'None of these counts today — this person can’t check in anywhere until one starts.' : 'Add at least one project.'}</p>
           )}
         </>
+      ) : mode === 'branch' ? (
+        branch?.project_id ? (
+          <p className="text-[11px] text-slate-600">
+            Only <span className="font-semibold text-violet-700">{branch.project_name}</span> — the project of their Branch “{branch.branch_name}”. Changes by itself when their Branch changes.
+          </p>
+        ) : (
+          <p className="text-[11px] text-amber-700">
+            {branch?.branch_name
+              ? `Their Branch “${branch.branch_name}” has no project linked (Admin Panel → Branches) — they can’t check in anywhere until it has one.`
+              : 'No Branch in their Employee record — they can’t check in anywhere until one is set.'}
+          </p>
+        )
       ) : (
         <p className="text-[11px] text-slate-500">Any project this person can otherwise see.</p>
       )}
@@ -267,7 +296,7 @@ export const BulkAttendanceProjectsPopup: React.FC<{
   onClose: () => void;
   onDone: (msg: string) => void;
 }> = ({ token, userIds, projects, onClose, onDone }) => {
-  const [mode, setMode] = useState<'add' | 'remove' | 'replace'>('add');
+  const [mode, setMode] = useState<'add' | 'remove' | 'replace' | 'branch'>('add');
   const [picks, setPicks] = useState<AttendanceProjectPick[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -309,7 +338,8 @@ export const BulkAttendanceProjectsPopup: React.FC<{
               [
                 ['add', 'Add'],
                 ['remove', 'Remove'],
-                ['replace', 'Make it the list']
+                ['replace', 'Make it the list'],
+                ['branch', 'Their Branch']
               ] as const
             ).map(([k, label]) => (
               <button
@@ -329,15 +359,19 @@ export const BulkAttendanceProjectsPopup: React.FC<{
               ? 'Adds these to each person’s list (dates of one already there are updated).'
               : mode === 'remove'
               ? 'Takes these off each person’s list.'
+              : mode === 'branch'
+              ? 'Each person checks in only at the project of their own Branch (Employees → Branch, linked in Admin Panel → Branches). It follows their Branch when it changes.'
               : 'Each person’s list becomes exactly these — empty means Any project.'}
           </p>
-          <div className="liquid-glass-inset rounded-2xl p-3 mt-3">
-            <PickList picks={picks} projects={projects} disabled={busy} onChange={setPicks} />
-          </div>
+          {mode !== 'branch' && (
+            <div className="liquid-glass-inset rounded-2xl p-3 mt-3">
+              <PickList picks={picks} projects={projects} disabled={busy} onChange={setPicks} />
+            </div>
+          )}
           {error && <p className="text-xs text-rose-600 mt-2">{error}</p>}
           <button
             type="button"
-            disabled={busy || (mode !== 'replace' && picks.length === 0)}
+            disabled={busy || (mode !== 'replace' && mode !== 'branch' && picks.length === 0)}
             onClick={() => void apply()}
             className="liquid-glass-button rounded-full w-full py-2.5 text-sm font-semibold mt-4 disabled:opacity-50"
           >
