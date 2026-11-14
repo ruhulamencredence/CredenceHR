@@ -23,6 +23,7 @@ import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import { sendSilentPushToUserIds } from "./PushNotificationService";
 import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
+import { trackingWindowFor } from "./TrackingSchedule";
 
 interface Deps {
   authenticateToken: any;
@@ -135,6 +136,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
         // Only someone this account can already see on Employee Tracking
         // (company and TrackingScope.ts) can be followed.
         if (!inTrackingScope(await getTrackingScope(queryDB, req.user), userId)) return res.status(403).json({ error: TRACKING_SCOPE_DENIED });
+        // Outside their Tracking Schedule nobody is followed (TrackingSchedule.ts).
+        const win = await trackingWindowFor(queryDB, userId).catch(() => null);
+        if (win && !win.on) return res.status(409).json({ error: "This person isn't tracked at this time (Tracking Schedule).", off_schedule: true, next_start: win.next_start });
         const latest = await queryDB(
           "SELECT lat, lng, accuracy_m, battery_pct, recorded_at FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1",
           [userId]
@@ -203,7 +207,13 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
     async (req: any, res: any) => {
       try {
         const scope = await getTrackingScope(queryDB, req.user);
-        const ids = idsFrom(req.body).filter((id) => inTrackingScope(scope, id));
+        const inScope = idsFrom(req.body).filter((id) => inTrackingScope(scope, id));
+        // People outside their Tracking Schedule are skipped.
+        const ids: number[] = [];
+        for (const id of inScope) {
+          const win = await trackingWindowFor(queryDB, id).catch(() => null);
+          if (!win || win.on) ids.push(id);
+        }
         const me = Number(req.user.id);
         const watching: { user_id: number; live_until: number | null }[] = [];
         for (const userId of ids) {

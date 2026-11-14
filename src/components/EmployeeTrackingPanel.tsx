@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone, CalendarClock } from 'lucide-react';
 import { LocationPing } from '../types';
 import { cleanPath, ROUGH_LABEL, MAX_ACCURACY_M, RoughReason } from '../lib/trackPath';
 import { apiUrl } from '../lib/api';
@@ -16,6 +16,7 @@ import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
 import { TrackingStayReport } from './TrackingStayReport';
 import { LiveFollowModal } from './LiveFollowModal';
+import { TrackingScheduleSheet } from './TrackingScheduleSheet';
 import { getChatSocket } from '../lib/chatSocket';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -52,6 +53,8 @@ interface EmployeeTrackingPanelProps {
   canStayReport?: boolean;
   // Module Access -> Employee Tracking -> "Live Follow" layer.
   canLive?: boolean;
+  // Module Access -> Employee Tracking -> "Tracking Schedule" layer.
+  canSchedule?: boolean;
 }
 
 // How often the Live board silently re-fetches while this tab is open — the
@@ -220,7 +223,9 @@ function agoLabel(iso: string): string {
 //    an interval, green pulsing dot if seen within STALE_AFTER_MIN, grey if not.
 //  - Path playback: click a user's row (or "View Path") to instead draw their
 //    full ping history for an optional date range as a connected purple trail.
-export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false, canLive = false }) => {
+export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false, canLive = false, canSchedule = false }) => {
+  // Tracking Schedule (TrackingScheduleSheet.tsx) open.
+  const [showSchedule, setShowSchedule] = useState(false);
   const canEmailReports = useCanEmailReports();
   // Live Follow (LiveFollowModal) — who is open, if anyone.
   const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
@@ -847,6 +852,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           )}
         </div>
       )}
+      {showSchedule && canSchedule && <TrackingScheduleSheet token={token} onClose={() => setShowSchedule(false)} />}
       {showStay && selectedUser && canStayReport && (
         <TrackingStayReport
           token={token}
@@ -948,6 +954,17 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
               >
                 <Radio className={`w-3.5 h-3.5 ${liveAllUntil ? 'animate-pulse' : ''}`} />
                 {liveAllUntil ? `Live · ${liveAllClock}` : 'Live all'}
+              </button>
+            )}
+            {canSchedule && !selectedUser && (
+              <button
+                type="button"
+                onClick={() => setShowSchedule(true)}
+                className="h-9 px-3 flex items-center justify-center gap-1.5 rounded-full border shadow-sm text-xs font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="When each person is tracked — always, fixed hours or their Duty Roster shift"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                Schedule
               </button>
             )}
           </div>

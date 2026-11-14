@@ -18,7 +18,7 @@
 | Monthly Attendance Report | `attendance_reports` | `read` Attendance Reports<br>🔒`late_list` Late list (who came late)<br>`dept_summary` Department Summary (present / absent / leave / delay by department)<br>`custom_report` Custom Report (Attendance Report Builder) |
 | Monthly Leave Application | `leave_applications` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs |
-| Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow |
+| Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow<br>🔒`tracking_schedule` Tracking Schedule |
 | Check In/Out | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf |
 | Bill Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |

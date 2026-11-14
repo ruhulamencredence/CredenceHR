@@ -150,6 +150,16 @@ public class LocationAccessPlugin extends Plugin {
         call.resolve();
     }
 
+    // Tracking Schedule: outside the person's tracking time — nothing runs
+    // and no notification shows until resumeAt (ms since epoch; 0 = unknown,
+    // look again later). The page calls it instead of startDutyTracking.
+    @PluginMethod
+    public void pauseDutyTracking(PluginCall call) {
+        Long at = call.getLong("resumeAt", 0L);
+        DutyTrackingService.pause(getContext(), at == null ? 0L : at);
+        call.resolve();
+    }
+
     // Battery saving: many phones stop background apps anyway unless
     // CredenceHR is let off battery optimisation.
     @PluginMethod

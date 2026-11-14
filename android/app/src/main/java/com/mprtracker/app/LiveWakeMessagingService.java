@@ -27,7 +27,9 @@ public class LiveWakeMessagingService extends MessagingService {
         // The server hasn't heard from this phone for a while (Android or
         // battery saving stopped tracking): a high-priority push may start
         // the service again even with the app closed.
-        if ("tracking_wake".equals(data.get("type"))) DutyTrackingService.wake(getApplicationContext());
+        // The server sends it when a phone has gone quiet, and when a person's
+        // tracking time starts (Tracking Schedule) — so it also ends a pause.
+        if ("tracking_wake".equals(data.get("type"))) DutyTrackingService.resume(getApplicationContext());
         // A chat call while the app is closed / in the background: the
         // phone's incoming-call screen (IncomingCall.java), and away again
         // when the call ends elsewhere.

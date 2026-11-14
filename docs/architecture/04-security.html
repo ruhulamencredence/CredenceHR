@@ -318,6 +318,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>GroupCallRoutes.ts</code></td>
 </tr>
 <tr>
+<td>কাজের সময়ের বাইরে কর্মীর location</td>
+<td>Employee Tracking → Schedule-এ যাঁর Fixed hours বা Duty Roster নিয়ম, তাঁর সময়ের বাইরে server কোনো location জমা রাখে না (<code>/api/tracking/ping</code> উত্তরে শুধু <code>off_schedule</code>), Live Follow / Live all-ও সেই সময় follow করে না; নতুন APK সেই সময় tracking বন্ধ রাখে, notification-ও থাকে না। নিয়ম বদলাতে Employee Tracking module + "Tracking Schedule" layer (explicit-only) লাগে, আর শুধু নিজের tracking scope-এর লোকদের জন্য।</td>
+<td><code>TrackingSchedule.ts</code>, <code>EmployeeTrackingRoutes.ts</code>, <code>LiveTrackingRoutes.ts</code></td>
+</tr>
+<tr>
 <td>কর্মী অন্য project-এ হাজিরা দেবেন</td>
 <td>Module Access-এ "Only these projects" বা "Their Branch" থাকলে server নিজে যাচাই করে কোন Project-এ check in / out / correction দেওয়া যায় — Their Branch-এ শুধু কর্মীর Employee record-এর Branch-এ যুক্ত Project (<code>branches.project_id</code>); Branch-এ Project না থাকলে কোথাও না। App থেকে পাঠানো project_id দিয়ে এটা এড়ানো যায় না। শুধু Users module + edit_add layer থাকা Admin বদলাতে পারেন; Admin-এর account শুধু Superadmin।</td>
 <td><code>AttendanceProjects.ts</code> <code>checkInProjectsFor</code>, <code>AttendanceRoutes.ts</code> <code>getAllowedProjectIds</code></td>

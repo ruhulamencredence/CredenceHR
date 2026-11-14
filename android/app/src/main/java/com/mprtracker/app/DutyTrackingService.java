@@ -68,6 +68,13 @@ import org.json.JSONObject;
 public class DutyTrackingService extends Service {
 
     static final String KEY_DUTY = "duty_on";
+    // Tracking Schedule (TrackingSchedule.ts): outside the person's tracking
+    // time the server answers "off_schedule" with the next start. Tracking
+    // then stops (no notification) until that time, kept here.
+    static final String KEY_PAUSED_UNTIL = "duty_paused_until";
+    static final String ACTION_RESUME = "com.mprtracker.app.DUTY_RESUME";
+    // Next start unknown (no shift in the coming week): look again after this.
+    private static final long RECHECK_MS = 6 * 60 * 60 * 1000L;
     // The alarm / a server wake-up push: report now (works in Doze).
     static final String ACTION_TICK = "com.mprtracker.app.DUTY_TICK";
     private static final long ALARM_MS = 10 * 60 * 1000;
@@ -104,6 +111,11 @@ public class DutyTrackingService extends Service {
         SharedPreferences p = ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
         if (p.getString(LiveTrackingService.KEY_TOKEN, null) == null) return;
         p.edit().putBoolean(KEY_DUTY, true).apply();
+        // Outside the tracking time: nothing runs, no notification.
+        if (paused(ctx)) {
+            scheduleResume(ctx, p.getLong(KEY_PAUSED_UNTIL, 0));
+            return;
+        }
         Intent i = new Intent(ctx, DutyTrackingService.class);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i);
@@ -115,7 +127,8 @@ public class DutyTrackingService extends Service {
 
     public static void stop(Context ctx) {
         cancelAlarm(ctx);
-        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).apply();
+        cancelResume(ctx);
+        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).remove(KEY_PAUSED_UNTIL).apply();
         ctx.stopService(new Intent(ctx, DutyTrackingService.class));
     }
 
@@ -124,9 +137,85 @@ public class DutyTrackingService extends Service {
         return p.getBoolean(KEY_DUTY, false) && p.getString(LiveTrackingService.KEY_TOKEN, null) != null;
     }
 
+    static boolean paused(Context ctx) {
+        long until = ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).getLong(KEY_PAUSED_UNTIL, 0);
+        return until > System.currentTimeMillis();
+    }
+
+    /** Outside the tracking time: stop (the notification goes) until resumeAt (ms; 0 = not known). */
+    static void pause(Context ctx, long resumeAt) {
+        long at = resumeAt > System.currentTimeMillis() ? resumeAt : System.currentTimeMillis() + RECHECK_MS;
+        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, true).putLong(KEY_PAUSED_UNTIL, at).apply();
+        cancelAlarm(ctx);
+        ctx.stopService(new Intent(ctx, DutyTrackingService.class));
+        scheduleResume(ctx, at);
+    }
+
+    /** The tracking time has come (resume alarm, or the server's wake-up push). */
+    static void resume(Context ctx) {
+        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().remove(KEY_PAUSED_UNTIL).apply();
+        cancelResume(ctx);
+        wake(ctx);
+    }
+
+    // One wake-up at the next start. Inexact (Android may move it a few
+    // minutes); the server's push at the start brings tracking back too.
+    static void scheduleResume(Context ctx, long atWallMs) {
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atWallMs, resumeIntent(ctx));
+            else am.set(AlarmManager.RTC_WAKEUP, atWallMs, resumeIntent(ctx));
+        } catch (Exception ignore) {
+            // best effort
+        }
+    }
+
+    static void cancelResume(Context ctx) {
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(resumeIntent(ctx));
+    }
+
+    private static PendingIntent resumeIntent(Context ctx) {
+        Intent i = new Intent(ctx, DutyAlarmReceiver.class).setAction(ACTION_RESUME);
+        return PendingIntent.getBroadcast(ctx, 7345, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    private static long parseIso(String v) {
+        if (v == null || v.isEmpty() || "null".equals(v)) return 0;
+        try {
+            SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+            f.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date d = f.parse(v);
+            return d != null ? d.getTime() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    // A ping / state answer said "off schedule": stop until the next start.
+    private void offSchedule(JSONObject res) {
+        if (res == null || !res.optBoolean("off_schedule", false)) return;
+        final long at = parseIso(res.isNull("next_start") ? null : res.optString("next_start", null));
+        handler.post(() -> pause(getApplicationContext(), at));
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (!wanted(this)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        // Brought back by Android while outside the tracking time: end at once
+        // (startForeground first — a foreground start must call it).
+        if (paused(this)) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+                else startForeground(NOTIFICATION_ID, notification());
+            } catch (Exception ignore) {
+                // not allowed — nothing shown anyway
+            }
+            stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -181,6 +270,11 @@ public class DutyTrackingService extends Service {
     /** From the alarm or a "tracking_wake" push: report now, starting the service if it was stopped. */
     static void wake(Context ctx) {
         if (!wanted(ctx)) {
+            cancelAlarm(ctx);
+            return;
+        }
+        // The regular alarm while outside the tracking time: stay stopped.
+        if (paused(ctx)) {
             cancelAlarm(ctx);
             return;
         }
@@ -338,6 +432,10 @@ public class DutyTrackingService extends Service {
             body.put("points", points);
             JSONObject res = post("/api/tracking/ping", body);
             if (res == null) return;
+            if (res.optBoolean("off_schedule", false)) {
+                offSchedule(res);
+                return;
+            }
             if (!repeat) {
                 final long sentUpTo = batch.isEmpty() ? fix.getTime() : batch.get(batch.size() - 1).getTime();
                 handler.post(() -> {
@@ -367,7 +465,7 @@ public class DutyTrackingService extends Service {
             body.put("mode", idle ? "idle" : "active");
             int battery = batteryPct();
             if (battery >= 0) body.put("battery_pct", battery);
-            post("/api/tracking/state", body);
+            offSchedule(post("/api/tracking/state", body));
         } catch (Exception ignore) {
             // next heartbeat tries again
         }
@@ -471,8 +569,9 @@ public class DutyTrackingService extends Service {
         if (client != null && callback != null) client.removeLocationUpdates(callback);
         running = false;
         alive = false;
-        // Stopped by Android (not by logout): the alarm brings it back.
-        if (wanted(this)) scheduleAlarm(this);
+        // Stopped by Android (not by logout, not the end of the tracking
+        // time): the alarm brings it back.
+        if (wanted(this) && !paused(this)) scheduleAlarm(this);
         net.shutdownNow();
         super.onDestroy();
     }

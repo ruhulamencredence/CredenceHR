@@ -222,6 +222,17 @@ erDiagram
     datetime last_ping
     timestamp sent_at
   }
+  tracking_schedule_settings {
+    int id PK
+    int buffer_minutes
+  }
+  tracking_schedules {
+    int user_id PK,FK
+    varchar mode
+    varchar days
+    time start_time
+    time end_time
+  }
   user_attendance_projects {
     int id PK
     int user_id FK
@@ -305,6 +316,7 @@ erDiagram
   users ||--o{ tracking_employee_access : "user_id"
   notices ||--o{ tracking_notice_recipients : "notice_id"
   users ||--o{ tracking_notice_recipients : "user_id"
+  users ||--o{ tracking_schedules : "user_id"
   projects ||--o{ user_attendance_projects : "project_id"
   users ||--o{ user_attendance_projects : "user_id"
   zk_devices ||--o{ zk_attendance_logs : "device_id"
