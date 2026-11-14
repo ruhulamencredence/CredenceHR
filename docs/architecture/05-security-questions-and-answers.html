@@ -472,6 +472,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>ফিডব্যাক Done / Pending কে করতে পারে?</td>
+<td>শুধু User Feedback module-এর <code>feedback_resolve</code> layer যাঁর আছে (ডিফল্টে কারও নেই; Superadmin সবসময়)। শুধু module দেখার অনুমতি থাকলে তালিকা দেখা যায়, কিন্তু Mark done / Reopen বোতাম লুকানো আর API 403 (টেস্ট করা)। সাধারণ কর্মী 403। কে Done করল, কখন, নোট — রেকর্ডে থাকে। টেস্ট: <code>docs/test-logs/2026-11-14/scripts/feedback-status-api.mjs</code>, <code>feedback-ui.cjs</code>।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>নতুন joiner-এর login (Login ID + অস্থায়ী password) কি mail করা যায়, আর কে পারে?</td>
 <td>হ্যাঁ — "Joiner's login" popup-এ Send email। শুধু যাঁর HR Operations-এর <code>onboarding_create</code> layer আছে (Superadmin সবসময়); অন্যরা 403 (টেস্ট করা)। Password জমা থাকে না, তাই popup ফেরত পাঠানো password server বর্তমান hash-এর সাথে মিলিয়ে দেখে — ভুল বা "New password"-এর আগের password পাঠানো যায় না (409)। লগে প্রাপক, সময়, প্রেরক থাকে; password নয়। Joiner-এর login তবু শুধু "My Onboarding" পেজে চলে, মেয়াদ আছে, আর প্রথম login-এ নতুন password দিতে হয়। টেস্ট: <code>docs/test-logs/2026-11-14/scripts/onboarding-email-api.mjs</code>, <code>onboarding-email-ui.cjs</code>।</td>
 <td>✅</td>
