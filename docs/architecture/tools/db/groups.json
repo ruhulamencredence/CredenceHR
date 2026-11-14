@@ -68,10 +68,12 @@
  ],
  "D. Attendance, Roster, Breaks & Tracking": [
   "attendance",
+  "attendance_admin_edits",
   "attendance_corrections",
   "attendance_mock_attempts",
   "attendance_report_department_access",
   "break_settings",
+  "data_import_runs",
   "duty_roster",
   "duty_roster_department_access",
   "duty_shifts",
@@ -178,6 +180,7 @@
   "mobile_limit_policies",
   "mobile_limit_requests",
   "mobile_sim_events",
+  "mobile_sim_holders",
   "mobile_sims"
  ],
  "B. Company, Organisation & Employees": [

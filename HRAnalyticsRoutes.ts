@@ -69,7 +69,12 @@ export function registerHRAnalyticsRoutes(app: Express, deps: HRAnalyticsRouteDe
       // Headcount: Admins / Users, and a Superadmin who is also an employee
       // (has an Employee record) — the company's own Superadmin is staff too.
       const empUserIds = new Set<number>(((await queryDB("SELECT user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || []).map((e: any) => Number(e.user_id)));
-      const users = allUsers.filter((u: any) => u.role === "admin" || u.role === "user" || (u.role === "superadmin" && empUserIds.has(Number(u.id))));
+      // Only people still working here: a login whose Employee record is
+      // inactive (left) is not counted.
+      const leftUserIds = new Set<number>(((employees as any[]) || []).filter((e: any) => e.user_id != null && Number(e.is_active ?? 1) === 0).map((e: any) => Number(e.user_id)));
+      const users = allUsers
+        .filter((u: any) => u.role === "admin" || u.role === "user" || (u.role === "superadmin" && empUserIds.has(Number(u.id))))
+        .filter((u: any) => !leftUserIds.has(Number(u.id)));
 
       const headcountTotal = users.length;
 

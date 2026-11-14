@@ -1300,7 +1300,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     const user_id = query.user_id ? Number(query.user_id) : null;
     const department = query.department ? String(query.department).trim() : null;
     // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
-    const empStatus = String(query.status || "all");
+    // Active employees unless "inactive" / "all" is asked for — someone who
+    // has left no longer shows up in reports by default.
+    const empStatus = String(query.status || "active");
 
     // Department-wise scope (see the deps comment above). null = unrestricted.
     // A department query param outside the caller's scope is rejected up
@@ -1672,7 +1674,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
       // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
-      const empStatus = String(req.query.status || "all");
+      const empStatus = String(req.query.status || "active");
 
       // Department-wise scope (see the deps comment above / the monthly
       // report route's own copy of this check). null = unrestricted.

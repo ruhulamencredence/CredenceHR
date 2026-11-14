@@ -130,6 +130,15 @@ erDiagram
     decimal old_limit
     decimal new_limit
   }
+  mobile_sim_holders {
+    int id PK
+    int sim_id FK
+    int employee_id FK
+    varchar holder_name
+    varchar duty_location
+    date from_date
+    date to_date
+  }
   mobile_sims {
     int id PK
     int employee_id FK
@@ -171,4 +180,6 @@ erDiagram
   mobile_sims ||--o{ mobile_limit_requests : "sim_id"
   users ||--o{ mobile_limit_requests : "user_id"
   mobile_sims ||--o{ mobile_sim_events : "sim_id"
+  mobile_sims ||--o{ mobile_sim_holders : "sim_id"
+  all_employees ||..o{ mobile_sim_holders : "employee_id"
   all_employees ||..o{ mobile_sims : "employee_id"

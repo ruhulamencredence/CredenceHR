@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৫৯টি টেবিল, ২৮০৪টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬২টি টেবিল, ২৮৩৯টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -999,6 +999,23 @@ Unique: `uq_onb_doc`(application_id,doc_type)
 
 Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 
+### `attendance_admin_edits`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `attendance_date` | date | না |  | |
+| `attendance_id` | int(11) | হ্যাঁ |  | logical → `attendance` |
+| `project_id` | int(11) | হ্যাঁ |  | logical → `projects` |
+| `old_check_in_at` | datetime | হ্যাঁ |  | |
+| `old_check_out_at` | datetime | হ্যাঁ |  | |
+| `new_check_in_at` | datetime | হ্যাঁ |  | |
+| `new_check_out_at` | datetime | হ্যাঁ |  | |
+| `remarks` | varchar(500) | না |  | |
+| `edited_by` | int(11) | হ্যাঁ |  | |
+| `edited_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `attendance_corrections`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1069,6 +1086,25 @@ Unique: `unique_user_department`(user_id,department)
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
 Unique: `uniq_break_settings_company`(company_id)
+
+### `data_import_runs`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
+| `kind` | varchar(40) | না |  | |
+| `kind_title` | varchar(100) | হ্যাঁ |  | |
+| `file_name` | varchar(255) | হ্যাঁ |  | |
+| `reason` | varchar(1000) | হ্যাঁ |  | |
+| `total` | int(11) | না | default 0 | |
+| `created` | int(11) | না | default 0 | |
+| `updated` | int(11) | না | default 0 | |
+| `skipped` | int(11) | না | default 0 | |
+| `errors` | int(11) | না | default 0 | |
+| `results` | mediumtext | হ্যাঁ |  | |
+| `imported_by` | int(11) | হ্যাঁ |  | |
+| `imported_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `duty_roster`
 
@@ -2669,6 +2705,20 @@ Unique: `uniq_mobile_policy_type`(company_id,employee_type)
 | `new_limit` | decimal(10,2) | হ্যাঁ |  | |
 | `change_kind` | varchar(20) | হ্যাঁ |  | |
 | `for_month` | char(7) | হ্যাঁ |  | |
+
+### `mobile_sim_holders`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `sim_id` | int(11) | না |  | FK → `mobile_sims.id` |
+| `employee_id` | int(11) | হ্যাঁ |  | logical → `all_employees` |
+| `holder_name` | varchar(150) | হ্যাঁ |  | |
+| `duty_location` | varchar(150) | হ্যাঁ |  | |
+| `from_date` | date | না |  | |
+| `to_date` | date | হ্যাঁ |  | |
+| `source` | varchar(10) | না | default 'live' | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `mobile_sims`
 

@@ -97,7 +97,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -170,7 +170,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // Mobile Bill -> Reports -> Limit changes (a second report, plain reading).
   mobile_bill: [
     { key: 'read', label: 'SIM & Mobile Bill' },
-    { key: 'limit_history', label: 'Limit Change History' }
+    { key: 'limit_history', label: 'Limit Change History' },
+    // Every SIM: where it is now, who had it before and for how long, limits, monthly bills.
+    { key: 'sim_inventory', label: 'SIM Inventory (history)' }
   ],
   // Office Attendance -> Unlinked PINs (edits Employees: explicit only).
   // Notices: who has read it (report, send again) and email — only when ticked.
@@ -208,7 +210,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     // own layer on top of "Quick reports" (both needed). Reading only, so on
     // by default; accounts with saved layers that have Quick reports got it
     // once (startup marker hr_quick_ot_grant).
-    { key: 'quick_ot', label: 'Quick report: Overtime (OT) — who, how many hours, which days' }
+    { key: 'quick_ot', label: 'Quick report: Overtime (OT) — who, how many hours, which days' },
+    { key: 'hr_headcount', label: 'Office / Project & Branch headcount' },
+    { key: 'hr_emp_export', label: 'Export employees (Excel)' }
   ],
   // Exit / Offboarding -> the exiting Employee's dues from other modules
   // (assets, SIM, loans / advances, claims) and adding them to the
@@ -232,7 +236,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'read', label: 'Attendance Reports' },
     { key: 'late_list', label: 'Late list (who came late)' },
     { key: 'dept_summary', label: 'Department Summary (present / absent / leave / delay by department)' },
-    { key: 'custom_report', label: 'Custom Report (Attendance Report Builder)' }
+    { key: 'custom_report', label: 'Custom Report (Attendance Report Builder)' },
+    // Give / correct someone's In / Out from the Monthly report (reason required).
+    { key: 'attendance_edit', label: 'Edit attendance (give In / Out, with remarks)' }
   ],
   // Mail Administration -> open someone's mailbox (read only) and see a
   // mailbox's saved password. Both explicit only, both logged.
@@ -274,7 +280,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // records — EmployeeRecordsGuard.ts) is its own explicit tick.
   employees: [
     { key: 'read', label: 'Employees (view, add, edit)' },
-    { key: 'employee_delete', label: 'Delete employee records' }
+    { key: 'employee_delete', label: 'Delete employee records' },
+    // How many work at each Head Office / Project and Branch, with the list.
+    { key: 'emp_headcount', label: 'Office / Project & Branch headcount' },
+    // Every employee's details as an Excel file (import layout). Explicit only.
+    { key: 'emp_export', label: 'Export employees (Excel)' }
   ],
   // Document Vault -> E-Signature: asking anyone other than the document's
   // own employee (or several people in order) to sign. Explicit only.
@@ -313,7 +323,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox

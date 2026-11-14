@@ -660,8 +660,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           if (!empByUserId.has(Number(e.user_id))) empByUserId.set(Number(e.user_id), e);
         }
         const departments = Array.from(new Set<string>(departmentByUserId.values())).sort((a, b) => a.localeCompare(b));
+        // Active employees unless ?status=inactive / all — someone who has
+        // left doesn't show up by default.
+        const statusFilter = String(req.query.status || "active");
         let matched = allUsers.filter((u: any) => {
           const e = empByUserId.get(Number(u.id));
+          const inactive = !!e && Number(e.is_active ?? 1) === 0;
+          if (statusFilter === "active" ? inactive : statusFilter === "inactive" ? !inactive : false) return false;
           if (q && ![u.name, e?.employee_id, e?.designation].some((v) => String(v || "").toLowerCase().includes(q))) return false;
           if (deptFilter) {
             const d = departmentByUserId.get(Number(u.id)) || "";
@@ -777,7 +782,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           customLeavesByUser.get(uid)!.push({ key: cat.category_key, label: cat.label, balance: Number(cb.balance) });
         }
 
-        res.json(users.map((u: any) => {
+        // People who have left (Employee record inactive) only when asked
+        // for with ?status=all / inactive.
+        const allStatus = String(req.query.status || "active");
+        const leftIds = new Set<number>(employees.filter((e: any) => e.user_id != null && Number(e.is_active ?? 1) === 0).map((e: any) => Number(e.user_id)));
+        const shownUsers = users.filter((u: any) => (allStatus === "all" ? true : allStatus === "inactive" ? leftIds.has(Number(u.id)) : !leftIds.has(Number(u.id))));
+        res.json(shownUsers.map((u: any) => {
           const b = byUser.get(u.id);
           return {
             user_id: u.id,

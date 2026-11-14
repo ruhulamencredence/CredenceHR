@@ -497,7 +497,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
           fetch(apiUrl('/api/departments'), { headers: authHeaders })
         ]);
         if (!empRes.ok) throw new Error((await empRes.json()).error || 'Failed to load the Employee Directory');
-        setEmployees(await empRes.json());
+        // Only people still working here — someone who has left isn't listed.
+        setEmployees(((await empRes.json()) as any[]).filter((e) => e.is_active));
         if (deptRes.ok) setDepartments(await deptRes.json());
       } catch (err: any) {
         setError(err.message || 'Failed to load the Employee Directory');

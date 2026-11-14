@@ -18,7 +18,7 @@ import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { readWorkbook } from '../lib/readWorkbook';
-import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, History, Inbox, Users, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
@@ -49,13 +49,14 @@ import {
   tk
 } from './MobileBillParts';
 import { MobileBillReports } from './MobileBillReports';
+import { SimInventoryTab, SimsFromEmployeesSheet } from './SimInventory';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
-type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
+type Tab = 'bills' | 'sims' | 'inventory' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
 
 export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
@@ -69,10 +70,18 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
   useEffect(() => {
     refreshPending();
   }, [refreshPending]);
+  // SIM Inventory tab: the Mobile Bill module's "SIM Inventory" layer.
+  const [canInventory, setCanInventory] = useState(false);
+  useEffect(() => {
+    mbApi<{ sim_inventory?: boolean }>(token, '/api/mobile-bill/access')
+      .then((a) => setCanInventory(!!a.sim_inventory))
+      .catch(() => setCanInventory(false));
+  }, [token]);
 
   const tabs: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[] = [
     { key: 'bills', label: 'Monthly Bills', icon: Receipt },
     { key: 'sims', label: 'SIMs', icon: Smartphone },
+    ...(canInventory ? [{ key: 'inventory' as Tab, label: 'SIM Inventory', icon: History }] : []),
     { key: 'limits', label: 'Limits', icon: SlidersHorizontal },
     { key: 'requests', label: 'Limit Requests', icon: Inbox, count: pending },
     { key: 'reports', label: 'Reports', icon: BarChart3 }
@@ -98,6 +107,7 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {tab === 'bills' && <BillsTab token={token} />}
       {tab === 'sims' && <SimsTab token={token} />}
+      {tab === 'inventory' && canInventory && <SimInventoryTab token={token} />}
       {tab === 'limits' && <LimitsTab token={token} />}
       {tab === 'requests' && <RequestsTab token={token} onChange={refreshPending} />}
       {tab === 'reports' && <MobileBillReports token={token} />}
@@ -675,7 +685,10 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
   const [status, setStatus] = useState<'active' | 'inactive' | 'unassigned' | ''>('active');
   const [editing, setEditing] = useState<MbSim | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
+  // "From Employees": office SIMs from Employees -> Contact No.
+  const [fromEmployees, setFromEmployees] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
 
   const load = useCallback(() => {
     mbApi<MbSim[]>(token, '/api/mobile-bill/sims')
@@ -726,6 +739,9 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
           <option value="inactive">Turned off</option>
           <option value="">All</option>
         </select>
+        <button type="button" className={btnLight} onClick={() => setFromEmployees(true)} title="Office SIMs from each employee's Contact No. — preview first">
+          <Users className="w-3.5 h-3.5" /> From Employees
+        </button>
         <button type="button" className={btnLight} onClick={() => setImporting(true)}>
           <Upload className="w-3.5 h-3.5" /> Import list
         </button>
@@ -734,6 +750,18 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
         </button>
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
+      {note && <p className="text-sm text-emerald-700">{note}</p>}
+      {fromEmployees && (
+        <SimsFromEmployeesSheet
+          token={token}
+          onClose={() => setFromEmployees(false)}
+          onDone={(n) => {
+            setFromEmployees(false);
+            setNote(`${n} SIM${n === 1 ? '' : 's'} added from Employees.`);
+            load();
+          }}
+        />
+      )}
       {!sims ? (
         <LoadingBlock />
       ) : (
