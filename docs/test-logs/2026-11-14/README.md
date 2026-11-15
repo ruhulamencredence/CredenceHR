@@ -269,6 +269,17 @@ counts. The live score will be known after deploying.)
   open; no page errors.
 - Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
 
+## SIM & Mobile Bill: spare SIMs (given to nobody, kept in stock)
+
+Asked: enter SIMs that HR holds without giving them to anyone, and give them to a new employee later. The form
+already had "— Nobody (spare SIM) —", but with the default "Employee type's limit" the server refused when no
+default limit was set under Limits. Now a SIM given to nobody gets limit 0 until it is given (then the employee's
+type limit applies); the form says the SIM stays in stock and is given later from the same form.
+
+- `scripts/spare-sims.cjs` (no limits set; one test employee added to the DB): **8/8** — two spare SIMs via the API
+  and one via the form are saved with nobody; SIM Inventory lists them "In stock"; giving one to the employee later
+  works, Inventory shows that holder and the SIM's story lists them. No page errors.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

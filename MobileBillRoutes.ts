@@ -593,8 +593,11 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
     let limit = Number(b.limit_amount);
     if (limitSource === "type") {
       const lim = typeLimit(await policies(), emp?.employee_type || null);
-      if (lim == null) return { error: `No limit is set for ${emp?.employee_type ? `"${emp.employee_type}"` : "this employee's type"} and no default limit either — set one under Limits, or give a custom limit.` };
-      limit = lim;
+      // A spare SIM (given to nobody, kept in stock): no limit is needed yet —
+      // 0 for now, and it follows the employee's type once it is given.
+      if (lim == null && !emp) limit = 0;
+      else if (lim == null) return { error: `No limit is set for ${emp?.employee_type ? `"${emp.employee_type}"` : "this employee's type"} and no default limit either — set one under Limits, or give a custom limit.` };
+      else limit = lim;
     } else if (!Number.isFinite(limit) || limit < 0) {
       return { error: "Enter the limit in taka." };
     }
