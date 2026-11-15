@@ -207,6 +207,19 @@ that scrolls sideways.
   swiping left closes it; a swipe on the holiday calendar doesn't open it; on Employee Directory a mid-screen swipe
   doesn't open it and the edge still does.
 
+## Approvals: Reject on the hand-over Layers (Asset Fulfiller, Vehicle Maintainer)
+
+Every Approval Template Layer had Approve / Reject except these two last Layers, which only had Fulfill & Hand
+Over / Assign & Confirm. Now Self Service -> Approve Application shows a reason box and **Reject** on those cards:
+the reason is required (the employee sees it), then a red `confirmDialog`. Same `POST /api/my-approvals/:id/act`
+as every other Reject; the server already allowed it for the Layer's own approver. Not added to the Dashboard's
+Pending Approvals card (asked to leave that card as it was).
+
+- `scripts/handover-reject.cjs` (Templates with only that Layer, approver = Superadmin): **13/13** — the requests
+  sit on the Fulfiller / Maintainer Layer; Reject is on both cards; Reject without a reason is refused; with a
+  reason + confirm -> "Rejected."; requisition and ride status become rejected; nothing left waiting; the
+  Dashboard's Pending Approvals card has no Reject box.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

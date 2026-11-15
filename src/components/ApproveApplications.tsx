@@ -313,6 +313,15 @@ useLiveRefresh(() => load(true));
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
+    // The hand-over Layers (Asset Fulfiller / Vehicle Maintainer): a Reject
+    // needs the reason too (e.g. "not in stock"), and is asked once more.
+    if (action === 'rejected' && (item.asset_fulfiller_bypass || item.vehicle_maintainer_bypass)) {
+      if (!(remarksDraft[key] || '').trim()) {
+        setMessage({ type: 'error', text: 'Write why you are rejecting it — the employee sees it.' });
+        return;
+      }
+      if (!(await confirmDialog(`Reject this ${item.asset_fulfiller_bypass ? 'asset requisition' : 'ride request'}? The employee is told why.`, { tone: 'danger' }))) return;
+    }
     setActingKey(key);
     setMessage(null);
     try {
@@ -362,6 +371,33 @@ useLiveRefresh(() => load(true));
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
       return data;
     }
+  };
+
+  // The hand-over Layers (Asset Fulfiller / Vehicle Maintainer) have their own
+  // main button (Fulfill & Hand Over / Assign & Confirm); this row lets the
+  // same approver turn the request down instead, with the reason.
+  const handOverReject = (item: MyApprovalItem) => {
+    const key = keyFor(item);
+    return (
+      <div className="self-stretch flex flex-col sm:flex-row sm:items-center gap-2 order-last pt-1">
+        <input
+          type="text"
+          aria-label="Reason for rejecting"
+          placeholder={item.asset_fulfiller_bypass ? 'Reason to reject (e.g. not in stock) — the employee sees it' : 'Reason to reject (e.g. no vehicle free) — the employee sees it'}
+          value={remarksDraft[key] || ''}
+          onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+          className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+        />
+        <button
+          type="button"
+          disabled={actingKey === key}
+          onClick={() => handleAct(item, 'rejected')}
+          className="flex items-center justify-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
+        >
+          <XCircle className="w-3.5 h-3.5" /> Reject
+        </button>
+      </div>
+    );
   };
 
   // ---- Select & approve several at once ----------------------------------
@@ -850,7 +886,8 @@ useLiveRefresh(() => load(true));
                     )}
 
                     {item.asset_fulfiller_bypass ? (
-                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-3 flex flex-col items-start gap-2" onClick={(e) => e.stopPropagation()}>
+                        {handOverReject(item)}
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
                           <Package className="w-3 h-3 shrink-0 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
                         </p>
@@ -863,7 +900,8 @@ useLiveRefresh(() => load(true));
                         </button>
                       </div>
                     ) : item.vehicle_maintainer_bypass ? (
-                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-3 flex flex-col items-start gap-2" onClick={(e) => e.stopPropagation()}>
+                        {handOverReject(item)}
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
                           <Car className="w-3 h-3 shrink-0 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
                         </p>
