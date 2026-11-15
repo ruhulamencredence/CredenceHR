@@ -357,6 +357,18 @@ A Superadmin's rule is seen and changed by a Superadmin only.
   Always and the ping is stored. A test account given admin + Tracking module + the "Tracking Schedule" layer for the
   check (then put back): the Superadmin is not in its list and its change is skipped.
 
+## APK: tracking notification goes at the end of the scheduled time, app closed too
+
+Before, with the app closed, the service only stopped at its next ping after the end (3–10 min). Now the service
+keeps the server's `schedule_until` from each ping / state answer and stops at that moment: a timer in the running
+service, plus an Android alarm (ACTION_WINDOW_END, inexact without the exact-alarm permission the Play Store
+restricts — it fires at the latest when the phone wakes). Stopping needs no network (the notification goes at
+once); then `GET /api/tracking/schedule/me` gives the next start for the resume alarm (still on after a schedule
+change → resumes; offline → looks again in an hour; the server's start push also brings it back).
+
+- Server side unchanged (`schedule_until` was already in the answers). Java compiled by the **Android build**
+  workflow on push (no Android SDK in this container). Not run on a real phone here — needs the new APK.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
