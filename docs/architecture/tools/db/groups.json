@@ -132,6 +132,7 @@
   "user_company_access",
   "user_device_requests",
   "user_devices",
+  "user_merge_log",
   "user_profile_details",
   "user_project_permissions",
   "user_sessions",
