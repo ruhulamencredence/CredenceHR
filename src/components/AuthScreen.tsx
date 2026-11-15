@@ -1,9 +1,13 @@
 import { signInDeviceFields } from '../lib/deviceKind';
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import googlePlayIcon from '../assets/google-play-icon.png';
+// The illustration's first frame as a small picture (34 KB): shown at once;
+// the animation (its player + 865 KB of data) starts only after the visitor
+// touches or types on the page — so the sign-in page opens fast.
+import heroStill from '../assets/office-illustration-still.webp';
 import { AddToHomeScreenButton, isIOSDevice, isStandalone } from './AddToHomeScreen';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
@@ -64,6 +68,27 @@ interface AuthScreenProps {
 // small Lottie hero animation as the one signature color accent, a large
 // centered greeting, and a single pill-shaped input area.
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
+  // The illustration: the still picture first; the animation after the first
+  // touch / key / focus on the page (never with "reduce motion"). The app
+  // (APK) has it on the device already, so it starts at once there.
+  const [heroAnimate, setHeroAnimate] = useState(false);
+  const [heroAnimReady, setHeroAnimReady] = useState(false);
+  const onHeroReady = useCallback(() => setHeroAnimReady(true), []);
+  useEffect(() => {
+    try {
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    } catch {
+      // no matchMedia
+    }
+    if (Capacitor.isNativePlatform()) {
+      setHeroAnimate(true);
+      return;
+    }
+    const start = () => setHeroAnimate(true);
+    const evs = ['pointerdown', 'pointermove', 'keydown', 'focusin', 'touchstart', 'scroll'] as const;
+    evs.forEach((e) => window.addEventListener(e, start, { once: true, passive: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, start));
+  }, []);
   // Accepts either an Email (Admin-created accounts) or a Project Name (bulk-created
   // accounts log in with Project Name + Password, spaces are ignored) — sent to the
   // server as a single "identifier" field.
@@ -426,9 +451,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         >
           <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 lg:h-14 w-auto" />
           <div className="hero-art relative isolate w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 pointer-events-none mt-2">
-            <Suspense fallback={<div className="w-full h-full" />}>
-              <AuthHeroLottie className="w-full h-full" />
-            </Suspense>
+            <img
+              src={heroStill}
+              alt=""
+              width={320}
+              height={320}
+              fetchPriority="high"
+              decoding="async"
+              className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${heroAnimReady ? 'opacity-0' : 'opacity-100'}`}
+            />
+            {heroAnimate && (
+              <Suspense fallback={null}>
+                <AuthHeroLottie className="absolute inset-0 w-full h-full" onReady={onHeroReady} />
+              </Suspense>
+            )}
           </div>
         </div>
 

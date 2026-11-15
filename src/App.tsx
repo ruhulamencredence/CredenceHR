@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { RefreshCw, ArrowLeft, X, Car } from 'lucide-react';
 import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest, chatAllowed } from './types';
@@ -42,6 +42,12 @@ const UserPanel = lazy(preloadUserPanel);
 // goes from that straight to the Dashboard (with its saved data), not
 // through the skeleton placeholder for a split second.
 export function dashboardCodeReady(maxMs: number): Promise<void> {
+  // Signed in after this file was loaded (main.tsx's web sign-in): start now.
+  try {
+    if (!userPanelLoad && localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
+  } catch {
+    // storage unavailable
+  }
   if (!userPanelLoad) return Promise.resolve();
   return Promise.race([userPanelLoad.then(() => undefined), new Promise<void>((r) => setTimeout(r, maxMs))]).catch(() => undefined);
 }
@@ -146,7 +152,7 @@ import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/Onboardi
 import { isStandalone } from './components/AddToHomeScreen';
 import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
-export default function App() {
+export default function App({ freshLogin = false }: { freshLogin?: boolean } = {}) {
   // Fixed for this mount: switching component type later would remount the Dashboard.
   const [DashboardPanel] = useState(() => LoadedUserPanel || UserPanel);
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -566,6 +572,18 @@ export default function App() {
       body: JSON.stringify({ id: t.id })
     }).catch(() => undefined);
   };
+
+  // Signed in on main.tsx's light sign-in screen: land on the Dashboard, the
+  // same as handleLoginSuccess below (before the first paint).
+  useLayoutEffect(() => {
+    if (!freshLogin) return;
+    setViewMode('user');
+    setSelfServiceView(null);
+    setShowProfilePage(false);
+    setShowChat(false);
+    setShowAlertsPage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     // Nothing saved from an earlier sign-in on this device is shown.

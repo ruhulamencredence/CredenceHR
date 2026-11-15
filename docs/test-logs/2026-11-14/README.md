@@ -234,6 +234,41 @@ the same account rights apply. The select-all line reads "Select all you can app
   Approve selected still works ("1 approved."). The Pending Attendance Approval popup uses the same code with the
   chain route; not exercised here (needs an off-site check-in waiting on a chain).
 
+## Sign-in page speed (PageSpeed Insights)
+
+PageSpeed on the live site (it measures the sign-in page): mobile 52–58, desktop 69–80 — FCP 3.3–5.6 s, Speed
+Index 9.7–10.7 s, TBT ~350–490 ms. Causes found with Lighthouse 12.6 on the live site:
+1. the whole app (App.tsx + react-dom, ~858 KB raw) ran on the sign-in page;
+2. the illustration's Lottie player (~761 KB raw) + its data (865 KB raw) loaded and **animated** straight away
+   (an animation keeps the page "changing", which is what blew up Speed Index);
+3. Inter came through an `@import` inside the CSS (render-blocking chain); 4. a 512 px / 140 KB favicon.
+
+Changes: `main.tsx` loads App.tsx lazily; a signed-out website visitor gets only `WebSignIn` (AuthScreen), the app
+code is fetched on the first touch / key and on sign-in (then `<App freshLogin>` lands on the Dashboard like
+`handleLoginSuccess`); `dashboardCodeReady` starts the Dashboard preload when a session now exists. AuthScreen shows
+the animation's first frame as a 34 KB WebP and starts the Lottie only after the first interaction. Inter via
+`<link media="print" onload>` + preconnect in index.html; 64 px favicon. `/privacy`, `/verify`, `/chat` lazy too.
+
+Lighthouse 12.6, same machine, production build served by `dist/server.cjs` (brotli), two runs each:
+
+| | mobile score | FCP | LCP | TBT | Speed Index | bytes |
+|---|---|---|---|---|---|---|
+| before | 75 / 78 | 2.9 s | 3.3–3.4 s | 400–490 ms | 2.9 s | 755 KiB |
+| after | 97 / 97 | 1.7 s | 2.4–2.5 s | 0 ms | 1.7 s | 317 KiB |
+| | **desktop** | | | | | |
+| before | 98 / 99 | 0.7 s | 0.8 s | 70–110 ms | 0.8–1.0 s | 755 KiB |
+| after | 100 / 100 | 0.4 s | 0.5 s | 0 ms | 0.4 s | 317 KiB |
+
+(Local numbers are better than the live site's for both — no internet latency, no other load — the gap is what
+counts. The live score will be known after deploying.)
+
+- `scripts/fast-signin.cjs` against the production build, computer + Pixel 7: **22/22** — sign-in screen with the
+  still picture; only the entry script before any touch (no Lottie / animation data); after the first touch the app
+  code and the animation load and it plays; signing in opens the app on the Dashboard even with a remembered Self
+  Service page; reload stays signed in; without a session the sign-in screen returns; `/privacy` and `/verify`
+  open; no page errors.
+- Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

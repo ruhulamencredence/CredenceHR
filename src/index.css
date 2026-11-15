@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Inter is loaded from index.html (non-blocking), not @import here. */
 @import "tailwindcss";
 
 /* Used by App.tsx's PanelLoadingFallback (shown briefly after login while the
