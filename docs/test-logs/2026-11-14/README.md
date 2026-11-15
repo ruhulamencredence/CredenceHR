@@ -396,8 +396,8 @@ The template editor (and Manage Chain on the Queue tab) was a `fixed` popup insi
 appearances the card's backdrop-filter traps fixed children, so the popup was cut to the card's size. Both now
 render at page level (`createPortal` to `document.body`) in the house liquid-glass style.
 
-- `scripts/approval-template-popup.cjs` (Light, Light Glass, Dark Glass): **9/9** — the editor's backdrop is a child
-  of `<body>`, covers the whole window, and the editor is fully visible.
+- `scripts/approval-template-popup.cjs` (Light, Light Glass, Dark Glass): **15/15** — the editor's backdrop is a child
+  of `<body>`, covers the whole window, and the editor is fully visible; Manage Chain likewise (15/15 with it).
 
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /

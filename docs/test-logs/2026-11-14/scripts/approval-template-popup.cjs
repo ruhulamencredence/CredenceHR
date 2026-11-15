@@ -18,6 +18,14 @@ const B='http://localhost:3200', D=process.argv[2];
   ok(r&&r.bd[0]>=1590&&r.bd[1]>=940,`${mode}: backdrop covers the whole window (${r&&r.bd.join('×')})`);
   ok(r&&r.card[0]>=0&&r.card[1]>400,`${mode}: the editor is fully visible (top ${r&&Math.round(r.card[0])}, height ${r&&Math.round(r.card[1])})`);
   await p.screenshot({path:`${D}/tpl-${mode}.png`});
+  // Queue tab -> Manage Chain
+  await p.keyboard.press('Escape'); await p.getByRole('button',{name:/Cancel/}).first().click().catch(()=>{}); await p.waitForTimeout(400);
+  await p.getByRole('button',{name:/Queue \(Global Chain\)/}).first().click(); await p.waitForTimeout(1500);
+  await p.getByRole('button',{name:/Manage Chain/}).first().click(); await p.waitForTimeout(1000);
+  const m=await p.evaluate(()=>{const h=[...document.querySelectorAll('h3')].find(x=>/Manage Approval Chain/.test(x.textContent));const card=h?.closest('.liquid-glass');const bd=card?.closest('.liquid-glass-backdrop');if(!card||!bd)return null;const c=card.getBoundingClientRect(),k=bd.getBoundingClientRect();return {parentIsBody:bd.parentElement===document.body,bd:[k.width,k.height],card:[c.top,c.bottom,c.height],bg:getComputedStyle(card).backgroundColor};});
+  ok(m&&m.parentIsBody&&m.bd[0]>=1590&&m.bd[1]>=940,`${mode}: Manage Chain at page level, covering the window`);
+  ok(m&&m.card[0]>=0&&m.card[1]<=950,`${mode}: Manage Chain fully on screen (top ${m&&Math.round(m.card[0])}, bottom ${m&&Math.round(m.card[1])})`);
+  await p.screenshot({path:`${D}/chain-${mode}.png`});
   console.log('   errors:',errs.slice(0,2)); await ctx.close();
  }
  console.log(`\n${pass} passed, ${fail} failed`); await b.close();
