@@ -220,6 +220,20 @@ Pending Approvals card (asked to leave that card as it was).
   reason + confirm -> "Rejected."; requisition and ride status become rejected; nothing left waiting; the
   Dashboard's Pending Approvals card has no Reject box.
 
+## Admin Dashboard: "Reject selected" in the attendance popups
+
+The Admin Dashboard's Pending Attendance Approval and Attendance corrections popups only had "Approve selected".
+Now the footer also has a reason box and **Reject selected (n)**: the reason is required (each employee sees it),
+then a red `confirmDialog`; the ticked rows go one by one through the same endpoints as approving
+(`/api/my-approvals/:id/act` `rejected`, or `/api/attendance/corrections/:id/decision` `reject` with remarks), so
+the same account rights apply. The select-all line reads "Select all you can approve or reject".
+
+- `scripts/dashboard-reject-selected.cjs` (3 corrections made by the Superadmin, no Timesheet template, so the
+  direct decision route): **8/8** — popup opens; Reject selected is there; refused without a reason; two ticked +
+  reason + confirm -> "2 rejected."; they leave the list; the employee's corrections are rejected with the reason;
+  Approve selected still works ("1 approved."). The Pending Attendance Approval popup uses the same code with the
+  chain route; not exercised here (needs an off-site check-in waiting on a chain).
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
