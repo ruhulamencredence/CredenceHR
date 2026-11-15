@@ -427,6 +427,16 @@ and how many are not given, SIMs per operator, total limit, and the last bills' 
 - `scripts/sims-summary.cjs`: **4/4** — all rows (10 SIMs, 9 not given, ৳500); "Not given to anyone" → "9 SIMs of 10",
   0 people, the limit of those rows only; no page errors.
 
+## AI Assistant: SIMs by department ("MIS department-এ কয়টা SIM")
+
+The Assistant had only a bill report, so "mis department er koto gula sim deya ache" got company bill totals.
+New tool `sim_list` (Mobile Bill module, reads `/api/mobile-bill/sims` with the asker's token): count, people,
+not given, operators, total limit, last bills, and every number with its holder; Excel download. The department
+matches its name, the short form in brackets (MIS), the first letters, or one word (HR → "HR & Admin");
+spare SIMs count by their duty location. Also by operator and "not given". "amar sim" still answers the asker's own.
+
+- `scripts/assistant-sim-list.sh`: **6/6** — MIS, HR, not given, operator, own SIM, no module → no access.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

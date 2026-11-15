@@ -1617,6 +1617,78 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "sim_list",
+    description: "Office SIMs (who holds which number) — optionally for one department (name or short form like MIS, HR), one operator, or only SIMs not given to anyone. Counts, people, operators, limits, last bill, and the list of numbers with holders. Without a department it also counts SIMs by department.",
+    params: {
+      department: { type: "string", description: "Department name or short form (optional)" },
+      operator: { type: "string", description: "Grameenphone | Robi | Banglalink | Airtel | Teletalk (optional)" },
+      given: { type: "string", description: "yes = held by someone, no = not given to anyone (optional)" }
+    },
+    available: (c) => hasMod(c, "mobile_bill"),
+    run: async (c, args) => {
+      const r = await callApi(c.req, "/api/mobile-bill/sims");
+      if (!r.ok) return fail(r.status);
+      let sims: any[] = (Array.isArray(r.body) ? r.body : []).filter((s) => s.status === "active");
+      const tk = (v: number) => `৳${bn(Math.round(v).toLocaleString("en-IN"))}`;
+      const deptOf = (s: any) => s.employee?.department || (s.employee_id ? "" : s.duty_location || "");
+      // "mis" finds "Management Information Systems (MIS)": the name, the
+      // short form in brackets, or the words' first letters.
+      const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9ঀ-৿]+/g, " ").trim();
+      const want = norm(String(args?.department || ""));
+      const deptHits = (d: string) => {
+        if (!want || !d) return false;
+        const n = norm(d);
+        const short = /\(([^)]+)\)/.exec(d)?.[1];
+        const initials = norm(d.replace(/\([^)]*\)/g, "")).split(" ").filter((w) => w && !["and", "of", "the", "&"].includes(w)).map((w) => w[0]).join("");
+        return n === want || (short && norm(short) === want) || initials === want || n.split(" ").includes(want) || (want.length >= 4 && n.includes(want));
+      };
+      const notes: string[] = [];
+      if (want) {
+        sims = sims.filter((s) => deptHits(deptOf(s)));
+        notes.push(`Department: ${args.department}`);
+      }
+      const op = String(args?.operator || "").toLowerCase();
+      const opName = /^(gp|grameen)/.test(op) ? "grameenphone" : op;
+      if (opName) { sims = sims.filter((s) => String(s.operator || "").toLowerCase().startsWith(opName.slice(0, 4))); notes.push(`Operator: ${args.operator}`); }
+      const given = String(args?.given || "").toLowerCase();
+      if (given === "no") { sims = sims.filter((s) => !s.employee_id); notes.push("Not given to anyone"); }
+      else if (given === "yes") { sims = sims.filter((s) => s.employee_id); notes.push("Held by someone"); }
+      const title = want ? `${[...new Set(sims.map(deptOf).filter(Boolean))].join(", ") || args.department} — SIM` : "Office SIM";
+      const shownNotes = notes.filter((n) => !n.startsWith("Department:"));
+      if (!sims.length) {
+        return { ok: true, text: `**${title}**${shownNotes.length ? ` (${shownNotes.join(" · ")})` : ""}: কোনো চালু SIM পাওয়া যায়নি।`, data: { sims: 0 }, actions: [{ label: "SIM & Mobile Bill খুলুন", nav: "admin:mobile_bill" }] };
+      }
+      const people = new Set(sims.filter((s) => s.employee_id).map((s) => s.employee_id)).size;
+      const spare = sims.filter((s) => !s.employee_id).length;
+      const ops = new Map<string, number>();
+      for (const s of sims) ops.set(s.operator || "-", (ops.get(s.operator || "-") || 0) + 1);
+      const limit = sims.reduce((a, s) => a + (Number(s.limit_amount) || 0), 0);
+      const billed = sims.filter((s) => s.last_bill);
+      const over = billed.filter((s) => s.last_bill.limit_amount > 0 && s.last_bill.amount > s.last_bill.limit_amount);
+      let text = `**${title}**${shownNotes.length ? ` (${shownNotes.join(" · ")})` : ""}: SIM ${bn(sims.length)}টি — ${bn(people)} জনের কাছে, কাউকে দেওয়া হয়নি ${bn(spare)}টি\n` +
+        `• Operator: ${[...ops].sort((a, b) => b[1] - a[1]).map(([o, n]) => `${o} ${bn(n)}`).join(", ")}\n` +
+        `• মোট মাসিক limit: ${tk(limit)}\n` +
+        (billed.length ? `• শেষ বিল: ${bn(billed.length)}টির মোট ${tk(billed.reduce((a, s) => a + s.last_bill.amount, 0))}${over.length ? `, limit-এর বেশি ${bn(over.length)}টি` : ""}\n` : "• এখনো কোনো বিল নেই\n");
+      if (want || sims.length <= 40) {
+        text += "\n" + sims.slice(0, 40).map((s) => `• ${s.phone_number} (${s.operator}) — ${s.employee ? `${s.employee.name}${s.employee.employee_code ? ` · ${s.employee.employee_code}` : ""}${s.employee.designation ? ` · ${s.employee.designation}` : ""}` : `কাউকে দেওয়া হয়নি${s.duty_location ? ` (${s.duty_location})` : ""}`} · limit ${tk(s.limit_amount)}`).join("\n");
+        if (sims.length > 40) text += `\n…আরও ${bn(sims.length - 40)}টি — পুরো তালিকা Excel-এ।`;
+      } else {
+        const byDept = new Map<string, number>();
+        for (const s of sims) { const d = deptOf(s) || "Department নেই"; byDept.set(d, (byDept.get(d) || 0) + 1); }
+        text += "\nDepartment অনুযায়ী:\n" + [...byDept].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([d, n]) => `• ${d} — ${bn(n)}টি`).join("\n") +
+          (byDept.size > 15 ? `\n…আরও ${bn(byDept.size - 15)}টি department — পুরো তালিকা Excel-এ।` : "");
+      }
+      return {
+        ok: true, text,
+        data: { sims: sims.length, people, not_given: spare, limit, list: sims.slice(0, 60).map((s) => ({ phone: s.phone_number, operator: s.operator, holder: s.employee?.name || null, employee_id: s.employee?.employee_code || null, department: deptOf(s) || null, limit: s.limit_amount })) },
+        actions: [{ label: "SIM & Mobile Bill খুলুন", nav: "admin:mobile_bill" }],
+        report: report(`${title} list`, `SIM-List-${want || "all"}-${c.today}`, ["Mobile", "Operator", "Employee", "Employee ID", "Designation", "Department", "Work station", "Duty location", "Limit", "Last bill month", "Last bill"],
+          sims.map((s) => [s.phone_number, s.operator, s.employee?.name || "Not given", s.employee?.employee_code || "", s.employee?.designation || "", s.employee?.department || "", s.employee?.work_station || "", s.duty_location || "", s.limit_amount, s.last_bill?.month || "", s.last_bill?.amount ?? ""]),
+          [["Active SIMs", String(sims.length)], ["People", String(people)], ["Not given", String(spare)], ...notes.map((n) => n.split(": ") as [string, string]).filter((x) => x.length === 2)])
+      };
+    }
+  },
+  {
     name: "tracking_overview",
     description: "Employee Tracking: who is sending their location now (live) and who isn't, with why (tracking off, no recent ping, standing still) — only the people this account may track.",
     available: (c) => hasMod(c, "tracking"),
@@ -3205,6 +3277,13 @@ const INTENTS: Intent[] = [
   presetIntent("blood_group_directory", ["blood group list", "রক্তের গ্রুপের তালিকা", "blood group directory", "kar blood group"]),
   presetIntent("assets_with_employees", ["assets with employees", "kar kache asset", "কার কাছে asset"]),
   { tool: "mobile_bill_report", keys: ["mobile bill report", "মোবাইল বিলের রিপোর্ট", "sim bill report", "limit er beshi", "সীমার বেশি বিল", "mobile bill koto"], args: (t, c) => { const p = periodOf(t, c); return p.month ? { from: p.month, to: p.month } : {}; } },
+  { tool: "sim_list", keys: ["sim koto gula", "sim kotogula", "sim koyta", "sim koita", "সিম কয়টা", "সিম কতগুলো", "koto gula sim", "kotogula sim", "koto sim", "koyta sim", "koita sim", "কয়টা সিম", "কতগুলো সিম", "কত সিম", "sim deya ache", "sim dewa ache", "সিম দেওয়া আছে", "sim list", "সিমের তালিকা", "sim details", "sim report", "সিম রিপোর্ট", "kar kache sim", "কার কাছে সিম", "department er sim", "sim kar kache", "sim number list"],
+    args: (t) => {
+      const d = /([a-z&]{2,}|[ঀ-৿]{2,})\s+(?:department|dept|বিভাগ|বিভাগের|ডিপার্টমেন্ট)/.exec(t)?.[1];
+      const operator = /\b(gp|grameen\w*|robi|banglalink|airtel|teletalk)\b/.exec(t)?.[1] || /(গ্রামীণ|রবি|বাংলালিংক|এয়ারটেল|টেলিটক)/.exec(t)?.[1]?.replace("গ্রামীণ", "gp").replace("রবি", "robi").replace("বাংলালিংক", "banglalink").replace("এয়ারটেল", "airtel").replace("টেলিটক", "teletalk");
+      const notGiven = hasAny(t, ["not given", "deya hoy nai", "deya hoyni", "dewa hoy nai", "দেওয়া হয়নি", "stock", "স্টক", "khali sim", "খালি সিম", "spare"]);
+      return { department: d && !["sob", "সব", "kon", "কোন", "er", "এর", "ei", "এই", "all", "protiti", "প্রতিটি"].includes(d) ? d : undefined, operator, given: notGiven ? "no" : undefined };
+    } },
   { tool: "tracking_overview", keys: ["tracking e ke ache", "কে ট্র্যাকিং", "tracking status", "location pathacche", "লোকেশন পাঠাচ্ছে", "ke track e"] },
   { tool: "tracking_stay_report", keys: ["stay report", "কোথায় ছিল", "kothay chilo"], args: (t, c) => ({ name: nameBefore(t), ...periodOf(t, c) }) },
   { tool: "duty_roster_overview", keys: ["duty roster", "রোস্টার", "kar kon shift", "কার কোন শিফট", "shift ke"], args: (t, c) => periodOf(t, c) },
@@ -3326,7 +3405,7 @@ const INTENTS: Intent[] = [
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
-const OWN_TOOL: Record<string, string> = { employee_attendance: "my_attendance_summary", late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
+const OWN_TOOL: Record<string, string> = { employee_attendance: "my_attendance_summary", late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides", sim_list: "my_mobile_sim" };
 
 const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "kemon achen", "কেমন আছ", "good morning", "শুভ সকাল",
   "ki khobor", "কী খবর", "কি খবর", "ki obostha apnar", "valo achen", "ভালো আছেন", "how are you"];
@@ -3625,6 +3704,7 @@ const TRAINING: [string, string, Record<string, any>?][] = [
   ["department wise ajker hajira", "attendance_department_summary"], ["ei mase kon department e beshi absent", "attendance_department_summary"],
   ["gotomaser sathe beton er parthokko", "payroll_month_comparison"], ["এ মাসে বেতন কেন বেড়েছে", "payroll_month_comparison"], ["salary sheet dekhao", "payroll_salary_sheet"],
   ["kar kar document jama dewa baki", "employee_records_report", { preset: "pending_documents" }], ["blood group onujayi talika", "employee_records_report", { preset: "blood_group_directory" }],
+  ["mis department er koto gula sim deya ache", "sim_list"], ["kar kache kon sim ache list dao", "sim_list"],
   ["mobile bill e ke limit er beshi korse", "mobile_bill_report"], ["ekhon ke ke tracking e ache", "tracking_overview"], ["ajke ke break e", "break_report"],
   ["management dashboard er summary dao", "management_dashboard_overview"], ["kon project budget submit koreni", "pepm_report", { kind: "budget_submission" }],
   ["client visit e jacchi movement check in koro", "prepare_movement_claim"], ["movement claim check in kore dao", "prepare_movement_claim"], ["মুভমেন্ট চেক ইন করো ব্যাংকে যাচ্ছি", "prepare_movement_claim"],
