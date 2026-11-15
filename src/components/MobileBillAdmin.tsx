@@ -823,6 +823,52 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                 </tr>
               ))}
             </tbody>
+            {/* The rows shown (after search / filters), summed — stays at the bottom while scrolling. */}
+            {shown.length > 0 &&
+              (() => {
+                const given = shown.filter((x) => x.employee_id);
+                const people = new Set(given.map((x) => x.employee_id)).size;
+                const billed = shown.filter((x) => x.last_bill);
+                const over = billed.filter((x) => x.last_bill!.amount > x.last_bill!.limit_amount);
+                return (
+                  <tfoot className="sticky bottom-0 bg-slate-50 border-t-2 border-slate-200 text-slate-700 shadow-[0_-1px_0_rgba(15,23,42,0.08)]">
+                    <tr>
+                      <td className="px-3 py-2.5 font-bold whitespace-nowrap">
+                        {shown.length} SIM{shown.length === 1 ? '' : 's'}
+                        {shown.length !== (sims || []).length && <span className="font-normal text-slate-500"> of {(sims || []).length}</span>}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <b>{people}</b> {people === 1 ? 'person' : 'people'} · <span className="text-amber-700 font-semibold">{shown.length - given.length} not given</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
+                        {(() => {
+                          const ops = new Map<string, number>();
+                          for (const x of shown) ops.set(x.operator, (ops.get(x.operator) || 0) + 1);
+                          return [...ops.entries()].map(([o, n]) => `${o} ${n}`).join(' · ');
+                        })()}
+                      </td>
+                      <td />
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <div className="font-bold">{tk(shown.reduce((a, x) => a + Number(x.limit_amount || 0), 0))}</div>
+                        <div className="text-[10px] text-slate-400">total limit</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        {billed.length ? (
+                          <>
+                            <div className="font-bold">{tk(billed.reduce((a, x) => a + Number(x.last_bill!.amount || 0), 0))}</div>
+                            <div className={`text-[10px] ${over.length ? 'text-rose-600 font-semibold' : 'text-slate-400'}`}>
+                              last bills{over.length ? ` · ${over.length} over limit` : ''}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
           </table>
         </div>
       )}

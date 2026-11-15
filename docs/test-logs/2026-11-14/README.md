@@ -419,6 +419,14 @@ file's dry run through the app's own Import list read all 569 rows (number / Emp
 operator columns found; 233 Grameenphone, 336 Robi); the 102 spare / department SIMs pass, the rest only lack their
 employees in the test database (they exist on the live site).
 
+## SIMs tab: summary row under the table (follows search / filters)
+
+SIM & Mobile Bill → SIMs: a footer row sums the rows shown — "N SIMs of M" (when filtered), how many people hold them
+and how many are not given, SIMs per operator, total limit, and the last bills' total with how many were over limit.
+
+- `scripts/sims-summary.cjs`: **4/4** — all rows (10 SIMs, 9 not given, ৳500); "Not given to anyone" → "9 SIMs of 10",
+  0 people, the limit of those rows only; no page errors.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
