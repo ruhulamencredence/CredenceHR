@@ -7,7 +7,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
+import { Building2, GitMerge, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -97,6 +97,7 @@ const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport'
 const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
 const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
 const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
+const AccountMergePopup = lazyPanel(() => import('./AccountMergePopup').then((m) => ({ default: m.AccountMergePopup })));
 const PasswordRequestsPopup = lazyPanel(() => import('./PasswordRequestsPopup').then((m) => ({ default: m.PasswordRequestsPopup })));
 const ProfilePhotoRequestsPopup = lazyPanel(() => import('./ProfilePhotoRequestsPopup').then((m) => ({ default: m.ProfilePhotoRequestsPopup })));
 const JobEditDetailsPopup = lazyPanel(() => import('./JobEditDetailsPopup').then((m) => ({ default: m.JobEditDetailsPopup })));
@@ -780,6 +781,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Users -> Password requests (Forgot password, layer "password_requests");
   // a "Password reset request" alert opens it too.
   const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // Users -> Merge accounts (layer "merge_accounts"): a hand-made login + the import's login for one person.
+  const [showMergeAccounts, setShowMergeAccounts] = useState(false);
   // Users -> Photo approvals (Superadmin only): new profile photos waiting;
   // a "New Profile Photo to Approve" alert opens it too.
   const [showPhotoRequests, setShowPhotoRequests] = useState(false);
@@ -6814,6 +6817,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <KeyRound className="w-3.5 h-3.5" /> Password requests
                 </button>
               )}
+              {usersLayer('merge_accounts') && (
+                <button
+                  type="button"
+                  onClick={() => setShowMergeAccounts(true)}
+                  title="A login made by hand and the login the employee import made for the same person — merge them into one"
+                  className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-full sm:rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <GitMerge className="w-3.5 h-3.5" /> Merge accounts
+                </button>
+              )}
               </div>
             </div>
           </div>
@@ -7919,6 +7932,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {showPhotoRequests && isSuperAdmin && (
         <ProfilePhotoRequestsPopup token={token} onClose={() => setShowPhotoRequests(false)} onChanged={setPhotoRequestCount} />
+      )}
+      {showMergeAccounts && usersLayer('merge_accounts') && (
+        <AccountMergePopup token={token} onClose={() => setShowMergeAccounts(false)} onChanged={() => fetchAllData()} />
       )}
       {showPasswordRequests && usersLayer('password_requests') && (
         <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />

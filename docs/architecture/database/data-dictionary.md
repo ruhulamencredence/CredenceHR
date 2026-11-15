@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৩টি টেবিল, ২৮৫৪টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৪টি টেবিল, ২৮৬৫টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1919,6 +1919,22 @@ Unique: `unique_user_company`(user_id,company_id)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `uniq_user_device`(user_id,device_id)
+
+### `user_merge_log`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `from_user_id` | int(11) | না |  | |
+| `from_name` | varchar(255) | হ্যাঁ |  | |
+| `from_login` | varchar(255) | হ্যাঁ |  | |
+| `to_user_id` | int(11) | না |  | |
+| `to_name` | varchar(255) | হ্যাঁ |  | |
+| `kept_access` | varchar(10) | না |  | |
+| `kept_password` | varchar(10) | না |  | |
+| `moved_json` | mediumtext | হ্যাঁ |  | |
+| `merged_by` | int(11) | হ্যাঁ |  | |
+| `merged_at` | datetime | হ্যাঁ | default current_timestamp() | |
 
 ### `user_profile_details`
 

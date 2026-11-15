@@ -11,7 +11,7 @@
 | Branches | `branches` | শুধু মডিউলের অনুমতি (layer নেই) |
 | MPR Numbers | `mprs` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Data Import | `imports` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Users | `users` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`block_account` Block Account<br>🔒`password_requests` Password requests (Forgot password) |
+| Users | `users` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`block_account` Block Account<br>🔒`password_requests` Password requests (Forgot password)<br>🔒`merge_accounts` Merge accounts |
 | Employees | `employees` | `read` Employees (view, add, edit)<br>🔒`employee_delete` Delete employee records<br>`emp_headcount` Office / Project & Branch headcount<br>🔒`emp_export` Export employees (Excel) |
 | Departments | `departments` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Remote Attendance | `attendance` | শুধু মডিউলের অনুমতি (layer নেই) |

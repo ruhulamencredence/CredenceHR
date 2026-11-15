@@ -186,6 +186,15 @@ erDiagram
     varchar status
     timestamp requested_at
   }
+  user_merge_log {
+    int id PK
+    int from_user_id
+    varchar from_name
+    varchar from_login
+    int to_user_id
+    varchar to_name
+    varchar kept_access
+  }
   user_profile_details {
     int user_id PK,FK
     varchar first_name
