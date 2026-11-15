@@ -1654,6 +1654,22 @@ html[data-lglass] .gsidebar :is([class*="bg-white/15"], [class*="bg-white/20"]) 
 html[data-lglass] .gsidebar input[type="text"] { color: #334155 !important; background-color: rgba(255,255,255,.6) !important; box-shadow: inset 0 0 0 1px rgba(15,23,42,.06) !important; }
 html[data-lglass] .gsidebar input[type="text"]::placeholder { color: #94a3b8 !important; }
 html[data-lglass] .gsidebar svg[class*="text-white"] { color: #64748b !important; }
+/* The sidebar's search results (the full column's dropdown and the minimized
+   column's popup): frosted white with slate text, not the dark purple panel
+   (its text had turned slate above, so it was dark on dark). */
+html[data-lglass] .gsidebar .gsidebar-pop,
+html[data-lglass] [data-gsidebar-searchfly] {
+  background: rgba(255,255,255,.94) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(170%); backdrop-filter: blur(20px) saturate(170%);
+  border-color: rgba(15,23,42,.08) !important;
+  box-shadow: 0 18px 40px -18px rgba(15,23,42,.35), inset 0 1px 0 #fff !important;
+}
+html[data-lglass] [data-gsidebar-searchfly] [class*="text-white"] { color: #334155 !important; }
+html[data-lglass] :is(.gsidebar .gsidebar-pop, [data-gsidebar-searchfly]) :is([class*="text-white/45"], [class*="text-white/50"], [class*="text-white/40"]) { color: #94a3b8 !important; }
+html[data-lglass] :is(.gsidebar .gsidebar-pop, [data-gsidebar-searchfly]) [class*="hover:bg-white/10"]:hover { background-color: rgba(15,23,42,.05) !important; }
+html[data-lglass] [data-gsidebar-searchfly] [class*="bg-white/15"] { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
+html[data-lglass] [data-gsidebar-searchfly] input[type="text"] { color: #334155 !important; background-color: rgba(15,23,42,.04) !important; }
+html[data-lglass] [data-gsidebar-searchfly] input[type="text"]::placeholder { color: #94a3b8 !important; }
 @media (min-width: 768px) {
   html[data-lglass] header.sticky {
     background: rgba(255,255,255,.55) !important;

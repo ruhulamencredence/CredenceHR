@@ -940,9 +940,13 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
                 <option key={e.id} value={e.id}>{personLabel(e)}</option>
               ))}
             </SearchSelect>
-            {emp && (
+            {emp ? (
               <p className="text-[11px] text-slate-500 mt-1">
                 {[emp.designation, emp.department, emp.work_station].filter(Boolean).join(' · ')} · Type: {emp.employee_type || 'not set'}
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Nobody: the SIM is kept in stock (SIM Inventory → In stock). Open it here later and pick the new employee to give it — its limit then follows their type.
               </p>
             )}
           </div>
