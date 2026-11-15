@@ -280,6 +280,16 @@ type limit applies); the form says the SIM stays in stock and is given later fro
   and one via the form are saved with nobody; SIM Inventory lists them "In stock"; giving one to the employee later
   works, Inventory shows that holder and the SIM's story lists them. No page errors.
 
+## Light Glass: sidebar search results readable
+
+In Light Glass the sidebar's search dropdown kept its dark purple panel while its text had turned slate (the
+sidebar rule), so it was dark on dark. Now the dropdown (and the minimized column's search popup) is frosted white
+with slate text, a grey group line, a light hover and the accent tint on the picked row. Other modes unchanged.
+
+- `scripts/lightglass-sidebar-search.cjs` ("sim" typed in the sidebar search): **3/3** — Light Glass text
+  rgb(51,65,85) on white, contrast 10.4:1; Light 10.5:1 and Dark Glass 6.0:1 as before. (The minimized column's
+  popup gets the same CSS; not opened in this test.)
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
