@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
-import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
+import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, ShieldCheck } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { retryImport } from '../lib/chunkReload';
@@ -189,7 +189,74 @@ const placeLine = (source: string | null | undefined, place: string | null | und
 // location_radius circle. Shown near the top of the User Panel, always
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
-export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
+// A relief guard duty (Duty Roster -> Guard Posts, GET /api/guard/my-relief).
+interface ReliefDuty {
+  id: number;
+  date: string;
+  post_name: string;
+  site: string | null;
+  project_id: number | null;
+  shift_name: string;
+  start_time: string;
+  end_time: string;
+  start: string;
+  end: string;
+  check_in_from: string;
+  check_in_until: string;
+  active: boolean;
+  checked_in: boolean;
+}
+// The shift's own times (Bangladesh time, as set on the roster) — not the phone's clock zone.
+const hm12 = (hm: string, addMin = 0) => {
+  const [h, m] = hm.split(':').map(Number);
+  const t = (((h * 60 + m + addMin) % 1440) + 1440) % 1440;
+  const H = Math.floor(t / 60);
+  return `${H % 12 || 12}:${String(t % 60).padStart(2, '0')} ${H < 12 ? 'AM' : 'PM'}`;
+};
+const bdToday = () => new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+const dayWord = (date: string, start: string) => {
+  const today = bdToday();
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  if (date === today) return Number(start.slice(0, 2)) >= 17 ? 'Tonight' : 'Today';
+  if (date === tomorrow) return 'Tomorrow';
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects: ownProjects, loading }) => {
+  // Relief guard duties: shown on the card; while one runs, its site is one
+  // of the places to check in at (the server opens it for that duty only).
+  const [relief, setRelief] = useState<ReliefDuty[]>([]);
+  const [reliefProjects, setReliefProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch(apiUrl('/api/guard/my-relief'), { headers: { Authorization: `Bearer ${token}` } });
+        const j = r.ok ? await r.json() : { duties: [] };
+        if (!alive) return;
+        const duties: ReliefDuty[] = Array.isArray(j?.duties) ? j.duties : [];
+        setRelief(duties);
+        const want = new Set(duties.filter((d) => d.active && d.project_id).map((d) => Number(d.project_id)));
+        if (want.size) {
+          const pr = await fetch(apiUrl('/api/attendance/my-projects'), { headers: { Authorization: `Bearer ${token}` } });
+          const list: Project[] = pr.ok ? await pr.json() : [];
+          if (alive) setReliefProjects(list.filter((x) => want.has(Number(x.id))));
+        } else setReliefProjects([]);
+      } catch {
+        // offline — the card works as before
+      }
+    };
+    void load();
+    const t = window.setInterval(() => void load(), 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [token]);
+  const projects = useMemo(() => {
+    const seen = new Set(ownProjects.map((x) => Number(x.id)));
+    return [...ownProjects, ...reliefProjects.filter((x) => !seen.has(Number(x.id)))];
+  }, [ownProjects, reliefProjects]);
   // Blur is on in the Android/iPhone app too (it used to be left out there
   // because some Android WebViews dropped it on reload); glass-mask-fix +
   // translateZ(0) on the shell keep the card itself from disappearing. The
@@ -561,6 +628,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             ) : waiting ? null : (
               <span>Not checked in today yet.</span>
             )}
+
             {waiting && (
               <span className="text-amber-700">
                 Off-site · {waiting.in_place || waiting.out_place} — counts once approved
@@ -569,6 +637,41 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             {!!status?.check_in_at && <ApprovalBadge approval={status?.check_in_approval} />}
             {hasCheckedOut && <ApprovalBadge approval={status?.check_out_approval} />}
           </div>
+          {relief.map((d) => (
+            <div key={d.id} className="mt-2 rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white px-3.5 py-2.5 text-[13px] text-slate-700">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 text-white px-2 py-0.5 text-[10px] font-bold">
+                  <ShieldCheck className="w-3 h-3" /> RELIEF DUTY
+                </span>
+                <b className="text-slate-900">
+                  {dayWord(d.date, d.start_time)} {hm12(d.start_time)} – {hm12(d.end_time)}
+                </b>
+              </div>
+              <div className="mt-1">
+                <b>{[d.site, d.post_name].filter(Boolean).join(' · ')}</b> · {d.shift_name}
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {d.project_id
+                  ? d.active
+                    ? d.checked_in
+                      ? `Checked in. Check Out here until ${hm12(d.end_time, 30)}.`
+                      : `You can check in there now (until ${hm12(d.end_time, 30)}).`
+                    : `You can check in there from ${hm12(d.start_time, -30)}.`
+                  : 'Your site supervisor marks your attendance there.'}
+              </div>
+              {d.active && d.project_id && (
+                <button
+                  type="button"
+                  onClick={() => void handleMark(d.checked_in ? 'out' : 'in')}
+                  disabled={!!working}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white px-3.5 py-1.5 text-xs font-bold disabled:opacity-50"
+                >
+                  {working ? <Spinner size={12} /> : <Play className="w-3 h-3" />} {d.checked_in ? 'Check Out' : 'Check In'} here
+                </button>
+              )}
+            </div>
+          ))}
+
           {status?.check_in_remarks && (
             <div className="pl-5 text-slate-500">
               <span className="font-medium text-slate-600">In remarks:</span> {status.check_in_remarks}

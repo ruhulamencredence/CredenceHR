@@ -369,6 +369,27 @@ change → resumes; offline → looks again in an hour; the server's start push 
 - Server side unchanged (`schedule_until` was already in the answers). Java compiled by the **Android build**
   workflow on push (no Android SDK in this container). Not run on a real phone here — needs the new APK.
 
+## Security guards: relief from another project (mockup approved, then built)
+
+Duty Roster → Guard Posts: posts get a "Check-in site (Project)". The board strikes through a guard on approved
+leave ("Sick Leave") and, today, one not checked in 30 min after the shift started ("Not in"); neither counts, so the
+post shows empty, with a "Today: … needs N more · Find relief" banner. The relief picker groups same-site free
+guards first, then other sites by distance (km), flags a long stretch in a row, and leaves out anyone on leave or on
+an overlapping shift. Putting a relief alerts the guard and opens the post's Project for check-in / out for that
+duty only (30 min before start to 30 min after end; server-side each time); a night duty's morning Out goes on the
+duty day's In. The guard's My Attendance shows a "RELIEF DUTY" box with "Check In here"; the site supervisor's
+muster for that Project lists the relief guard (tagged) and can mark them.
+
+- `scripts/relief-guard-api.mjs` (two projects with map circles, guard logins limited to their own site, a sick
+  leave, a supervisor team): **18/18** — board marks the sick guard and the gap; candidates same-site first, other
+  sites with km, sick guard not offered; before relief check-in at the other site is 403; relief → alert, my-relief
+  active, the site is a check-in site, check-in and check-out work; muster lists and saves him; relief removed →
+  site closed again; a night duty's morning Out lands on yesterday's In.
+- `scripts/relief-guard-ui.cjs` (computer + Pixel 7): **12/12** — banner incl. a no-show, struck-through sick guard,
+  picker title / groups / km / check-in note, phone box with times in Bangladesh time and "Check In here" opening the
+  usual map confirm; no page errors.
+- Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

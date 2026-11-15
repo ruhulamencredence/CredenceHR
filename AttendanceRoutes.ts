@@ -31,6 +31,7 @@ import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes
 import { loadRoster } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { restrictedAttendanceProjects } from "./AttendanceProjects";
+import { activeReliefDuties } from "./GuardRoutes";
 import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
 
@@ -92,11 +93,20 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // and only the ones explicitly granted for a plain User (mirrors GET
   // /api/projects's own visibility rule). A Superadmin is never limited.
   async function getAllowedProjectIds(userId: number, role: string, ymd: string = todayInDhaka()): Promise<Set<number> | null> {
+    // A relief guard duty (Duty Roster -> Guard Posts) running now opens its
+    // post's Project for check-in / out — from 30 min before the shift to 30
+    // min after it, and only then (GuardRoutes.ts activeReliefDuties).
+    const relief = ((await activeReliefDuties(queryDB, userId).catch(() => [])) as any[]).map((d) => Number(d.project_id));
     const listed = await restrictedAttendanceProjects(queryDB, userId, role, ymd);
-    if (listed) return listed;
+    if (listed) {
+      for (const id of relief) listed.add(id);
+      return listed;
+    }
     if (role === "admin" || role === "superadmin") return null; // null = no restriction
     const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [userId]);
-    return new Set(perms.map((p: any) => Number(p.project_id)));
+    const set = new Set<number>(perms.map((p: any) => Number(p.project_id)));
+    for (const id of relief) set.add(id);
+    return set;
   }
 
   // Loads the Project and validates it has a location + radius set, returning a
@@ -585,6 +595,23 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         if (inRow.length) {
           existing = inRow;
           outElsewhere = Number(inRow[0].project_id) !== project_id;
+        }
+      }
+      // A night relief duty: its morning Out goes on the In of the duty's own
+      // day (the In was given before midnight at this Project).
+      if (!(existing.length > 0 && existing[0].check_in_at)) {
+        const duty = ((await activeReliefDuties(queryDB, Number(req.user.id)).catch(() => [])) as any[]).find(
+          (d) => Number(d.project_id) === project_id && d.date !== today
+        );
+        if (duty) {
+          const open: any[] = await queryDB(
+            "SELECT * FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL AND check_out_at IS NULL",
+            [req.user.id, project_id, duty.date]
+          );
+          if (open.length) {
+            existing = open;
+            outElsewhere = false;
+          }
         }
       }
       const outProject = outElsewhere ? project_id : null;

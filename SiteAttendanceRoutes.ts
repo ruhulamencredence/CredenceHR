@@ -51,6 +51,7 @@ import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
 import { runsBackgroundJobs } from "./jobRunner";
 
 import { attachPersonInfo } from "./personInfo";
+import { reliefAtProjectOn } from "./GuardRoutes";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 interface SiteAttendanceRouteDeps {
@@ -520,8 +521,20 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       const s = await sheetFor(teamId, date);
       const entries = s ? await entriesOfSheet(Number(s.id)) : [];
       const byEmp = new Map<number, any>(entries.map((e) => [Number(e.employee_id), e]));
-      // Members, plus anyone already on this sheet who has since moved team.
-      const people = [...view.members];
+      // Members, plus anyone already on this sheet who has since moved team,
+      // plus relief guards on duty at this team's Project that day (Duty
+      // Roster -> Guard Posts) — the supervisor marks them too.
+      const people: any[] = [...view.members];
+      const reliefOf = new Map<number, string>();
+      if (view.project_id) {
+        for (const d of await reliefAtProjectOn(queryDB, view.project_id, date)) {
+          reliefOf.set(d.employee_id, `${d.post_name} · ${d.shift_name} ${d.start_time}–${d.end_time}`);
+          if (!people.some((p) => p.employee_id === d.employee_id)) {
+            const emp = w.empById.get(d.employee_id);
+            if (emp) people.push(empLite(emp));
+          }
+        }
+      }
       for (const e of entries) {
         if (!people.some((p) => p.employee_id === Number(e.employee_id))) {
           const emp = w.empById.get(Number(e.employee_id));
@@ -564,7 +577,9 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
             shift: shifts.get(p.employee_id) || null,
             marked_by_other_team: otherTeam.get(p.employee_id) || null,
             own_check_in: own.get(p.employee_id) || null,
-            from_app: !!Number(e?.from_app || 0)
+            from_app: !!Number(e?.from_app || 0),
+            // On relief duty here today (not a member of this team).
+            relief: reliefOf.get(p.employee_id) || null
           };
         })
       });
@@ -606,6 +621,8 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       const allowed = new Set<number>(view.members.map((m) => m.employee_id));
       const oldEntries = existing ? await entriesOfSheet(Number(existing.id)) : [];
       for (const e of oldEntries) allowed.add(Number(e.employee_id));
+      // Relief guards on duty at this team's Project that day.
+      if (view.project_id) for (const d of await reliefAtProjectOn(queryDB, view.project_id, date)) allowed.add(d.employee_id);
 
       const raw: any[] = Array.isArray(b.entries) ? b.entries : [];
       const clean = new Map<number, { status: string; in_time: string | null; out_time: string | null; remarks: string | null }>();
