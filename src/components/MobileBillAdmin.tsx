@@ -18,7 +18,7 @@ import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { readWorkbook } from '../lib/readWorkbook';
-import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, History, Inbox, Users, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { BarChart3, CheckCircle2, UserPlus, FileDown, FileSpreadsheet, History, Inbox, Users, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
@@ -720,6 +720,9 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
   const [status, setStatus] = useState<'active' | 'inactive' | 'unassigned' | ''>('active');
   const [dept, setDept] = useState('');
   const [editing, setEditing] = useState<MbSim | 'new' | null>(null);
+  // Opened from a stock SIM's "Give to employee" button: the popup leads with picking the person.
+  const [giving, setGiving] = useState(false);
+  const openSim = (x: MbSim | 'new', give = false) => { setGiving(give); setEditing(x); };
   const [importing, setImporting] = useState(false);
   // "From Employees": office SIMs from Employees -> Contact No.
   const [fromEmployees, setFromEmployees] = useState(false);
@@ -789,6 +792,17 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {note && <p className="text-sm text-emerald-700">{note}</p>}
+      {status === 'unassigned' && (
+        <div className="rounded-2xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-900">
+          <div className="font-bold text-sm mb-1.5">These SIMs are in stock — not given to anyone. To give one to an employee:</div>
+          <ol className="grid sm:grid-cols-3 gap-2">
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">1</span><span>Press <b>Give to employee</b> on the SIM's row (on the right).</span></li>
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">2</span><span>In <b>Give to</b>, type the employee's name or ID and pick them.</span></li>
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">3</span><span>Check the monthly limit (their type's limit, or a custom amount) and press <b>Give SIM</b>.</span></li>
+          </ol>
+          <div className="mt-1.5 text-teal-800/80">The SIM then leaves stock and shows under the employee (and in their My SIM &amp; Bill). To take it back later: Edit → Given to: Nobody.</div>
+        </div>
+      )}
       {fromEmployees && (
         <SimsFromEmployeesSheet
           token={token}
@@ -807,8 +821,8 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                {['Mobile', 'Employee', 'Department / Work station', 'Duty location', 'Limit', 'Last bill', ''].map((h, i) => (
-                  <th key={i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i === 4 || i === 5 ? 'text-right' : 'text-left'}`}>
+                {['Mobile', 'Employee', 'Department / Work station', 'Duty location', 'Limit', 'Last bill', 'Action'].map((h, i) => (
+                  <th key={i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i >= 4 ? 'text-right' : 'text-left'}`}>
                     {h}
                   </th>
                 ))}
@@ -823,7 +837,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                 </tr>
               )}
               {shown.map((s) => (
-                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => setEditing(s)}>
+                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => openSim(s, !s.employee_id && s.status === 'active')}>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <div className="font-mono font-semibold">{s.phone_number}</div>
                     <OperatorBadge op={s.operator} />
@@ -855,8 +869,19 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                       <span className="text-slate-300">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {s.pending_requests > 0 && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">request</span>}
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <div className="inline-flex items-center gap-2">
+                      {s.pending_requests > 0 && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">request</span>}
+                      {!s.employee_id && s.status === 'active' ? (
+                        <button type="button" className={`${btnMain} !py-1.5`} onClick={(e) => { e.stopPropagation(); openSim(s, true); }} title={`Give ${s.phone_number} to an employee`}>
+                          <UserPlus className="w-3.5 h-3.5" /> Give to employee
+                        </button>
+                      ) : (
+                        <button type="button" className={`${btnLight} !py-1.5`} onClick={(e) => { e.stopPropagation(); openSim(s); }} title={`Edit ${s.phone_number}: holder, limit, duty location, turn off`}>
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -915,6 +940,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
           token={token}
           meta={meta}
           sim={editing === 'new' ? null : editing}
+          give={giving}
           onClose={() => setEditing(null)}
           onDone={() => {
             setEditing(null);
@@ -942,7 +968,7 @@ interface SimDetail extends MbSim {
   requests: MbRequest[];
 }
 
-const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose: () => void; onDone: () => void }> = ({ token, meta, sim, onClose, onDone }) => {
+const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; give?: boolean; onClose: () => void; onDone: () => void }> = ({ token, meta, sim, give, onClose, onDone }) => {
   const [f, setF] = useState({
     phone_number: sim?.phone_number || '',
     operator: sim?.operator || '',
@@ -998,7 +1024,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
   };
 
   return (
-    <Modal title={sim ? `SIM ${sim.phone_number}` : 'Give a SIM'} onClose={onClose} wide>
+    <Modal title={give && sim ? `Give SIM ${sim.phone_number} to an employee` : sim ? `SIM ${sim.phone_number}` : 'Give a SIM'} onClose={onClose} wide>
       <div className="grid md:grid-cols-2 gap-5">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -1016,9 +1042,14 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
               </select>
             </div>
           </div>
-          <div>
-            <label className={labelCls}>Given to</label>
-            <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
+          <div className={give ? 'rounded-2xl border-2 border-teal-400 bg-teal-50/60 p-3 -mx-1' : ''}>
+            <label className={labelCls}>{give ? 'Give to — type a name or Employee ID' : 'Given to'}</label>
+            <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => {
+              const v = e.target.value;
+              // Giving a stock SIM: the limit follows the new holder's type when one is set (changeable below).
+              const pick = meta.employees.find((x) => String(x.id) === v);
+              setF((o) => ({ ...o, employee_id: v, ...(give && pick && pick.type_limit != null ? { limit_source: 'type' } : {}) }));
+            }}>
               <option value="">— Nobody (spare SIM) —</option>
               {empOptions.map((e) => (
                 <option key={e.id} value={e.id}>{personLabel(e)}</option>
@@ -1096,7 +1127,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
               <span />
             )}
             <button type="button" className={btnMain} disabled={saving || !f.phone_number} onClick={save}>
-              {saving ? 'Saving…' : sim ? 'Save' : 'Give SIM'}
+              {saving ? 'Saving…' : !sim || (give && f.employee_id) ? 'Give SIM' : 'Save'}
             </button>
           </div>
         </div>

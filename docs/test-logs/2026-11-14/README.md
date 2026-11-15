@@ -446,6 +446,15 @@ location of a SIM not given to anyone; "(No department)" too. Works with the oth
 - `scripts/sims-dept-stock.cjs`: **7/7** — stock card → 9 of 10, 0 people, selected, status select follows;
   "MIS" → 2 SIMs (one held, one spare by duty location); MIS + stock → 1; Monthly Bills has the filter; no page errors.
 
+## SIMs tab: "Give to employee" on stock SIMs, "Edit" on the rest, 3-step guide
+
+Rows were clickable with no visible button, so nobody could tell how to give a stock SIM. Now an **Action** column:
+green "Give to employee" on a stock SIM, "Edit" on the others; the stock view shows the three steps above the table;
+the popup is titled "Give SIM <number> to an employee" with the person field outlined, and its button reads "Give SIM".
+
+- `scripts/sims-give-stock.cjs`: **8/8** — 9 Give / 1 Edit buttons; guide on the stock view; popup title; "Give SIM";
+  the SIM given (custom limit, as the test data has no type limit) and gone from the stock list; put back after.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
